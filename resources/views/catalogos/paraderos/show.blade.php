@@ -42,6 +42,10 @@
                     <span class="detail-value">{{ $item['ubicacion'] ?? $item['location'] ?? '-' }}</span>
                 </div>
                 <div class="detail-item">
+                    <span class="detail-label">Mina</span>
+                    <span class="detail-value">{{ $item['mina'] ?? '-' }}</span>
+                </div>
+                <div class="detail-item">
                     <span class="detail-label">Estado</span>
                     <span class="badge badge-{{ ($item['activo'] ?? $item['active'] ?? true) ? 'success' : 'danger' }}">
                         {{ ($item['activo'] ?? $item['active'] ?? true) ? 'Activo' : 'Inactivo' }}

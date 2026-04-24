@@ -26,7 +26,7 @@ $stats = [
 @endphp
 
 @section('content')
-<div class="mi-asistencia-container">
+<div class="mi-asistencia-container" id="miAsistenciaApp" data-save-url="" data-initial-date="{{ $today }}">
     <div class="ma-header">
         <div class="ma-title-section">
             <h1 class="ma-title">Control de Asistencia</h1>
@@ -35,7 +35,8 @@ $stats = [
         <div class="ma-info-bar">
             <div class="ma-info-item">
                 <label class="ma-info-label">Fecha</label>
-                <input type="date" class="ma-date-input" value="{{ $today }}">
+                <input id="maDateInput" type="date" class="ma-date-input" value="{{ $today }}">
+                <span class="ma-date-helper">Cambie la fecha para registrar otra jornada</span>
             </div>
             <div class="ma-info-item">
                 <span class="ma-info-label">Turno</span>
@@ -48,24 +49,29 @@ $stats = [
         </div>
     </div>
 
+    <div class="ma-date-notice">
+        <strong>Fecha operativa:</strong>
+        <span id="maDateCurrent"></span>
+    </div>
+
     <div class="ma-stats-row">
         <div class="ma-stat-card present">
-            <div class="ma-stat-num">{{ $stats['presentes'] }}</div>
+            <div id="maStatPresentes" class="ma-stat-num">{{ $stats['presentes'] }}</div>
             <div class="ma-stat-lbl">Presentes</div>
         </div>
         <div class="ma-stat-card absent">
-            <div class="ma-stat-num">{{ $stats['ausentes'] }}</div>
+            <div id="maStatAusentes" class="ma-stat-num">{{ $stats['ausentes'] }}</div>
             <div class="ma-stat-lbl">Ausentes</div>
         </div>
         <div class="ma-stat-card total">
-            <div class="ma-stat-num">{{ $stats['total'] }}</div>
+            <div id="maStatTotal" class="ma-stat-num">{{ $stats['total'] }}</div>
             <div class="ma-stat-lbl">Total</div>
         </div>
     </div>
 
     <div class="ma-worker-list">
         <div class="ma-list-header">
-            <h2 class="ma-list-title">Personal Asignado ({{ $stats['total'] }} trabajadores)</h2>
+            <h2 id="maListTitle" class="ma-list-title">Personal Asignado ({{ $stats['total'] }} trabajadores)</h2>
             <div class="ma-filter-btns">
                 <button class="ma-filter-btn active" data-filter="all">Todos</button>
                 <button class="ma-filter-btn" data-filter="presente">Presentes</button>
@@ -86,7 +92,7 @@ $stats = [
                 </thead>
                 <tbody>
                     @foreach($trabajadores as $trabajador)
-                    <tr class="worker-row" data-estado="{{ $trabajador['estado'] }}">
+                    <tr class="worker-row" data-id="{{ $trabajador['id'] }}" data-estado="{{ $trabajador['estado'] }}" data-inicial="{{ $trabajador['estado'] }}">
                         <td>
                             <div class="worker-name">{{ $trabajador['nombre'] }}</div>
                         </td>
@@ -98,9 +104,9 @@ $stats = [
                         </td>
                         <td>
                             @if($trabajador['estado'] === 'presente')
-                            <span class="estado-badge presente">Presente</span>
+                            <span class="estado-badge presente" data-role="estado-badge">Presente</span>
                             @else
-                            <span class="estado-badge ausente">Ausente</span>
+                            <span class="estado-badge ausente" data-role="estado-badge">Ausente</span>
                             @endif
                         </td>
                         <td>
@@ -121,16 +127,259 @@ $stats = [
     </div>
 
     <div class="ma-actions">
-        <button class="ma-btn-save">
+        <button id="maBtnSave" type="button" class="ma-btn-save">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Guardar Asistencia
         </button>
-        <button class="ma-btn-export">
+        <button id="maBtnExport" type="button" class="ma-btn-export">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Exportar
         </button>
     </div>
 </div>
+
+<script>
+(function () {
+    const app = document.getElementById('miAsistenciaApp');
+    if (!app) {
+        return;
+    }
+
+    const rows = Array.from(app.querySelectorAll('.worker-row'));
+    const filterButtons = Array.from(app.querySelectorAll('.ma-filter-btn'));
+    const listTitle = document.getElementById('maListTitle');
+    const statPresentes = document.getElementById('maStatPresentes');
+    const statAusentes = document.getElementById('maStatAusentes');
+    const statTotal = document.getElementById('maStatTotal');
+    const saveButton = document.getElementById('maBtnSave');
+    const exportButton = document.getElementById('maBtnExport');
+    const dateInput = document.getElementById('maDateInput');
+    const dateCurrent = document.getElementById('maDateCurrent');
+
+    let activeFilter = 'all';
+
+    const getEstadoLabel = function (estado) {
+        return estado === 'presente' ? 'Presente' : 'Ausente';
+    };
+
+    const setBadgeState = function (badge, estado) {
+        badge.classList.remove('presente', 'ausente', 'tardanza', 'permiso');
+        badge.classList.add(estado);
+        badge.textContent = getEstadoLabel(estado);
+    };
+
+    const dateStorageKey = function (date) {
+        return 'mi_asistencia_borrador_' + String(date || 'sin_fecha');
+    };
+
+    const formatDateLabel = function (value) {
+        if (!value) {
+            return 'Sin fecha seleccionada';
+        }
+
+        const date = new Date(value + 'T00:00:00');
+        if (Number.isNaN(date.getTime())) {
+            return value;
+        }
+
+        return date.toLocaleDateString('es-PE', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+        });
+    };
+
+    const setRowEstado = function (row, estado) {
+        row.dataset.estado = estado;
+
+        const buttons = Array.from(row.querySelectorAll('.mark-btn'));
+        const badge = row.querySelector('[data-role="estado-badge"]');
+
+        buttons.forEach(function (btn) {
+            const isPresenteButton = btn.classList.contains('presente');
+            const active = (estado === 'presente' && isPresenteButton) || (estado === 'ausente' && !isPresenteButton);
+            btn.classList.toggle('active', active);
+        });
+
+        if (badge) {
+            setBadgeState(badge, estado);
+        }
+    };
+
+    const updateDateNotice = function () {
+        if (dateCurrent) {
+            dateCurrent.textContent = formatDateLabel(dateInput?.value || app.dataset.initialDate || '');
+        }
+    };
+
+    const applyDateSnapshot = function () {
+        const currentDate = dateInput?.value || app.dataset.initialDate || '';
+        const raw = localStorage.getItem(dateStorageKey(currentDate));
+        let snapshot = null;
+
+        if (raw) {
+            try {
+                snapshot = JSON.parse(raw);
+            } catch (error) {
+                snapshot = null;
+            }
+        }
+
+        const byId = new Map();
+        if (snapshot && Array.isArray(snapshot.registros)) {
+            snapshot.registros.forEach(function (item) {
+                byId.set(String(item.id), item.estado);
+            });
+        }
+
+        rows.forEach(function (row) {
+            const next = byId.get(String(row.dataset.id)) || row.dataset.inicial || 'ausente';
+            setRowEstado(row, next);
+        });
+
+        updateDateNotice();
+        updateStats();
+        applyFilter();
+    };
+
+    const applyFilter = function () {
+        let visibleCount = 0;
+        rows.forEach(function (row) {
+            const estado = row.dataset.estado;
+            const visible = activeFilter === 'all' || estado === activeFilter;
+            row.style.display = visible ? '' : 'none';
+            if (visible) {
+                visibleCount += 1;
+            }
+        });
+
+        if (listTitle) {
+            const label = activeFilter === 'all'
+                ? 'Personal Asignado'
+                : (activeFilter === 'presente' ? 'Personal Presente' : 'Personal Ausente');
+            listTitle.textContent = label + ' (' + visibleCount + ' trabajadores)';
+        }
+    };
+
+    const updateStats = function () {
+        const total = rows.length;
+        const presentes = rows.filter(function (row) { return row.dataset.estado === 'presente'; }).length;
+        const ausentes = total - presentes;
+
+        if (statTotal) statTotal.textContent = String(total);
+        if (statPresentes) statPresentes.textContent = String(presentes);
+        if (statAusentes) statAusentes.textContent = String(ausentes);
+    };
+
+    const buildPayload = function () {
+        return rows.map(function (row) {
+            return {
+                id: Number(row.dataset.id),
+                estado: row.dataset.estado,
+            };
+        });
+    };
+
+    rows.forEach(function (row) {
+        const buttons = Array.from(row.querySelectorAll('.mark-btn'));
+
+        buttons.forEach(function (button) {
+            button.addEventListener('click', function () {
+                const nextEstado = button.classList.contains('presente') ? 'presente' : 'ausente';
+                setRowEstado(row, nextEstado);
+
+                updateStats();
+                applyFilter();
+            });
+        });
+    });
+
+    filterButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            activeFilter = button.dataset.filter || 'all';
+
+            filterButtons.forEach(function (btn) {
+                btn.classList.toggle('active', btn === button);
+            });
+
+            applyFilter();
+        });
+    });
+
+    if (saveButton) {
+        saveButton.addEventListener('click', async function () {
+            const selectedDate = dateInput ? dateInput.value : (app.dataset.initialDate || '');
+            const payload = {
+                fecha: selectedDate,
+                registros: buildPayload(),
+            };
+
+            const saveUrl = String(app.dataset.saveUrl || '').trim();
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+            if (saveUrl) {
+                try {
+                    const response = await fetch(saveUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'Accept': 'application/json',
+                        },
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('No se pudo guardar en servidor.');
+                    }
+
+                    window.alert('Asistencia guardada correctamente.');
+                    return;
+                } catch (error) {
+                    // Fallback local cuando no hay conexión o endpoint no disponible.
+                }
+            }
+
+            localStorage.setItem(dateStorageKey(selectedDate), JSON.stringify(payload));
+            window.alert('Asistencia guardada localmente para la fecha seleccionada.');
+        });
+    }
+
+    if (dateInput) {
+        dateInput.addEventListener('change', function () {
+            applyDateSnapshot();
+        });
+    }
+
+    if (exportButton) {
+        exportButton.addEventListener('click', function () {
+            const header = ['id', 'estado'];
+            const lines = [header.join(',')];
+
+            buildPayload().forEach(function (item) {
+                lines.push([item.id, item.estado].join(','));
+            });
+
+            const csv = lines.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const datePart = dateInput?.value || app.dataset.initialDate || 'asistencia';
+
+            link.href = url;
+            link.download = 'mi-asistencia-' + datePart + '.csv';
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        });
+    }
+
+    applyDateSnapshot();
+})();
+</script>
 
 <style>
 .mi-asistencia-container { max-width: 1400px; margin: 0 auto; padding: 24px; }
@@ -141,6 +390,11 @@ $stats = [
 .ma-info-item { display: flex; flex-direction: column; align-items: center; }
 .ma-info-label { font-size: 12px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
 .ma-info-value { font-size: 18px; font-weight: 600; }
+.ma-date-input { margin-top: 6px; border: 1px solid rgba(255,255,255,0.5); border-radius: 10px; background: rgba(255,255,255,0.14); color: white; padding: 8px 10px; font-weight: 600; min-width: 190px; text-align: center; box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
+.ma-date-input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .95; cursor: pointer; }
+.ma-date-input:focus { outline: none; border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,0.22); }
+.ma-date-helper { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,0.82); }
+.ma-date-notice { margin-bottom: 18px; padding: 10px 14px; border-radius: 12px; background: #e6fffb; border: 1px solid #bdf3ed; color: #0f766e; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
 .ma-stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 24px; }
 .ma-stat-card { background: white; border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.04); }
 .ma-stat-card.present { border-left: 4px solid #10B981; }

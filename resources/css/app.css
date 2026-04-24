@@ -1,4 +1,11 @@
 @import "tailwindcss";
+@import "./modules/man-power.css";
+@import "./modules/rq-mina.css";
+@import "./modules/rq-proserge.css";
+@import "./modules/asistencia-alertas.css";
+@import "./modules/asistencia-index.css";
+@import "./modules/asistencia-resumen.css";
+@import "./modules/asistencia-supervisor.css";
 
 @theme {
     /* Color primario - Turquesa */
@@ -759,6 +766,139 @@ a.user-card:hover {
     white-space: nowrap;
 }
 
+.btn-icon-only {
+    width: 42px;
+    height: 42px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 8px;
+    border-width: 1.5px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.btn-outline.btn-icon-only {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+.btn-outline.btn-icon-only:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+}
+
+.personal-pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.personal-page-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #475569;
+}
+
+.personal-page-size-select {
+    border: 1px solid #d7e0ed;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: #fff;
+    color: #334155;
+    font-size: 13px;
+}
+
+.personal-pagination-info {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.personal-page-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.personal-page-jump-label {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.personal-page-jump-input {
+    width: 72px;
+    border: 1px solid #d7e0ed;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #334155;
+    background: #fff;
+}
+
+.personal-page-jump-btn {
+    border: 1px solid #d7e0ed;
+    background: #fff;
+    color: #475569;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.personal-page-jump-btn:hover {
+    background: #f8fbff;
+}
+
+.personal-pagination {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.personal-pager-btn {
+    border: 1px solid #d7e0ed;
+    background: #fff;
+    color: #475569;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.personal-pager-btn:hover {
+    background: #f8fbff;
+}
+
+.personal-pager-btn.active {
+    border-color: #19d3c5;
+    background: rgba(25, 211, 197, 0.12);
+    color: #0f766e;
+}
+
+.personal-pager-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.personal-pager-ellipsis {
+    cursor: default;
+    pointer-events: none;
+    min-width: 30px;
+    text-align: center;
+    padding: 6px 6px;
+}
+
 .btn svg {
     width: 18px;
     height: 18px;
@@ -937,19 +1077,24 @@ a.user-card:hover {
 
 .mines-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
 }
 
 .mine-selection-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
+    gap: 10px;
     padding: 12px 16px;
     background: #FAFBFC;
     border: 1px solid #E2E8F0;
     border-radius: 10px;
     transition: all 0.2s;
+}
+
+.mine-selection-item:not(:has(.mine-status-select)) {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .mine-selection-item:has(input:checked) {
@@ -961,6 +1106,7 @@ a.user-card:hover {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
 }
 
 .mine-checkbox input {
@@ -974,6 +1120,7 @@ a.user-card:hover {
     cursor: pointer;
     font-size: 14px;
     font-weight: 500;
+    min-width: 0;
 }
 
 .checkbox-custom {
@@ -1009,10 +1156,46 @@ a.user-card:hover {
 
 .checkbox-text {
     color: var(--color-text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mine-status-select {
+    width: 100%;
+    max-width: 150px;
 }
 
 .mine-status-select select {
-    width: 110px;
+    width: 100%;
+    min-width: 132px;
+}
+
+@media (max-width: 767px) {
+    .mines-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mine-selection-item {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .checkbox-text {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        word-break: break-word;
+    }
+
+    .mine-status-select {
+        max-width: none;
+    }
+
+    .mine-status-select select {
+        min-width: 0;
+    }
 }
 
 /* ============================================
@@ -1969,12 +2152,12 @@ a.user-card:hover {
 }
 
 .person-card.inactive {
-    background: #FEF2F2;
-    border-color: #FECACA;
+    background: white;
+    border-color: #E2E8F0;
 }
 
 .person-card.inactive .person-name {
-    color: #991B1B;
+    color: var(--color-text);
 }
 
 .person-avatar {
@@ -1989,11 +2172,27 @@ a.user-card:hover {
     font-size: 20px;
     font-weight: 700;
     flex-shrink: 0;
+    border: 1px solid rgba(25, 211, 197, 0.22);
 }
 
-.person-card.inactive .person-avatar {
-    background: linear-gradient(135deg, rgba(254, 202, 202, 0.3), rgba(254, 202, 202, 0.15));
-    color: #DC2626;
+.person-avatar.is-supervisor {
+    background: linear-gradient(135deg, rgba(221, 214, 254, 0.95), rgba(243, 232, 255, 0.95));
+    color: #7C3AED;
+    border-color: rgba(124, 58, 237, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.08);
+}
+
+.person-avatar.is-inactive {
+    background: linear-gradient(135deg, rgba(254, 202, 202, 0.92), rgba(254, 226, 226, 0.92));
+    color: #991B1B;
+    border-color: rgba(220, 38, 38, 0.28);
+}
+
+.person-avatar.is-supervisor.is-inactive {
+    background: linear-gradient(135deg, rgba(254, 202, 202, 0.92), rgba(254, 226, 226, 0.92));
+    color: #7C3AED;
+    border-color: rgba(220, 38, 38, 0.34);
+    box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.14);
 }
 
 .person-info {
@@ -2065,16 +2264,6 @@ a.user-card:hover {
     background: #FEF3C7;
     color: #B45309;
     border: 1px solid #FCD34D;
-}
-
-.person-badge.status-active {
-    background: rgba(16, 185, 129, 0.1);
-    color: #059669;
-}
-
-.person-badge.status-inactive {
-    background: rgba(239, 68, 68, 0.1);
-    color: #DC2626;
 }
 
 .person-actions {

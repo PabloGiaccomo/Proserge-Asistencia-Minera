@@ -1,0 +1,108 @@
+.asistencia-dashboard .supervisor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.asistencia-dashboard .supervisor-card {
+    background: #F8FAFC;
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid #E2E8F0;
+}
+
+.asistencia-dashboard .supervisor-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.asistencia-dashboard .supervisor-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--color-primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.asistencia-dashboard .supervisor-info {
+    flex: 1;
+}
+
+.asistencia-dashboard .supervisor-nombre {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.asistencia-dashboard .supervisor-meta {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+
+.asistencia-dashboard .supervisor-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #E2E8F0;
+    margin-bottom: 12px;
+}
+
+.asistencia-dashboard .supervisor-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.asistencia-dashboard .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.asistencia-dashboard .stat-label {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+}
+
+.asistencia-dashboard .supervisor-eval {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.asistencia-dashboard .eval-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+}
+
+.asistencia-dashboard .eval-stars {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.asistencia-dashboard .eval-stars svg {
+    color: #FBBF24;
+}
+
+.asistencia-dashboard .star-filled {
+    fill: currentColor;
+}
+
+.asistencia-dashboard .eval-value {
+    margin-left: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+}

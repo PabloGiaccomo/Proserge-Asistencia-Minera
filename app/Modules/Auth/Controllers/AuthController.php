@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AuthToken;
 use App\Models\Usuario;
+use App\Support\Rbac\PermissionMatrix;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -77,7 +78,7 @@ class AuthController extends Controller
             'rol' => [
                 'id' => $usuario->rol?->id,
                 'nombre' => $usuario->rol?->nombre,
-                'permisos' => $usuario->rol?->permisos ?? [],
+                'permisos' => PermissionMatrix::normalizeForRole($usuario->rol?->nombre, $usuario->rol?->permisos ?? []),
             ],
             'scope_minas' => $usuario->scopesMina->pluck('mina_id')->values(),
         ];

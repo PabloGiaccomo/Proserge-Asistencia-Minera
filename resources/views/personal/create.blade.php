@@ -3,11 +3,6 @@
 @section('title', 'Nuevo Trabajador - Proserge')
 
 @section('content')
-@php
-    $catalogMinas = ['Mina 1', 'Mina 2', 'Mina 3'];
-    $catalogOficinas = ['Oficina Central Lima', 'Oficina Cerro de Pasco', 'Oficina Ancash'];
-    $catalogTalleres = ['Taller Mecánico Central', 'Taller de Soldadura', 'Taller Eléctrico'];
-@endphp
 <div class="module-page personal-page">
     <!-- Page Header -->
     <div class="page-header">

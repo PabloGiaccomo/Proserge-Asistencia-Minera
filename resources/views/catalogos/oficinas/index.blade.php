@@ -9,8 +9,16 @@
             <h1 class="page-title">Oficinas</h1>
             <p class="page-subtitle">Catálogo de oficinas</p>
         </div>
+        <div class="page-actions">
+            <a href="{{ route('catalogos.index') }}" class="btn btn-outline">Volver</a>
+            <a href="{{ route('catalogos.oficinas.create') }}" class="btn btn-primary">Nueva oficina</a>
+        </div>
     </div>
 </div>
+
+@if(session('success'))
+    <div class="alert alert-success" style="margin-bottom:16px;">{{ session('success') }}</div>
+@endif
 
 <div class="card">
     <div class="card-header">
@@ -20,7 +28,7 @@
         @if(empty($data))
             @include('components.empty-state', [
                 'message' => 'No hay oficinas registradas',
-                'description' => 'Las oficinas se crean desde la configuración del sistema'
+                'description' => 'Puedes crear nuevas oficinas desde este catálogo'
             ])
         @else
             <div class="table-responsive">
@@ -38,17 +46,20 @@
                         @foreach($data as $item)
                         <tr>
                             <td>{{ $item['id'] ?? '-' }}</td>
-                            <td>{{ $item['nombre'] ?? $item['name'] ?? '-' }}</td>
-                            <td>{{ $item['ubicacion'] ?? $item['location'] ?? '-' }}</td>
+                            <td>{{ $item['nombre'] ?? '-' }}</td>
+                            <td>{{ $item['ubicacion'] ?? '-' }}</td>
                             <td>
-                                <span class="badge badge-{{ ($item['activo'] ?? $item['active'] ?? true) ? 'success' : 'danger' }}">
-                                    {{ ($item['activo'] ?? $item['active'] ?? true) ? 'Activa' : 'Inactiva' }}
+                                <span class="badge badge-{{ ($item['activo'] ?? true) ? 'success' : 'danger' }}">
+                                    {{ ($item['activo'] ?? true) ? 'Activa' : 'Inactiva' }}
                                 </span>
                             </td>
                             <td>
-                                <a href="{{ route('catalogos.oficinas.show', $item['id']) }}" class="btn btn-sm btn-outline">
-                                    Ver
-                                </a>
+                                <a href="{{ route('catalogos.oficinas.show', $item['id']) }}" class="btn btn-sm btn-outline">Ver</a>
+                                <a href="{{ route('catalogos.oficinas.edit', $item['id']) }}" class="btn btn-sm btn-outline">Editar</a>
+                                <form method="POST" action="{{ route('catalogos.oficinas.destroy', $item['id']) }}" style="display:inline-block;" onsubmit="return confirm('Deseas eliminar esta oficina?');">
+                                    @csrf
+                                    <button type="submit" class="btn btn-sm btn-outline" style="color:#B91C1C; border-color:#FCA5A5;">Eliminar</button>
+                                </form>
                             </td>
                         </tr>
                         @endforeach

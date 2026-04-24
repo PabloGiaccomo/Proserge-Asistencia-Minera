@@ -15,6 +15,7 @@ use App\Modules\Evaluaciones\Controllers\EvaluacionSupervisorController;
 use App\Modules\ManPower\Controllers\ManPowerController;
 use App\Modules\RQMina\Controllers\RQMinaController;
 use App\Modules\RQProserge\Controllers\RQProsergeController;
+use App\Modules\Personal\Controllers\PersonalController;
 use App\Modules\Seguridad\Controllers\PermisoController;
 use App\Modules\Seguridad\Controllers\RolController;
 use App\Modules\Seguridad\Controllers\UsuarioController;
@@ -30,6 +31,10 @@ Route::prefix('v1')->group(function (): void {
     });
 
     Route::get('/catalogos/minas', [MinaController::class, 'index']);
+    Route::get('/catalogos/minas/{id}', [MinaController::class, 'show']);
+    Route::post('/catalogos/minas', [MinaController::class, 'store']);
+    Route::put('/catalogos/minas/{id}', [MinaController::class, 'update']);
+    Route::post('/catalogos/minas/{id}/inactivar', [MinaController::class, 'inactivate']);
     Route::get('/catalogos/talleres', [TallerController::class, 'index']);
     Route::get('/catalogos/oficinas', [OficinaController::class, 'index']);
     Route::get('/catalogos/paraderos', [ParaderoController::class, 'index']);
@@ -99,6 +104,12 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/seguridad/permisos', [PermisoController::class, 'index']);
         Route::get('/seguridad/usuarios/{usuarioId}/mina-scope', [UsuarioMinaScopeController::class, 'index']);
         Route::put('/seguridad/usuarios/{usuarioId}/mina-scope', [UsuarioMinaScopeController::class, 'sync']);
+
+        Route::get('/personal', [PersonalController::class, 'index']);
+        Route::post('/personal', [PersonalController::class, 'store']);
+        Route::put('/personal/{id}', [PersonalController::class, 'update']);
+        Route::post('/personal/importar', [PersonalController::class, 'importar']);
+        Route::get('/personal/exportar', [PersonalController::class, 'exportar']);
 
         Route::get('/seguridad/scope-check', ScopeCheckController::class)->middleware('mina.scope');
     });

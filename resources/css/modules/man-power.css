@@ -1,0 +1,393 @@
+.manpower-screen {
+    font-family: 'Plus Jakarta Sans', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    padding: 20px;
+    background: #f5f7fb;
+}
+
+.manpower-screen .mp-header {
+    margin-bottom: 14px;
+}
+
+.manpower-screen .mp-title {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 800;
+    color: #16283d;
+}
+
+.manpower-screen .mp-subtitle {
+    margin: 6px 0 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.manpower-screen .mp-filter-panel {
+    background: #ffffff;
+    border: 1px solid #dbe3ef;
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.manpower-screen .mp-search-standalone {
+    margin-bottom: 12px;
+}
+
+.manpower-screen .mp-filter-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.manpower-screen .mp-filter-head span {
+    font-size: 13px;
+    font-weight: 700;
+    color: #51647e;
+}
+
+.manpower-screen .btn-filter-toggle {
+    border: 1px solid #d7e0ed;
+    background: #fff;
+    color: #3f556f;
+    border-radius: 10px;
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.manpower-screen .btn-filter-toggle:hover {
+    background: #f8fbff;
+}
+
+.manpower-screen .mp-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #dce4ef;
+    border-radius: 12px;
+    padding: 11px 12px;
+    background: #f9fbff;
+    margin-bottom: 0;
+}
+
+.manpower-screen .mp-search-wrap svg {
+    color: #73859f;
+    flex-shrink: 0;
+}
+
+.manpower-screen .mp-search-wrap input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #223247;
+    font-size: 14px;
+}
+
+.manpower-screen .mp-filters-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+    gap: 10px;
+}
+
+.manpower-screen .filter-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.manpower-screen .filter-item label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #52647f;
+}
+
+.manpower-screen .filter-item select,
+.manpower-screen .filter-item input {
+    border: 1px solid #dce4ef;
+    border-radius: 10px;
+    padding: 9px 10px;
+    font-size: 13px;
+    color: #233449;
+    background: #f9fbff;
+}
+
+.manpower-screen .mp-filter-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.manpower-screen .btn-filter-main,
+.manpower-screen .btn-filter-light {
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.manpower-screen .btn-filter-main {
+    border: none;
+    color: #fff;
+    background: linear-gradient(135deg, #16a3a3, #0d8f8f);
+}
+
+.manpower-screen .btn-filter-light {
+    border: 1px solid #d7e0ed;
+    color: #4a5d76;
+    background: #fff;
+}
+
+.manpower-screen .mp-results-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.manpower-screen .head-left h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #1d3048;
+}
+
+.manpower-screen .head-left p {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: #6d7f98;
+}
+
+.manpower-screen .mp-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+    gap: 12px;
+}
+
+.manpower-screen .mp-card {
+    background: #fff;
+    border: 1px solid #e0e8f3;
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.manpower-screen .mp-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+}
+
+.manpower-screen .accent-pendiente {
+    border-left: 4px solid #f59e0b;
+}
+
+.manpower-screen .accent-parcial {
+    border-left: 4px solid #0ea5e9;
+}
+
+.manpower-screen .accent-completo {
+    border-left: 4px solid #10b981;
+}
+
+.manpower-screen .mp-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.manpower-screen .mp-card-head h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #1b2e45;
+}
+
+.manpower-screen .mp-card-head p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #667a94;
+}
+
+.manpower-screen .coverage-chip {
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 9px;
+    flex-shrink: 0;
+}
+
+.manpower-screen .coverage-pendiente {
+    background: #fff3dd;
+    color: #9a5b09;
+}
+
+.manpower-screen .coverage-parcial {
+    background: #e7f6ff;
+    color: #0e6b98;
+}
+
+.manpower-screen .coverage-completo {
+    background: #e9fbf2;
+    color: #0b7b4d;
+}
+
+.manpower-screen .mp-supervisors {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #33475f;
+}
+
+.manpower-screen .mp-supervisors.is-empty {
+    color: #9a6b00;
+}
+
+.manpower-screen .mp-stats {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.manpower-screen .stat {
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 5px 9px;
+}
+
+.manpower-screen .stat.solicitado {
+    background: #edf2fb;
+    color: #355074;
+}
+
+.manpower-screen .stat.atendido {
+    background: #e8faf1;
+    color: #127949;
+}
+
+.manpower-screen .stat.pendiente {
+    background: #fff1e4;
+    color: #ad5a14;
+}
+
+.manpower-screen .mp-extra-row {
+    margin-top: 10px;
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+}
+
+.manpower-screen .extra-pill {
+    font-size: 11px;
+    color: #4b5f7b;
+    background: #f4f7fc;
+    border-radius: 999px;
+    padding: 5px 9px;
+}
+
+.manpower-screen .mp-last-group {
+    margin-top: 10px;
+    color: #6f8199;
+    font-size: 12px;
+}
+
+.manpower-screen .mp-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.manpower-screen .btn-view,
+.manpower-screen .btn-create {
+    flex: 1;
+    border-radius: 10px;
+    text-align: center;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 10px;
+    border: 1px solid transparent;
+}
+
+.manpower-screen .btn-view {
+    background: #f4f7fc;
+    color: #2e435f;
+    border-color: #dbe4f0;
+}
+
+.manpower-screen .btn-create {
+    background: linear-gradient(135deg, #2ec4c7, #1ea7aa);
+    color: #fff;
+}
+
+.manpower-screen .btn-view.is-priority {
+    background: #2e3f57;
+    color: #fff;
+    border-color: #2e3f57;
+}
+
+.manpower-screen .btn-create.is-priority {
+    box-shadow: 0 6px 14px rgba(30, 167, 170, 0.25);
+}
+
+.manpower-screen .mp-empty-state {
+    background: #fff;
+    border: 1px solid #e0e8f3;
+    border-radius: 14px;
+    text-align: center;
+    padding: 28px 16px;
+    color: #6a7d95;
+}
+
+.manpower-screen .mp-empty-state h3 {
+    margin: 0;
+    color: #22374f;
+}
+
+.manpower-screen .mp-empty-state p {
+    margin: 8px 0 0;
+}
+
+@media (max-width: 1220px) {
+    .manpower-screen .mp-filters-grid {
+        grid-template-columns: repeat(3, minmax(150px, 1fr));
+    }
+
+    .manpower-screen .mp-cards-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 860px) {
+    .manpower-screen {
+        padding: 12px;
+    }
+
+    .manpower-screen .mp-filters-grid {
+        grid-template-columns: repeat(2, minmax(140px, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .manpower-screen .mp-filters-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .manpower-screen .mp-actions {
+        flex-direction: column;
+    }
+
+    .manpower-screen .mp-title {
+        font-size: 24px;
+    }
+}

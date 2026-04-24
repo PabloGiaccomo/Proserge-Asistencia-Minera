@@ -3,17 +3,25 @@
 namespace App\Modules\Seguridad\Controllers;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\Http;
+use App\Support\Rbac\PermissionCatalog;
 
 class PermisoPageController extends Controller
 {
     public function index()
     {
-        $token = session('auth_token');
-        
-        $response = Http::withToken($token)->get(config('app.api_url') . '/v1/seguridad/permisos');
-        $data = $response->successful() ? $response->json()['data'] ?? [] : [];
-        
+        $data = collect(PermissionCatalog::modules())
+            ->flatMap(function (string $label, string $module): array {
+                return collect(PermissionCatalog::actions())
+                    ->map(fn (string $action): array => [
+                        'id' => $module . '.' . $action,
+                        'nombre' => $action,
+                        'descripcion' => 'Permite ' . $action . ' en el módulo ' . $label,
+                        'modulo' => $label,
+                    ])->all();
+            })
+            ->values()
+            ->all();
+
         return view('seguridad.permisos.index', compact('data'));
     }
 }

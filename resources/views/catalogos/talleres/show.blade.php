@@ -7,9 +7,14 @@
     <div class="page-header-content">
         <div>
             <h1 class="page-title">Detalle de Taller</h1>
-            <p class="page-subtitle">{{ $item['nombre'] ?? $item['name'] ?? '' }}</p>
+            <p class="page-subtitle">{{ $item['nombre'] ?? '' }}</p>
         </div>
         <div class="page-actions">
+            <a href="{{ route('catalogos.talleres.edit', $item['id']) }}" class="btn btn-primary">Editar</a>
+            <form method="POST" action="{{ route('catalogos.talleres.destroy', $item['id']) }}" style="display:inline-block;" onsubmit="return confirm('Deseas eliminar este taller?');">
+                @csrf
+                <button type="submit" class="btn btn-outline" style="color:#B91C1C; border-color:#FCA5A5;">Eliminar</button>
+            </form>
             <a href="{{ route('catalogos.talleres.index') }}" class="btn btn-outline">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -21,7 +26,6 @@
     </div>
 </div>
 
-@if($item)
 <div class="grid grid-2">
     <div class="card">
         <div class="card-header">
@@ -35,16 +39,16 @@
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Nombre</span>
-                    <span class="detail-value">{{ $item['nombre'] ?? $item['name'] ?? '-' }}</span>
+                    <span class="detail-value">{{ $item['nombre'] ?? '-' }}</span>
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Ubicación</span>
-                    <span class="detail-value">{{ $item['ubicacion'] ?? $item['location'] ?? '-' }}</span>
+                    <span class="detail-value">{{ $item['ubicacion'] ?? '-' }}</span>
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Estado</span>
-                    <span class="badge badge-{{ ($item['activo'] ?? $item['active'] ?? true) ? 'success' : 'danger' }}">
-                        {{ ($item['activo'] ?? $item['active'] ?? true) ? 'Activo' : 'Inactivo' }}
+                    <span class="badge badge-{{ ($item['activo'] ?? true) ? 'success' : 'danger' }}">
+                        {{ ($item['activo'] ?? true) ? 'Activo' : 'Inactivo' }}
                     </span>
                 </div>
             </div>
@@ -59,24 +63,14 @@
             <div class="detail-grid">
                 <div class="detail-item">
                     <span class="detail-label">Código</span>
-                    <span class="detail-value">{{ $item['codigo'] ?? $item['code'] ?? '-' }}</span>
+                    <span class="detail-value">{{ $item['codigo'] ?? '-' }}</span>
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Descripción</span>
-                    <span class="detail-value">{{ $item['descripcion'] ?? $item['description'] ?? '-' }}</span>
+                    <span class="detail-value">{{ $item['descripcion'] ?? '-' }}</span>
                 </div>
             </div>
         </div>
     </div>
 </div>
-@else
-<div class="card">
-    <div class="card-body">
-        @include('components.empty-state', [
-            'message' => 'Taller no encontrado',
-            'description' => 'El taller que buscas no existe'
-        ])
-    </div>
-</div>
-@endif
 @endsection

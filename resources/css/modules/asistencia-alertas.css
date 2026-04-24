@@ -1,0 +1,95 @@
+.alertas-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.alerta-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    border-radius: 16px;
+    border: 1px solid;
+}
+
+.alerta-warning {
+    background: rgba(245, 158, 11, 0.05);
+    border-color: rgba(245, 158, 11, 0.2);
+}
+
+.alerta-warning .alerta-icon {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--color-warning);
+}
+
+.alerta-danger {
+    background: rgba(239, 68, 68, 0.05);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.alerta-danger .alerta-icon {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--color-danger);
+}
+
+.alerta-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.alerta-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.alerta-content {
+    flex: 1;
+}
+
+.alerta-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.alerta-titulo {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.alerta-cantidad {
+    padding: 2px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.alerta-warning .alerta-cantidad {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--color-warning);
+}
+
+.alerta-danger .alerta-cantidad {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--color-danger);
+}
+
+.alerta-descripcion {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.alerta-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}

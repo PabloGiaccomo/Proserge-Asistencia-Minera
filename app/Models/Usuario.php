@@ -25,15 +25,25 @@ class Usuario extends Authenticatable
         'password',
         'rol_id',
         'personal_id',
+        'estado',
     ];
 
     protected $hidden = [
         'password',
     ];
 
+    protected $casts = [
+        'password' => 'hashed',
+    ];
+
     public function rol(): BelongsTo
     {
         return $this->belongsTo(Rol::class, 'rol_id');
+    }
+
+    public function personal(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'personal_id');
     }
 
     public function scopesMina(): HasMany

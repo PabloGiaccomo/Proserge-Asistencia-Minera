@@ -7,72 +7,58 @@
     <div class="page-header">
         <div class="page-header-top">
             <div>
-                <h1 class="page-title">Editar Scope por Mina</h1>
-                <p class="page-subtitle">{{ $usuario['name'] ?? '' }}</p>
+                <h1 class="page-title">Scope Mina</h1>
+                <p class="page-subtitle">{{ $usuario->personal?->nombre_completo ?? $usuario->email }}</p>
             </div>
             <div class="page-actions">
-                <a href="{{ route('usuarios.show', $usuario['id']) }}" class="btn btn-outline">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="19" y1="12" x2="5" y2="12"></line>
-                        <polyline points="12 19 5 12 12 5"></polyline>
-                    </svg>
-                    Volver
-                </a>
+                <a href="{{ route('usuarios.show', $usuario->id) }}" class="btn btn-outline">Volver</a>
             </div>
         </div>
     </div>
 
-    <form action="{{ route('usuarios.scope-update', $usuario['id']) }}" method="POST">
-        @csrf
-        @method('PUT')
-        <div class="card">
-            <div class="card-header">
-                <span class="card-title">Seleccionar Acceso por Mina</span>
-                <span class="card-badge">{{ count($scopes) ?? 0 }} minas asignadas</span>
-            </div>
-            <div class="card-body">
-                <p style="margin-bottom: 20px; color: var(--color-text-secondary);">Seleccione las minas y ubicaciones a las que este usuario tendrá acceso. Si no tiene acceso a una mina, no podrá ver información de esa mina en RQ Mina, RQ Proserge, Man Power o Mi Asistencia.</p>
-                
-                <div class="mines-grid">
-                    @foreach($todasLasMinas as $mina)
-                    @php
-                    $isSelected = in_array($mina['nombre'], $scopes ?? []);
-                    @endphp
-                    <div class="mine-selection-item">
-                        <div class="mine-checkbox">
-                            <input type="checkbox" name="mina_ids[]" value="{{ $mina['nombre'] }}" id="mina_{{ str_replace(' ', '_', $mina['nombre']) }}"
-                                {{ $isSelected ? 'checked' : '' }}>
-                            <label for="mina_{{ str_replace(' ', '_', $mina['nombre']) }}" class="mine-checkbox-label">
-                                <span class="checkbox-custom"></span>
-                                <span class="checkbox-text">{{ $mina['nombre'] }}</span>
-                            </label>
-                        </div>
-                        <div class="mine-status-select">
-                            <select name="mina_estado[{{ $mina['nombre'] }}]" class="form-control form-control-sm" {{ !$isSelected ? 'disabled' : '' }}>
-                                <option value="habilitado" {{ $isSelected ? 'selected' : '' }}>Habilitado</option>
-                            </select>
-                        </div>
-                    </div>
-                    @endforeach
-                </div>
-            </div>
-        </div>
+    @if(session('success'))
+        <div class="alert alert-success" style="margin-bottom: 16px;">{{ session('success') }}</div>
+    @endif
 
-        <div class="form-actions">
-            <a href="{{ route('usuarios.show', $usuario['id']) }}" class="btn btn-outline">Cancelar</a>
-            <button type="submit" class="btn btn-primary">Guardar Scope</button>
+    @if($errors->any())
+        <div class="alert alert-error" style="margin-bottom: 16px;">{{ $errors->first() }}</div>
+    @endif
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Minas disponibles</span>
+            <span class="card-badge">{{ count($scopeIds) }} seleccionadas</span>
         </div>
-    </form>
+        <div class="card-body">
+            <form action="{{ route('usuarios.scope-update', $usuario->id) }}" method="POST">
+                @csrf
+                @method('PUT')
+
+                <p style="margin-bottom: 20px; color: var(--color-text-secondary);">Selecciona las minas a las que este usuario puede acceder.</p>
+
+                <div style="display: grid; gap: 12px; margin-bottom: 20px;">
+                    @forelse($minas as $mina)
+                        <label style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; cursor: pointer;">
+                            <span>
+                                <strong>{{ $mina->nombre }}</strong><br>
+                                <span style="color: var(--color-text-secondary); font-size: 13px;">Estado catalogo: {{ strtoupper((string) $mina->estado) }}</span>
+                            </span>
+                            <input type="checkbox" name="mina_ids[]" value="{{ $mina->id }}" {{ in_array($mina->id, $scopeIds, true) ? 'checked' : '' }}>
+                        </label>
+                    @empty
+                        <div class="empty-state" style="padding: 24px 0;">
+                            <h3 class="empty-title">No hay minas registradas</h3>
+                            <p class="empty-description">Primero debes registrar minas en el catálogo.</p>
+                        </div>
+                    @endforelse
+                </div>
+
+                <div class="form-actions">
+                    <a href="{{ route('usuarios.show', $usuario->id) }}" class="btn btn-outline">Cancelar</a>
+                    <button type="submit" class="btn btn-primary">Guardar Scope</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 @endsection
-
-@push('scripts')
-<script>
-document.querySelectorAll('input[name="mina_ids[]"]').forEach(function(checkbox) {
-    checkbox.addEventListener('change', function() {
-        const statusSelect = this.closest('.mine-selection-item').querySelector('select');
-        statusSelect.disabled = !this.checked;
-    });
-});
-</script>
-@endpush

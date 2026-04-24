@@ -9,6 +9,10 @@
             <h1 class="page-title">Minas</h1>
             <p class="page-subtitle">Catálogo de minas</p>
         </div>
+        <div class="page-actions">
+            <a href="{{ route('catalogos.index') }}" class="btn btn-outline">Volver</a>
+            <a href="{{ route('catalogos.minas.create') }}" class="btn btn-primary">Nueva mina</a>
+        </div>
     </div>
 </div>
 
@@ -49,6 +53,15 @@
                                 <a href="{{ route('catalogos.minas.show', $item['id']) }}" class="btn btn-sm btn-outline">
                                     Ver
                                 </a>
+                                <a href="{{ route('catalogos.minas.edit', $item['id']) }}" class="btn btn-sm btn-outline">
+                                    Editar
+                                </a>
+                                @if(($item['activo'] ?? true))
+                                    <form method="POST" action="{{ route('catalogos.minas.inactivate', $item['id']) }}" style="display:inline-block;" onsubmit="return confirm('Deseas inactivar esta mina y sus paraderos?');">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline" style="color:#B91C1C; border-color:#FCA5A5;">Inactivar</button>
+                                    </form>
+                                @endif
                             </td>
                         </tr>
                         @endforeach

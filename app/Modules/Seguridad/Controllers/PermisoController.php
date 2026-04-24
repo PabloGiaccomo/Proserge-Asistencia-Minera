@@ -3,21 +3,16 @@
 namespace App\Modules\Seguridad\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\Rol;
+use App\Support\Rbac\PermissionCatalog;
 use App\Shared\Support\ApiResponse;
 
 class PermisoController extends Controller
 {
     public function index()
     {
-        $permisos = Rol::query()
-            ->pluck('permisos')
-            ->filter(fn ($items) => is_array($items))
-            ->flatten()
-            ->filter(fn ($item) => is_string($item) && trim($item) !== '')
-            ->map(fn (string $item) => trim($item))
-            ->unique()
-            ->sort()
+        $permisos = collect(PermissionCatalog::modules())
+            ->flatMap(fn (string $label, string $module) => collect(PermissionCatalog::actions())
+                ->map(fn (string $action) => $module . '.' . $action))
             ->values();
 
         return ApiResponse::success(

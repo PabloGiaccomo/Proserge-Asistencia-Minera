@@ -43,6 +43,8 @@ Route::middleware('web.auth')->group(function (): void {
     
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->name('personal.index');
+    Route::get('/personal/exportar', [PersonalPageController::class, 'exportForm'])->name('personal.export.form');
+    Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->name('personal.export.download');
     Route::get('/personal/crear', [PersonalPageController::class, 'create'])->name('personal.create');
     Route::post('/personal/crear', [PersonalPageController::class, 'store'])->name('personal.store');
     Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->name('personal.edit');
@@ -110,24 +112,49 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Usuarios
     Route::get('/usuarios', [UsuarioPageController::class, 'index'])->name('usuarios.index');
+    Route::get('/usuarios/crear', [UsuarioPageController::class, 'create'])->name('usuarios.create');
+    Route::post('/usuarios', [UsuarioPageController::class, 'store'])->name('usuarios.store');
     Route::get('/usuarios/{id}', [UsuarioPageController::class, 'show'])->name('usuarios.show');
     Route::put('/usuarios/{id}', [UsuarioPageController::class, 'update'])->name('usuarios.update');
+    Route::post('/usuarios/{id}/estado', [UsuarioPageController::class, 'toggleEstado'])->name('usuarios.toggle-estado');
+    Route::post('/usuarios/{id}/password', [UsuarioPageController::class, 'updatePassword'])->name('usuarios.password');
     Route::get('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'editarScope'])->name('usuarios.scope');
 
     // Catálogos - Hub
     Route::get('/catalogos', [CatalogoHubController::class, 'index'])->name('catalogos.index');
     Route::get('/catalogos/minas', [MinaPageController::class, 'index'])->name('catalogos.minas.index');
+    Route::get('/catalogos/minas/crear', [MinaPageController::class, 'create'])->name('catalogos.minas.create');
+    Route::post('/catalogos/minas', [MinaPageController::class, 'store'])->name('catalogos.minas.store');
     Route::get('/catalogos/minas/{id}', [MinaPageController::class, 'show'])->name('catalogos.minas.show');
+    Route::get('/catalogos/minas/{id}/editar', [MinaPageController::class, 'edit'])->name('catalogos.minas.edit');
+    Route::put('/catalogos/minas/{id}', [MinaPageController::class, 'update'])->name('catalogos.minas.update');
+    Route::post('/catalogos/minas/{id}/inactivar', [MinaPageController::class, 'inactivate'])->name('catalogos.minas.inactivate');
     Route::get('/catalogos/talleres', [TallerPageController::class, 'index'])->name('catalogos.talleres.index');
+    Route::get('/catalogos/talleres/crear', [TallerPageController::class, 'create'])->name('catalogos.talleres.create');
+    Route::post('/catalogos/talleres', [TallerPageController::class, 'store'])->name('catalogos.talleres.store');
     Route::get('/catalogos/talleres/{id}', [TallerPageController::class, 'show'])->name('catalogos.talleres.show');
+    Route::get('/catalogos/talleres/{id}/editar', [TallerPageController::class, 'edit'])->name('catalogos.talleres.edit');
+    Route::put('/catalogos/talleres/{id}', [TallerPageController::class, 'update'])->name('catalogos.talleres.update');
+    Route::post('/catalogos/talleres/{id}/eliminar', [TallerPageController::class, 'destroy'])->name('catalogos.talleres.destroy');
     Route::get('/catalogos/oficinas', [OficinaPageController::class, 'index'])->name('catalogos.oficinas.index');
+    Route::get('/catalogos/oficinas/crear', [OficinaPageController::class, 'create'])->name('catalogos.oficinas.create');
+    Route::post('/catalogos/oficinas', [OficinaPageController::class, 'store'])->name('catalogos.oficinas.store');
     Route::get('/catalogos/oficinas/{id}', [OficinaPageController::class, 'show'])->name('catalogos.oficinas.show');
+    Route::get('/catalogos/oficinas/{id}/editar', [OficinaPageController::class, 'edit'])->name('catalogos.oficinas.edit');
+    Route::put('/catalogos/oficinas/{id}', [OficinaPageController::class, 'update'])->name('catalogos.oficinas.update');
+    Route::post('/catalogos/oficinas/{id}/eliminar', [OficinaPageController::class, 'destroy'])->name('catalogos.oficinas.destroy');
     Route::get('/catalogos/paraderos', [ParaderoPageController::class, 'index'])->name('catalogos.paraderos.index');
     Route::get('/catalogos/paraderos/{id}', [ParaderoPageController::class, 'show'])->name('catalogos.paraderos.show');
 
     // Roles y Permisos
     Route::get('/seguridad/roles', [RolPageController::class, 'index'])->name('seguridad.roles.index');
+    Route::get('/seguridad/roles/crear', [RolPageController::class, 'create'])->name('seguridad.roles.create');
+    Route::post('/seguridad/roles', [RolPageController::class, 'store'])->name('seguridad.roles.store');
     Route::get('/seguridad/roles/{id}', [RolPageController::class, 'show'])->name('seguridad.roles.show');
+    Route::get('/seguridad/roles/{id}/editar', [RolPageController::class, 'edit'])->name('seguridad.roles.edit');
+    Route::put('/seguridad/roles/{id}', [RolPageController::class, 'update'])->name('seguridad.roles.update');
+    Route::post('/seguridad/roles/{id}/duplicar', [RolPageController::class, 'duplicate'])->name('seguridad.roles.duplicate');
+    Route::post('/seguridad/roles/{id}/estado', [RolPageController::class, 'toggleEstado'])->name('seguridad.roles.toggle');
     Route::get('/seguridad/permisos', [PermisoPageController::class, 'index'])->name('seguridad.permisos.index');
 
     // POST Routes

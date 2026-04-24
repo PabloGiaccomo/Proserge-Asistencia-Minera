@@ -3,7 +3,11 @@
 namespace App\Modules\Auth\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Usuario;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class LoginPageController extends Controller
@@ -24,7 +28,40 @@ class LoginPageController extends Controller
             'password' => 'required',
         ]);
 
-        // Hardcoded admin for testing (no database needed)
+        $usuario = Usuario::query()
+            ->with(['rol:id,nombre,permisos', 'personal:id,nombre_completo'])
+            ->where('email', $request->email)
+            ->first();
+
+        if ($usuario && Hash::check($request->password, $usuario->password)) {
+            $estado = Schema::hasColumn('usuarios', 'estado')
+                ? strtoupper((string) $usuario->estado)
+                : 'ACTIVO';
+
+            if ($estado !== 'ACTIVO') {
+                return back()
+                    ->with('error', 'Tu usuario se encuentra inactivo.')
+                    ->withInput($request->except('password'));
+            }
+
+            $token = Str::random(80);
+
+            session([
+                'auth_token' => $token,
+                'user' => [
+                    'id' => $usuario->id,
+                    'email' => $usuario->email,
+                    'name' => $usuario->personal?->nombre_completo ?? $usuario->email,
+                    'rol' => $usuario->rol?->nombre ?? 'Usuario',
+                    'permissions' => PermissionMatrix::normalizeForRole($usuario->rol?->nombre, $usuario->rol?->permisos ?? []),
+                ],
+                'user_id' => $usuario->id,
+            ]);
+
+            return redirect()->route('inicio')->with('success', 'Bienvenido');
+        }
+
+        // Mantener acceso de desarrollo mientras existan ambientes sin usuarios cargados.
         if ($request->email === 'admin@proserge.com' && $request->password === 'admin123') {
             $token = Str::random(80);
             
@@ -35,6 +72,7 @@ class LoginPageController extends Controller
                     'email' => 'admin@proserge.com',
                     'name' => 'Administrador',
                     'rol' => 'ADMIN',
+                    'permissions' => ['*'],
                 ],
                 'user_id' => '00000000-0000-0000-0000-000000000001',
             ]);
@@ -42,7 +80,7 @@ class LoginPageController extends Controller
             return redirect()->route('inicio')->with('success', 'Bienvenido');
         }
 
-        return back()->with('error', 'Credenciales incorrectas. Usa admin@proserge.com / admin123')->withInput($request->except('password'));
+        return back()->with('error', 'Credenciales incorrectas.')->withInput($request->except('password'));
     }
 
     public function logout()

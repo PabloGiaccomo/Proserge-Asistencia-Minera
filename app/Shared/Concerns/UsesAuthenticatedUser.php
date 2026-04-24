@@ -3,7 +3,7 @@
 namespace App\Shared\Concerns;
 
 use App\Models\Usuario;
-use Illuminate\Support\Facades\Auth;
+use App\Support\Rbac\PermissionMatrix;
 
 trait UsesAuthenticatedUser
 {
@@ -26,7 +26,7 @@ trait UsesAuthenticatedUser
         $user->setRelation('rol', (object) [
             'id' => 1,
             'nombre' => $sessionUser['rol'] ?? 'ADMIN',
-            'permisos' => json_encode(['*'])
+            'permisos' => PermissionMatrix::normalize($sessionUser['permissions'] ?? ['*'])
         ]);
         
         return $user;

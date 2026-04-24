@@ -8,27 +8,55 @@
         <div class="page-header-top">
             <div>
                 <h1 class="page-title">Usuarios</h1>
-                <p class="page-subtitle">Gestión de usuarios del sistema</p>
+                <p class="page-subtitle">Cada usuario debe estar vinculado a un trabajador real del módulo Personal.</p>
             </div>
             <div class="page-actions">
-                <button type="button" class="btn btn-primary" onclick="openModal('agregarUsuarioModal')">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                    Nuevo Usuario
-                </button>
+                @allowed('usuarios', 'crear')
+                    <a href="{{ route('usuarios.create') }}" class="btn btn-primary">Nuevo Usuario</a>
+                @endallowed
             </div>
+        </div>
+    </div>
+
+    @if(session('success'))
+        <div class="alert alert-success" style="margin-bottom: 16px;">{{ session('success') }}</div>
+    @endif
+
+    @if(session('error'))
+        <div class="alert alert-error" style="margin-bottom: 16px;">{{ session('error') }}</div>
+    @endif
+
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-body">
+            <form method="GET" action="{{ route('usuarios.index') }}" class="form-row" style="align-items: end; gap: 12px;">
+                <div class="form-group" style="flex: 1 1 320px;">
+                    <label class="form-label">Buscar</label>
+                    <input type="text" name="search" class="form-control" value="{{ $filters['search'] ?? '' }}" placeholder="Nombre, DNI, puesto, correo o rol">
+                </div>
+                @if($hasEstadoColumn)
+                    <div class="form-group" style="min-width: 180px;">
+                        <label class="form-label">Estado</label>
+                        <select name="estado" class="form-control">
+                            <option value="">Todos</option>
+                            <option value="ACTIVO" {{ ($filters['estado'] ?? '') === 'ACTIVO' ? 'selected' : '' }}>Activos</option>
+                            <option value="INACTIVO" {{ ($filters['estado'] ?? '') === 'INACTIVO' ? 'selected' : '' }}>Inactivos</option>
+                        </select>
+                    </div>
+                @endif
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Filtrar</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <div class="card">
         <div class="card-header">
-            <span class="card-title">Listado de Usuarios</span>
-            <span class="card-badge">{{ count($data ?? []) }} usuarios</span>
+            <span class="card-title">Listado de usuarios</span>
+            <span class="card-badge">{{ $usuarios->count() }} registros</span>
         </div>
         <div class="card-body">
-            @if(empty($data))
+            @if($usuarios->isEmpty())
                 <div class="empty-state">
                     <div class="empty-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -39,16 +67,7 @@
                         </svg>
                     </div>
                     <h3 class="empty-title">No hay usuarios registrados</h3>
-                    <p class="empty-description">Los usuarios se crean buscando personal existente</p>
-                    <div class="empty-action">
-                        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('agregarUsuarioModal')">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19"/>
-                                <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Agregar Usuario
-                        </button>
-                    </div>
+                    <p class="empty-description">Usa el botón Nuevo Usuario para crear cuentas solo desde trabajadores ya registrados en Personal.</p>
                 </div>
             @else
                 <div class="table-responsive">
@@ -56,36 +75,54 @@
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>Nombre</th>
-                                <th>Email</th>
-                                <th>Roles</th>
+                                <th>Trabajador</th>
+                                <th>Correo</th>
+                                <th>Rol</th>
                                 <th>Estado</th>
                                 <th>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach($data as $item)
-                            <tr>
-                                <td>{{ $item['id'] ?? '-' }}</td>
-                                <td>{{ $item['name'] ?? '-' }}</td>
-                                <td>{{ $item['email'] ?? '-' }}</td>
-                                <td>
-                                    {{ $item['rol'] ?? '-' }}
-                                </td>
-                                <td>
-                                    <span class="badge badge-{{ ($item['estado'] ?? 'ACTIVO') === 'ACTIVO' ? 'success' : 'danger' }}">
-                                        {{ $item['estado'] ?? 'ACTIVO' }}
-                                    </span>
-                                </td>
-                                <td>
-                                    <a href="{{ route('usuarios.show', $item['id']) }}" class="btn btn-sm btn-outline">
-                                        Ver
-                                    </a>
-                                    <a href="{{ route('usuarios.scope', $item['id']) }}" class="btn btn-sm btn-outline">
-                                        Scope Mina
-                                    </a>
-                                </td>
-                            </tr>
+                            @foreach($usuarios as $usuario)
+                                @php
+                                    $estado = $hasEstadoColumn ? strtoupper((string) $usuario->estado) : 'ACTIVO';
+                                @endphp
+                                <tr>
+                                    <td><code>{{ $usuario->id }}</code></td>
+                                    <td>
+                                        <strong>{{ $usuario->personal?->nombre_completo ?? 'Sin trabajador' }}</strong><br>
+                                        <span style="color: var(--color-text-secondary); font-size: 13px;">
+                                            DNI: {{ $usuario->personal?->dni ?? '-' }}
+                                            @if($usuario->personal?->puesto)
+                                                | {{ $usuario->personal->puesto }}
+                                            @endif
+                                        </span>
+                                    </td>
+                                    <td>{{ $usuario->email }}</td>
+                                    <td>{{ $usuario->rol?->nombre ?? '-' }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ $estado === 'ACTIVO' ? 'success' : 'danger' }}">{{ $estado }}</span>
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                            <a href="{{ route('usuarios.show', $usuario->id) }}" class="btn btn-sm btn-outline">Ver</a>
+                                            @allowed('usuarios', 'editar')
+                                                <a href="{{ route('usuarios.show', $usuario->id) }}#edicion" class="btn btn-sm btn-outline">Editar</a>
+                                            @endallowed
+                                            @allowed('usuarios', 'administrar')
+                                                <a href="{{ route('usuarios.scope', $usuario->id) }}" class="btn btn-sm btn-outline">Scope Mina</a>
+                                            @endallowed
+                                            @if($hasEstadoColumn)
+                                                @allowed('usuarios', 'administrar')
+                                                <form method="POST" action="{{ route('usuarios.toggle-estado', $usuario->id) }}">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-sm btn-outline">{{ $estado === 'ACTIVO' ? 'Desactivar' : 'Activar' }}</button>
+                                                </form>
+                                                @endallowed
+                                            @endif
+                                        </div>
+                                    </td>
+                                </tr>
                             @endforeach
                         </tbody>
                     </table>
@@ -94,132 +131,4 @@
         </div>
     </div>
 </div>
-
-<!-- Modal Agregar Usuario -->
-<div class="modal" id="agregarUsuarioModal" style="display: none;">
-    <div class="modal-backdrop" onclick="closeModal('agregarUsuarioModal')"></div>
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 class="modal-title">Agregar Usuario</h2>
-            <button type="button" class="modal-close" onclick="closeModal('agregarUsuarioModal')">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        </div>
-        <div class="modal-body">
-            <p class="modal-subtitle" id="searchHelpText">Busca un trabajador del personal para agregarlo como usuario del sistema.</p>
-            
-            @include('components.ui.global-search', [
-                'searchId' => 'buscar-trabajador',
-                'placeholder' => 'Buscar por nombre o DNI...',
-                'showClear' => true,
-                'minChars' => 2
-            ])
-
-            <div id="datosUsuarioForm" style="display: none;">
-                <div class="form-section">
-                    <h3 class="form-section-title">Datos del Usuario</h3>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Nombre</label>
-                            <input type="text" class="form-control" id="formNombre" readonly>
-                        </div>
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">DNI</label>
-                            <input type="text" class="form-control" id="formDni" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Email</label>
-                            <input type="email" class="form-control" id="formEmail" placeholder="email@proserge.com">
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label required">Rol</label>
-                            <select class="form-control" id="formRol" required>
-                                <option value="">Seleccionar...</option>
-                                <option value="ADMIN">ADMIN</option>
-                                <option value="SUPERVISOR">SUPERVISOR</option>
-                                <option value="USUARIO">USUARIO</option>
-                                <option value="AUDITOR">AUDITOR</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Estado</label>
-                            <select class="form-control" id="formEstado">
-                                <option value="ACTIVO">ACTIVO</option>
-                                <option value="INACTIVO">INACTIVO</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeModal('agregarUsuarioModal')">Cancelar</button>
-            <button type="button" class="btn btn-primary" id="btnCrearUsuario" disabled>Crear Usuario</button>
-        </div>
-    </div>
-</div>
 @endsection
-
-@push('scripts')
-<script>
-let trabajadorSeleccionado = null;
-
-function generateEmail(nombre) {
-    if (!nombre) return '';
-    const parts = nombre.toLowerCase().trim().split(' ');
-    if (parts.length >= 2) {
-        return parts[0][0] + parts[parts.length - 1] + '@proserge.com';
-    }
-    return nombre.toLowerCase().replace(/\s+/g, '.') + '@proserge.com';
-}
-
-document.addEventListener('search:select', function(e) {
-    const { item, searchId } = e.detail;
-    if (searchId === 'buscar-trabajador' && item && item.nombre) {
-        trabajadorSeleccionado = item;
-        
-        document.getElementById('formNombre').value = item.nombre;
-        document.getElementById('formDni').value = item.dni || '';
-        document.getElementById('formEmail').value = generateEmail(item.nombre);
-        
-        document.getElementById('searchHelpText').style.display = 'none';
-        document.querySelector('[data-search-id="buscar-trabajador"]').style.display = 'none';
-        document.getElementById('datosUsuarioForm').style.display = 'block';
-        document.getElementById('btnCrearUsuario').disabled = false;
-    }
-});
-
-document.getElementById('btnCrearUsuario').addEventListener('click', function() {
-    if (!trabajadorSeleccionado) return;
-    
-    const rol = document.getElementById('formRol').value;
-    if (!rol) {
-        alert('Por favor selecciona un rol');
-        return;
-    }
-    
-    const usuario = {
-        id: 'usr-' + Date.now(),
-        name: trabajadorSeleccionado.nombre,
-        dni: trabajadorSeleccionado.dni,
-        email: document.getElementById('formEmail').value,
-        rol: rol,
-        estado: document.getElementById('formEstado').value
-    };
-    
-    alert('Usuario creado exitosamente:\n\nNombre: ' + usuario.name + '\nDNI: ' + usuario.dni + '\nEmail: ' + usuario.email + '\nRol: ' + usuario.rol + '\nEstado: ' + usuario.estado);
-    closeModal('agregarUsuarioModal');
-    location.reload();
-});
-</script>
-@endpush

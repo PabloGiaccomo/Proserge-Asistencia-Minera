@@ -13,6 +13,15 @@ class MinaParadero extends Model
 
     protected $keyType = 'string';
 
+    protected $fillable = [
+        'id',
+        'mina_id',
+        'nombre',
+        'ubicacion',
+        'link_ubicacion',
+        'estado',
+    ];
+
     public function mina(): BelongsTo
     {
         return $this->belongsTo(Mina::class, 'mina_id');

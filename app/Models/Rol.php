@@ -9,6 +9,8 @@ class Rol extends Model
 {
     protected $table = 'roles';
 
+    public $timestamps = false;
+
     public $incrementing = false;
 
     protected $keyType = 'string';
@@ -16,6 +18,7 @@ class Rol extends Model
     protected $fillable = [
         'id',
         'nombre',
+        'descripcion',
         'permisos',
         'estado',
     ];

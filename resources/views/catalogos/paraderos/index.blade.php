@@ -9,6 +9,9 @@
             <h1 class="page-title">Paraderos</h1>
             <p class="page-subtitle">Catálogo de paraderos</p>
         </div>
+        <div class="page-actions">
+            <a href="{{ route('catalogos.index') }}" class="btn btn-outline">Volver</a>
+        </div>
     </div>
 </div>
 
@@ -29,6 +32,7 @@
                         <tr>
                             <th>ID</th>
                             <th>Nombre</th>
+                            <th>Mina</th>
                             <th>Ubicación</th>
                             <th>Estado</th>
                             <th>Acciones</th>
@@ -39,6 +43,7 @@
                         <tr>
                             <td>{{ $item['id'] ?? '-' }}</td>
                             <td>{{ $item['nombre'] ?? $item['name'] ?? '-' }}</td>
+                            <td>{{ $item['mina'] ?? '-' }}</td>
                             <td>{{ $item['ubicacion'] ?? $item['location'] ?? '-' }}</td>
                             <td>
                                 <span class="badge badge-{{ ($item['activo'] ?? $item['active'] ?? true) ? 'success' : 'danger' }}">

@@ -8,61 +8,72 @@
         <div class="page-header-top">
             <div>
                 <h1 class="page-title">Roles</h1>
-                <p class="page-subtitle">Gestión de roles del sistema</p>
+                <p class="page-subtitle">Configura qué módulos puede ver cada rol y qué acciones puede realizar.</p>
             </div>
             <div class="page-actions">
-                <a href="#" class="btn btn-primary">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                    Nuevo Rol
-                </a>
+                @allowed('roles', 'crear')
+                    <a href="{{ route('seguridad.roles.create') }}" class="btn btn-primary">Nuevo Rol</a>
+                @endallowed
             </div>
         </div>
     </div>
 
+    @if(session('success'))
+        <div class="alert alert-success" style="margin-bottom:16px;">{{ session('success') }}</div>
+    @endif
+
     <div class="card">
         <div class="card-header">
-            <span class="card-title">Listado de Roles</span>
-            <span class="card-badge">{{ count($data ?? []) }} roles</span>
+            <span class="card-title">Listado de roles</span>
+            <span class="card-badge">{{ $roles->count() }} roles</span>
         </div>
-    <div class="card-body">
-        @if(empty($data))
-            @include('components.empty-state', [
-                'message' => 'No hay roles registrados',
-                'description' => 'Los roles se crean desde la configuración del sistema'
-            ])
-        @else
+        <div class="card-body">
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>ID</th>
                             <th>Nombre</th>
+                            <th>Usuarios</th>
                             <th>Descripción</th>
-                            <th>Permisos</th>
+                            <th>Estado</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($data as $item)
-                        <tr>
-                            <td>{{ $item['id'] ?? '-' }}</td>
-                            <td>{{ $item['nombre'] ?? $item['name'] ?? '-' }}</td>
-                            <td>{{ $item['descripcion'] ?? $item['description'] ?? '-' }}</td>
-                            <td>{{ count($item['permisos'] ?? $item['permissions'] ?? []) }}</td>
-                            <td>
-                                <a href="{{ route('seguridad.roles.show', $item['id']) }}" class="btn btn-sm btn-outline">
-                                    Ver
-                                </a>
-                            </td>
-                        </tr>
+                        @foreach($roles as $rol)
+                            <tr>
+                                <td><strong>{{ $rol->nombre }}</strong></td>
+                                <td>{{ $rol->usuarios_count ?? 0 }}</td>
+                                <td>{{ $rol->descripcion ?: 'Sin descripción' }}</td>
+                                <td>
+                                    <span class="badge badge-{{ strtoupper((string) $rol->estado) === 'ACTIVO' ? 'success' : 'danger' }}">{{ strtoupper((string) $rol->estado) }}</span>
+                                </td>
+                                <td>
+                                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                        <a href="{{ route('seguridad.roles.show', $rol->id) }}" class="btn btn-sm btn-outline">Ver</a>
+                                        @allowed('roles', 'editar')
+                                            <a href="{{ route('seguridad.roles.edit', $rol->id) }}" class="btn btn-sm btn-outline">Editar permisos</a>
+                                        @endallowed
+                                        @allowed('roles', 'crear')
+                                            <form method="POST" action="{{ route('seguridad.roles.duplicate', $rol->id) }}">
+                                                @csrf
+                                                <button type="submit" class="btn btn-sm btn-outline">Duplicar</button>
+                                            </form>
+                                        @endallowed
+                                        @allowed('roles', 'administrar')
+                                            <form method="POST" action="{{ route('seguridad.roles.toggle', $rol->id) }}">
+                                                @csrf
+                                                <button type="submit" class="btn btn-sm btn-outline">{{ strtoupper((string) $rol->estado) === 'ACTIVO' ? 'Desactivar' : 'Activar' }}</button>
+                                            </form>
+                                        @endallowed
+                                    </div>
+                                </td>
+                            </tr>
                         @endforeach
                     </tbody>
                 </table>
             </div>
-        @endif
+        </div>
     </div>
 </div>
 @endsection
