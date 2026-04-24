@@ -431,3 +431,30 @@ CREATE TABLE IF NOT EXISTS epp_registro (
   PRIMARY KEY (id),
   UNIQUE KEY uq_epp_codigo (codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- ACTUALIZACIONES ADICIONALES PARA CAMPOS AGREGADOS DESDE LA IMPLEMENTACION
+-- =============================================================================
+
+-- Agregar columnas de telefono分裂 y descripcion a roles
+ALTER TABLE roles ADD COLUMN descripcion VARCHAR(255) NULL AFTER nombre;
+
+-- Agregar columnas de telefono分裂 a personal
+ALTER TABLE personal ADD COLUMN telefono_1 VARCHAR(30) NULL AFTER telefono;
+ALTER TABLE personal ADD COLUMN telefono_2 VARCHAR(30) NULL AFTER telefono_1;
+
+-- Agregar columna de estado a usuarios
+ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVO' AFTER personal_id;
+
+-- =============================================================================
+-- DATOS INICIALES (seed) - Estos datos se insertan al crear la DB
+-- =============================================================================
+
+INSERT INTO roles (id, nombre, descripcion, permisos, estado, created_at, updated_at) VALUES
+(UUID(), 'ADMIN', 'Usuario con acceso total al sistema', '{\"personal\":{\"ver\":true,\"crear\":true,\"editar\":true,\"eliminar\":true},\"rq_mina\":{\"ver\":true,\"crear\":true,\"editar\":true,\"eliminar\":true},\"usuarios\":{\"ver\":true,\"crear\":true,\"editar\":true,\"eliminar\":true},\"roles\":{\"ver\":true,\"crear\":true,\"editar\":true,\"eliminar\":true},\"catalogos\":{\"ver\":true,\"crear\":true,\"editar\":true,\"eliminar\":true}}', 'ACTIVO', NOW(), NOW()),
+(UUID(), 'GERENTE', 'Usuario gerente con permisos avanzados', '{\"personal\":{\"ver\":true,\"crear\":true,\"editar\":true},\"rq_mina\":{\"ver\":true,\"crear\":true,\"editar\":true},\"usuarios\":{\"ver\":true},\"roles\":{\"ver\":true},\"catalogos\":{\"ver\":true,\"crear\":true,\"editar\":true}}', 'ACTIVO', NOW(), NOW()),
+(UUID(), 'SUPERVISOR', 'Supervisor de mina', '{\"personal\":{\"ver\":true},\"rq_mina\":{\"ver\":true,\"crear\":true},\"usuarios\":{\"ver\":true},\"catalogos\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW()),
+(UUID(), 'RRHH', 'Recursos Humanos', '{\"personal\":{\"ver\":true,\"crear\":true,\"editar\":true},\"rq_mina\":{\"ver\":true},\"usuarios\":{\"ver\":true,\"crear\":true,\"editar\":true},\"roles\":{\"ver\":true},\"catalogos\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW()),
+(UUID(), 'OPERACIONES', 'Usuario de operaciones', '{\"personal\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW()),
+(UUID(), 'USUARIO', 'Usuario basico', '{\"personal\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW())
+ON DUPLICATE KEY UPDATE updated_at = NOW();
