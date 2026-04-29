@@ -3,11 +3,16 @@
 namespace App\Modules\RQProserge\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Modules\Notificaciones\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class RQProsergePageController extends WebPageController
 {
+    public function __construct(private readonly NotificationService $notificationService)
+    {
+    }
+
     public function index(): View
     {
         $data = $this->getDemoData();
@@ -39,6 +44,30 @@ class RQProsergePageController extends WebPageController
 
     public function update(Request $request, string $id)
     {
+        $estado = strtoupper((string) $request->input('estado', ''));
+
+        if ($estado === 'PARCIAL') {
+            $this->notificationService->emit('rq_proserge_parcial', [
+                'actor_user_id' => session('user.id'),
+                'entity_type' => 'rq_proserge',
+                'entity_id' => $id,
+                'title' => 'RQ Proserge parcialmente atendido',
+                'message' => sprintf('El RQ Proserge %s quedo en estado parcial.', $id),
+                'dedupe_key' => 'rq_proserge_parcial:' . $id . ':' . now()->format('YmdHi'),
+            ]);
+        }
+
+        if (in_array($estado, ['COMPLETADO', 'ATENDIDO'], true)) {
+            $this->notificationService->emit('rq_proserge_completado', [
+                'actor_user_id' => session('user.id'),
+                'entity_type' => 'rq_proserge',
+                'entity_id' => $id,
+                'title' => 'RQ Proserge completado',
+                'message' => sprintf('El RQ Proserge %s fue completado.', $id),
+                'dedupe_key' => 'rq_proserge_completado:' . $id,
+            ]);
+        }
+
         return redirect()->route('rq-proserge.show', $id)->with('success', 'RQ actualizado correctamente');
     }
 

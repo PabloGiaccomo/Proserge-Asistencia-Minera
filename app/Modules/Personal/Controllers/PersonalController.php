@@ -92,7 +92,7 @@ class PersonalController extends Controller
             'q' => ['nullable', 'string', 'max:191'],
             'sort' => ['nullable', 'string', 'max:20'],
             'order' => ['nullable', 'string', 'max:10'],
-            'estado' => ['nullable', 'string', 'max:20'],
+            'estado' => ['nullable', 'string', 'max:40'],
             'tipo' => ['nullable', 'string', 'max:20'],
             'mina' => ['nullable', 'string', 'max:191'],
             'mina_estado' => ['nullable', 'string', 'max:30'],

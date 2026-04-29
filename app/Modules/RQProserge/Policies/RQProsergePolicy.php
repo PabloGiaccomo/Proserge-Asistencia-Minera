@@ -5,17 +5,18 @@ namespace App\Modules\RQProserge\Policies;
 use App\Models\RQProserge;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Support\Rbac\PermissionMatrix;
 
 class RQProsergePolicy
 {
     public function viewAny(Usuario $usuario): bool
     {
-        return $this->isRrhhOrPrivileged($usuario);
+        return PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver');
     }
 
     public function view(Usuario $usuario, RQProserge $rqProserge): bool
     {
-        if (!$this->isRrhhOrPrivileged($usuario)) {
+        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver')) {
             return false;
         }
 
@@ -24,7 +25,7 @@ class RQProsergePolicy
 
     public function assign(Usuario $usuario, RQProserge $rqProserge): bool
     {
-        if (!$this->isRrhhOrPrivileged($usuario)) {
+        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'asignar')) {
             return false;
         }
 
@@ -54,15 +55,14 @@ class RQProsergePolicy
 
     private function isRrhhOrPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['RRHH', 'ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver');
     }
 
     private function isPrivileged(Usuario $usuario): bool
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+            || PermissionMatrix::userCan($usuario, 'rq_proserge', 'administrar');
     }
 }

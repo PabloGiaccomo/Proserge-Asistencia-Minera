@@ -21,7 +21,7 @@ class AuthController extends Controller
         ]);
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos'])
+            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos'])
             ->where('email', $payload['email'])
             ->first();
 
@@ -70,7 +70,13 @@ class AuthController extends Controller
 
     private function buildUserPayload(Usuario $usuario): array
     {
-        $usuario->loadMissing(['rol:id,nombre,permisos', 'scopesMina:usuario_id,mina_id']);
+        $usuario->loadMissing(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'scopesMina:usuario_id,mina_id']);
+
+        $roles = collect([$usuario->rol])
+            ->merge($usuario->rolesAdicionales)
+            ->filter()
+            ->unique('id')
+            ->values();
 
         return [
             'id' => $usuario->id,
@@ -80,6 +86,11 @@ class AuthController extends Controller
                 'nombre' => $usuario->rol?->nombre,
                 'permisos' => PermissionMatrix::normalizeForRole($usuario->rol?->nombre, $usuario->rol?->permisos ?? []),
             ],
+            'roles' => $roles->map(fn ($rol) => [
+                'id' => $rol->id,
+                'nombre' => $rol->nombre,
+            ])->values(),
+            'permisos_efectivos' => PermissionMatrix::normalizeForRoles($roles->all()),
             'scope_minas' => $usuario->scopesMina->pluck('mina_id')->values(),
         ];
     }

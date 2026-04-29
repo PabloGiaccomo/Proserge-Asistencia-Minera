@@ -10,12 +10,17 @@ use App\Modules\RQMina\Requests\StoreRQMinaRequest;
 use App\Modules\RQMina\Requests\UpdateRQMinaRequest;
 use App\Modules\RQMina\Resources\RQMinaResource;
 use App\Modules\RQMina\Services\RQMinaService;
+use App\Modules\Notificaciones\Services\NotificationService;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class RQMinaController extends Controller
 {
-    public function __construct(private readonly RQMinaService $service)
+    public function __construct(
+        private readonly RQMinaService $service,
+        private readonly NotificationService $notificationService,
+    )
     {
     }
 
@@ -174,10 +179,49 @@ class RQMinaController extends Controller
             );
         }
 
+        try {
+            $this->notificationService->emit('rq_mina_enviado', $this->buildSendNotificationContext($usuario, $sent));
+        } catch (\Throwable $exception) {
+            Log::error('rqmina.api_send_notification_exception', [
+                'rq_id' => (string) $sent->id,
+                'mina_id' => (string) $sent->mina_id,
+                'actor_usuario_id' => (string) $usuario->id,
+                'error_message' => $exception->getMessage(),
+                'error_trace' => $exception->getTraceAsString(),
+            ]);
+        }
+
         return ApiResponse::success(
             data: RQMinaResource::make($sent)->resolve(),
             message: 'RQ Mina enviado',
             code: 'RQ_MINA_SEND_OK',
         );
+    }
+
+    private function buildSendNotificationContext(Usuario $usuario, RQMina $rqMina): array
+    {
+        $mineName = (string) ($rqMina->mina?->nombre ?? 'mina no definida');
+        $areaName = (string) ($rqMina->area ?? 'sin area');
+        $fechaInicio = $rqMina->fecha_inicio ? $rqMina->fecha_inicio->format('d/m/Y') : 'sin fecha';
+        $fechaFin = $rqMina->fecha_fin ? $rqMina->fecha_fin->format('d/m/Y') : $fechaInicio;
+
+        return [
+            'actor_user_id' => (string) $usuario->id,
+            'mine_id' => (string) $rqMina->mina_id,
+            'entity_type' => 'rq_mina',
+            'entity_id' => (string) $rqMina->id,
+            'title' => 'RQ Mina enviado',
+            'permission_module' => 'rq_mina',
+            'permission_action' => 'ver',
+            'require_permission' => false,
+            'message' => sprintf(
+                '%s | Area: %s | %s al %s. Requiere atencion RRHH/Planner.',
+                $mineName,
+                $areaName,
+                $fechaInicio,
+                $fechaFin
+            ),
+            'dedupe_key' => 'rq_mina_enviado:' . $rqMina->id,
+        ];
     }
 }

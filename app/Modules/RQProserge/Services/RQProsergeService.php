@@ -8,6 +8,7 @@ use App\Models\RQMinaDetalle;
 use App\Models\Usuario;
 use App\Modules\RQProserge\Policies\RQProsergePolicy;
 use App\Shared\Services\DisponibilidadPersonalService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -68,7 +69,7 @@ class RQProsergeService
 
     public function create(Usuario $usuario, array $payload): ?RQProserge
     {
-        if (!$this->policy->viewAny($usuario)) {
+        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'crear')) {
             return null;
         }
 
@@ -251,7 +252,8 @@ class RQProsergeService
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+            || PermissionMatrix::userCan($usuario, 'rq_proserge', 'administrar');
     }
 
     public function createForUser(Usuario $usuario, array $payload): array

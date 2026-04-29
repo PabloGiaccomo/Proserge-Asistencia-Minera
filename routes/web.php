@@ -5,6 +5,8 @@ use App\Modules\Evaluaciones\Controllers\EvaluacionSupervisorPageController;
 use App\Modules\Evaluaciones\Controllers\EvaluacionDesempenoPageController;
 use App\Modules\Personal\Controllers\PersonalPageController;
 use App\Modules\Personal\Controllers\PersonalImportController;
+use App\Modules\Personal\Controllers\PersonalFichaController;
+use App\Modules\Personal\Controllers\PublicPersonalFichaController;
 use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
 use App\Modules\ManPower\Controllers\ManPowerPageController;
@@ -21,6 +23,7 @@ use App\Modules\Catalogos\Controllers\TallerPageController;
 use App\Modules\Catalogos\Controllers\OficinaPageController;
 use App\Modules\Catalogos\Controllers\ParaderoPageController;
 use App\Modules\Perfil\Controllers\PerfilPageController;
+use App\Modules\Notificaciones\Controllers\NotificacionPageController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -34,12 +37,24 @@ Route::get('/login', [LoginPageController::class, 'showLoginForm'])->name('login
 Route::post('/login', [LoginPageController::class, 'login'])->name('login.post');
 Route::post('/logout', [LoginPageController::class, 'logout'])->name('logout');
 
+Route::get('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'show'])->name('ficha-colaborador.show');
+Route::post('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'submit'])->name('ficha-colaborador.submit');
+
 Route::middleware('web.auth')->group(function (): void {
     // Inicio - Home principal
     Route::get('/inicio', [PersonalPageController::class, 'home'])->name('inicio');
     
     // Perfil
     Route::get('/perfil', [PerfilPageController::class, 'index'])->name('perfil.index');
+
+    // Notificaciones
+    Route::get('/notificaciones', [NotificacionPageController::class, 'index'])->name('notificaciones.index');
+    Route::get('/notificaciones/count', [NotificacionPageController::class, 'count'])->name('notificaciones.count');
+    Route::get('/notificaciones/poll', [NotificacionPageController::class, 'poll'])->name('notificaciones.poll');
+    Route::post('/notificaciones/marcar-todas-leidas', [NotificacionPageController::class, 'markAllRead'])->name('notificaciones.mark-all-read');
+    Route::post('/notificaciones/{recipientId}/leer', [NotificacionPageController::class, 'markRead'])->name('notificaciones.mark-read');
+    Route::post('/notificaciones/{recipientId}/archivar', [NotificacionPageController::class, 'archive'])->name('notificaciones.archive');
+    Route::get('/notificaciones/{recipientId}/accion', [NotificacionPageController::class, 'openAction'])->name('notificaciones.action');
     
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->name('personal.index');
@@ -47,6 +62,16 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->name('personal.export.download');
     Route::get('/personal/crear', [PersonalPageController::class, 'create'])->name('personal.create');
     Route::post('/personal/crear', [PersonalPageController::class, 'store'])->name('personal.store');
+    Route::get('/personal/fichas/importar', [PersonalFichaController::class, 'importForm'])->name('personal.fichas.import');
+    Route::post('/personal/fichas/importar', [PersonalFichaController::class, 'parseMacro'])->name('personal.fichas.parse');
+    Route::post('/personal/fichas/generar-link', [PersonalFichaController::class, 'generateLink'])->name('personal.fichas.generate-link');
+    Route::post('/personal/fichas/cancelar-importacion', [PersonalFichaController::class, 'cancelImport'])->name('personal.fichas.cancel-import');
+    Route::get('/personal/fichas/temporales', [PersonalFichaController::class, 'temporales'])->name('personal.fichas.temporales');
+    Route::get('/personal/fichas/{id}/revisar', [PersonalFichaController::class, 'review'])->name('personal.fichas.review');
+    Route::get('/personal/fichas/archivos/{id}/descargar', [PersonalFichaController::class, 'downloadArchivo'])->name('personal.fichas.archivos.download');
+    Route::post('/personal/fichas/{id}/aprobar', [PersonalFichaController::class, 'approve'])->name('personal.fichas.approve');
+    Route::post('/personal/fichas/{id}/observar', [PersonalFichaController::class, 'observe'])->name('personal.fichas.observe');
+    Route::get('/personal/fichas/{id}/pdf', [PersonalFichaController::class, 'pdf'])->name('personal.fichas.pdf');
     Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->name('personal.edit');
     Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->name('personal.update');
     Route::get('/personal/importar', [PersonalImportController::class, 'showImportForm'])->name('personal.importar');
@@ -79,7 +104,13 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Bienestar
     Route::get('/bienestar', [BienestarPageController::class, 'index'])->name('bienestar.index');
+    Route::get('/bienestar/bloqueos/nuevo', [BienestarPageController::class, 'createBloqueo'])->name('bienestar.bloqueos.create');
+    Route::post('/bienestar/bloqueos', [BienestarPageController::class, 'storeBloqueoGeneral'])->name('bienestar.bloqueos.store-general');
+    Route::get('/bienestar/bloqueos/{bloqueoId}/editar', [BienestarPageController::class, 'editBloqueo'])->name('bienestar.bloqueos.edit');
+    Route::put('/bienestar/bloqueos/{bloqueoId}', [BienestarPageController::class, 'updateBloqueo'])->name('bienestar.bloqueos.update');
+    Route::post('/bienestar/bloqueos/{bloqueoId}/anular', [BienestarPageController::class, 'anularBloqueo'])->name('bienestar.bloqueos.anular');
     Route::get('/bienestar/{id}', [BienestarPageController::class, 'show'])->name('bienestar.show');
+    Route::post('/bienestar/{id}/bloqueos', [BienestarPageController::class, 'storeBloqueo'])->name('bienestar.bloqueos.store');
 
     // Asistencia (main dashboard)
     Route::get('/asistencia', [AsistenciaPageController::class, 'index'])->name('asistencia.index');
@@ -161,6 +192,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/rq-mina', [RQMinaPageController::class, 'store'])->name('rq-mina.store');
     Route::put('/rq-mina/{id}', [RQMinaPageController::class, 'update'])->name('rq-mina.update');
     Route::post('/rq-mina/{id}/enviar', [RQMinaPageController::class, 'enviar'])->name('rq-mina.enviar');
+    Route::post('/rq-mina/{id}/eliminar', [RQMinaPageController::class, 'destroy'])->name('rq-mina.destroy');
 
     Route::post('/rq-proserge', [RQProsergePageController::class, 'store'])->name('rq-proserge.store');
     Route::put('/rq-proserge/{id}', [RQProsergePageController::class, 'update'])->name('rq-proserge.update');

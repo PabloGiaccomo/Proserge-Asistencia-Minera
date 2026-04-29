@@ -46,6 +46,65 @@ class PersonalNormalizer
         return $dni;
     }
 
+    public static function documentType(mixed $value, mixed $number = null): string
+    {
+        $type = self::normalizeKey(self::text($value));
+
+        $aliases = [
+            'dni' => 'DNI',
+            'dniperuano' => 'DNI',
+            'documentonacionaldeidentidad' => 'DNI',
+            'ce' => 'CE',
+            'carnedeextranjeria' => 'CE',
+            'carnetdeextranjeria' => 'CE',
+            'carnetextranjeria' => 'CE',
+            'carnedeextranjeria' => 'CE',
+            'pasaporte' => 'PASAPORTE',
+            'passport' => 'PASAPORTE',
+            'otro' => 'OTRO',
+        ];
+
+        if (isset($aliases[$type])) {
+            return $aliases[$type];
+        }
+
+        $documentNumber = self::documentNumber($number);
+        if (self::isValidDni($documentNumber)) {
+            return 'DNI';
+        }
+
+        return 'OTRO';
+    }
+
+    public static function documentNumber(mixed $value): string
+    {
+        $raw = self::text($value);
+        if ($raw === '') {
+            return '';
+        }
+
+        if (preg_match('/^\d+(\.0+)?$/', $raw)) {
+            $raw = str_replace('.0', '', $raw);
+        }
+
+        $document = strtoupper($raw);
+        $document = preg_replace('/[^A-Z0-9\-]/', '', $document) ?: '';
+
+        return mb_substr($document, 0, 40);
+    }
+
+    public static function isValidDocument(string $type, string $number): bool
+    {
+        $type = self::documentType($type, $number);
+        $number = self::documentNumber($number);
+
+        if ($type === 'DNI') {
+            return self::isValidDni($number);
+        }
+
+        return preg_match('/^[A-Z0-9\-]{6,20}$/', $number) === 1;
+    }
+
     public static function isValidDni(string $dni): bool
     {
         return preg_match('/^\d{8}$/', $dni) === 1;
@@ -61,8 +120,12 @@ class PersonalNormalizer
 
         $aliases = [
             'regimen' => 'REG',
+            'bajoregimen' => 'REG',
+            'regimenlaboral' => 'REG',
             'reg' => 'REG',
             'se' => 'FIJO',
+            'servicioespecifico' => 'FIJO',
+            'personalfijo' => 'FIJO',
             'fijo' => 'FIJO',
             'intermitente' => 'INTER',
             'inter' => 'INTER',
@@ -79,7 +142,7 @@ class PersonalNormalizer
 
         return match ($normalized) {
             'REG' => 'Regimen',
-            'FIJO' => 'Fijo',
+            'FIJO' => 'Personal fijo / servicio especifico',
             'INTER' => 'Intermitente',
             'INDET' => 'Indeterminado',
             default => 'Regimen',
@@ -163,6 +226,28 @@ class PersonalNormalizer
             return null;
         }
 
+        $dateFormats = [
+            'd/m/Y',
+            'd-m-Y',
+            'd.m.Y',
+            'Y-m-d',
+            'Y/m/d',
+            'm/d/Y',
+        ];
+
+        foreach ($dateFormats as $format) {
+            $date = DateTime::createFromFormat($format, $text);
+            $errors = DateTime::getLastErrors();
+            if ($date instanceof DateTime && ($errors === false || (($errors['warning_count'] ?? 0) === 0 && ($errors['error_count'] ?? 0) === 0))) {
+                return $date->format('Y-m-d');
+            }
+        }
+
+        $spanishDate = self::spanishLongDate($text);
+        if ($spanishDate !== null) {
+            return $spanishDate;
+        }
+
         try {
             return (new DateTime($text))->format('Y-m-d');
         } catch (\Throwable) {
@@ -242,9 +327,48 @@ class PersonalNormalizer
         }
 
         if ($first !== '' && $second !== '' && $first !== $second) {
-            return $first . ' / ' . $second;
+            return $first . ' - ' . $second;
         }
 
         return $first !== '' ? $first : $second;
+    }
+
+    private static function spanishLongDate(string $value): ?string
+    {
+        $key = self::normalizeKey($value);
+        if ($key === '') {
+            return null;
+        }
+
+        $months = [
+            'enero' => 1,
+            'febrero' => 2,
+            'marzo' => 3,
+            'abril' => 4,
+            'mayo' => 5,
+            'junio' => 6,
+            'julio' => 7,
+            'agosto' => 8,
+            'setiembre' => 9,
+            'septiembre' => 9,
+            'octubre' => 10,
+            'noviembre' => 11,
+            'diciembre' => 12,
+        ];
+
+        $monthPattern = implode('|', array_keys($months));
+        if (!preg_match('/^(\d{1,2})(?:de)?(' . $monthPattern . ')(?:del|de)?(\d{4})$/', $key, $match)) {
+            return null;
+        }
+
+        $day = (int) $match[1];
+        $month = $months[$match[2]] ?? null;
+        $year = (int) $match[3];
+
+        if (!$month || !checkdate($month, $day, $year)) {
+            return null;
+        }
+
+        return sprintf('%04d-%02d-%02d', $year, $month, $day);
     }
 }

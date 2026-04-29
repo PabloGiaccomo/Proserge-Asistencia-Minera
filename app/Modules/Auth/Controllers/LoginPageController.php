@@ -29,7 +29,7 @@ class LoginPageController extends Controller
         ]);
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'personal:id,nombre_completo'])
+            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'personal:id,nombre_completo'])
             ->where('email', $request->email)
             ->first();
 
@@ -46,6 +46,12 @@ class LoginPageController extends Controller
 
             $token = Str::random(80);
 
+            $roles = collect([$usuario->rol])
+                ->merge($usuario->rolesAdicionales)
+                ->filter()
+                ->unique('id')
+                ->values();
+
             session([
                 'auth_token' => $token,
                 'user' => [
@@ -53,7 +59,8 @@ class LoginPageController extends Controller
                     'email' => $usuario->email,
                     'name' => $usuario->personal?->nombre_completo ?? $usuario->email,
                     'rol' => $usuario->rol?->nombre ?? 'Usuario',
-                    'permissions' => PermissionMatrix::normalizeForRole($usuario->rol?->nombre, $usuario->rol?->permisos ?? []),
+                    'roles' => $roles->map(fn ($rol) => $rol->nombre)->values()->all(),
+                    'permissions' => PermissionMatrix::normalizeForRoles($roles->all()),
                 ],
                 'user_id' => $usuario->id,
             ]);
@@ -72,6 +79,7 @@ class LoginPageController extends Controller
                     'email' => 'admin@proserge.com',
                     'name' => 'Administrador',
                     'rol' => 'ADMIN',
+                    'roles' => ['ADMIN'],
                     'permissions' => ['*'],
                 ],
                 'user_id' => '00000000-0000-0000-0000-000000000001',

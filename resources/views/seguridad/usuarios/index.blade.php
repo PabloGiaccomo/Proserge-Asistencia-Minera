@@ -86,6 +86,7 @@
                             @foreach($usuarios as $usuario)
                                 @php
                                     $estado = $hasEstadoColumn ? strtoupper((string) $usuario->estado) : 'ACTIVO';
+                                    $rolesExtra = $usuario->rolesAdicionales ?? collect();
                                 @endphp
                                 <tr>
                                     <td><code>{{ $usuario->id }}</code></td>
@@ -99,7 +100,14 @@
                                         </span>
                                     </td>
                                     <td>{{ $usuario->email }}</td>
-                                    <td>{{ $usuario->rol?->nombre ?? '-' }}</td>
+                                    <td>
+                                        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                            <span class="badge badge-success">{{ $usuario->rol?->nombre ?? '-' }}</span>
+                                            @foreach($rolesExtra as $rol)
+                                                <span class="badge badge-info">{{ $rol->nombre }}</span>
+                                            @endforeach
+                                        </div>
+                                    </td>
                                     <td>
                                         <span class="badge badge-{{ $estado === 'ACTIVO' ? 'success' : 'danger' }}">{{ $estado }}</span>
                                     </td>

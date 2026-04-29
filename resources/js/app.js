@@ -5,7 +5,123 @@ document.addEventListener('DOMContentLoaded', function() {
     const mobileMenuToggle = document.getElementById('menuToggleBtn');
     const sidebar = document.getElementById('sidebar');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const userMenu = document.getElementById('headerUserMenu');
+    const userMenuToggle = document.getElementById('headerUserMenuToggle');
+    const notifMenu = document.getElementById('headerNotifMenu');
+    const notifMenuToggle = document.getElementById('headerNotifToggle');
+    const notifPanel = document.getElementById('headerNotifPanel');
+    const notifBackdrop = document.getElementById('headerNotifBackdrop');
+    const notifCloseButton = document.getElementById('headerNotifClose');
     const mobileBreakpoint = 1023;
+
+    const closeUserMenu = function() {
+        if (!userMenu || !userMenuToggle) {
+            return;
+        }
+
+        userMenu.classList.remove('is-open');
+        userMenuToggle.setAttribute('aria-expanded', 'false');
+    };
+
+    const closeNotifMenu = function() {
+        if (!notifMenu || !notifMenuToggle) {
+            return;
+        }
+
+        notifMenu.classList.remove('is-open');
+        notifMenuToggle.setAttribute('aria-expanded', 'false');
+        if (notifPanel) {
+            notifPanel.classList.remove('is-open');
+            notifPanel.setAttribute('aria-hidden', 'true');
+        }
+        if (notifBackdrop) {
+            notifBackdrop.classList.remove('is-visible');
+            notifBackdrop.setAttribute('aria-hidden', 'true');
+        }
+        document.body.classList.remove('notif-panel-open');
+    };
+
+    if (userMenu && userMenuToggle) {
+        userMenuToggle.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const willOpen = !userMenu.classList.contains('is-open');
+            userMenu.classList.remove('is-open');
+            userMenuToggle.setAttribute('aria-expanded', 'false');
+            closeNotifMenu();
+            if (willOpen) {
+                userMenu.classList.add('is-open');
+                userMenuToggle.setAttribute('aria-expanded', 'true');
+            }
+        });
+    }
+
+    if (notifMenu && notifMenuToggle) {
+        notifMenuToggle.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const willOpen = !notifMenu.classList.contains('is-open');
+            closeNotifMenu();
+            closeUserMenu();
+            if (willOpen) {
+                notifMenu.classList.add('is-open');
+                notifMenuToggle.setAttribute('aria-expanded', 'true');
+                if (notifPanel) {
+                    notifPanel.classList.add('is-open');
+                    notifPanel.setAttribute('aria-hidden', 'false');
+                }
+                if (notifBackdrop) {
+                    notifBackdrop.classList.add('is-visible');
+                    notifBackdrop.setAttribute('aria-hidden', 'false');
+                }
+                document.body.classList.add('notif-panel-open');
+            }
+        });
+    }
+
+    if (notifCloseButton) {
+        notifCloseButton.addEventListener('click', function() {
+            closeNotifMenu();
+        });
+    }
+
+    if (notifBackdrop) {
+        notifBackdrop.addEventListener('click', function() {
+            closeNotifMenu();
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (!event.target.closest('#headerUserMenu')) {
+            closeUserMenu();
+        }
+
+        if (!event.target.closest('#headerNotifMenu') && !event.target.closest('#headerNotifPanel')) {
+            closeNotifMenu();
+        }
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeUserMenu();
+            closeNotifMenu();
+        }
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('open_notifications') === '1' && notifMenu && notifMenuToggle) {
+        notifMenu.classList.add('is-open');
+        notifMenuToggle.setAttribute('aria-expanded', 'true');
+        if (notifPanel) {
+            notifPanel.classList.add('is-open');
+            notifPanel.setAttribute('aria-hidden', 'false');
+        }
+        if (notifBackdrop) {
+            notifBackdrop.classList.add('is-visible');
+            notifBackdrop.setAttribute('aria-hidden', 'false');
+        }
+        document.body.classList.add('notif-panel-open');
+    }
     
     if (!sidebar) {
         return;

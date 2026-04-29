@@ -432,6 +432,88 @@ CREATE TABLE IF NOT EXISTS epp_registro (
   UNIQUE KEY uq_epp_codigo (codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS notification_types (
+  id CHAR(36) NOT NULL,
+  code VARCHAR(80) NOT NULL,
+  module VARCHAR(50) NOT NULL,
+  category VARCHAR(30) NOT NULL DEFAULT 'operacion',
+  default_priority VARCHAR(20) NOT NULL DEFAULT 'medium',
+  required_permission_module VARCHAR(50) NULL,
+  required_permission_action VARCHAR(30) NULL,
+  default_title VARCHAR(191) NOT NULL,
+  default_action_label VARCHAR(80) NULL,
+  default_action_route VARCHAR(191) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_notification_types_code (code),
+  KEY idx_notification_types_module_active (module, is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_events (
+  id CHAR(36) NOT NULL,
+  notification_type_id CHAR(36) NOT NULL,
+  actor_usuario_id CHAR(36) NULL,
+  mina_id CHAR(36) NULL,
+  module VARCHAR(50) NOT NULL,
+  priority VARCHAR(20) NOT NULL DEFAULT 'medium',
+  title VARCHAR(191) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  action_label VARCHAR(80) NULL,
+  action_route VARCHAR(191) NULL,
+  entity_type VARCHAR(80) NULL,
+  entity_id VARCHAR(80) NULL,
+  payload JSON NULL,
+  dedupe_key VARCHAR(191) NULL,
+  occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_notification_events_dedupe (dedupe_key),
+  KEY idx_notification_events_module_priority (module, priority),
+  KEY idx_notification_events_mina_occurred (mina_id, occurred_at),
+  KEY idx_notification_events_expires (expires_at),
+  CONSTRAINT fk_notification_events_type FOREIGN KEY (notification_type_id) REFERENCES notification_types(id),
+  CONSTRAINT fk_notification_events_actor FOREIGN KEY (actor_usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL,
+  CONSTRAINT fk_notification_events_mina FOREIGN KEY (mina_id) REFERENCES minas(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_recipients (
+  id CHAR(36) NOT NULL,
+  notification_event_id CHAR(36) NOT NULL,
+  usuario_id CHAR(36) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'UNREAD',
+  delivered_at TIMESTAMP NULL,
+  read_at TIMESTAMP NULL,
+  archived_at TIMESTAMP NULL,
+  actioned_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_notification_recipients_event_user (notification_event_id, usuario_id),
+  KEY idx_notification_recipients_user_status (usuario_id, status, created_at),
+  CONSTRAINT fk_notification_recipients_event FOREIGN KEY (notification_event_id) REFERENCES notification_events(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notification_recipients_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id CHAR(36) NOT NULL,
+  usuario_id CHAR(36) NOT NULL,
+  notification_type_id CHAR(36) NOT NULL,
+  in_app_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  email_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  minimum_priority VARCHAR(20) NOT NULL DEFAULT 'low',
+  mute_until TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_notification_preferences_user_type (usuario_id, notification_type_id),
+  CONSTRAINT fk_notification_preferences_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notification_preferences_type FOREIGN KEY (notification_type_id) REFERENCES notification_types(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================================================
 -- ACTUALIZACIONES ADICIONALES PARA CAMPOS AGREGADOS DESDE LA IMPLEMENTACION
 -- =============================================================================
@@ -458,3 +540,34 @@ INSERT INTO roles (id, nombre, descripcion, permisos, estado, created_at, update
 (UUID(), 'OPERACIONES', 'Usuario de operaciones', '{\"personal\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW()),
 (UUID(), 'USUARIO', 'Usuario basico', '{\"personal\":{\"ver\":true}}', 'ACTIVO', NOW(), NOW())
 ON DUPLICATE KEY UPDATE updated_at = NOW();
+
+INSERT INTO notification_types (id, code, module, category, default_priority, required_permission_module, required_permission_action, default_title, default_action_label, default_action_route, is_active, created_at, updated_at) VALUES
+(UUID(), 'rq_mina_enviado', 'rq_mina', 'operacion', 'high', 'rq_proserge', 'ver', 'RQ Mina enviado', 'Ver RQ Mina', '/rq-mina/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'rq_proserge_parcial', 'rq_proserge', 'operacion', 'high', 'rq_proserge', 'editar', 'RQ Proserge parcialmente atendido', 'Ver RQ Proserge', '/rq-proserge/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'rq_proserge_completado', 'rq_proserge', 'operacion', 'medium', 'rq_proserge', 'ver', 'RQ Proserge completado', 'Ver RQ Proserge', '/rq-proserge/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'grupo_dia_pendiente', 'man_power', 'operacion', 'high', 'man_power', 'crear', 'Grupo de dia pendiente', 'Crear grupo', '/man-power/grupos/crear', 1, NOW(), NOW()),
+(UUID(), 'grupo_noche_pendiente', 'man_power', 'operacion', 'high', 'man_power', 'crear', 'Grupo de noche pendiente', 'Crear grupo', '/man-power/grupos/crear', 1, NOW(), NOW()),
+(UUID(), 'grupo_sin_supervisor', 'man_power', 'advertencia', 'high', 'man_power', 'editar', 'Grupo sin supervisor', 'Revisar grupo', '/man-power/grupos/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'grupo_sin_cerrar', 'man_power', 'advertencia', 'high', 'man_power', 'cerrar', 'Grupo sin cerrar', 'Cerrar asistencia', '/asistencia/grupos/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'asistencia_pendiente_marcar', 'asistencias', 'accion_requerida', 'high', 'asistencias', 'crear', 'Asistencia pendiente de marcar', 'Marcar asistencia', '/asistencia/grupos/{entity_id}/marcar', 1, NOW(), NOW()),
+(UUID(), 'asistencia_pendiente_cerrar', 'asistencias', 'accion_requerida', 'high', 'asistencias', 'cerrar', 'Asistencia pendiente de cerrar', 'Cerrar asistencia', '/asistencia/grupos/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'faltas_generadas', 'faltas', 'advertencia', 'medium', 'faltas', 'ver', 'Se generaron faltas', 'Ver faltas', '/faltas', 1, NOW(), NOW()),
+(UUID(), 'import_personal_error', 'personal', 'sistema', 'critical', 'personal', 'importar', 'Error en importacion de personal', 'Revisar importacion', '/personal/importar', 1, NOW(), NOW()),
+(UUID(), 'personal_datos_incompletos', 'personal', 'advertencia', 'medium', 'personal', 'editar', 'Personal con datos incompletos', 'Ver personal', '/personal', 1, NOW(), NOW()),
+(UUID(), 'personal_bloqueado_bienestar', 'bienestar', 'operacion', 'high', 'bienestar', 'ver', 'Personal bloqueado por bienestar', 'Ver bienestar', '/bienestar/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'personal_no_disponible', 'personal', 'operacion', 'high', 'personal', 'ver', 'Personal no disponible para parada', 'Ver personal', '/personal', 1, NOW(), NOW()),
+(UUID(), 'rol_modificado', 'roles', 'seguridad', 'critical', 'roles', 'administrar', 'Rol modificado', 'Ver rol', '/seguridad/roles/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'permisos_modificados', 'roles', 'seguridad', 'critical', 'roles', 'administrar', 'Permisos modificados', 'Ver roles', '/seguridad/roles', 1, NOW(), NOW()),
+(UUID(), 'usuario_creado', 'usuarios', 'seguridad', 'high', 'usuarios', 'crear', 'Nuevo usuario creado', 'Ver usuario', '/usuarios/{entity_id}', 1, NOW(), NOW()),
+(UUID(), 'usuario_desactivado', 'usuarios', 'seguridad', 'high', 'usuarios', 'administrar', 'Usuario desactivado', 'Ver usuario', '/usuarios/{entity_id}', 1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  module = VALUES(module),
+  category = VALUES(category),
+  default_priority = VALUES(default_priority),
+  required_permission_module = VALUES(required_permission_module),
+  required_permission_action = VALUES(required_permission_action),
+  default_title = VALUES(default_title),
+  default_action_label = VALUES(default_action_label),
+  default_action_route = VALUES(default_action_route),
+  is_active = VALUES(is_active),
+  updated_at = NOW();

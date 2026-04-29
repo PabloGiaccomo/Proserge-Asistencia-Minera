@@ -20,17 +20,17 @@
     <!-- Page Header -->
     <div class="page-header">
         <div class="page-header-top">
-            <div class="page-header-left">
-                <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 12H5M12 19l-7-7 7-7"/>
-                    </svg>
-                    Volver
-                </a>
-            </div>
             <div>
                 <h1 class="page-title">Editar Trabajador</h1>
                 <p class="page-subtitle">Modificar los datos del trabajador</p>
+                <div style="margin-top:10px;">
+                    <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Volver
+                    </a>
+                </div>
             </div>
         </div>
     </div>

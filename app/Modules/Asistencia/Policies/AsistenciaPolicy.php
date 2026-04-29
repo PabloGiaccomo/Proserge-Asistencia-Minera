@@ -5,14 +5,13 @@ namespace App\Modules\Asistencia\Policies;
 use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Support\Rbac\PermissionMatrix;
 
 class AsistenciaPolicy
 {
     public function manage(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['SUPERVISOR', 'PLANNER', 'RRHH', 'ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return PermissionMatrix::userCanAny($usuario, 'asistencias', ['crear', 'editar', 'actualizar', 'cerrar']);
     }
 
     public function canAccessMina(Usuario $usuario, string $minaId): bool
@@ -42,6 +41,7 @@ class AsistenciaPolicy
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+            || PermissionMatrix::userCan($usuario, 'asistencias', 'administrar');
     }
 }

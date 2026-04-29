@@ -109,7 +109,7 @@
                             <span class="info-label">Scopes de Mina</span>
                             <span class="info-value">
                                 @if(empty($minasHabilitadas))
-                                    Global (todos)
+                                    Sin minas asignadas
                                 @else
                                     {{ count($minasHabilitadas) }} mina(s)
                                 @endif

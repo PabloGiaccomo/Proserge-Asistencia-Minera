@@ -5,17 +5,18 @@ namespace App\Modules\ManPower\Policies;
 use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Support\Rbac\PermissionMatrix;
 
 class ManPowerPolicy
 {
     public function viewParadas(Usuario $usuario): bool
     {
-        return $this->isAllowedRole($usuario);
+        return PermissionMatrix::userCan($usuario, 'man_power', 'ver');
     }
 
     public function manageGrupos(Usuario $usuario): bool
     {
-        return $this->isAllowedRole($usuario);
+        return PermissionMatrix::userCanAny($usuario, 'man_power', ['crear', 'editar', 'actualizar', 'asignar']);
     }
 
     public function canAccessMina(Usuario $usuario, string $minaId): bool
@@ -47,15 +48,14 @@ class ManPowerPolicy
 
     private function isAllowedRole(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['PLANNER', 'RRHH', 'ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return PermissionMatrix::userCan($usuario, 'man_power', 'ver');
     }
 
     private function isPrivileged(Usuario $usuario): bool
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+            || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
     }
 }

@@ -17,6 +17,7 @@ class PermissionCatalog
         'evaluaciones' => 'Evaluaciones',
         'asistencias' => 'Asistencias',
         'faltas' => 'Faltas',
+        'catalogos' => 'Catalogos',
         'remoto' => 'Remoto',
         'epps' => 'EPPs',
         'minas' => 'Minas',

@@ -23,6 +23,8 @@ class UpdatePersonalRequest extends FormRequest
                 'max:20',
                 Rule::unique('personal', 'dni')->ignore($personalId, 'id'),
             ],
+            'tipo_documento' => ['nullable', 'string', 'max:40'],
+            'numero_documento' => ['nullable', 'string', 'max:40'],
             'nombre_completo' => ['required', 'string', 'max:191'],
             'puesto' => ['required', 'string', 'max:120'],
             'telefono' => ['nullable', 'string', 'max:30'],
@@ -33,7 +35,7 @@ class UpdatePersonalRequest extends FormRequest
             'ocupacion' => ['nullable', 'string', 'max:120'],
             'es_supervisor' => ['nullable', 'boolean'],
             'fecha_ingreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'string', 'max:20'],
+            'estado' => ['nullable', 'string', 'max:40'],
             'minas' => ['nullable', 'array'],
             'minas.*.mina_id' => ['nullable', 'string', 'size:36', 'exists:minas,id'],
             'minas.*.mina_nombre' => ['nullable', 'string', 'max:191'],
@@ -49,6 +51,8 @@ class UpdatePersonalRequest extends FormRequest
             'es_supervisor' => $this->input('es_supervisor', $this->input('supervisor')),
             'estado' => $this->input('estado', $this->input('activo')),
             'telefono_1' => $this->input('telefono_1', $this->input('telefono')),
+            'tipo_documento' => $this->input('tipo_documento', 'DNI'),
+            'numero_documento' => $this->input('numero_documento', $this->input('dni')),
         ]);
     }
 }

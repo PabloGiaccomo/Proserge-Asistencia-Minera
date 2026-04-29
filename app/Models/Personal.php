@@ -18,6 +18,8 @@ class Personal extends Model
     protected $fillable = [
         'id',
         'dni',
+        'tipo_documento',
+        'numero_documento',
         'nombre_completo',
         'puesto',
         'ocupacion',
@@ -52,5 +54,20 @@ class Personal extends Model
     public function usuario(): HasOne
     {
         return $this->hasOne(Usuario::class, 'personal_id');
+    }
+
+    public function bloqueos(): HasMany
+    {
+        return $this->hasMany(PersonalBloqueo::class, 'personal_id');
+    }
+
+    public function fichas(): HasMany
+    {
+        return $this->hasMany(PersonalFicha::class, 'personal_id');
+    }
+
+    public function fichaColaborador(): HasOne
+    {
+        return $this->hasOne(PersonalFicha::class, 'personal_id')->latestOfMany();
     }
 }

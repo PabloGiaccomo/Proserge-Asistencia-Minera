@@ -5,14 +5,13 @@ namespace App\Modules\Faltas\Policies;
 use App\Models\Falta;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Support\Rbac\PermissionMatrix;
 
 class FaltaPolicy
 {
     public function manage(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['PLANNER', 'RRHH', 'SUPERVISOR', 'ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return PermissionMatrix::userCanAny($usuario, 'faltas', ['ver', 'editar', 'actualizar', 'eliminar']);
     }
 
     public function view(Usuario $usuario, Falta $falta): bool
@@ -53,6 +52,7 @@ class FaltaPolicy
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+            || PermissionMatrix::userCan($usuario, 'faltas', 'administrar');
     }
 }

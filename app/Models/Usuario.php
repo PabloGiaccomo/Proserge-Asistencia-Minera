@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -49,5 +50,17 @@ class Usuario extends Authenticatable
     public function scopesMina(): HasMany
     {
         return $this->hasMany(UsuarioMinaScope::class, 'usuario_id');
+    }
+
+    public function rolesAdicionales(): BelongsToMany
+    {
+        return $this->belongsToMany(Rol::class, 'usuario_roles', 'usuario_id', 'rol_id')
+            ->withPivot(['id', 'tipo'])
+            ->withTimestamps();
+    }
+
+    public function notificationRecipients(): HasMany
+    {
+        return $this->hasMany(NotificationRecipient::class, 'usuario_id');
     }
 }

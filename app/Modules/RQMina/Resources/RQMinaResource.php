@@ -28,6 +28,7 @@ class RQMinaResource extends JsonResource
             'creador' => $this->whenLoaded('creador', fn (): array => [
                 'id' => $this->creador?->id,
                 'email' => $this->creador?->email,
+                'nombre' => $this->creador?->personal?->nombre_completo ?? $this->creador?->name ?? $this->creador?->email,
             ]),
             'detalle' => $this->whenLoaded('detalle', function (): array {
                 return $this->detalle->map(fn ($item): array => [

@@ -20,6 +20,7 @@ use App\Modules\Seguridad\Controllers\PermisoController;
 use App\Modules\Seguridad\Controllers\RolController;
 use App\Modules\Seguridad\Controllers\UsuarioController;
 use App\Modules\Seguridad\Controllers\UsuarioMinaScopeController;
+use App\Modules\Notificaciones\Controllers\NotificacionController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -110,6 +111,12 @@ Route::prefix('v1')->group(function (): void {
         Route::put('/personal/{id}', [PersonalController::class, 'update']);
         Route::post('/personal/importar', [PersonalController::class, 'importar']);
         Route::get('/personal/exportar', [PersonalController::class, 'exportar']);
+
+        Route::get('/notificaciones', [NotificacionController::class, 'index']);
+        Route::get('/notificaciones/no-leidas/count', [NotificacionController::class, 'unreadCount']);
+        Route::post('/notificaciones/marcar-todas-leidas', [NotificacionController::class, 'markAllRead']);
+        Route::post('/notificaciones/{recipientId}/leer', [NotificacionController::class, 'markRead']);
+        Route::post('/notificaciones/{recipientId}/archivar', [NotificacionController::class, 'archive']);
 
         Route::get('/seguridad/scope-check', ScopeCheckController::class)->middleware('mina.scope');
     });

@@ -8,18 +8,23 @@ use App\Models\Personal;
 use App\Models\Rol;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class UsuarioPageController extends Controller
 {
-    public function __construct(private readonly RoleManagementService $roleService)
+    public function __construct(
+        private readonly RoleManagementService $roleService,
+        private readonly NotificationService $notificationService,
+    )
     {
     }
 
@@ -32,6 +37,7 @@ class UsuarioPageController extends Controller
             ->with([
                 'personal:id,dni,nombre_completo,puesto',
                 'rol:id,nombre',
+                'rolesAdicionales:id,nombre',
                 'scopesMina:id,usuario_id,mina_id',
             ]);
 
@@ -46,6 +52,9 @@ class UsuarioPageController extends Controller
                             ->orWhereRaw('LOWER(puesto) LIKE ?', [$needle]);
                     })
                     ->orWhereHas('rol', function ($rolQuery) use ($needle): void {
+                        $rolQuery->whereRaw('LOWER(nombre) LIKE ?', [$needle]);
+                    })
+                    ->orWhereHas('rolesAdicionales', function ($rolQuery) use ($needle): void {
                         $rolQuery->whereRaw('LOWER(nombre) LIKE ?', [$needle]);
                     });
             });
@@ -73,6 +82,7 @@ class UsuarioPageController extends Controller
         $trabajadorId = trim((string) $request->query('trabajador_id', ''));
 
         $roles = $this->roleService->active();
+        $roleBuckets = $this->roleBuckets($roles);
 
         $trabajadores = collect();
         if ($search !== '') {
@@ -93,12 +103,13 @@ class UsuarioPageController extends Controller
         $trabajadorSeleccionado = null;
         if ($trabajadorId !== '') {
             $trabajadorSeleccionado = Personal::query()
-                ->with('usuario.rol:id,nombre')
+                ->with(['usuario.rol:id,nombre', 'usuario.rolesAdicionales:id,nombre'])
                 ->find($trabajadorId, ['id', 'dni', 'nombre_completo', 'puesto', 'correo', 'estado']);
         }
 
         return view('seguridad.usuarios.create', [
             'roles' => $roles,
+            'roleBuckets' => $roleBuckets,
             'trabajadores' => $trabajadores,
             'trabajadorSeleccionado' => $trabajadorSeleccionado,
             'search' => $search,
@@ -119,6 +130,10 @@ class UsuarioPageController extends Controller
             'email' => ['required', 'email', 'max:191', Rule::unique('usuarios', 'email')],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'rol_id' => ['required', 'string', 'size:36', 'exists:roles,id'],
+            'area_role_ids' => ['nullable', 'array'],
+            'area_role_ids.*' => ['string', 'size:36', 'exists:roles,id'],
+            'cargo_role_ids' => ['nullable', 'array'],
+            'cargo_role_ids.*' => ['string', 'size:36', 'exists:roles,id'],
             'estado' => ['nullable', 'string', Rule::in(['ACTIVO', 'INACTIVO'])],
         ], [
             'personal_id.unique' => 'Este trabajador ya tiene un usuario registrado.',
@@ -146,6 +161,25 @@ class UsuarioPageController extends Controller
 
         $usuario = Usuario::query()->create($payload);
 
+        $this->syncAdditionalRoles(
+            $usuario,
+            $validated['rol_id'],
+            $this->normalizeRoleSelection($validated['area_role_ids'] ?? []),
+            $this->normalizeRoleSelection($validated['cargo_role_ids'] ?? []),
+        );
+
+        $this->notificationService->emit('usuario_creado', [
+            'actor_user_id' => session('user.id'),
+            'entity_type' => 'usuario',
+            'entity_id' => $usuario->id,
+            'title' => 'Nuevo usuario creado',
+            'message' => sprintf('Se creo el usuario %s con rol asignado.', $usuario->email),
+            'target_user_ids' => $this->securityAudience(),
+            'dedupe_key' => 'usuario_creado:' . $usuario->id,
+            'priority' => 'high',
+            'category' => 'seguridad',
+        ]);
+
         return redirect()
             ->route('usuarios.show', $usuario->id)
             ->with('success', 'Usuario creado correctamente y vinculado al trabajador seleccionado.');
@@ -156,10 +190,12 @@ class UsuarioPageController extends Controller
         $usuario = $this->findUsuarioOrFail($id);
 
         $roles = $this->roleService->active();
+        $roleBuckets = $this->roleBuckets($roles);
 
         return view('seguridad.usuarios.show', [
             'usuario' => $usuario,
             'roles' => $roles,
+            'roleBuckets' => $roleBuckets,
             'hasEstadoColumn' => $this->hasEstadoColumn(),
         ]);
     }
@@ -171,6 +207,10 @@ class UsuarioPageController extends Controller
         $rules = [
             'email' => ['required', 'email', 'max:191', Rule::unique('usuarios', 'email')->ignore($usuario->id, 'id')],
             'rol_id' => ['required', 'string', 'size:36', 'exists:roles,id'],
+            'area_role_ids' => ['nullable', 'array'],
+            'area_role_ids.*' => ['string', 'size:36', 'exists:roles,id'],
+            'cargo_role_ids' => ['nullable', 'array'],
+            'cargo_role_ids.*' => ['string', 'size:36', 'exists:roles,id'],
         ];
 
         if ($this->hasEstadoColumn()) {
@@ -187,6 +227,13 @@ class UsuarioPageController extends Controller
         }
 
         $usuario->save();
+
+        $this->syncAdditionalRoles(
+            $usuario,
+            $validated['rol_id'],
+            $this->normalizeRoleSelection($validated['area_role_ids'] ?? []),
+            $this->normalizeRoleSelection($validated['cargo_role_ids'] ?? []),
+        );
 
         return redirect()->route('usuarios.show', $usuario->id)->with('success', 'Usuario actualizado correctamente.');
     }
@@ -215,6 +262,20 @@ class UsuarioPageController extends Controller
 
         $usuario->estado = strtoupper((string) $usuario->estado) === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
         $usuario->save();
+
+        if (strtoupper((string) $usuario->estado) === 'INACTIVO') {
+            $this->notificationService->emit('usuario_desactivado', [
+                'actor_user_id' => session('user.id'),
+                'entity_type' => 'usuario',
+                'entity_id' => $usuario->id,
+                'title' => 'Usuario desactivado',
+                'message' => sprintf('El usuario %s fue desactivado.', $usuario->email),
+                'target_user_ids' => $this->securityAudience(),
+                'dedupe_key' => 'usuario_desactivado:' . $usuario->id . ':' . now()->format('YmdHi'),
+                'priority' => 'high',
+                'category' => 'seguridad',
+            ]);
+        }
 
         return redirect()->route('usuarios.index')->with('success', 'Estado del usuario actualizado correctamente.');
     }
@@ -274,13 +335,119 @@ class UsuarioPageController extends Controller
             ->with([
                 'personal:id,dni,nombre_completo,puesto,correo,estado',
                 'rol:id,nombre',
+                'rolesAdicionales:id,nombre',
                 'scopesMina.mina:id,nombre',
             ])
             ->findOrFail($id);
     }
 
+    private function roleBuckets(Collection $roles): array
+    {
+        $areaKeywords = ['OPERACIONES', 'RRHH', 'BIENESTAR', 'EVALUACIONES', 'ASISTENCIA', 'FALTAS', 'MAN_POWER'];
+        $cargoKeywords = ['SUPERVISOR', 'USUARIO', 'COORDINADOR', 'PLANNER', 'ANALISTA', 'JEFE'];
+
+        $roles = $roles->filter(function (Rol $rol): bool {
+            return !in_array(strtoupper((string) $rol->nombre), ['ADMIN', 'SUPERADMIN', 'ADMIN_COPIA'], true);
+        })->values();
+
+        $areas = $roles->filter(function (Rol $rol) use ($areaKeywords): bool {
+            $name = strtoupper((string) $rol->nombre);
+            foreach ($areaKeywords as $keyword) {
+                if (str_contains($name, $keyword)) {
+                    return true;
+                }
+            }
+
+            return str_starts_with($name, 'AREA_');
+        })->values();
+
+        $cargos = $roles->reject(function (Rol $rol) use ($areas, $cargoKeywords): bool {
+            if ($areas->contains(fn (Rol $item) => $item->id === $rol->id)) {
+                return true;
+            }
+
+            $name = strtoupper((string) $rol->nombre);
+            if (str_starts_with($name, 'CARGO_')) {
+                return false;
+            }
+
+            foreach ($cargoKeywords as $keyword) {
+                if (str_contains($name, $keyword)) {
+                    return false;
+                }
+            }
+
+            return false;
+        })->values();
+
+        return [
+            'areas' => $areas,
+            'cargos' => $cargos,
+        ];
+    }
+
+    private function normalizeRoleSelection(array $roleIds): Collection
+    {
+        return collect($roleIds)
+            ->map(fn ($id) => trim((string) $id))
+            ->filter(fn (string $id) => $id !== '')
+            ->unique()
+            ->values();
+    }
+
+    private function syncAdditionalRoles(Usuario $usuario, string $primaryRoleId, Collection $areaRoleIds, Collection $cargoRoleIds): void
+    {
+        if (!Schema::hasTable('usuario_roles')) {
+            return;
+        }
+
+        $blockedRoleIds = Rol::query()
+            ->whereIn('nombre', ['ADMIN', 'SUPERADMIN', 'ADMIN_COPIA'])
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        $areaRoleIds = $areaRoleIds->reject(fn (string $id) => $id === $primaryRoleId)->values();
+        $cargoRoleIds = $cargoRoleIds->reject(fn (string $id) => $id === $primaryRoleId)->values();
+        $areaRoleIds = $areaRoleIds->reject(fn (string $id) => in_array($id, $blockedRoleIds, true))->values();
+        $cargoRoleIds = $cargoRoleIds->reject(fn (string $id) => in_array($id, $blockedRoleIds, true))->values();
+
+        DB::table('usuario_roles')->where('usuario_id', $usuario->id)->delete();
+
+        $rows = $areaRoleIds->map(fn (string $rolId): array => [
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $usuario->id,
+            'rol_id' => $rolId,
+            'tipo' => 'area',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ])->merge($cargoRoleIds->map(fn (string $rolId): array => [
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $usuario->id,
+            'rol_id' => $rolId,
+            'tipo' => 'cargo',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]))->all();
+
+        if (!empty($rows)) {
+            DB::table('usuario_roles')->insert($rows);
+        }
+    }
+
     private function hasEstadoColumn(): bool
     {
         return Schema::hasTable('usuarios') && Schema::hasColumn('usuarios', 'estado');
+    }
+
+    private function securityAudience(): array
+    {
+        $query = Usuario::query()->whereHas('rol', fn ($roleQuery) => $roleQuery->whereIn('nombre', ['ADMIN', 'GERENTE']));
+
+        if ($this->hasEstadoColumn()) {
+            $query->where('estado', 'ACTIVO');
+        }
+
+        return $query->pluck('id')->all();
     }
 }

@@ -4,6 +4,8 @@ namespace App\Modules\Seguridad\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Rol;
+use App\Models\Usuario;
+use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -12,7 +14,10 @@ use Illuminate\View\View;
 
 class RolPageController extends Controller
 {
-    public function __construct(private readonly RoleManagementService $service)
+    public function __construct(
+        private readonly RoleManagementService $service,
+        private readonly NotificationService $notificationService,
+    )
     {
     }
 
@@ -62,8 +67,35 @@ class RolPageController extends Controller
     public function update(Request $request, string $id): RedirectResponse
     {
         $rol = Rol::query()->findOrFail($id);
+        $beforePermissions = $rol->permisos;
         $validated = $this->validatePayload($request, $rol);
         $this->service->update($rol, $validated);
+
+        $this->notificationService->emit('rol_modificado', [
+            'actor_user_id' => session('user.id'),
+            'entity_type' => 'rol',
+            'entity_id' => $rol->id,
+            'title' => 'Rol actualizado',
+            'message' => sprintf('El rol %s fue actualizado.', $rol->nombre),
+            'target_user_ids' => $this->securityAudience(),
+            'priority' => 'critical',
+            'category' => 'seguridad',
+            'dedupe_key' => 'rol_modificado:' . $rol->id . ':' . now()->format('YmdHi'),
+        ]);
+
+        if (json_encode($beforePermissions) !== json_encode($validated['permisos'] ?? [])) {
+            $this->notificationService->emit('permisos_modificados', [
+                'actor_user_id' => session('user.id'),
+                'entity_type' => 'rol',
+                'entity_id' => $rol->id,
+                'title' => 'Permisos de rol modificados',
+                'message' => sprintf('Se modificaron permisos del rol %s.', $rol->nombre),
+                'target_user_ids' => $this->securityAudience(),
+                'priority' => 'critical',
+                'category' => 'seguridad',
+                'dedupe_key' => 'permisos_modificados:' . $rol->id . ':' . now()->format('YmdHi'),
+            ]);
+        }
 
         return redirect()->route('seguridad.roles.show', $rol->id)->with('success', 'Rol actualizado correctamente.');
     }
@@ -104,5 +136,13 @@ class RolPageController extends Controller
             'modules' => $this->service->modules(),
             'actions' => $this->service->actions(),
         ];
+    }
+
+    private function securityAudience(): array
+    {
+        return Usuario::query()
+            ->whereHas('rol', fn ($query) => $query->whereIn('nombre', ['ADMIN', 'GERENTE']))
+            ->pluck('id')
+            ->all();
     }
 }

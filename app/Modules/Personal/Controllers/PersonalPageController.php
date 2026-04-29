@@ -8,6 +8,7 @@ use App\Models\Oficina;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
+use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalService;
 use App\Modules\Personal\Support\PersonalExportConfig;
 use App\Modules\Personal\Support\PersonalNormalizer;
@@ -21,6 +22,7 @@ class PersonalPageController extends WebPageController
     public function __construct(
         private readonly PersonalService $service,
         private readonly ExportPersonalService $exportService,
+        private readonly PersonalFichaService $fichaService,
     ) {
     }
 
@@ -31,6 +33,8 @@ class PersonalPageController extends WebPageController
 
     public function index(Request $request)
     {
+        $this->fichaService->expireStaleLinks();
+
         if (strtolower((string) $request->query('export')) === 'excel') {
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
         }
@@ -39,7 +43,9 @@ class PersonalPageController extends WebPageController
             $this->service->list($request->query())
         )->resolve();
 
-        return view('personal.index', compact('trabajadores'));
+        $catalogs = $this->getLocationCatalogs();
+
+        return view('personal.index', array_merge($catalogs, compact('trabajadores')));
     }
 
     public function exportForm(Request $request): View
@@ -100,8 +106,9 @@ class PersonalPageController extends WebPageController
         abort_if(!$personal, 404);
 
         $trabajador = PersonalResource::make($personal)->resolve();
+        $ficha = $personal->fichaColaborador ?? null;
 
-        return view('personal.show', compact('id', 'trabajador'));
+        return view('personal.show', compact('id', 'trabajador', 'ficha'));
     }
 
     public function create(): View
@@ -113,6 +120,8 @@ class PersonalPageController extends WebPageController
     {
         $validated = $request->validate([
             'dni' => ['required', 'string', 'max:20', 'unique:personal,dni'],
+            'tipo_documento' => ['nullable', 'string', 'max:40'],
+            'numero_documento' => ['nullable', 'string', 'max:40'],
             'nombre' => ['required', 'string', 'max:191'],
             'puesto' => ['required', 'string', 'max:120'],
             'telefono' => ['nullable', 'string', 'max:30'],
@@ -255,6 +264,8 @@ class PersonalPageController extends WebPageController
 
         $validated = $request->validate([
             'dni' => ['required', 'string', 'max:20', 'unique:personal,dni,' . $id . ',id'],
+            'tipo_documento' => ['nullable', 'string', 'max:40'],
+            'numero_documento' => ['nullable', 'string', 'max:40'],
             'nombre' => ['required', 'string', 'max:191'],
             'puesto' => ['required', 'string', 'max:120'],
             'telefono' => ['nullable', 'string', 'max:30'],
@@ -342,6 +353,8 @@ class PersonalPageController extends WebPageController
             ->all();
 
         return [
+            'tipo_documento' => $validated['tipo_documento'] ?? 'DNI',
+            'numero_documento' => $validated['numero_documento'] ?? $validated['dni'],
             'dni' => $validated['dni'],
             'nombre_completo' => $validated['nombre'],
             'puesto' => $validated['puesto'],

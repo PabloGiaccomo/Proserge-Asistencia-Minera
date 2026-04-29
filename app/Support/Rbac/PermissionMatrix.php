@@ -48,6 +48,54 @@ class PermissionMatrix
         return $matrix;
     }
 
+    public static function normalizeForRoles(array $roles): array
+    {
+        $matrices = [];
+        $hasPrivileged = false;
+
+        foreach ($roles as $role) {
+            $roleName = is_array($role) ? ($role['nombre'] ?? null) : ($role->nombre ?? null);
+            $permissions = is_array($role) ? ($role['permisos'] ?? []) : ($role->permisos ?? []);
+
+            $normalized = self::normalizeForRole(is_string($roleName) ? $roleName : null, $permissions);
+            $matrices[] = $normalized;
+
+            if (self::isPrivilegedRole(is_string($roleName) ? $roleName : null)) {
+                $hasPrivileged = true;
+            }
+        }
+
+        if ($hasPrivileged) {
+            return PermissionCatalog::fullAccessMatrix();
+        }
+
+        return self::mergeMatrices($matrices);
+    }
+
+    public static function effectivePermissions(?Usuario $usuario): array
+    {
+        if (!$usuario) {
+            return PermissionCatalog::emptyMatrix();
+        }
+
+        $roles = [];
+        if ($usuario->rol) {
+            $roles[] = $usuario->rol;
+        }
+
+        if ($usuario->relationLoaded('rolesAdicionales')) {
+            foreach ($usuario->rolesAdicionales as $rol) {
+                $roles[] = $rol;
+            }
+        }
+
+        if (empty($roles)) {
+            return self::normalize(session('user.permissions', []));
+        }
+
+        return self::normalizeForRoles($roles);
+    }
+
     public static function allows(mixed $rawPermissions, string $module, string $action = 'ver'): bool
     {
         $matrix = self::normalize($rawPermissions);
@@ -76,7 +124,7 @@ class PermissionMatrix
             return false;
         }
 
-        return self::allows($usuario->rol?->permisos ?? session('user.permissions', []), $module, $action);
+        return self::allows(self::effectivePermissions($usuario), $module, $action);
     }
 
     public static function userCanAny(?Usuario $usuario, string $module, array $actions): bool
@@ -85,7 +133,25 @@ class PermissionMatrix
             return false;
         }
 
-        return self::allowsAny($usuario->rol?->permisos ?? session('user.permissions', []), $module, $actions);
+        return self::allowsAny(self::effectivePermissions($usuario), $module, $actions);
+    }
+
+    private static function mergeMatrices(array $matrices): array
+    {
+        $merged = PermissionCatalog::emptyMatrix();
+
+        foreach ($matrices as $matrix) {
+            $normalized = self::normalize($matrix);
+            foreach ($merged as $module => $actions) {
+                foreach ($actions as $action => $value) {
+                    if (($normalized[$module][$action] ?? false) === true) {
+                        $merged[$module][$action] = true;
+                    }
+                }
+            }
+        }
+
+        return $merged;
     }
 
     private static function isLegacyFlatList(array $rawPermissions): bool

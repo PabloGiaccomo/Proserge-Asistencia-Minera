@@ -16,9 +16,24 @@ class PersonalService
 {
     public function list(array $filters): Collection
     {
-        return $this->buildFilteredQuery($filters)
-            ->with(['minas'])
-            ->get();
+        $query = $this->buildFilteredQuery($filters)->with(['minas']);
+
+        if (Schema::hasTable('personal_fichas')) {
+            $query->with('fichaColaborador.link');
+        }
+
+        if (Schema::hasTable('personal_bloqueo')) {
+            $query->with([
+                'bloqueos' => function ($q): void {
+                    $q->where('estado', 'ACTIVO')
+                        ->where('visible_para_planner', true)
+                        ->orderBy('fecha_inicio')
+                        ->orderBy('fecha_fin');
+                },
+            ]);
+        }
+
+        return $query->get();
     }
 
     public function buildFilteredQuery(array $filters): Builder
@@ -48,7 +63,8 @@ class PersonalService
         }
 
         $stateFilter = strtoupper((string) ($filters['estado'] ?? ''));
-        if ($stateFilter === 'ACTIVO' || $stateFilter === 'INACTIVO') {
+        $allowedStates = ['ACTIVO', 'INACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'APROBADO', 'OBSERVADO', 'RECHAZADO'];
+        if (in_array($stateFilter, $allowedStates, true)) {
             $query->where('personal.estado', $stateFilter);
         }
 
@@ -105,7 +121,24 @@ class PersonalService
 
     public function find(string $id): ?Personal
     {
-        return Personal::query()->with('minas')->find($id);
+        $query = Personal::query()->with('minas');
+
+        if (Schema::hasTable('personal_fichas')) {
+            $query->with('fichaColaborador.link');
+        }
+
+        if (Schema::hasTable('personal_bloqueo')) {
+            $query->with([
+                'bloqueos' => function ($q): void {
+                    $q->where('estado', 'ACTIVO')
+                        ->where('visible_para_planner', true)
+                        ->orderBy('fecha_inicio')
+                        ->orderBy('fecha_fin');
+                },
+            ]);
+        }
+
+        return $query->find($id);
     }
 
     public function create(array $payload): Personal
@@ -116,19 +149,30 @@ class PersonalService
                 PersonalNormalizer::text($payload['telefono_2'] ?? '')
             ) ?? ($payload['telefono'] ?? null);
             $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
+            $documentNumber = PersonalNormalizer::documentNumber($payload['numero_documento'] ?? $payload['dni'] ?? '');
+            $documentType = PersonalNormalizer::documentType($payload['tipo_documento'] ?? 'DNI', $documentNumber);
+            $legacyDni = $documentType === 'DNI' ? PersonalNormalizer::dni($documentNumber) : $documentNumber;
 
             $data = [
                 'id' => (string) Str::uuid(),
-                'dni' => PersonalNormalizer::dni($payload['dni'] ?? ''),
+                'dni' => $legacyDni,
                 'nombre_completo' => PersonalNormalizer::text($payload['nombre_completo'] ?? ''),
                 'puesto' => PersonalNormalizer::text($payload['puesto'] ?? ''),
                 'ocupacion' => PersonalNormalizer::text($payload['ocupacion'] ?? '') ?: null,
                 'contrato' => PersonalNormalizer::contract($payload['contrato'] ?? null),
                 'es_supervisor' => $this->resolveSupervisor($payload),
-                'qr_code' => 'QR-' . PersonalNormalizer::dni($payload['dni'] ?? '') . '-' . Str::upper(Str::random(8)),
+                'qr_code' => 'QR-' . $legacyDni . '-' . Str::upper(Str::random(8)),
                 'fecha_ingreso' => PersonalNormalizer::isoDate($payload['fecha_ingreso'] ?? null),
                 'estado' => $this->resolveState($payload['estado'] ?? 'ACTIVO'),
             ];
+
+            if (Schema::hasColumn('personal', 'tipo_documento')) {
+                $data['tipo_documento'] = $documentType;
+            }
+
+            if (Schema::hasColumn('personal', 'numero_documento')) {
+                $data['numero_documento'] = $documentNumber;
+            }
 
             if (Schema::hasColumn('personal', 'telefono')) {
                 $data['telefono'] = PersonalNormalizer::combinePhones(
@@ -165,9 +209,12 @@ class PersonalService
                 PersonalNormalizer::text($payload['telefono_2'] ?? '')
             ) ?? ($payload['telefono'] ?? null);
             $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
+            $documentNumber = PersonalNormalizer::documentNumber($payload['numero_documento'] ?? $payload['dni'] ?? $personal->numero_documento ?? $personal->dni);
+            $documentType = PersonalNormalizer::documentType($payload['tipo_documento'] ?? $personal->tipo_documento ?? 'DNI', $documentNumber);
+            $legacyDni = $documentType === 'DNI' ? PersonalNormalizer::dni($documentNumber) : $documentNumber;
 
             $data = [
-                'dni' => PersonalNormalizer::dni($payload['dni'] ?? ''),
+                'dni' => $legacyDni,
                 'nombre_completo' => PersonalNormalizer::text($payload['nombre_completo'] ?? ''),
                 'puesto' => PersonalNormalizer::text($payload['puesto'] ?? ''),
                 'ocupacion' => PersonalNormalizer::text($payload['ocupacion'] ?? '') ?: null,
@@ -176,6 +223,14 @@ class PersonalService
                 'fecha_ingreso' => PersonalNormalizer::isoDate($payload['fecha_ingreso'] ?? null),
                 'estado' => $this->resolveState($payload['estado'] ?? 'ACTIVO'),
             ];
+
+            if (Schema::hasColumn('personal', 'tipo_documento')) {
+                $data['tipo_documento'] = $documentType;
+            }
+
+            if (Schema::hasColumn('personal', 'numero_documento')) {
+                $data['numero_documento'] = $documentNumber;
+            }
 
             if (Schema::hasColumn('personal', 'telefono')) {
                 $data['telefono'] = PersonalNormalizer::combinePhones(
@@ -287,7 +342,22 @@ class PersonalService
 
         $state = strtoupper(trim((string) $value));
 
-        return in_array($state, ['1', 'ACTIVO', 'ACTIVE'], true) ? 'ACTIVO' : 'INACTIVO';
+        $allowed = [
+            'ACTIVO',
+            'INACTIVO',
+            'PENDIENTE_COMPLETAR_FICHA',
+            'FICHA_ENVIADA',
+            'LINK_VENCIDO',
+            'APROBADO',
+            'OBSERVADO',
+            'RECHAZADO',
+        ];
+
+        if (in_array($state, $allowed, true)) {
+            return $state;
+        }
+
+        return in_array($state, ['1', 'ACTIVE'], true) ? 'ACTIVO' : 'INACTIVO';
     }
 
     private function resolveMineIds(string $mineFilter): array

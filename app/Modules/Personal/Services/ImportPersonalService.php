@@ -164,6 +164,14 @@ class ImportPersonalService
                 $existingSelect[] = 'correo';
             }
 
+            if (Schema::hasColumn('personal', 'tipo_documento')) {
+                $existingSelect[] = 'tipo_documento';
+            }
+
+            if (Schema::hasColumn('personal', 'numero_documento')) {
+                $existingSelect[] = 'numero_documento';
+            }
+
             $existing = Personal::query()
                 ->get($existingSelect)
                 ->keyBy('dni');
@@ -243,6 +251,14 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                                 'despues' => 'ACTIVO',
                             ];
                         }
+                    }
+
+                    if (Schema::hasColumn('personal', 'tipo_documento') && (string) ($personal->tipo_documento ?? '') !== 'DNI') {
+                        $updates['tipo_documento'] = 'DNI';
+                    }
+
+                    if (Schema::hasColumn('personal', 'numero_documento') && (string) ($personal->numero_documento ?? '') !== $dni) {
+                        $updates['numero_documento'] = $dni;
                     }
 
                     if ($personal->nombre_completo !== $nombre) {
@@ -341,6 +357,14 @@ if (count($updates) > 0) {
                         'fecha_ingreso' => $fechaIngreso,
                         'estado' => 'ACTIVO',
                     ];
+
+                    if (Schema::hasColumn('personal', 'tipo_documento')) {
+                        $newData['tipo_documento'] = 'DNI';
+                    }
+
+                    if (Schema::hasColumn('personal', 'numero_documento')) {
+                        $newData['numero_documento'] = $dni;
+                    }
 
                     if ($hasTelefonoColumn) {
                         $newData['telefono'] = PersonalNormalizer::combinePhones($phoneData['telefono_1'], $phoneData['telefono_2']);

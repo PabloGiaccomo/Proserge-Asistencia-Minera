@@ -25,7 +25,7 @@ class AuthenticateToken
         $tokenHash = hash('sha256', $bearer);
 
         $token = AuthToken::query()
-            ->with(['usuario.rol'])
+            ->with(['usuario.rol', 'usuario.rolesAdicionales'])
             ->where('token_hash', $tokenHash)
             ->whereNull('revoked_at')
             ->first();

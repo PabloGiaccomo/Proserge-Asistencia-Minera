@@ -5,6 +5,7 @@ namespace App\Modules\Catalogos\Services;
 use App\Models\Mina;
 use App\Models\MinaParadero;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,6 +20,8 @@ class MinaCatalogService
         $query = Mina::query()->with(['paraderos' => function ($q): void {
             $q->orderBy('nombre');
         }])->orderBy('nombre');
+
+        $this->applyOfficeOverlapGuard($query);
 
         if (in_array($estado, ['ACTIVO', 'INACTIVO'], true)) {
             $query->where('estado', $estado);
@@ -38,9 +41,13 @@ class MinaCatalogService
 
     public function find(string $id): ?Mina
     {
-        return Mina::query()->with(['paraderos' => function ($q): void {
+        $query = Mina::query()->with(['paraderos' => function ($q): void {
             $q->orderBy('nombre');
-        }])->find($id);
+        }]);
+
+        $this->applyOfficeOverlapGuard($query);
+
+        return $query->find($id);
     }
 
     public function create(array $payload): Mina
@@ -153,5 +160,14 @@ class MinaCatalogService
         $state = strtoupper(trim((string) $value));
 
         return in_array($state, ['1', 'ACTIVO', 'ACTIVE'], true) ? 'ACTIVO' : 'INACTIVO';
+    }
+
+    private function applyOfficeOverlapGuard(Builder $query): void
+    {
+        $query->whereNotExists(function ($sub): void {
+            $sub->select(DB::raw(1))
+                ->from('oficinas as o')
+                ->whereRaw('LOWER(TRIM(o.nombre)) = LOWER(TRIM(minas.nombre))');
+        });
     }
 }
