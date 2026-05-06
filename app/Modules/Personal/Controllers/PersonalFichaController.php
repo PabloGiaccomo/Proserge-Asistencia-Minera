@@ -5,15 +5,19 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
+use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Support\Rbac\PermissionMatrix;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class PersonalFichaController extends WebPageController
@@ -22,6 +26,7 @@ class PersonalFichaController extends WebPageController
         private readonly PersonalFichaMacroExtractor $extractor,
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalFichaPdfService $pdfService,
+        private readonly PersonalFichaExportService $exportService,
     ) {
     }
 
@@ -206,6 +211,33 @@ class PersonalFichaController extends WebPageController
         return $this->pdfService->download($ficha);
     }
 
+    public function exportExcel(Request $request)
+    {
+        return $this->exportService->downloadExcel(
+            $request->all(),
+            'fichas_personal_' . now()->format('Ymd_His') . '.xlsx'
+        );
+    }
+
+    public function startPdfExport(Request $request): JsonResponse
+    {
+        $job = $this->exportService->startPdfJob($request->all());
+
+        return response()->json($job);
+    }
+
+    public function processPdfExport(string $jobId): JsonResponse
+    {
+        return response()->json($this->exportService->processPdfJob($jobId));
+    }
+
+    public function downloadPdfExport(string $jobId)
+    {
+        $path = $this->exportService->zipDownloadPath($jobId);
+
+        return response()->download($path, 'fichas_personal_' . $jobId . '.zip');
+    }
+
     public function downloadArchivo(string $id)
     {
         $archivo = PersonalFichaArchivo::query()->findOrFail($id);
@@ -213,6 +245,48 @@ class PersonalFichaController extends WebPageController
         abort_unless(Storage::disk('local')->exists($archivo->path), 404);
 
         return Storage::disk('local')->download($archivo->path, $archivo->nombre_original ?: basename($archivo->path));
+    }
+
+    public function extendTemporal(string $id): RedirectResponse
+    {
+        $this->assertCanDeletePersonal();
+
+        $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
+        $this->fichaService->extendLink($ficha, 24);
+
+        return redirect()
+            ->route('personal.fichas.temporales')
+            ->with('success', 'El link temporal fue ampliado por 1 dia mas.');
+    }
+
+    public function regularizeLink(string $id): RedirectResponse
+    {
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($id);
+        $result = $this->fichaService->ensureRegularizationLink($ficha, 24);
+
+        return redirect()
+            ->back()
+            ->with('success', 'Se habilito un link temporal para regularizar la ficha.')
+            ->with('regularization_link', $result['url'] ?? null);
+    }
+
+    public function destroyTemporal(string $id): RedirectResponse
+    {
+        $this->assertCanDeletePersonal();
+
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'familiares', 'archivos'])->findOrFail($id);
+
+        try {
+            $this->fichaService->deleteDraftFicha($ficha);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.fichas.temporales')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo eliminar el trabajador temporal.');
+        }
+
+        return redirect()
+            ->route('personal.fichas.temporales')
+            ->with('success', 'Trabajador temporal eliminado por completo.');
     }
 
     public function cancelImport(Request $request): RedirectResponse
@@ -303,5 +377,10 @@ class PersonalFichaController extends WebPageController
             ->keys()
             ->values()
             ->all();
+    }
+
+    private function assertCanDeletePersonal(): void
+    {
+        abort_unless(PermissionMatrix::userCan($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
     }
 }

@@ -8,13 +8,17 @@ use App\Models\Oficina;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
+use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalService;
+use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalExportConfig;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class PersonalPageController extends WebPageController
@@ -22,13 +26,82 @@ class PersonalPageController extends WebPageController
     public function __construct(
         private readonly PersonalService $service,
         private readonly ExportPersonalService $exportService,
+        private readonly PersonalFichaExportService $fichaExportService,
         private readonly PersonalFichaService $fichaService,
     ) {
     }
 
     public function home(): View
     {
-        return view('personal.home');
+        $permissions = session('user.permissions', []);
+        $dashboards = collect([
+            [
+                'module' => 'personal',
+                'title' => 'Personal',
+                'description' => 'Ficha laboral, estados, situacion y seguimiento de trabajadores.',
+                'tone' => '#19D3C5',
+            ],
+            [
+                'module' => 'mi_asistencia',
+                'title' => 'Mi Asistencia',
+                'description' => 'Resumen personal de asistencia, turnos y marcaciones.',
+                'tone' => '#4F8CFF',
+            ],
+            [
+                'module' => 'man_power',
+                'title' => 'Man Power',
+                'description' => 'Vista operativa de grupos, cobertura y distribucion por parada.',
+                'tone' => '#10B981',
+            ],
+            [
+                'module' => 'rq_mina',
+                'title' => 'RQ Mina',
+                'description' => 'Seguimiento de requerimientos, fechas y necesidades por mina.',
+                'tone' => '#F59E0B',
+            ],
+            [
+                'module' => 'rq_proserge',
+                'title' => 'RQ Proserge',
+                'description' => 'Asignaciones internas y paradas gestionadas desde Proserge.',
+                'tone' => '#8B5CF6',
+            ],
+            [
+                'module' => 'bienestar',
+                'title' => 'Bienestar',
+                'description' => 'Vacaciones, descansos medicos y bloqueos activos del personal.',
+                'tone' => '#EC4899',
+            ],
+            [
+                'module' => 'evaluaciones',
+                'title' => 'Evaluaciones',
+                'description' => 'Panel de seguimiento para evaluaciones de supervisor y desempeno.',
+                'tone' => '#06B6D4',
+            ],
+            [
+                'module' => 'asistencias',
+                'title' => 'Asistencias',
+                'description' => 'Operacion de asistencia por grupo, supervisor, parada y mina.',
+                'tone' => '#0F766E',
+            ],
+            [
+                'module' => 'faltas',
+                'title' => 'Faltas',
+                'description' => 'Control de incidencias y seguimiento de correcciones pendientes.',
+                'tone' => '#DC2626',
+            ],
+            [
+                'module' => 'catalogos',
+                'title' => 'Catalogos',
+                'description' => 'Estado general de minas, talleres, oficinas y configuraciones base.',
+                'tone' => '#64748B',
+            ],
+        ])->filter(fn (array $dashboard): bool => PermissionMatrix::allows($permissions, $dashboard['module'], 'dashboards'))
+            ->values()
+            ->all();
+
+        return view('personal.home', [
+            'dashboards' => $dashboards,
+        ]);
     }
 
     public function index(Request $request)
@@ -39,9 +112,27 @@ class PersonalPageController extends WebPageController
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
         }
 
+        $filters = $request->query();
+        $visibleStateFilter = strtoupper(trim((string) ($filters['estado'] ?? '')));
+        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true) === false) {
+            $visibleStateFilter = match (strtolower((string) ($filters['estado'] ?? ''))) {
+                'activo' => 'ACTIVO',
+                'inactivo' => 'INACTIVO',
+                'cesado' => 'CESADO',
+                default => '',
+            };
+        }
+        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
+            unset($filters['estado']);
+        }
+
         $trabajadores = PersonalResource::collection(
-            $this->service->list($request->query())
+            $this->service->list($filters)
         )->resolve();
+
+        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
+            $trabajadores = array_values(array_filter($trabajadores, fn (array $trabajador): bool => strtoupper((string) ($trabajador['estado'] ?? '')) === $visibleStateFilter));
+        }
 
         $catalogs = $this->getLocationCatalogs();
 
@@ -66,11 +157,17 @@ class PersonalPageController extends WebPageController
             ->all();
 
         $recommendedColumns = PersonalExportConfig::recommendedColumns(array_keys($availableColumns));
+        $availableFichaColumns = $this->fichaExportService->availableColumns();
+        $recommendedFichaColumns = $this->fichaExportService->recommendedColumns();
+        $fichaPreview = $this->fichaExportService->preview($request->query());
 
         return view('personal.export', [
             'config' => $config,
             'availableColumns' => $availableColumns,
             'recommendedColumns' => $recommendedColumns,
+            'availableFichaColumns' => $availableFichaColumns,
+            'recommendedFichaColumns' => $recommendedFichaColumns,
+            'fichaPreview' => $fichaPreview,
             'preview' => $preview,
             'minas' => $minas,
         ]);
@@ -100,46 +197,41 @@ class PersonalPageController extends WebPageController
         );
     }
 
-    public function show(string $id): View
+    public function show(string $id): RedirectResponse
     {
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
-        $trabajador = PersonalResource::make($personal)->resolve();
-        $ficha = $personal->fichaColaborador ?? null;
-
-        return view('personal.show', compact('id', 'trabajador', 'ficha'));
+        return redirect()->route('personal.edit', $id);
     }
 
     public function create(): View
     {
-        return view('personal.create', $this->getLocationCatalogs());
+        return view('personal.create', array_merge($this->getLocationCatalogs(), [
+            'sections' => PersonalFichaCatalog::sections(),
+            'initialFields' => PersonalFichaCatalog::emptyData(),
+        ]));
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request): View|RedirectResponse
     {
-        $validated = $request->validate([
-            'dni' => ['required', 'string', 'max:20', 'unique:personal,dni'],
-            'tipo_documento' => ['nullable', 'string', 'max:40'],
-            'numero_documento' => ['nullable', 'string', 'max:40'],
-            'nombre' => ['required', 'string', 'max:191'],
-            'puesto' => ['required', 'string', 'max:120'],
-            'telefono' => ['nullable', 'string', 'max:30'],
-            'telefono_1' => ['nullable', 'string', 'max:30'],
-            'telefono_2' => ['nullable', 'string', 'max:30'],
-            'correo' => ['nullable', 'email', 'max:191'],
-            'tipo_contrato' => ['required', 'string', 'max:40'],
-            'supervisor' => ['required', 'boolean'],
-            'activo' => ['required', 'boolean'],
-            'fecha_ingreso' => ['nullable', 'date'],
-            'ocupacion' => ['nullable', 'string', 'max:120'],
-            'minas' => ['nullable', 'array'],
-            'mina_estado' => ['nullable', 'array'],
+        $validated = $request->validate($this->manualCreateRules());
+
+        $result = $this->fichaService->createManual(
+            $validated['fields'] ?? [],
+            [
+                'es_supervisor' => $validated['es_supervisor'] ?? false,
+                'minas' => $this->buildMinePayload($validated),
+            ],
+            $this->requireAuthenticatedUser(),
+        );
+
+        return view('personal.fichas.link', [
+            'result' => $result,
+            'url' => $result['url'],
+            'trabajador' => $result['personal'],
+            'ficha' => $result['ficha'],
         ]);
-
-        $this->service->create($this->buildPayloadFromWeb($validated));
-
-        return redirect()->route('personal.index')->with('success', 'Trabajador creado correctamente');
     }
 
     public function edit(string $id): View
@@ -148,6 +240,8 @@ class PersonalPageController extends WebPageController
         abort_if(!$personal, 404);
 
         $trabajador = PersonalResource::make($personal)->resolve();
+        $ficha = $personal->fichaColaborador;
+        $ficha?->loadMissing(['familiares', 'archivos']);
 
         $catalogs = $this->getLocationCatalogs();
         $knownLocations = collect([
@@ -180,7 +274,17 @@ class PersonalPageController extends WebPageController
         $catalogs['catalogOficinas'] = array_values(array_unique($catalogs['catalogOficinas']));
         $catalogs['catalogTalleres'] = array_values(array_unique($catalogs['catalogTalleres']));
 
-        return view('personal.edit', array_merge($catalogs, ['trabajador' => $trabajador]));
+        $regularizationSummary = $this->fichaService->regularizationSummary($ficha);
+
+        return view('personal.edit', array_merge($catalogs, [
+            'trabajador' => $trabajador,
+            'ficha' => $ficha,
+            'sections' => PersonalFichaCatalog::sections(),
+            'initialFields' => $this->initialFichaFieldsForEdit($trabajador, $ficha),
+            'missingRequiredDocuments' => $this->fichaService->missingRequiredDocumentKeys($ficha),
+            'missingRequiredFichaFields' => $regularizationSummary['missing_fields'],
+            'regularizationSummary' => $regularizationSummary,
+        ]));
     }
 
     private function getLocationCatalogs(): array
@@ -262,6 +366,27 @@ class PersonalPageController extends WebPageController
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
+        if ($request->has('fields')) {
+            $validated = $request->validate($this->editFichaRules());
+
+            $this->fichaService->updateManual(
+                $personal,
+                $validated['fields'] ?? [],
+                [
+                    'estado' => $validated['estado'] ?? 'ACTIVO',
+                    'es_supervisor' => $validated['es_supervisor'] ?? false,
+                    'minas' => $this->buildMinePayload($validated),
+                    'familiares' => $validated['familiares'] ?? [],
+                    'documentos' => $request->file('documentos', []),
+                ],
+                $this->requireAuthenticatedUser(),
+            );
+
+            return redirect()
+                ->route('personal.show', $id)
+                ->with('success', 'Trabajador y ficha actualizados correctamente.');
+        }
+
         $validated = $request->validate([
             'dni' => ['required', 'string', 'max:20', 'unique:personal,dni,' . $id . ',id'],
             'tipo_documento' => ['nullable', 'string', 'max:40'],
@@ -293,7 +418,123 @@ class PersonalPageController extends WebPageController
         return redirect()->route('personal.index')->with('success', 'Trabajador actualizado correctamente');
     }
 
+    public function destroy(string $id): RedirectResponse
+    {
+        abort_unless(PermissionMatrix::userCan($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
+
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        try {
+            $this->service->deleteCompletely($personal);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.show', $id)
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo eliminar el trabajador.');
+        }
+
+        return redirect()
+            ->route('personal.index')
+            ->with('success', 'Trabajador eliminado por completo.');
+    }
+
+    public function cease(string $id): RedirectResponse
+    {
+        abort_unless(PermissionMatrix::userCanAny($this->requireAuthenticatedUser(), 'personal', ['editar', 'actualizar', 'administrar']), 403);
+
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        try {
+            $this->service->markIndeterminateContractCeased($personal);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo cesar el trabajador.');
+        }
+
+        return redirect()
+            ->route('personal.index')
+            ->with('success', 'El trabajador indeterminado fue marcado como cesado.');
+    }
+
     private function buildPayloadFromWeb(array $validated, array $existing = []): array
+    {
+        return [
+            'tipo_documento' => $validated['tipo_documento'] ?? 'DNI',
+            'numero_documento' => $validated['numero_documento'] ?? $validated['dni'],
+            'dni' => $validated['dni'],
+            'nombre_completo' => $validated['nombre'],
+            'puesto' => $validated['puesto'],
+            'telefono' => array_key_exists('telefono', $validated) ? $validated['telefono'] : ($existing['telefono'] ?? null),
+            'telefono_1' => array_key_exists('telefono_1', $validated)
+                ? $validated['telefono_1']
+                : ($validated['telefono'] ?? ($existing['telefono_1'] ?? $existing['telefono'] ?? null)),
+            'telefono_2' => array_key_exists('telefono_2', $validated) ? $validated['telefono_2'] : ($existing['telefono_2'] ?? null),
+            'correo' => array_key_exists('correo', $validated) ? $validated['correo'] : ($existing['correo'] ?? null),
+            'contrato' => $validated['tipo_contrato'],
+            'es_supervisor' => (bool) $validated['supervisor'],
+            'estado' => (bool) $validated['activo'] ? 'ACTIVO' : 'INACTIVO',
+            'fecha_ingreso' => array_key_exists('fecha_ingreso', $validated) ? $validated['fecha_ingreso'] : ($existing['fecha_ingreso'] ?? null),
+            'ocupacion' => array_key_exists('ocupacion', $validated) ? $validated['ocupacion'] : ($existing['ocupacion'] ?? null),
+            'minas' => $this->buildMinePayload($validated),
+        ];
+    }
+
+    private function manualCreateRules(): array
+    {
+        $rules = [
+            'fields' => ['required', 'array'],
+            'es_supervisor' => ['nullable', 'boolean'],
+            'minas' => ['nullable', 'array'],
+            'mina_estado' => ['nullable', 'array'],
+        ];
+
+        foreach (PersonalFichaCatalog::fields() as $key => $field) {
+            $fieldRules = match ($field['type']) {
+                'date' => ['date'],
+                'email' => ['email', 'max:191'],
+                'select' => count($field['options'] ?? []) > 0
+                    ? ['string', 'in:' . implode(',', array_map('strval', array_keys($field['options'] ?? [])))]
+                    : ['string', 'max:191'],
+                'textarea' => ['string', 'max:5000'],
+                'hidden' => ['string', 'max:5000'],
+                default => ['string', 'max:191'],
+            };
+
+            array_unshift($fieldRules, 'nullable');
+            $rules['fields.' . $key] = $fieldRules;
+        }
+
+        $rules['fields.tipo_documento'] = ['required', 'string', 'in:' . implode(',', array_map('strval', array_keys(PersonalFichaCatalog::DOCUMENT_TYPES)))];
+        $rules['fields.numero_documento'] = ['required', 'string', 'max:40'];
+        $rules['familiares'] = ['nullable', 'array'];
+        $rules['familiares.*.nombres_apellidos'] = ['nullable', 'string', 'max:191'];
+        $rules['familiares.*.parentesco'] = ['nullable', 'string', 'max:80'];
+        $rules['familiares.*.fecha_nacimiento'] = ['nullable', 'date'];
+        $rules['familiares.*.tipo_documento'] = ['nullable', 'string', 'max:40'];
+        $rules['familiares.*.numero_documento'] = ['nullable', 'string', 'max:40'];
+        $rules['familiares.*.telefono'] = ['nullable', 'string', 'max:30'];
+        $rules['familiares.*.vive_con_trabajador'] = ['nullable'];
+        $rules['familiares.*.contacto_emergencia'] = ['nullable'];
+        $rules['documentos'] = ['nullable', 'array'];
+
+        foreach (PersonalFichaCatalog::documentRequirements() as $key => $requirement) {
+            $rules['documentos.' . $key] = ['nullable', 'file', 'max:10240', 'mimes:pdf,doc,docx,jpg,jpeg,png,webp'];
+        }
+
+        return $rules;
+    }
+
+    private function editFichaRules(): array
+    {
+        return [
+            ...$this->manualCreateRules(),
+            'estado' => ['required', 'in:ACTIVO,INACTIVO,CESADO'],
+        ];
+    }
+
+    private function buildMinePayload(array $validated): array
     {
         $stateMap = $validated['mina_estado'] ?? [];
         $normalizedStateMap = collect($stateMap)
@@ -322,7 +563,7 @@ class PersonalPageController extends WebPageController
             });
         };
 
-        $mines = collect($selectedMines)
+        return collect($selectedMines)
             ->map(function (string $mineName) use ($stateMap, $normalizedStateMap, $knownMines, $findMine): ?array {
                 $match = $findMine($mineName);
 
@@ -351,25 +592,34 @@ class PersonalPageController extends WebPageController
             ->filter()
             ->values()
             ->all();
+    }
 
-        return [
-            'tipo_documento' => $validated['tipo_documento'] ?? 'DNI',
-            'numero_documento' => $validated['numero_documento'] ?? $validated['dni'],
-            'dni' => $validated['dni'],
-            'nombre_completo' => $validated['nombre'],
-            'puesto' => $validated['puesto'],
-            'telefono' => array_key_exists('telefono', $validated) ? $validated['telefono'] : ($existing['telefono'] ?? null),
-            'telefono_1' => array_key_exists('telefono_1', $validated)
-                ? $validated['telefono_1']
-                : ($validated['telefono'] ?? ($existing['telefono_1'] ?? $existing['telefono'] ?? null)),
-            'telefono_2' => array_key_exists('telefono_2', $validated) ? $validated['telefono_2'] : ($existing['telefono_2'] ?? null),
-            'correo' => array_key_exists('correo', $validated) ? $validated['correo'] : ($existing['correo'] ?? null),
-            'contrato' => $validated['tipo_contrato'],
-            'es_supervisor' => (bool) $validated['supervisor'],
-            'estado' => (bool) $validated['activo'] ? 'ACTIVO' : 'INACTIVO',
-            'fecha_ingreso' => array_key_exists('fecha_ingreso', $validated) ? $validated['fecha_ingreso'] : ($existing['fecha_ingreso'] ?? null),
-            'ocupacion' => array_key_exists('ocupacion', $validated) ? $validated['ocupacion'] : ($existing['ocupacion'] ?? null),
-            'minas' => $mines,
-        ];
+    private function initialFichaFieldsForEdit(array $trabajador, $ficha): array
+    {
+        if ($ficha) {
+            return $this->fichaService->fichaDataForPublic($ficha);
+        }
+
+        $fields = PersonalFichaCatalog::emptyData();
+        $fullName = preg_split('/\s+/', trim((string) ($trabajador['nombre_completo'] ?? $trabajador['nombre'] ?? ''))) ?: [];
+
+        if (count($fullName) >= 3) {
+            $fields['apellido_paterno'] = $fullName[0] ?? '';
+            $fields['apellido_materno'] = $fullName[1] ?? '';
+            $fields['nombres'] = implode(' ', array_slice($fullName, 2));
+        } else {
+            $fields['nombres'] = trim((string) ($trabajador['nombre_completo'] ?? $trabajador['nombre'] ?? ''));
+        }
+
+        $fields['tipo_documento'] = (string) ($trabajador['tipo_documento'] ?? 'DNI');
+        $fields['numero_documento'] = (string) ($trabajador['numero_documento'] ?? $trabajador['dni'] ?? '');
+        $fields['telefono'] = (string) ($trabajador['telefono'] ?? '');
+        $fields['correo'] = (string) ($trabajador['correo'] ?? '');
+        $fields['puesto'] = (string) ($trabajador['puesto'] ?? '');
+        $fields['ocupacion'] = (string) ($trabajador['ocupacion'] ?? '');
+        $fields['contrato'] = (string) ($trabajador['contrato'] ?? 'REG');
+        $fields['fecha_ingreso'] = (string) ($trabajador['fecha_ingreso'] ?? '');
+
+        return $this->fichaService->normalizeFichaData($fields);
     }
 }

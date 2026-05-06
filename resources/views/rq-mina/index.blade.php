@@ -144,8 +144,35 @@ $calcTotal = static function (array $detalle): int {
 
     <div class="card">
         <div class="card-header-list">
-            <h2 class="card-title-list">Listado de RQ Mina</h2>
-            <span class="card-badge">{{ (int) ($pg['total'] ?? count($items)) }} registros</span>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div style="display:flex;flex-direction:column;">
+                    <h2 class="card-title-list">Listado de RQ Mina</h2>
+                    <span class="card-badge">{{ (int) ($pg['total'] ?? count($items)) }} registros</span>
+                </div>
+
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+                    <div class="export-controls" style="display:flex;gap:8px;align-items:center;">
+                        <button type="button" id="btnExportPersonal" class="btn-filter-outline" aria-expanded="false" aria-controls="exportPersonalSection" onclick="toggleExportSection('exportPersonalSection','btnExportPersonal')">Exportar personal en excel ▾</button>
+                        <button type="button" id="btnExportFichas" class="btn-filter-outline" aria-expanded="false" aria-controls="exportFichasSection" onclick="toggleExportSection('exportFichasSection','btnExportFichas')">Exportar fichas ▾</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="exportPersonalSection" style="display:none;margin:12px 0;padding:12px;border-radius:6px;border:1px solid #e5e7eb;background:#fafafa;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="text-sm" style="font-weight:600;">Exportar personal en Excel</span>
+                <a href="{{ $baseUrl }}?{{ http_build_query(array_merge($baseQuery, ['export' => 'personal_excel'])) }}" class="btn-filter-outline">Descargar Excel</a>
+                <span class="text-xs text-slate-500">(se exportan los datos según los filtros aplicados)</span>
+            </div>
+        </div>
+
+        <div id="exportFichasSection" style="display:none;margin:12px 0;padding:12px;border-radius:6px;border:1px solid #e5e7eb;background:#fafafa;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="text-sm" style="font-weight:600;">Exportar fichas</span>
+                <a href="{{ $baseUrl }}?{{ http_build_query(array_merge($baseQuery, ['export' => 'fichas'])) }}" class="btn-filter-outline">Descargar Fichas</a>
+                <span class="text-xs text-slate-500">(descarga de fichas según filtros)</span>
+            </div>
         </div>
 
         @if(empty($items))
@@ -604,6 +631,20 @@ function changeRqMinaPageSize(size) {
     params.set('page', '1');
     params.set('per_page', String(size || 10));
     window.location.href = '{{ $baseUrl }}?' + params.toString();
+}
+
+function toggleExportSection(sectionId, btnId) {
+    const sec = document.getElementById(sectionId);
+    const btn = document.getElementById(btnId);
+    if (!sec || !btn) return;
+    const isHidden = sec.style.display === 'none' || getComputedStyle(sec).display === 'none';
+    if (isHidden) {
+        sec.style.display = 'block';
+        btn.setAttribute('aria-expanded', 'true');
+    } else {
+        sec.style.display = 'none';
+        btn.setAttribute('aria-expanded', 'false');
+    }
 }
 </script>
 

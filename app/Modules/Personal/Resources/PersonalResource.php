@@ -46,19 +46,24 @@ class PersonalResource extends JsonResource
         $estadoPersonal = strtoupper((string) $this->estado);
         $ficha = $this->whenLoaded('fichaColaborador', fn () => $this->fichaColaborador, null);
         $estadoFicha = $ficha?->estado;
-        $estadoActual = $estadoPersonal === 'ACTIVO' ? 'trabajando' : 'inactivo';
+        $contrato = PersonalNormalizer::contract($this->contrato);
+        $fichaData = is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : [];
+        $fichaData['tipo_documento'] = $fichaData['tipo_documento'] ?? $ficha?->tipo_documento ?? $this->tipo_documento ?? 'DNI';
+        $fichaData['numero_documento'] = $fichaData['numero_documento'] ?? $ficha?->numero_documento ?? $this->numero_documento ?? $this->dni;
+        $fechaFinContrato = PersonalNormalizer::isoDate($fichaData['fecha_fin_contrato'] ?? null);
+        $fechaCese = PersonalNormalizer::isoDate($fichaData['fecha_cese'] ?? null);
+        $missingRequiredFichaFields = collect(PersonalFichaCatalog::requiredKeys())
+            ->filter(function (string $key) use ($fichaData): bool {
+                $value = $fichaData[$key] ?? null;
 
-        if (in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO'], true)) {
-            $estadoActual = strtolower($estadoPersonal);
-        }
+                if (is_array($value)) {
+                    return count(array_filter($value, static fn ($item) => filled($item))) === 0;
+                }
 
-        if ($primaryBloqueo && $estadoPersonal === 'ACTIVO') {
-            $estadoActual = match ((string) $primaryBloqueo->tipo) {
-                'vacaciones' => 'vacaciones',
-                'descanso_medico' => 'enfermo',
-                default => 'bloqueado_bienestar',
-            };
-        }
+                return !filled($value);
+            })
+            ->values()
+            ->all();
 
         $fechas = [
             'ingreso' => optional($this->fecha_ingreso)->toDateString(),
@@ -200,6 +205,75 @@ class PersonalResource extends JsonResource
             $mineStates[$mina->nombre] = PersonalNormalizer::mineStatusLabel($mina->pivot?->estado);
         }
 
+        $ubicacionSituacion = collect($mineNames)
+            ->map(function ($name): ?string {
+                $lower = mb_strtolower((string) $name);
+
+                if (str_contains($lower, 'oficina')) {
+                    return 'oficina';
+                }
+
+                if (str_contains($lower, 'taller')) {
+                    return 'taller';
+                }
+
+                return null;
+            })
+            ->filter()
+            ->first();
+
+        $hasCentroTrabajoActivo = $ubicacionSituacion !== null;
+
+        $hasParadaActiva = $activeBloqueos->contains(function ($bloqueo): bool {
+            return !in_array((string) ($bloqueo->tipo ?? ''), ['vacaciones', 'descanso_medico'], true);
+        });
+        $hasRqProsergeParadaActiva = collect($this->whenLoaded('rqProsergeDetalles', fn () => $this->rqProsergeDetalles, collect()))
+            ->isNotEmpty();
+
+        $contratoVencido = $fechaFinContrato !== null && $fechaFinContrato !== '' && $fechaFinContrato < $todayString;
+        $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
+        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'OBSERVADO'], true)
+            || $ficha === null
+            || count($missingRequiredFichaFields) > 0;
+        $bienestarInactivo = $primaryBloqueo && in_array((string) $primaryBloqueo->tipo, ['vacaciones', 'descanso_medico'], true);
+        $intermitenteActivo = $contrato === 'INTER' && ($hasParadaActiva || $hasRqProsergeParadaActiva);
+        $trabajadorNoIntermitenteActivo = $contrato !== 'INTER';
+
+        $estadoVisible = match (true) {
+            $contratoVencido || $ceseVigente || ($contrato === 'INDET' && $estadoPersonal === 'CESADO') => 'CESADO',
+            $terminarFicha => 'INACTIVO',
+            $bienestarInactivo => 'INACTIVO',
+            $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
+            $trabajadorNoIntermitenteActivo || $intermitenteActivo => 'ACTIVO',
+            default => 'INACTIVO',
+        };
+
+        $situacionKey = match (true) {
+            $estadoVisible === 'CESADO' => 'no_habilitado',
+            $terminarFicha => 'terminar_ficha',
+            $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
+            $primaryBloqueo && (string) $primaryBloqueo->tipo === 'descanso_medico' => 'descanso_medico',
+            $hasParadaActiva || $hasRqProsergeParadaActiva => 'parada',
+            $ubicacionSituacion === 'oficina' => 'oficina',
+            $ubicacionSituacion === 'taller' => 'taller',
+            $contrato === 'INTER' => 'habilitado',
+            collect($mineStates)->contains(fn ($state) => in_array($state, ['habilitado', 'proceso'], true)) => 'habilitado',
+            collect($mineStates)->contains('no_habilitado') => 'no_habilitado',
+            default => 'habilitado',
+        };
+
+        $situacionLabel = match ($situacionKey) {
+            'terminar_ficha' => 'Terminar ficha',
+            'vacaciones' => 'Vacaciones',
+            'descanso_medico' => 'Descanso medico',
+            'parada' => 'En parada',
+            'oficina' => 'En oficina',
+            'taller' => 'En taller',
+            'habilitado' => 'Habilitado',
+            'no_habilitado' => 'No habilitado',
+            default => 'Habilitado',
+        };
+
         return [
             'id' => $this->id,
             'dni' => $this->dni,
@@ -209,24 +283,31 @@ class PersonalResource extends JsonResource
             'nombre_completo' => $this->nombre_completo,
             'puesto' => $this->puesto,
             'ocupacion' => $this->ocupacion,
-            'contrato' => $this->contrato,
-            'tipo_contrato' => PersonalNormalizer::contractLabel($this->contrato),
+            'contrato' => $contrato,
+            'tipo_contrato' => PersonalNormalizer::contractLabel($contrato),
             'supervisor' => (bool) $this->es_supervisor,
             'es_supervisor' => (bool) $this->es_supervisor,
             'fecha_ingreso' => optional($this->fecha_ingreso)->toDateString(),
+            'fecha_fin_contrato' => $fechaFinContrato,
+            'fecha_cese' => $fechaCese,
             'telefono' => PersonalNormalizer::combinePhones($telefono1, $telefono2),
             'telefono_1' => $telefono1,
             'telefono_2' => $telefono2,
             'correo' => $this->correo,
-            'estado' => $estadoPersonal,
-            'estado_label' => PersonalFichaCatalog::stateLabel($estadoFicha ?: $estadoPersonal),
+            'estado' => $estadoVisible,
+            'estado_interno' => $estadoPersonal,
+            'estado_label' => PersonalFichaCatalog::stateLabel($estadoVisible),
             'estado_ficha' => $estadoFicha,
             'ficha_id' => $ficha?->id,
             'ficha_submitted_at' => optional($ficha?->submitted_at)->toIso8601String(),
             'ficha_link_expires_at' => optional($ficha?->link?->expires_at)->toIso8601String(),
-            'activo' => $estadoPersonal === 'ACTIVO',
-            'estado_actual' => $estadoActual,
+            'activo' => $estadoVisible === 'ACTIVO',
+            'estado_actual' => strtolower($estadoVisible),
+            'situacion' => $situacionKey,
+            'situacion_label' => $situacionLabel,
+            'missing_required_ficha_fields' => $missingRequiredFichaFields,
             'bloqueado_bienestar' => $primaryBloqueo !== null,
+            'puede_cesar' => $contrato === 'INDET' && !$ceseVigente && $estadoVisible !== 'CESADO',
             'bloqueo_bienestar' => $primaryBloqueo ? [
                 'tipo' => (string) $primaryBloqueo->tipo,
                 'tipo_label' => method_exists($primaryBloqueo, 'tipoLabel') ? $primaryBloqueo->tipoLabel() : ucfirst(str_replace('_', ' ', (string) $primaryBloqueo->tipo)),

@@ -16,6 +16,22 @@ class PersonalFichaPdfService
 
     public function download(PersonalFicha $ficha): Response
     {
+        if (!class_exists(Dompdf::class)) {
+            return response($this->output($ficha), 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+            ]);
+        }
+
+        $name = $this->filename($ficha);
+
+        return response($this->output($ficha), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $name . '"',
+        ]);
+    }
+
+    public function output(PersonalFicha $ficha): string
+    {
         $ficha->loadMissing(['personal', 'familiares']);
 
         $html = view('personal.fichas.pdf', [
@@ -27,9 +43,7 @@ class PersonalFichaPdfService
         ])->render();
 
         if (!class_exists(Dompdf::class)) {
-            return response($html, 200, [
-                'Content-Type' => 'text/html; charset=UTF-8',
-            ]);
+            return $html;
         }
 
         $options = new Options();
@@ -42,11 +56,11 @@ class PersonalFichaPdfService
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
 
-        $name = 'ficha_colaborador_' . Str::slug($ficha->personal?->nombre_completo ?: $ficha->numero_documento) . '.pdf';
+        return $dompdf->output();
+    }
 
-        return response($dompdf->output(), 200, [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="' . $name . '"',
-        ]);
+    public function filename(PersonalFicha $ficha): string
+    {
+        return 'ficha_colaborador_' . Str::slug($ficha->personal?->nombre_completo ?: $ficha->numero_documento) . '.pdf';
     }
 }

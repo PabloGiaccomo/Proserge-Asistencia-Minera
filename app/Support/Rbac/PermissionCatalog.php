@@ -30,6 +30,7 @@ class PermissionCatalog
     /** @var array<int, string> */
     private const ACTIONS = [
         'ver',
+        'dashboards',
         'crear',
         'editar',
         'actualizar',
@@ -50,6 +51,14 @@ class PermissionCatalog
     public static function actions(): array
     {
         return self::ACTIONS;
+    }
+
+    public static function actionLabel(string $action): string
+    {
+        return match ($action) {
+            'dashboards' => 'Dashboards',
+            default => ucfirst($action),
+        };
     }
 
     public static function moduleLabel(string $module): string
@@ -81,9 +90,9 @@ class PermissionCatalog
                 'permisos' => self::matrixFromSelections([
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
-                    'personal' => ['ver', 'editar', 'actualizar', 'exportar'],
-                    'rq_mina' => ['ver', 'crear', 'editar', 'actualizar'],
-                    'man_power' => ['ver', 'crear', 'editar', 'actualizar', 'asignar'],
+                    'personal' => ['ver', 'dashboards', 'editar', 'actualizar', 'exportar'],
+                    'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
+                    'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
                 ]),
             ],
             [
@@ -93,12 +102,12 @@ class PermissionCatalog
                 'permisos' => self::matrixFromSelections([
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
-                    'personal' => ['ver', 'crear', 'editar', 'actualizar', 'exportar', 'importar'],
+                    'personal' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'exportar', 'importar'],
                     'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'administrar'],
-                    'rq_proserge' => ['ver', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'man_power' => ['ver', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'bienestar' => ['ver', 'crear', 'editar', 'actualizar'],
-                    'asistencias' => ['ver', 'editar', 'actualizar', 'cerrar'],
+                    'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
+                    'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
+                    'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
+                    'asistencias' => ['ver', 'dashboards', 'editar', 'actualizar', 'cerrar'],
                 ]),
             ],
             [
@@ -108,10 +117,10 @@ class PermissionCatalog
                 'permisos' => self::matrixFromSelections([
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
-                    'mi_asistencia' => ['ver'],
-                    'asistencias' => ['ver', 'crear', 'editar', 'actualizar', 'cerrar'],
-                    'evaluaciones' => ['ver', 'crear', 'editar', 'actualizar'],
-                    'personal' => ['ver'],
+                    'mi_asistencia' => ['ver', 'dashboards'],
+                    'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'cerrar'],
+                    'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
+                    'personal' => ['ver', 'dashboards'],
                 ]),
             ],
             [
@@ -121,7 +130,7 @@ class PermissionCatalog
                 'permisos' => self::matrixFromSelections([
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
-                    'mi_asistencia' => ['ver'],
+                    'mi_asistencia' => ['ver', 'dashboards'],
                 ]),
             ],
         ];

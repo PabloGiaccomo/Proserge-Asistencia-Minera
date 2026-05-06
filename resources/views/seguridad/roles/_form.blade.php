@@ -51,7 +51,7 @@
                     <tr>
                         <th>Módulo</th>
                         @foreach($actions as $action)
-                            <th>{{ ucfirst($action) }}</th>
+                            <th>{{ \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</th>
                         @endforeach
                     </tr>
                 </thead>

@@ -61,6 +61,11 @@ class Personal extends Model
         return $this->hasMany(PersonalBloqueo::class, 'personal_id');
     }
 
+    public function rqProsergeDetalles(): HasMany
+    {
+        return $this->hasMany(RQProsergeDetalle::class, 'personal_id');
+    }
+
     public function fichas(): HasMany
     {
         return $this->hasMany(PersonalFicha::class, 'personal_id');

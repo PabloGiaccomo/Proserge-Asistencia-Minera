@@ -142,6 +142,157 @@ class PersonalFichaService
         ];
     }
 
+    public function createManual(array $fields, array $attributes, Usuario $user): array
+    {
+        $data = $this->normalizeFichaData($fields);
+        $documentType = PersonalNormalizer::documentType($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
+        $documentNumber = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
+
+        if (!PersonalNormalizer::isValidDocument($documentType, $documentNumber)) {
+            throw ValidationException::withMessages([
+                'fields.numero_documento' => 'El documento no tiene un formato valido para el tipo seleccionado.',
+            ]);
+        }
+
+        $missingRequired = collect(PersonalFichaCatalog::requiredKeys())
+            ->filter(fn (string $key): bool => trim((string) ($data[$key] ?? '')) === '')
+            ->values();
+
+        $verifyFields = collect($attributes['verify_fields'] ?? PersonalFichaCatalog::defaultVerificationKeys())
+            ->merge($missingRequired)
+            ->filter(fn ($key): bool => array_key_exists((string) $key, PersonalFichaCatalog::fields()))
+            ->map(fn ($key): string => (string) $key)
+            ->unique()
+            ->values()
+            ->all();
+
+        return DB::transaction(function () use ($data, $documentType, $documentNumber, $attributes, $verifyFields, $missingRequired, $user): array {
+            $existing = $this->findPersonalByDocument($documentType, $documentNumber);
+
+            if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
+                throw ValidationException::withMessages([
+                    'fields.numero_documento' => 'Ya existe un trabajador activo o pendiente con este documento.',
+                ]);
+            }
+
+            $payload = [
+                ...$this->personalPayloadFromFicha($data, PersonalFicha::ESTADO_PENDIENTE),
+                'es_supervisor' => filter_var($attributes['es_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'minas' => $attributes['minas'] ?? [],
+            ];
+
+            $personal = $existing
+                ? $this->personalService->update($existing, $payload)
+                : $this->personalService->create($payload);
+
+            $ficha = PersonalFicha::query()->create([
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personal->id,
+                'estado' => PersonalFicha::ESTADO_PENDIENTE,
+                'tipo_documento' => $documentType,
+                'numero_documento' => $documentNumber,
+                'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                'datos_detectados_json' => $data,
+                'datos_json' => $data,
+                'campos_verificacion_json' => $verifyFields,
+                'advertencias_json' => [],
+                'created_by_usuario_id' => $user->id,
+            ]);
+
+            [$token, $link] = $this->createSecureLink($ficha);
+
+            return [
+                'personal' => $personal->fresh(['fichaColaborador.link']),
+                'ficha' => $ficha->fresh(['personal', 'link']),
+                'link' => $link,
+                'token' => $token,
+                'url' => route('ficha-colaborador.show', ['token' => $token]),
+                'missing_required' => $missingRequired->all(),
+            ];
+        });
+    }
+
+    public function updateManual(Personal $personal, array $fields, array $attributes, Usuario $user): array
+    {
+        $data = $this->normalizeFichaData($fields);
+        $documentType = PersonalNormalizer::documentType($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
+        $documentNumber = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
+
+        if (!PersonalNormalizer::isValidDocument($documentType, $documentNumber)) {
+            throw ValidationException::withMessages([
+                'fields.numero_documento' => 'El documento no tiene un formato valido para el tipo seleccionado.',
+            ]);
+        }
+
+        $existing = $this->findPersonalByDocument($documentType, $documentNumber);
+        if ($existing && $existing->id !== $personal->id && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
+            throw ValidationException::withMessages([
+                'fields.numero_documento' => 'Ya existe otro trabajador activo o pendiente con este documento.',
+            ]);
+        }
+
+        $documentPaths = $this->storeFichaDocuments($personal->fichaColaborador?->id, $attributes['documentos'] ?? []);
+
+        return DB::transaction(function () use ($personal, $data, $attributes, $user, $documentType, $documentNumber, $documentPaths): array {
+            $updatedPersonal = $this->personalService->update($personal, [
+                ...$this->personalPayloadFromFicha($data, $attributes['estado'] ?? ((string) $personal->estado ?: 'ACTIVO')),
+                'es_supervisor' => filter_var($attributes['es_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'minas' => $attributes['minas'] ?? [],
+            ]);
+
+            $ficha = $personal->fichaColaborador()->with('link')->first();
+
+            if ($ficha) {
+                $ficha->forceFill([
+                    'tipo_documento' => $documentType,
+                    'numero_documento' => $documentNumber,
+                    'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                    'datos_json' => $data,
+                    'datos_detectados_json' => $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $data),
+                ])->save();
+            } else {
+                $estadoFicha = strtoupper((string) ($attributes['estado'] ?? $personal->estado)) === 'ACTIVO'
+                    ? PersonalFicha::ESTADO_APROBADO
+                    : 'INACTIVO';
+
+                $ficha = PersonalFicha::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'personal_id' => $updatedPersonal->id,
+                    'estado' => $estadoFicha,
+                    'tipo_documento' => $documentType,
+                    'numero_documento' => $documentNumber,
+                    'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                    'datos_detectados_json' => $data,
+                    'datos_json' => $data,
+                    'campos_verificacion_json' => [],
+                    'advertencias_json' => [],
+                    'created_by_usuario_id' => $user->id,
+                    'approved_at' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? now() : null,
+                    'approved_by_usuario_id' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? $user->id : null,
+                ]);
+            }
+
+            if (array_key_exists('familiares', $attributes)) {
+                PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
+
+                foreach ($this->normalizeFamiliares($attributes['familiares'] ?? []) as $familiar) {
+                    PersonalFichaFamiliar::query()->create([
+                        'id' => (string) Str::uuid(),
+                        'personal_ficha_id' => $ficha->id,
+                        ...$familiar,
+                    ]);
+                }
+            }
+
+            $this->syncFichaDocuments($ficha, $documentPaths, $user);
+
+            return [
+                'personal' => $updatedPersonal->fresh(['fichaColaborador.link']),
+                'ficha' => $ficha->fresh(['personal', 'link', 'familiares', 'archivos']),
+            ];
+        });
+    }
+
     public function documentAvailability(array $fields): array
     {
         $data = $this->normalizeFichaData($fields);
@@ -205,7 +356,7 @@ class PersonalFichaService
             return ['mode' => 'expired', 'link' => null, 'ficha' => null];
         }
 
-        if ($ficha->submitted_at) {
+        if ($ficha->submitted_at && $link->estado !== PersonalFichaLink::ESTADO_ACTIVO) {
             if ($link->read_until && now()->lessThanOrEqualTo($link->read_until)) {
                 return ['mode' => 'readonly', 'link' => $link, 'ficha' => $ficha];
             }
@@ -224,11 +375,17 @@ class PersonalFichaService
     public function submitFromWorker(PersonalFichaLink $link, array $fields, array $familiares, string $firmaBase64, UploadedFile $huella, array $documentos = []): PersonalFicha
     {
         $ficha = $link->ficha()->with('personal')->firstOrFail();
+        $wasApproved = $ficha->estado === PersonalFicha::ESTADO_APROBADO;
+        $previousPersonalState = strtoupper((string) ($ficha->personal?->estado ?? ''));
 
         if ($ficha->submitted_at || now()->greaterThan($link->expires_at)) {
-            throw ValidationException::withMessages([
-                'ficha' => 'Este link ya no permite modificaciones.',
-            ]);
+            $isRegularizationLink = $link->estado === PersonalFichaLink::ESTADO_ACTIVO && !$link->disabled_at && now()->lessThanOrEqualTo($link->expires_at);
+
+            if (!$isRegularizationLink) {
+                throw ValidationException::withMessages([
+                    'ficha' => 'Este link ya no permite modificaciones.',
+                ]);
+            }
         }
 
         $data = $this->normalizeFichaData([
@@ -263,14 +420,20 @@ class PersonalFichaService
 
         return DB::transaction(function () use ($ficha, $link, $data, $familiares, $firmaBase64, $huella, $huellaPath, $documentPaths): PersonalFicha {
             $ficha->forceFill([
-                'estado' => PersonalFicha::ESTADO_ENVIADA,
+                'estado' => $wasApproved ? PersonalFicha::ESTADO_APROBADO : PersonalFicha::ESTADO_ENVIADA,
                 'datos_json' => $data,
                 'firma_base64' => $firmaBase64,
                 'huella_path' => $huellaPath,
                 'submitted_at' => now(),
             ])->save();
 
-            $ficha->personal?->forceFill(['estado' => PersonalFicha::ESTADO_ENVIADA])->save();
+            if ($ficha->personal) {
+                $newPersonalState = $wasApproved || in_array($previousPersonalState, ['ACTIVO', 'INACTIVO', 'CESADO'], true)
+                    ? $previousPersonalState
+                    : PersonalFicha::ESTADO_ENVIADA;
+
+                $ficha->personal->forceFill(['estado' => $newPersonalState])->save();
+            }
 
             PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
             foreach ($this->normalizeFamiliares($familiares) as $familiar) {
@@ -443,24 +606,31 @@ class PersonalFichaService
         $this->expireStaleLinks();
 
         return PersonalFicha::query()
-            ->with(['personal', 'link'])
-            ->whereIn('estado', [
-                PersonalFicha::ESTADO_PENDIENTE,
-                PersonalFicha::ESTADO_ENVIADA,
-                PersonalFicha::ESTADO_OBSERVADO,
-            ])
+            ->with(['personal', 'link', 'archivos'])
             ->latest('created_at')
             ->limit(300)
             ->get()
+            ->filter(function (PersonalFicha $ficha): bool {
+                $hasWorkflowState = in_array($ficha->estado, [
+                    PersonalFicha::ESTADO_PENDIENTE,
+                    PersonalFicha::ESTADO_ENVIADA,
+                    PersonalFicha::ESTADO_OBSERVADO,
+                ], true);
+
+                return $hasWorkflowState || $this->needsRegularization($ficha);
+            })
             ->map(function (PersonalFicha $ficha): array {
-                $link = $ficha->link;
+                $summary = $this->regularizationSummary($ficha);
 
                 return [
                     'ficha' => $ficha,
                     'personal' => $ficha->personal,
-                    'link' => $link,
-                    'url' => $this->publicUrlForLink($link),
+                    'link' => $summary['link'],
+                    'url' => $summary['url'],
                     'estado_label' => PersonalFichaCatalog::stateLabel($ficha->estado),
+                    'missing_fields' => $summary['missing_fields'],
+                    'missing_documents' => $summary['missing_documents'],
+                    'can_regularize' => $summary['can_regularize'],
                 ];
             })
             ->all();
@@ -487,6 +657,91 @@ class PersonalFichaService
         return $links->count();
     }
 
+    public function extendLink(PersonalFicha $ficha, int $hours = 24): PersonalFichaLink
+    {
+        $link = $ficha->link()->first();
+
+        if (!$link) {
+            throw ValidationException::withMessages([
+                'ficha' => 'La ficha no tiene un link temporal activo para extender.',
+            ]);
+        }
+
+        if ($ficha->submitted_at) {
+            throw ValidationException::withMessages([
+                'ficha' => 'La ficha ya fue enviada por el trabajador y no se puede extender.',
+            ]);
+        }
+
+        $base = $link->expires_at && $link->expires_at->greaterThan(now())
+            ? $link->expires_at->copy()
+            : now()->copy();
+
+        $link->forceFill([
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'disabled_at' => null,
+            'submitted_at' => null,
+            'read_until' => null,
+            'expires_at' => $base->addHours($hours),
+        ])->save();
+
+        return $link->fresh();
+    }
+
+    public function ensureRegularizationLink(PersonalFicha $ficha, int $hours = 24): array
+    {
+        $ficha->loadMissing(['personal', 'link', 'archivos']);
+
+        if (!$this->needsRegularization($ficha)) {
+            throw ValidationException::withMessages([
+                'ficha' => 'La ficha ya no tiene datos o documentos pendientes por regularizar.',
+            ]);
+        }
+
+        if ($ficha->link && $ficha->link->estado === PersonalFichaLink::ESTADO_ACTIVO && $ficha->link->expires_at?->greaterThan(now())) {
+            return [
+                'link' => $ficha->link->fresh(),
+                'url' => $this->publicUrlForLink($ficha->link),
+            ];
+        }
+
+        [$token, $link] = $this->createSecureLink($ficha, $hours);
+
+        return [
+            'link' => $link,
+            'token' => $token,
+            'url' => route('ficha-colaborador.show', ['token' => $token]),
+        ];
+    }
+
+    public function deleteDraftFicha(PersonalFicha $ficha): void
+    {
+        DB::transaction(function () use ($ficha): void {
+            $ficha->loadMissing(['personal', 'link', 'familiares', 'archivos']);
+
+            foreach ($ficha->archivos as $archivo) {
+                if ($archivo->path && Storage::disk('local')->exists($archivo->path)) {
+                    Storage::disk('local')->delete($archivo->path);
+                }
+                $archivo->delete();
+            }
+
+            if ($ficha->huella_path && Storage::disk('local')->exists($ficha->huella_path)) {
+                Storage::disk('local')->delete($ficha->huella_path);
+            }
+
+            PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
+            PersonalFichaLink::query()->where('personal_ficha_id', $ficha->id)->delete();
+
+            $personal = $ficha->personal;
+            $ficha->delete();
+
+            if ($personal) {
+                $this->personalService->deleteCompletely($personal);
+            }
+        });
+    }
+
     public function normalizeFichaData(array $fields): array
     {
         $data = PersonalFichaCatalog::emptyData();
@@ -501,7 +756,7 @@ class PersonalFichaService
         $data['numero_documento'] = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
         $data['contrato'] = PersonalNormalizer::contract($data['contrato'] ?? null);
 
-        foreach (['fecha_nacimiento', 'fecha_ingreso'] as $dateField) {
+        foreach (['fecha_nacimiento', 'fecha_ingreso', 'fecha_fin_contrato', 'fecha_cese'] as $dateField) {
             $data[$dateField] = PersonalNormalizer::isoDate($data[$dateField] ?? null) ?? '';
         }
 
@@ -600,14 +855,193 @@ class PersonalFichaService
             ->all();
     }
 
-    private function createSecureLink(PersonalFicha $ficha): array
+    public function familyRowsForEdit(?PersonalFicha $ficha): array
+    {
+        if ($ficha && $ficha->relationLoaded('familiares') === false) {
+            $ficha->load('familiares');
+        }
+
+        if ($ficha && $ficha->familiares->count() > 0) {
+            return $ficha->familiares->map(fn ($item) => [
+                'nombres_apellidos' => $item->nombres_apellidos,
+                'parentesco' => $item->parentesco,
+                'fecha_nacimiento' => optional($item->fecha_nacimiento)->toDateString(),
+                'tipo_documento' => $item->tipo_documento,
+                'numero_documento' => $item->numero_documento,
+                'telefono' => $item->telefono,
+                'vive_con_trabajador' => $item->vive_con_trabajador,
+                'contacto_emergencia' => $item->contacto_emergencia,
+            ])->values()->all();
+        }
+
+        return collect(['Padre', 'Madre', 'Conyuge'])
+            ->map(fn ($parentesco) => [
+                'nombres_apellidos' => '',
+                'parentesco' => $parentesco,
+                'fecha_nacimiento' => '',
+                'tipo_documento' => 'DNI',
+                'numero_documento' => '',
+                'telefono' => '',
+                'vive_con_trabajador' => false,
+                'contacto_emergencia' => false,
+            ])
+            ->all();
+    }
+
+    public function missingRequiredDocumentKeys(?PersonalFicha $ficha): array
+    {
+        if (!$ficha) {
+            return array_keys(array_filter(
+                PersonalFichaCatalog::documentRequirements(),
+                fn (array $requirement): bool => (bool) ($requirement['required'] ?? false)
+            ));
+        }
+
+        $ficha->loadMissing('archivos');
+        $attachedTypes = $ficha->archivos->pluck('tipo')->map(fn ($value): string => (string) $value)->all();
+
+        return collect(PersonalFichaCatalog::documentRequirements())
+            ->filter(fn (array $requirement): bool => (bool) ($requirement['required'] ?? false))
+            ->keys()
+            ->reject(fn (string $key): bool => in_array($key, $attachedTypes, true))
+            ->values()
+            ->all();
+    }
+
+    public function hasMissingRequiredDocuments(?PersonalFicha $ficha): bool
+    {
+        return count($this->missingRequiredDocumentKeys($ficha)) > 0;
+    }
+
+    public function missingRequiredFieldKeys(?PersonalFicha $ficha): array
+    {
+        if (!$ficha) {
+            return PersonalFichaCatalog::requiredKeys();
+        }
+
+        $data = is_array($ficha->datos_json ?? null) ? $ficha->datos_json : [];
+        if ($data === []) {
+            return PersonalFichaCatalog::requiredKeys();
+        }
+
+        $requiredKeys = collect(PersonalFichaCatalog::requiredKeys());
+
+        if (($data['estado_civil'] ?? null) === 'Otro') {
+            $requiredKeys->push('estado_civil_otro');
+        }
+
+        if (($data['nacionalidad'] ?? null) === 'Otra') {
+            $requiredKeys->push('nacionalidad_otra');
+        }
+
+        if (($data['pais_nacimiento'] ?? null) === 'Otro') {
+            $requiredKeys = $requiredKeys->merge(['pais_nacimiento_otro', 'lugar_nacimiento_extranjero']);
+        } else {
+            $requiredKeys = $requiredKeys->merge(['departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento']);
+        }
+
+        if (($data['domicilio_tipo'] ?? 'Peru') === 'Extranjero') {
+            $requiredKeys = $requiredKeys->merge(['domicilio_pais_otro', 'domicilio_extranjero']);
+        } else {
+            $requiredKeys = $requiredKeys->merge(['domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion']);
+        }
+
+        $banco = (string) ($data['banco'] ?? '');
+        if (in_array($banco, ['BCP', 'Interbank'], true)) {
+            $requiredKeys->push('numero_cuenta');
+        } elseif ($banco === 'Otro') {
+            $requiredKeys = $requiredKeys->merge(['banco_otro', 'cci']);
+        }
+
+        if (($data['sistema_pensionario'] ?? null) === 'Sistema Privado de Pensiones') {
+            $requiredKeys = $requiredKeys->merge(['tipo_comision', 'tipo_afp', 'cuspp']);
+        }
+
+        if (($data['quinta_empleador_principal'] ?? null) === 'Otra empresa') {
+            $requiredKeys = $requiredKeys->merge(['quinta_otra_empresa', 'quinta_otra_empresa_ruc']);
+        }
+
+        if (in_array((string) ($data['contrato'] ?? ''), ['REG', 'FIJO', 'INTER'], true)) {
+            $requiredKeys->push('fecha_fin_contrato');
+        }
+
+        if ((string) ($data['contrato'] ?? '') === 'INDET') {
+            $requiredKeys->push('fecha_ingreso');
+        }
+
+        return $requiredKeys
+            ->unique()
+            ->filter(function (string $key) use ($data): bool {
+                $value = $data[$key] ?? null;
+
+                if (is_array($value)) {
+                    return count(array_filter($value, static fn ($item) => filled($item))) === 0;
+                }
+
+                return !filled($value);
+            })
+            ->values()
+            ->all();
+    }
+
+    public function hasMissingRequiredFields(?PersonalFicha $ficha): bool
+    {
+        return count($this->missingRequiredFieldKeys($ficha)) > 0;
+    }
+
+    public function needsRegularization(?PersonalFicha $ficha): bool
+    {
+        if (!$ficha) {
+            return false;
+        }
+
+        return $this->hasMissingRequiredFields($ficha)
+            || $this->hasMissingRequiredDocuments($ficha)
+            || in_array((string) $ficha->estado, [
+                PersonalFicha::ESTADO_OBSERVADO,
+                PersonalFicha::ESTADO_RECHAZADO,
+                PersonalFicha::ESTADO_LINK_VENCIDO,
+            ], true);
+    }
+
+    public function regularizationSummary(?PersonalFicha $ficha): array
+    {
+        if (!$ficha) {
+            return [
+                'missing_fields' => [],
+                'missing_documents' => [],
+                'can_regularize' => false,
+                'has_active_link' => false,
+                'link' => null,
+                'url' => null,
+            ];
+        }
+
+        $ficha->loadMissing('link');
+        $missingFields = $this->missingRequiredFieldKeys($ficha);
+        $missingDocuments = $this->missingRequiredDocumentKeys($ficha);
+        $link = $ficha->link;
+
+        return [
+            'missing_fields' => $missingFields,
+            'missing_documents' => $missingDocuments,
+            'can_regularize' => $this->needsRegularization($ficha),
+            'has_active_link' => $link
+                && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
+                && $link->expires_at?->greaterThan(now()),
+            'link' => $link,
+            'url' => $this->publicUrlForLink($link),
+        ];
+    }
+
+    private function createSecureLink(PersonalFicha $ficha, int $hours = 24): array
     {
         do {
             $token = Str::random(80);
             $hash = hash('sha256', $token);
         } while (PersonalFichaLink::query()->where('token_hash', $hash)->exists());
 
-        $expiresAt = now()->copy()->addHours(24)->format('Y-m-d H:i:s');
+        $expiresAt = now()->copy()->addHours($hours)->format('Y-m-d H:i:s');
 
         $link = PersonalFichaLink::query()->create([
             'id' => (string) Str::uuid(),
@@ -635,6 +1069,85 @@ class PersonalFichaService
         }
 
         return $merged;
+    }
+
+    private function storeFichaDocuments(?string $fichaId, array $documentos): array
+    {
+        if ($fichaId === null || $fichaId === '') {
+            return collect($documentos)
+                ->filter(fn ($documento) => $documento instanceof UploadedFile)
+                ->mapWithKeys(function (UploadedFile $documento, string $tipo): array {
+                    $safeTipo = Str::slug((string) $tipo, '_') ?: 'documento';
+
+                    return [$safeTipo => [
+                        'file' => $documento,
+                        'path' => null,
+                    ]];
+                })
+                ->all();
+        }
+
+        $documentPaths = [];
+        foreach ($documentos as $tipo => $documento) {
+            if (!$documento instanceof UploadedFile) {
+                continue;
+            }
+
+            $safeTipo = Str::slug((string) $tipo, '_') ?: 'documento';
+            $documentPaths[$safeTipo] = [
+                'file' => $documento,
+                'path' => $documento->storeAs(
+                    'personal_fichas/' . $fichaId . '/documentos',
+                    $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
+                    'local',
+                ),
+            ];
+        }
+
+        return $documentPaths;
+    }
+
+    private function syncFichaDocuments(PersonalFicha $ficha, array $documentPaths, Usuario $user): void
+    {
+        foreach ($documentPaths as $tipo => $payload) {
+            $existing = PersonalFichaArchivo::query()
+                ->where('personal_ficha_id', $ficha->id)
+                ->where('tipo', $tipo)
+                ->first();
+
+            if ($existing?->path && Storage::disk('local')->exists($existing->path)) {
+                Storage::disk('local')->delete($existing->path);
+            }
+
+            if ($existing) {
+                $existing->delete();
+            }
+
+            /** @var UploadedFile $documento */
+            $documento = $payload['file'];
+            $path = $payload['path'];
+
+            if ($path === null) {
+                $safeTipo = Str::slug((string) $tipo, '_') ?: 'documento';
+                $path = $documento->storeAs(
+                    'personal_fichas/' . $ficha->id . '/documentos',
+                    $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
+                    'local',
+                );
+            }
+
+            PersonalFichaArchivo::query()->create([
+                'id' => (string) Str::uuid(),
+                'personal_ficha_id' => $ficha->id,
+                'tipo' => $tipo,
+                'nombre_original' => $documento->getClientOriginalName(),
+                'path' => $path,
+                'mime' => $documento->getMimeType(),
+                'size' => $documento->getSize(),
+                'uploaded_by_usuario_id' => $user->id,
+                'uploaded_by_public' => false,
+            ]);
+        }
     }
 
     private function rrhhUserIds(): array

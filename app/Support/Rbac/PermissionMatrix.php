@@ -32,6 +32,13 @@ class PermissionMatrix
                     $matrix[$module][$action] = filter_var($allowed, FILTER_VALIDATE_BOOL);
                 }
             }
+
+            if (array_key_exists('dashboards', $matrix[$module])
+                && !array_key_exists('dashboards', $actions)
+                && (($matrix[$module]['ver'] ?? false) === true)
+            ) {
+                $matrix[$module]['dashboards'] = true;
+            }
         }
 
         return $matrix;

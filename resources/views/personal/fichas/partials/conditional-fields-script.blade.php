@@ -110,9 +110,16 @@ document.addEventListener('DOMContentLoaded', function () {
             setVisible(key, otroEmpleador);
             setEnabled(key, otroEmpleador);
         });
+
+        const contrato = byKey('contrato')?.value || '';
+        const contratoConFin = contrato === 'FIJO' || contrato === 'INTER' || contrato === 'REG';
+        setVisible('fecha_fin_contrato', contratoConFin);
+        setEnabled('fecha_fin_contrato', contratoConFin);
+        setVisible('fecha_cese', contrato === 'INDET');
+        setEnabled('fecha_cese', contrato === 'INDET');
     };
 
-    ['estado_civil', 'nacionalidad', 'pais_nacimiento', 'domicilio_tipo', 'banco', 'sistema_pensionario', 'quinta_empleador_principal'].forEach(function (key) {
+    ['estado_civil', 'nacionalidad', 'pais_nacimiento', 'domicilio_tipo', 'banco', 'sistema_pensionario', 'quinta_empleador_principal', 'contrato'].forEach(function (key) {
         byKey(key)?.addEventListener('change', applyConditionals);
     });
 

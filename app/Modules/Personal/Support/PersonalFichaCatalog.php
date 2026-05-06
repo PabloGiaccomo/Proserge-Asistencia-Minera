@@ -99,6 +99,8 @@ class PersonalFichaCatalog
                         'INDET' => 'Indeterminado',
                     ]),
                     self::field('fecha_ingreso', 'Inicio relacion laboral', 'date', false),
+                    self::field('fecha_fin_contrato', 'Fin de contrato', 'date', false),
+                    self::field('fecha_cese', 'Fecha de cese', 'date', false),
                     self::field('tipo_trabajador', 'Tipo de trabajador', 'text', false),
                     self::field('categoria_trabajador', 'Categoria', 'text', false),
                 ],

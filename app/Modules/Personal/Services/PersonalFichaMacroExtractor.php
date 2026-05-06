@@ -37,6 +37,7 @@ class PersonalFichaMacroExtractor
         'ocupacion' => ['ocupacion'],
         'contrato' => ['contrato', 'tipocontrato', 'tipodecontrato', 'modalidadcontrato'],
         'fecha_ingreso' => ['fechaingreso', 'fechadeingreso', 'inicio', 'fechainicio', 'fechainiciocontrato'],
+        'fecha_fin_contrato' => ['fechafincontrato', 'fincontrato', 'fechatermino', 'fechafin', 'vencimientocontrato'],
         'unidad_minera' => ['mina', 'unidadminera', 'sede', 'centrodetrabajo'],
         'area' => ['area'],
         'banco' => ['banco', 'entidadbancaria'],

@@ -21,6 +21,17 @@
         <div class="ficha-alert">{{ session('success') }}</div>
     @endif
 
+    @if(session('error'))
+        <div class="ficha-alert ficha-alert-danger">{{ session('error') }}</div>
+    @endif
+
+    @if(session('regularization_link'))
+        <div class="ficha-alert">
+            Link temporal habilitado:
+            <a href="{{ session('regularization_link') }}" target="_blank" rel="noopener">{{ session('regularization_link') }}</a>
+        </div>
+    @endif
+
     @if(count(session('warning_lines', [])) > 0)
         <div class="ficha-alert ficha-alert-warning">
             @foreach(session('warning_lines', []) as $line)
@@ -55,6 +66,8 @@
                                 $ficha = $row['ficha'];
                                 $personal = $row['personal'];
                                 $link = $row['link'];
+                                $missingFields = $row['missing_fields'] ?? [];
+                                $missingDocuments = $row['missing_documents'] ?? [];
                                 $statusClass = match($ficha->estado) {
                                     'FICHA_ENVIADA' => 'ficha-status-sent',
                                     'APROBADO' => 'ficha-status-approved',
@@ -66,6 +79,11 @@
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
                                     <div class="ficha-card-subtitle">{{ $personal?->puesto ?: 'Puesto pendiente' }}</div>
+                                    @if(count($missingFields) > 0 || count($missingDocuments) > 0)
+                                        <div class="ficha-card-subtitle" style="color:#b45309; margin-top:4px;">
+                                            Faltan datos o documentos importantes
+                                        </div>
+                                    @endif
                                 </td>
                                 <td>{{ $ficha->tipo_documento }} {{ $ficha->numero_documento }}</td>
                                 <td><span class="ficha-status {{ $statusClass }}">{{ $row['estado_label'] }}</span></td>
@@ -85,9 +103,24 @@
                                         <a href="{{ route('personal.fichas.review', $ficha->id) }}" class="btn {{ $ficha->estado === 'FICHA_ENVIADA' ? 'btn-primary' : 'btn-outline' }} btn-xs">
                                             {{ $ficha->estado === 'FICHA_ENVIADA' ? 'Validar / activar' : 'Ver ficha' }}
                                         </a>
-                                        @if($personal)
-                                            <a href="{{ route('personal.show', $personal->id) }}" class="btn btn-outline btn-xs">Ver personal</a>
-                                        @endif
+                                        @allowed('personal', 'eliminar')
+                                            @if($link && !$ficha->submitted_at)
+                                                <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-outline btn-xs">Ampliar 1 dia</button>
+                                                </form>
+                                            @endif
+                                            @if(!empty($row['can_regularize']))
+                                                <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" onsubmit="return confirm('Se habilitara un link temporal para regularizar la ficha del trabajador.');">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-outline btn-xs">Habilitar link temporal</button>
+                                                </form>
+                                            @endif
+                                            <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" onsubmit="return confirm('Se eliminara por completo este trabajador temporal y su ficha.');">
+                                                @csrf
+                                                <button type="submit" class="btn btn-danger btn-xs">Borrar completo</button>
+                                            </form>
+                                        @endallowed
                                     </div>
                                 </td>
                             </tr>

@@ -13,12 +13,22 @@
             <div class="page-actions">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
                 <a href="{{ route('personal.edit', $id) }}" class="btn btn-primary">Editar</a>
+                @allowed('personal', 'eliminar')
+                    <form method="POST" action="{{ route('personal.destroy', $id) }}" onsubmit="return confirm('Se eliminara por completo este trabajador.');">
+                        @csrf
+                        <button type="submit" class="btn btn-danger">Eliminar</button>
+                    </form>
+                @endallowed
             </div>
         </div>
     </div>
 
     @if(session('success'))
         <div class="ficha-alert">{{ session('success') }}</div>
+    @endif
+
+    @if(session('error'))
+        <div class="ficha-alert ficha-alert-danger">{{ session('error') }}</div>
     @endif
 
     <div class="ficha-card">

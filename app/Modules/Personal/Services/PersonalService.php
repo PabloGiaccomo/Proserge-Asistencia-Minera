@@ -4,13 +4,19 @@ namespace App\Modules\Personal\Services;
 
 use App\Models\Mina;
 use App\Models\Personal;
+use App\Models\PersonalBloqueo;
+use App\Models\PersonalFichaFamiliar;
+use App\Models\PersonalFichaLink;
 use App\Models\PersonalMina;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PersonalService
 {
@@ -29,6 +35,19 @@ class PersonalService
                         ->where('visible_para_planner', true)
                         ->orderBy('fecha_inicio')
                         ->orderBy('fecha_fin');
+                },
+            ]);
+        }
+
+        if (Schema::hasTable('rq_proserge_detalle') && Schema::hasTable('rq_proserge')) {
+            $today = Carbon::today()->toDateString();
+            $query->with([
+                'rqProsergeDetalles' => function ($q) use ($today): void {
+                    $q->whereDate('fecha_inicio', '<=', $today)
+                        ->whereDate('fecha_fin', '>=', $today)
+                        ->whereHas('rqProserge', function ($rq): void {
+                            $rq->whereNotIn('estado', ['CANCELADO', 'CERRADO']);
+                        });
                 },
             ]);
         }
@@ -134,6 +153,19 @@ class PersonalService
                         ->where('visible_para_planner', true)
                         ->orderBy('fecha_inicio')
                         ->orderBy('fecha_fin');
+                },
+            ]);
+        }
+
+        if (Schema::hasTable('rq_proserge_detalle') && Schema::hasTable('rq_proserge')) {
+            $today = Carbon::today()->toDateString();
+            $query->with([
+                'rqProsergeDetalles' => function ($q) use ($today): void {
+                    $q->whereDate('fecha_inicio', '<=', $today)
+                        ->whereDate('fecha_fin', '>=', $today)
+                        ->whereHas('rqProserge', function ($rq): void {
+                            $rq->whereNotIn('estado', ['CANCELADO', 'CERRADO']);
+                        });
                 },
             ]);
         }
@@ -325,6 +357,64 @@ class PersonalService
         return $this->resolveState($value);
     }
 
+    public function markIndeterminateContractCeased(Personal $personal): Personal
+    {
+        if (PersonalNormalizer::contract($personal->contrato) !== 'INDET') {
+            throw ValidationException::withMessages([
+                'personal' => 'Solo el personal con contrato indeterminado puede cesarse manualmente desde acciones.',
+            ]);
+        }
+
+        $personal->forceFill(['estado' => 'CESADO'])->save();
+
+        return $personal->fresh(['minas', 'fichaColaborador.link']);
+    }
+
+    public function deleteCompletely(Personal $personal): void
+    {
+        $blockers = $this->deletionBlockers($personal);
+        if (!empty($blockers)) {
+            throw ValidationException::withMessages([
+                'personal' => 'No se puede eliminar porque tiene registros vinculados en: ' . implode(', ', $blockers) . '.',
+            ]);
+        }
+
+        DB::transaction(function () use ($personal): void {
+            $personal->loadMissing(['fichas.archivos', 'fichas.familiares', 'fichas.link', 'usuario', 'bloqueos', 'relacionesMina']);
+
+            foreach ($personal->fichas as $ficha) {
+                foreach ($ficha->archivos as $archivo) {
+                    if ($archivo->path && Storage::disk('local')->exists($archivo->path)) {
+                        Storage::disk('local')->delete($archivo->path);
+                    }
+                    $archivo->delete();
+                }
+
+                if ($ficha->huella_path && Storage::disk('local')->exists($ficha->huella_path)) {
+                    Storage::disk('local')->delete($ficha->huella_path);
+                }
+
+                PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
+                PersonalFichaLink::query()->where('personal_ficha_id', $ficha->id)->delete();
+                $ficha->delete();
+            }
+
+            if ($personal->usuario) {
+                if (Schema::hasTable('usuario_roles')) {
+                    DB::table('usuario_roles')->where('usuario_id', $personal->usuario->id)->delete();
+                }
+                if (Schema::hasTable('usuario_mina_scope')) {
+                    DB::table('usuario_mina_scope')->where('usuario_id', $personal->usuario->id)->delete();
+                }
+                $personal->usuario->delete();
+            }
+
+            PersonalBloqueo::query()->where('personal_id', $personal->id)->delete();
+            PersonalMina::query()->where('personal_id', $personal->id)->delete();
+            $personal->delete();
+        });
+    }
+
     private function resolveSupervisor(array $payload): bool
     {
         if (array_key_exists('es_supervisor', $payload)) {
@@ -345,6 +435,7 @@ class PersonalService
         $allowed = [
             'ACTIVO',
             'INACTIVO',
+            'CESADO',
             'PENDIENTE_COMPLETAR_FICHA',
             'FICHA_ENVIADA',
             'LINK_VENCIDO',
@@ -377,6 +468,31 @@ class PersonalService
                 ], true);
             })
             ->pluck('id')
+            ->values()
+            ->all();
+    }
+
+    private function deletionBlockers(Personal $personal): array
+    {
+        $checks = [
+            ['table' => 'asistencia_detalles', 'column' => 'trabajador_id', 'label' => 'asistencias'],
+            ['table' => 'faltas', 'column' => 'trabajador_id', 'label' => 'faltas'],
+            ['table' => 'grupo_trabajo_detalles', 'column' => 'personal_id', 'label' => 'grupos de trabajo'],
+            ['table' => 'rq_proserge_detalles', 'column' => 'personal_id', 'label' => 'RQ Proserge'],
+            ['table' => 'evaluaciones_desempeno', 'column' => 'trabajador_id', 'label' => 'evaluaciones de desempeno'],
+            ['table' => 'evaluacion_desempenos', 'column' => 'trabajador_id', 'label' => 'evaluaciones de desempeno'],
+            ['table' => 'evaluacion_supervisors', 'column' => 'evaluado_id', 'label' => 'evaluaciones de supervisor'],
+            ['table' => 'evaluacion_supervisores', 'column' => 'evaluado_id', 'label' => 'evaluaciones de supervisor'],
+        ];
+
+        return collect($checks)
+            ->filter(function (array $check) use ($personal): bool {
+                return Schema::hasTable($check['table'])
+                    && Schema::hasColumn($check['table'], $check['column'])
+                    && DB::table($check['table'])->where($check['column'], $personal->id)->exists();
+            })
+            ->pluck('label')
+            ->unique()
             ->values()
             ->all();
     }

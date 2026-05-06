@@ -12,6 +12,8 @@
         request('contrato'),
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
+    $canDeletePersonal = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'eliminar');
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
 @endphp
 <style>
 .acciones-dropdown a.accion-item {
@@ -339,9 +341,21 @@
 }
 
 .dg-pill-ocup-mina {
-    background: #cffafe;
-    color: #155e75;
-    border-color: #67e8f9;
+    background: #ecfdf5;
+    color: #047857;
+    border-color: #a7f3d0;
+}
+
+.dg-pill-ocup-mina-proceso {
+    background: #fffbeb;
+    color: #b45309;
+    border-color: #fde68a;
+}
+
+.dg-pill-ocup-mina-no-habilitado {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fecaca;
 }
 
 .dg-pill-ocup-oficina {
@@ -481,7 +495,7 @@
                             <polyline points="6 9 12 15 18 9"/>
                         </svg>
                     </button>
-                    <div id="accionesMenu" class="acciones-dropdown" style="display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 260px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 8px; z-index: 1000;">
+                    <div id="accionesMenu" class="acciones-dropdown" style="display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 260px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 8px; z-index: 9999;">
                         <a class="accion-item" href="{{ route('personal.create') }}">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
@@ -520,10 +534,12 @@
                                 <polyline points="7 10 12 15 17 10"/>
                                 <line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            Exportar Excel
+                            Exportar
                         </a>
-                    </div>
+                     </div>
                 </div>
+                
+                <!-- Quick Export Buttons removed as requested -->
                 
                 <!-- Botón filtros -->
                 <button type="button" id="filterToggle" class="btn btn-outline d-flex align-items-center gap-2" aria-expanded="false" aria-label="Mostrar filtros" title="Mostrar filtros" style="display: none;">
@@ -579,8 +595,9 @@
                 </label>
                 <div class="filter-chips-compact">
                     <button type="button" class="chip-compact {{ request('estado', '') == '' ? 'active' : '' }}" data-filter-chip="estado" data-value="">Todos</button>
-                    <button type="button" class="chip-compact chip-activo {{ request('estado') == 'activo' ? 'active' : '' }}" data-filter-chip="estado" data-value="activo">Activos</button>
-                    <button type="button" class="chip-compact chip-inactivo {{ request('estado') == 'inactivo' ? 'active' : '' }}" data-filter-chip="estado" data-value="inactivo">Inactivos</button>
+                    <button type="button" class="chip-compact chip-activo {{ strtoupper((string) request('estado')) == 'ACTIVO' ? 'active' : '' }}" data-filter-chip="estado" data-value="ACTIVO">Activos</button>
+                    <button type="button" class="chip-compact chip-inactivo {{ strtoupper((string) request('estado')) == 'INACTIVO' ? 'active' : '' }}" data-filter-chip="estado" data-value="INACTIVO">Inactivos</button>
+                    <button type="button" class="chip-compact {{ strtoupper((string) request('estado')) == 'CESADO' ? 'active' : '' }}" data-filter-chip="estado" data-value="CESADO">Cesados</button>
                 </div>
             </div>
 
@@ -765,10 +782,6 @@
                                                 <option value="activo">Activo</option>
                                                 <option value="inactivo">Inactivo</option>
                                                 <option value="cesado">Cesado</option>
-                                                <option value="pendiente ficha">Pendiente ficha</option>
-                                                <option value="ficha enviada">Ficha enviada</option>
-                                                <option value="link vencido">Link vencido</option>
-                                                <option value="observado">Observado</option>
                                             </select>
                                         </div>
                                     </div>
@@ -781,16 +794,14 @@
                                             <label class="dg-popover-label">Situación</label>
                                             <select id="dgBienestar" class="filter-compact-select">
                                                 <option value="">Todos</option>
-                                                <option value="activo">Activo</option>
+                                                <option value="parada">En parada</option>
+                                                <option value="oficina">En oficina</option>
+                                                <option value="taller">En taller</option>
+                                                <option value="habilitado">Habilitado</option>
+                                                <option value="no_habilitado">No habilitado</option>
                                                 <option value="vacaciones">Vacaciones</option>
-                                                <option value="descanso_medico">Descanso médico</option>
-                                                <option value="parada">Parada</option>
-                                                <option value="inhabilitado">Inhabilitado</option>
-                                                <option value="pendiente_ficha">Pendiente ficha</option>
-                                                <option value="ficha_enviada">Ficha enviada</option>
-                                                <option value="link_vencido">Link vencido</option>
-                                                <option value="restriccion_temporal">Restricción temporal</option>
-                                                <option value="otro">Otro</option>
+                                                <option value="descanso_medico">Descanso medico</option>
+                                                <option value="terminar_ficha">Terminar ficha</option>
                                             </select>
                                         </div>
                                     </div>
@@ -834,52 +845,14 @@
                                     $estadoText = match ($estadoRaw) {
                                         'CESADO' => 'Cesado',
                                         'INACTIVO' => 'Inactivo',
-                                        'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente ficha',
-                                        'FICHA_ENVIADA' => 'Ficha enviada',
-                                        'LINK_VENCIDO' => 'Link vencido',
-                                        'OBSERVADO' => 'Observado',
-                                        'RECHAZADO' => 'Rechazado',
-                                        default => $trabajador['estado_label'] ?? 'Activo',
+                                        default => 'Activo',
                                     };
-                                    $estadoActual = strtolower((string) ($trabajador['estado_actual'] ?? 'trabajando'));
-                                    $situacionKey = match ($estadoActual) {
-                                        'trabajando' => 'activo',
-                                        'vacaciones' => 'vacaciones',
-                                        'enfermo' => 'descanso_medico',
-                                        'parada' => 'parada',
-                                        'bloqueado_bienestar' => strtolower((string) ($trabajador['bloqueo_bienestar']['tipo'] ?? 'otro')),
-                                        'inactivo' => 'inactivo',
-                                        'pendiente_completar_ficha' => 'pendiente_ficha',
-                                        'ficha_enviada' => 'ficha_enviada',
-                                        'link_vencido' => 'link_vencido',
-                                        default => 'otro',
-                                    };
-
-                                    if (!in_array($situacionKey, ['activo', 'vacaciones', 'descanso_medico', 'parada', 'inhabilitado', 'restriccion_temporal', 'inactivo', 'pendiente_ficha', 'ficha_enviada', 'link_vencido'], true)) {
-                                        $situacionKey = 'otro';
-                                    }
-
-                                    $situacionLabel = match ($situacionKey) {
-                                        'activo' => 'Activo',
-                                        'vacaciones' => 'Vacaciones',
-                                        'descanso_medico' => 'Descanso médico',
-                                        'parada' => 'Parada',
-                                        'inhabilitado' => 'Inhabilitado',
-                                        'restriccion_temporal' => 'Restricción',
-                                        'inactivo' => 'Inactivo',
-                                        'pendiente_ficha' => 'Pendiente ficha',
-                                        'ficha_enviada' => 'Ficha enviada',
-                                        'link_vencido' => 'Link vencido',
-                                        default => 'Otro',
-                                    };
+                                    $situacionKey = (string) ($trabajador['situacion'] ?? 'habilitado');
+                                    $situacionLabel = (string) ($trabajador['situacion_label'] ?? 'Habilitado');
                                     $estadoClass = match (mb_strtolower($estadoText)) {
                                         'activo' => 'dg-pill-estado-activo',
                                         'inactivo' => 'dg-pill-estado-inactivo',
                                         'cesado' => 'dg-pill-estado-cesado',
-                                        'pendiente ficha' => 'dg-pill-situacion-vacaciones',
-                                        'ficha enviada' => 'dg-pill-contrato-indefinido',
-                                        'link vencido', 'rechazado' => 'dg-pill-estado-inactivo',
-                                        'observado' => 'dg-pill-situacion-bloqueo',
                                         default => 'dg-pill-neutral',
                                     };
 
@@ -899,16 +872,13 @@
                                     }
 
                                     $situacionClass = match ($situacionKey) {
-                                        'activo' => 'dg-pill-situacion-activo',
+                                        'parada' => 'dg-pill-situacion-parada',
+                                        'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
+                                        'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
-                                        'parada' => 'dg-pill-situacion-parada',
-                                        'pendiente_ficha' => 'dg-pill-situacion-vacaciones',
-                                        'ficha_enviada' => 'dg-pill-contrato-indefinido',
-                                        'link_vencido' => 'dg-pill-estado-inactivo',
-                                        'inhabilitado', 'restriccion_temporal', 'otro' => 'dg-pill-situacion-bloqueo',
-                                        'inactivo' => 'dg-pill-situacion-inactivo',
-                                        default => 'dg-pill-neutral',
+                                        'terminar_ficha' => 'dg-pill-situacion-inactivo',
+                                        default => 'dg-pill-situacion-inactivo',
                                     };
 
                                     $ocupAll = $trabajador['minas'] ?? [];
@@ -955,9 +925,16 @@
                                                 @foreach($ocupVisible as $ocup)
                                                     @php
                                                         $ocupLower = mb_strtolower((string) $ocup);
+                                                        $ocupState = (string) (($trabajador['minas_estado'][$ocup] ?? 'habilitado'));
                                                         $ocupClass = str_contains($ocupLower, 'oficina')
                                                             ? 'dg-pill-ocup-oficina'
-                                                            : (str_contains($ocupLower, 'taller') ? 'dg-pill-ocup-taller' : 'dg-pill-ocup-mina');
+                                                            : (str_contains($ocupLower, 'taller')
+                                                                ? 'dg-pill-ocup-taller'
+                                                                : match ($ocupState) {
+                                                                    'proceso' => 'dg-pill-ocup-mina-proceso',
+                                                                    'no_habilitado' => 'dg-pill-ocup-mina-no-habilitado',
+                                                                    default => 'dg-pill-ocup-mina',
+                                                                });
                                                     @endphp
                                                     <span class="dg-pill {{ $ocupClass }}">{{ $ocup }}</span>
                                                 @endforeach
@@ -973,9 +950,21 @@
                                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
                                             <a href="{{ route('personal.edit', $trabajador['id'] ?? '') }}" class="btn btn-outline btn-xs" style="padding:4px 8px;">Editar</a>
                                             @if(!empty($trabajador['ficha_id']))
-                                                <a href="{{ route('personal.fichas.review', $trabajador['ficha_id']) }}" class="btn {{ $situacionKey === 'ficha_enviada' ? 'btn-primary' : 'btn-outline' }} btn-xs" style="padding:4px 8px;">
-                                                    {{ $situacionKey === 'ficha_enviada' ? 'Validar / activar' : 'Ficha' }}
+                                                <a href="{{ route('personal.fichas.review', $trabajador['ficha_id']) }}" class="btn btn-outline btn-xs" style="padding:4px 8px;">
+                                                    Ficha
                                                 </a>
+                                            @endif
+                                            @if($canCeasePersonal && !empty($trabajador['puede_cesar']))
+                                                <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? '') }}" onsubmit="return confirm('Se marcara a este trabajador como cesado.');">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-outline btn-xs" style="padding:4px 8px;">Cesar</button>
+                                                </form>
+                                            @endif
+                                            @if($canDeletePersonal)
+                                                <form method="POST" action="{{ route('personal.destroy', $trabajador['id'] ?? '') }}" onsubmit="return confirm('Se eliminara por completo este trabajador.');">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-danger btn-xs" style="padding:4px 8px;">Eliminar</button>
+                                                </form>
                                             @endif
                                             <button type="button" class="btn btn-outline btn-xs" style="padding:4px 8px;" onclick="event.stopPropagation(); showWorkerDetail(this.closest('tr'))">Mostrar</button>
                                         </div>
@@ -1023,6 +1012,9 @@ function showWorkerDetail(card) {
 
     const worker = JSON.parse(card.dataset.worker || '{}');
     const modal = document.getElementById('workerDetailModal');
+    const canDeletePersonal = @json($canDeletePersonal);
+    const canCeasePersonal = @json($canCeasePersonal);
+    const csrfToken = @json(csrf_token());
     if (!modal || !worker.nombre) return;
 
     const telefonoAttr = card.getAttribute('data-telefono') || '';
@@ -1045,20 +1037,15 @@ function showWorkerDetail(card) {
     let estadoClass = '';
     let estadoLabel = '';
     switch (worker.estado_actual) {
-        case 'trabajando': estadoClass = 'status-active'; estadoLabel = 'Activo en la empresa'; break;
-        case 'vacaciones': estadoClass = 'status-vacaciones'; estadoLabel = 'En Vacaciones'; break;
-        case 'enfermo': estadoClass = 'status-enfermo'; estadoLabel = 'Descanso médico'; break;
-        case 'parada': estadoClass = 'status-parada'; estadoLabel = 'En Parada'; break;
-        case 'bloqueado_bienestar': estadoClass = 'status-parada'; estadoLabel = 'Bloqueado por Bienestar'; break;
+        case 'activo': estadoClass = 'status-active'; estadoLabel = 'Activo'; break;
+        case 'cesado': estadoClass = 'status-inactive'; estadoLabel = 'Cesado'; break;
         case 'inactivo': estadoClass = 'status-inactive'; estadoLabel = 'Inactivo'; break;
-        case 'pendiente_completar_ficha': estadoClass = 'status-vacaciones'; estadoLabel = 'Pendiente completar ficha'; break;
-        case 'ficha_enviada': estadoClass = 'status-active'; estadoLabel = 'Ficha enviada'; break;
-        case 'link_vencido': estadoClass = 'status-inactive'; estadoLabel = 'Link vencido'; break;
         default: estadoClass = 'status-active'; estadoLabel = 'Activo';
     }
 
     const fechas = worker.fechas || {};
     const resumenBienestar = worker.resumen_bienestar || {};
+    const situacionLabel = worker.situacion_label || 'Habilitado';
     const ingresoRaw = fechaIngresoRaw || fechas.ingreso || null;
     const ingreso = ingresoRaw ? new Date(ingresoRaw).toLocaleDateString('es-PE') : '-';
     const vacStr = resumenBienestar.vacaciones || 'Sin vacaciones próximas en los siguientes 2 meses. Disponible por ahora.';
@@ -1089,7 +1076,10 @@ function showWorkerDetail(card) {
 
     const detailContent = `
         <div class="worker-detail-modal">
-            <div class="detail-header">
+            <div class="detail-header" style="position:relative;">
+                <button type="button" class="btn btn-outline" onclick="closeWorkerDetailModal()" style="position:absolute; top:12px; right:12px; width:32px; height:32px; padding:0; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; z-index:2;" aria-label="Cerrar">
+                    ×
+                </button>
                 <div class="detail-avatar">${(worker.nombre || 'U').substring(0, 2).toUpperCase()}</div>
                 <div class="detail-header-info">
                     <h2 class="detail-name">${worker.nombre || '-'}</h2>
@@ -1136,8 +1126,12 @@ function showWorkerDetail(card) {
                     <h3 class="detail-section-title">Estado y Fechas</h3>
                     <div class="detail-grid">
                         <div class="detail-item">
-                            <span class="detail-label">Estado Actual</span>
+                            <span class="detail-label">Estado</span>
                             <span class="detail-value"><span class="person-badge ${estadoClass}">${estadoLabel}</span></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Situacion</span>
+                            <span class="detail-value">${situacionLabel}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">Vacaciones</span>
@@ -1155,15 +1149,17 @@ function showWorkerDetail(card) {
                 </div>
             </div>
             <div class="detail-footer">
-                ${worker.ficha_id ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn ${worker.estado_actual === 'ficha_enviada' ? 'btn-primary' : 'btn-outline'}">${worker.estado_actual === 'ficha_enviada' ? 'Validar y activar' : 'Ficha Colaborador'}</a>` : ''}
+                ${worker.ficha_id ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
                 <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
-                <button class="btn btn-outline" onclick="closeWorkerDetailModal()">Cerrar</button>
+                ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" onsubmit="return confirm('Se marcara a este trabajador como cesado.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
+                ${canDeletePersonal ? `<form method="POST" action="/personal/${worker.id}/eliminar" onsubmit="return confirm('Se eliminara por completo este trabajador.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-danger">Eliminar</button></form>` : ''}
             </div>
         </div>
     `;
 
     modal.querySelector('.modal-content').innerHTML = detailContent;
+
     openModal('workerDetailModal');
 }
 
@@ -1496,14 +1492,23 @@ document.addEventListener('DOMContentLoaded', function () {
     const accionesMenu = document.getElementById('accionesMenu');
     
     if (accionesBtn && accionesMenu) {
-        accionesBtn.addEventListener('click', function(e) {
+        accionesBtn.addEventListener('click', function (e) {
+            e.preventDefault();
             e.stopPropagation();
             const isVisible = accionesMenu.style.display === 'block';
             accionesMenu.style.display = isVisible ? 'none' : 'block';
         });
-        
-        document.addEventListener('click', function(e) {
-            if (!accionesMenu.contains(e.target) && e.target !== accionesBtn) {
+
+        accionesMenu.addEventListener('click', function (e) {
+            e.stopPropagation();
+        });
+
+        document.addEventListener('click', function () {
+            accionesMenu.style.display = 'none';
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
                 accionesMenu.style.display = 'none';
             }
         });

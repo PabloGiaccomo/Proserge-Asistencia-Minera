@@ -7,6 +7,7 @@ use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -23,22 +24,34 @@ class LoginPageController extends Controller
 
     public function login(Request $request)
     {
-        $request->validate([
+        $payload = $request->validate([
             'email' => 'required|email',
             'password' => 'required',
         ]);
 
+        $throttleKey = Str::lower((string) $payload['email']) . '|' . $request->ip();
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            return back()
+                ->with('error', 'Demasiados intentos. Intenta de nuevo en ' . max($seconds, 1) . ' segundos.')
+                ->withInput($request->except('password'));
+        }
+
         $usuario = Usuario::query()
             ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'personal:id,nombre_completo'])
-            ->where('email', $request->email)
+            ->where('email', $payload['email'])
             ->first();
 
-        if ($usuario && Hash::check($request->password, $usuario->password)) {
+        if ($usuario && Hash::check($payload['password'], $usuario->password)) {
             $estado = Schema::hasColumn('usuarios', 'estado')
                 ? strtoupper((string) $usuario->estado)
                 : 'ACTIVO';
 
             if ($estado !== 'ACTIVO') {
+                RateLimiter::hit($throttleKey, 300);
+
                 return back()
                     ->with('error', 'Tu usuario se encuentra inactivo.')
                     ->withInput($request->except('password'));
@@ -65,35 +78,22 @@ class LoginPageController extends Controller
                 'user_id' => $usuario->id,
             ]);
 
-            return redirect()->route('inicio')->with('success', 'Bienvenido');
-        }
-
-        // Mantener acceso de desarrollo mientras existan ambientes sin usuarios cargados.
-        if ($request->email === 'admin@proserge.com' && $request->password === 'admin123') {
-            $token = Str::random(80);
-            
-            session([
-                'auth_token' => $token,
-                'user' => [
-                    'id' => '00000000-0000-0000-0000-000000000001',
-                    'email' => 'admin@proserge.com',
-                    'name' => 'Administrador',
-                    'rol' => 'ADMIN',
-                    'roles' => ['ADMIN'],
-                    'permissions' => ['*'],
-                ],
-                'user_id' => '00000000-0000-0000-0000-000000000001',
-            ]);
+            $request->session()->regenerate();
+            RateLimiter::clear($throttleKey);
 
             return redirect()->route('inicio')->with('success', 'Bienvenido');
         }
+
+        RateLimiter::hit($throttleKey, 300);
 
         return back()->with('error', 'Credenciales incorrectas.')->withInput($request->except('password'));
     }
 
-    public function logout()
+    public function logout(Request $request)
     {
         session()->forget(['auth_token', 'user', 'user_id']);
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
         
         return redirect()->route('login');
     }
