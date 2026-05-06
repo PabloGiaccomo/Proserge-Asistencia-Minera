@@ -1197,10 +1197,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
 
-    if (rows.length === 0) {
-        return;
-    }
-
     const closeAllPopovers = function () {
         filterPopovers.forEach(function (panel) {
             panel.classList.remove('is-open');
