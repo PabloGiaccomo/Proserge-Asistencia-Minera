@@ -1177,12 +1177,19 @@ class PersonalFichaService
             if ($ficha && !$ficha->submitted_at) {
                 $personal = $ficha->personal;
                 if ($personal && in_array(strtoupper((string) $personal->estado), [PersonalFicha::ESTADO_PENDIENTE, PersonalFicha::ESTADO_LINK_VENCIDO], true)) {
-                    $personal->delete();
-                    return;
+                    try {
+                        $this->personalService->deleteCompletely($personal);
+                        return;
+                    } catch (ValidationException) {
+                        $personal->forceFill([
+                            'estado' => PersonalFicha::ESTADO_LINK_VENCIDO,
+                        ])->save();
+                    }
                 }
 
-                $ficha->delete();
-                return;
+                $ficha->forceFill([
+                    'estado' => PersonalFicha::ESTADO_LINK_VENCIDO,
+                ])->save();
             }
 
             $link->forceFill([
