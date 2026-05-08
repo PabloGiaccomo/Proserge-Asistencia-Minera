@@ -1,0 +1,72 @@
+PASOS DE INSTALACION LOCAL - PROSERGE
+
+Carpeta del proyecto:
+C:\Sistema-Proserge
+
+IMPORTANTE
+En este equipo, el comando "php" de Windows apunta a otra instalacion sin pdo_mysql.
+Para Laravel usa el PHP de Laragon:
+C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe
+
+1. Entrar a la carpeta del proyecto
+cd /d C:\Sistema-Proserge
+
+2. Instalar dependencias PHP
+php composer.phar install
+
+Si "php composer.phar install" falla por drivers/extensiones, usar:
+C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe composer.phar install
+
+3. Instalar dependencias frontend
+npm.cmd install
+
+4. Configurar .env
+El archivo .env ya quedo configurado con MySQL local:
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=proserge_asistencia_minera
+DB_USERNAME=root
+DB_PASSWORD=
+APP_URL=http://127.0.0.1:8000
+
+5. Encender MySQL de Laragon
+Abre Laragon y presiona Start All.
+
+Si necesitas levantar MySQL manualmente:
+C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysqld.exe --defaults-file=C:\laragon\bin\mysql\mysql-8.4.3-winx64\my.ini
+
+6. Crear/importar base de datos
+La base local usada es:
+proserge_asistencia_minera
+
+Los scripts SQL estan en:
+C:\Sistema-Proserge\database\setup
+
+En esta instalacion ya fueron importados y luego se ejecutaron las migraciones.
+
+7. Ejecutar migraciones si hace falta
+C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe artisan migrate --force
+
+8. Compilar frontend para produccion local
+npm.cmd run build
+
+9. Iniciar Laravel
+C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe artisan serve
+
+10. Iniciar Vite en otra consola, solo si quieres desarrollo con recarga automatica
+npm.cmd run dev
+
+URL local:
+http://127.0.0.1:8000
+
+Usuario local creado:
+admin@proserge.local
+
+Contrasena:
+admin123
+
+Notas:
+- Si PowerShell bloquea npm, usa siempre npm.cmd.
+- Si php artisan dice "could not find driver", estas usando el PHP incorrecto. Usa el PHP de Laragon indicado arriba.
+- Las vulnerabilidades de npm audit no impiden iniciar el sistema local.
