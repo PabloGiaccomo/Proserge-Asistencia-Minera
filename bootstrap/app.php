@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\AuthenticateToken;
 use App\Http\Middleware\EnsureMinaScope;
+use App\Http\Middleware\EnsureWebPermission;
 use App\Http\Middleware\WebAuthenticate;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.token' => AuthenticateToken::class,
             'mina.scope' => EnsureMinaScope::class,
             'web.auth' => WebAuthenticate::class,
+            'web.permission' => EnsureWebPermission::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

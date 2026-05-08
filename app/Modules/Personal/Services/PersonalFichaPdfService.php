@@ -47,13 +47,13 @@ class PersonalFichaPdfService
         }
 
         $options = new Options();
-        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('defaultFont', 'Helvetica');
         $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html, 'UTF-8');
-        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->setPaper('letter', 'portrait');
         $dompdf->render();
 
         return $dompdf->output();

@@ -8,6 +8,7 @@ use App\Models\PersonalBloqueo;
 use App\Models\PersonalFichaFamiliar;
 use App\Models\PersonalFichaLink;
 use App\Models\PersonalMina;
+use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -380,7 +381,7 @@ class PersonalService
         }
 
         DB::transaction(function () use ($personal): void {
-            $personal->loadMissing(['fichas.archivos', 'fichas.familiares', 'fichas.link', 'usuario', 'bloqueos', 'relacionesMina']);
+            $personal->loadMissing(['fichas.archivos', 'fichas.familiares', 'fichas.link', 'bloqueos', 'relacionesMina']);
 
             foreach ($personal->fichas as $ficha) {
                 foreach ($ficha->archivos as $archivo) {
@@ -399,14 +400,27 @@ class PersonalService
                 $ficha->delete();
             }
 
-            if ($personal->usuario) {
+            $usuarios = Usuario::query()
+                ->where('personal_id', $personal->id)
+                ->get();
+
+            foreach ($usuarios as $usuario) {
                 if (Schema::hasTable('usuario_roles')) {
-                    DB::table('usuario_roles')->where('usuario_id', $personal->usuario->id)->delete();
+                    DB::table('usuario_roles')->where('usuario_id', $usuario->id)->delete();
                 }
                 if (Schema::hasTable('usuario_mina_scope')) {
-                    DB::table('usuario_mina_scope')->where('usuario_id', $personal->usuario->id)->delete();
+                    DB::table('usuario_mina_scope')->where('usuario_id', $usuario->id)->delete();
                 }
-                $personal->usuario->delete();
+                if (Schema::hasTable('notification_recipients')) {
+                    DB::table('notification_recipients')->where('usuario_id', $usuario->id)->delete();
+                }
+                if (Schema::hasTable('notification_events') && Schema::hasColumn('notification_events', 'actor_usuario_id')) {
+                    DB::table('notification_events')->where('actor_usuario_id', $usuario->id)->update([
+                        'actor_usuario_id' => null,
+                    ]);
+                }
+
+                $usuario->delete();
             }
 
             PersonalBloqueo::query()->where('personal_id', $personal->id)->delete();

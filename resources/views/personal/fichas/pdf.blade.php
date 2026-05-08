@@ -1,248 +1,329 @@
 @php
-    use App\Modules\Personal\Support\PersonalNormalizer;
+    use Carbon\Carbon;
+    use Illuminate\Support\Str;
 
-    $value = fn (string $key, string $default = '-') => trim((string) ($data[$key] ?? '')) !== '' ? trim((string) $data[$key]) : $default;
-    $fullName = trim(collect([$value('apellido_paterno', ''), $value('apellido_materno', ''), $value('nombres', '')])->filter()->implode(' '));
-    $fullName = $fullName !== '' ? $fullName : ($ficha->personal?->nombre_completo ?: '-');
-    $document = trim(($ficha->tipo_documento ?: $value('tipo_documento', 'DNI')) . ' ' . ($ficha->numero_documento ?: $value('numero_documento', '')));
-    $fechaFicha = optional($ficha->submitted_at ?? $ficha->created_at)->format('d/m/Y') ?: now()->format('d/m/Y');
-    $fechaNacimiento = $value('fecha_nacimiento', '');
-    $edad = '-';
-    if ($fechaNacimiento !== '') {
+    $text = function (string $key, string $default = '') use ($data): string {
+        $value = trim((string) ($data[$key] ?? ''));
+        return $value !== '' ? $value : $default;
+    };
+
+    $assetUri = function (string $relativePath): ?string {
+        $path = public_path($relativePath);
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $mime = match ($extension) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            default => 'image/png',
+        };
+
+        return 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($path));
+    };
+
+    $fullName = trim(collect([
+        $text('apellido_paterno'),
+        $text('apellido_materno'),
+        $text('nombres'),
+    ])->filter()->implode(' '));
+    $fullName = $fullName !== '' ? $fullName : ($ficha->personal?->nombre_completo ?: '');
+
+    $documentType = $ficha->tipo_documento ?: $text('tipo_documento', 'DNI');
+    $documentNumber = $ficha->numero_documento ?: $text('numero_documento');
+    $submittedDate = optional($ficha->submitted_at ?? $ficha->created_at)->format('d/m/Y') ?: now()->format('d/m/Y');
+
+    $birthDate = $text('fecha_nacimiento');
+    $birthDisplay = '';
+    $age = '';
+    if ($birthDate !== '') {
         try {
-            $edad = \Carbon\Carbon::parse($fechaNacimiento)->age;
+            $birth = Carbon::parse($birthDate);
+            $birthDisplay = $birth->format('d/m/Y');
+            $age = (string) $birth->age;
         } catch (\Throwable) {
-            $edad = '-';
+            $birthDisplay = $birthDate;
         }
     }
-    $fechaInicio = $value('fecha_ingreso', '');
-    $inicio = ['dia' => '', 'mes' => '', 'anio' => ''];
-    if ($fechaInicio !== '') {
+
+    $entry = null;
+    if ($text('fecha_ingreso') !== '') {
         try {
-            $date = \Carbon\Carbon::parse($fechaInicio);
-            $inicio = ['dia' => $date->format('d'), 'mes' => $date->format('m'), 'anio' => $date->format('Y')];
+            $entry = Carbon::parse($text('fecha_ingreso'));
         } catch (\Throwable) {
-            $inicio = ['dia' => '', 'mes' => '', 'anio' => ''];
+            $entry = null;
         }
     }
-    $domicilio = $value('domicilio_direccion', '');
-    $domicilioDeclaracion = $value('quinta_domicilio', $domicilio);
-    $ciudad = $value('quinta_ciudad', $value('domicilio_provincia', 'Arequipa'));
-    $quintaDia = $value('quinta_fecha_dia', now()->format('d'));
-    $quintaMes = $value('quinta_fecha_mes', now()->locale('es')->translatedFormat('F'));
-    $quintaAnio = $value('quinta_fecha_anio', now()->format('Y'));
-    $familiaresOrden = collect(['Padre', 'Madre', 'Conyuge', 'Hijo 1', 'Hijo 2', 'Hijo 3', 'Hijo 4', 'Hijo 5'])
-        ->map(function (string $parentesco) use ($familiares) {
-            $match = $familiares->first(fn ($item) => strcasecmp((string) $item->parentesco, $parentesco) === 0);
+
+    $orderedRelatives = collect(['Padre', 'Madre', 'Coyugue', 'Hijo 1', 'Hijo 2', 'Hijo 3', 'Hijo 4', 'Hijo 5'])
+        ->map(function (string $label) use ($familiares) {
+            $match = $familiares->first(function ($item) use ($label) {
+                return strcasecmp((string) $item->parentesco, $label) === 0;
+            });
+
             return [
-                'parentesco' => $parentesco,
-                'nombres' => $match?->nombres_apellidos ?: '',
-                'fecha' => optional($match?->fecha_nacimiento)->format('d/m/Y') ?: '',
+                'label' => $label,
+                'name' => $match?->nombres_apellidos ?: '',
+                'date' => optional($match?->fecha_nacimiento)->format('d/m/Y') ?: '',
                 'vive' => $match ? ($match->vive_con_trabajador ? 'SI' : 'NO') : '',
-                'telefono' => $match?->telefono ?: '',
+                'phone' => $match?->telefono ?: '',
             ];
-        });
-    $contacto = $familiares->firstWhere('contacto_emergencia', true) ?: $familiares->first();
+        })->values();
+
     try {
-        $otrosEmpleadores = json_decode((string) ($data['quinta_otros_empleadores_json'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR);
-        $otrosEmpleadores = is_array($otrosEmpleadores) ? $otrosEmpleadores : [];
+        $otherEmployers = json_decode((string) ($data['quinta_otros_empleadores_json'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR);
+        $otherEmployers = is_array($otherEmployers) ? array_values($otherEmployers) : [];
     } catch (\Throwable) {
-        $otrosEmpleadores = [];
+        $otherEmployers = [];
     }
+
+    $pageBg = [];
+    foreach (range(1, 7) as $pageNumber) {
+        $pageBg[$pageNumber] = $assetUri('pdf-templates/ficha-colaborador/page_' . $pageNumber . '_clean.png')
+            ?: $assetUri('pdf-templates/ficha-colaborador/page_' . $pageNumber . '.png');
+    }
+
+    $logoUri = null;
+    $logoPath = base_path('img/LogoProserge.jpg');
+    if (is_file($logoPath)) {
+        $logoUri = 'data:image/jpeg;base64,' . base64_encode((string) file_get_contents($logoPath));
+    }
+
+    $firmaUri = null;
+    if (is_string($firmaBase64) && trim($firmaBase64) !== '') {
+        $firmaUri = Str::startsWith($firmaBase64, 'data:') ? $firmaBase64 : 'data:image/png;base64,' . $firmaBase64;
+    }
+
+    $huellaUri = $huellaDataUrl ?: null;
+
+    $city = $text('quinta_ciudad', $text('domicilio_provincia', 'Arequipa'));
+    $quintaDay = $text('quinta_fecha_dia', now()->format('d'));
+    $quintaMonth = $text('quinta_fecha_mes', now()->locale('es')->translatedFormat('F'));
+    $quintaYear = $text('quinta_fecha_anio', now()->format('Y'));
+
+    $pix = static fn (float $value): string => round($value * (612 / 935), 2) . 'pt';
+
+    $fieldStyle = static function (
+        float $x,
+        float $y,
+        ?float $width = null,
+        ?float $height = null,
+        float $font = 10,
+        string $weight = 'normal',
+        string $align = 'left',
+        string $extra = ''
+    ) use ($pix): string {
+        $style = [
+            'left:' . $pix($x),
+            'top:' . $pix($y),
+            'font-size:' . $font . 'pt',
+            'font-weight:' . $weight,
+            'text-align:' . $align,
+        ];
+
+        if ($width !== null) {
+            $style[] = 'width:' . $pix($width);
+        }
+
+        if ($height !== null) {
+            $style[] = 'height:' . $pix($height);
+        }
+
+        if ($extra !== '') {
+            $style[] = $extra;
+        }
+
+        return implode(';', $style);
+    };
+
+    $pensionLabel = Str::upper($text('sistema_pensionario'));
+    $isPrivatePension = Str::contains($pensionLabel, 'PRIVADO');
 @endphp
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <style>
-        @page { margin: 22px 24px; }
-        body { font-family: DejaVu Sans, sans-serif; color: #111827; font-size: 9.5px; }
-        .page { page-break-after: always; }
+        @page { size: letter portrait; margin: 0; }
+        html, body { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: #000; }
+        .page { position: relative; width: 612pt; height: 792pt; page-break-after: always; overflow: hidden; }
         .page:last-child { page-break-after: auto; }
-        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        td, th { border: 1px solid #111827; padding: 4px 5px; vertical-align: top; word-wrap: break-word; }
-        th { background: #f1f5f9; font-weight: bold; text-align: center; }
-        .no-border td, .no-border th { border: 0; }
-        .header-title { font-size: 14px; font-weight: bold; text-align: center; }
-        .doc-title { font-size: 16px; font-weight: bold; text-align: center; margin: 14px 0; }
-        .section-title { background: #e5e7eb; border: 1px solid #111827; padding: 5px; font-weight: bold; margin-top: 7px; }
-        .label { font-weight: bold; background: #f8fafc; }
-        .center { text-align: center; }
-        .right { text-align: right; }
-        .small { font-size: 8.5px; }
-        .muted { color: #374151; }
-        .photo-box { height: 82px; text-align: center; font-weight: bold; }
-        .signature-box { height: 76px; text-align: center; }
-        .image-box { max-width: 170px; max-height: 68px; object-fit: contain; }
-        .huella-box { width: 82px; height: 82px; text-align: center; }
-        .blank-box { height: 360px; border: 1px solid #111827; }
-        .line { border-bottom: 1px solid #111827; min-height: 16px; display: inline-block; }
-        .check { font-family: DejaVu Sans, sans-serif; }
+        .page-bg { position: absolute; inset: 0; width: 612pt; height: 792pt; }
+        .field { position: absolute; z-index: 2; display: block; min-height: 10pt; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: clip; background: #fff; padding: 0 1pt; }
+        .multiline { white-space: normal; overflow: visible; }
+        .logo-overlay { position: absolute; z-index: 2; object-fit: contain; }
+        .signature-image { position: absolute; z-index: 2; object-fit: contain; }
     </style>
 </head>
 <body>
     <div class="page">
-        <table>
-            <tr>
-                <td class="photo-box" rowspan="3">FOTO</td>
-                <td class="header-title" rowspan="3">FICHA DE COLABORADOR</td>
-                <td class="label">Codigo:</td><td>SGC-FOR-13</td>
-            </tr>
-            <tr><td class="label">Version:</td><td>03</td></tr>
-            <tr><td class="label">Fecha:</td><td>01/05/2026</td></tr>
-        </table>
+        @if($pageBg[1])<img class="page-bg" src="{{ $pageBg[1] }}" alt="Plantilla ficha 1">@endif
+        <div class="field" style="{{ $fieldStyle(596, 156, 82, null, 11, 'normal', 'center') }}">{{ $submittedDate }}</div>
+        <div class="field" style="{{ $fieldStyle(218, 227, 85, null, 12, 'normal') }}">{{ $documentNumber }}</div>
+        <div class="field" style="{{ $fieldStyle(218, 252, 85, null, 12, 'normal') }}">{{ $age }}</div>
+        <div class="field" style="{{ $fieldStyle(126, 294, 140, null, 12, 'normal') }}">{{ $birthDisplay }}</div>
+        <div class="field" style="{{ $fieldStyle(93, 327, 120, null, 10, 'normal') }}">{{ Str::upper($text('sexo')) }}</div>
+        <div class="field" style="{{ $fieldStyle(205, 327, 75, null, 10, 'normal') }}">{{ Str::upper($text('grupo_sanguineo')) }}</div>
+        <div class="field" style="{{ $fieldStyle(82, 387, 160, null, 11, 'normal') }}">{{ $text('telefono_alterno') }}</div>
+        <div class="field" style="{{ $fieldStyle(82, 414, 160, null, 11, 'normal') }}">{{ $text('telefono') }}</div>
+        <div class="field" style="{{ $fieldStyle(195, 435, 160, null, 10, 'normal') }}">{{ Str::upper($text('brevete')) }}</div>
 
-        <table style="margin-top:6px;">
-            <tr><td class="label" style="width:16%;">FECHA</td><td>{{ $fechaFicha }}</td><td class="label">RUC</td><td>20539399536</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(363, 220, 170, null, 12, 'normal', 'center') }}">{{ Str::upper($text('apellido_paterno')) }}</div>
+        <div class="field" style="{{ $fieldStyle(549, 220, 170, null, 12, 'normal', 'center') }}">{{ Str::upper($text('apellido_materno')) }}</div>
+        <div class="field" style="{{ $fieldStyle(723, 220, 160, null, 12, 'normal', 'center') }}">{{ Str::upper($text('nombres')) }}</div>
+        <div class="field" style="{{ $fieldStyle(524, 257, 290, null, 10.5, 'normal') }}">{{ Str::upper($text('domicilio_direccion', $text('domicilio_extranjero'))) }}</div>
+        <div class="field" style="{{ $fieldStyle(300, 286, 130, null, 11, 'normal') }}">{{ Str::upper($text('domicilio_distrito')) }}</div>
+        <div class="field" style="{{ $fieldStyle(492, 286, 120, null, 11, 'normal') }}">{{ Str::upper($text('domicilio_provincia')) }}</div>
+        <div class="field" style="{{ $fieldStyle(695, 286, 120, null, 11, 'normal') }}">{{ Str::upper($text('domicilio_departamento')) }}</div>
+        <div class="field" style="{{ $fieldStyle(491, 315, 240, null, 10.5, 'normal') }}">{{ $text('correo') }}</div>
+        <div class="field" style="{{ $fieldStyle(301, 344, 145, null, 11, 'normal') }}">{{ Str::upper($text('nacionalidad')) }}</div>
+        <div class="field" style="{{ $fieldStyle(491, 344, 165, null, 11, 'normal') }}">{{ Str::upper($text('estado_civil')) }}</div>
+        <div class="field" style="{{ $fieldStyle(300, 385, 145, null, 11, 'normal') }}">{{ Str::upper($text('distrito_nacimiento')) }}</div>
+        <div class="field" style="{{ $fieldStyle(492, 385, 120, null, 11, 'normal') }}">{{ Str::upper($text('provincia_nacimiento')) }}</div>
+        <div class="field" style="{{ $fieldStyle(693, 385, 120, null, 11, 'normal') }}">{{ Str::upper($text('departamento_nacimiento')) }}</div>
+        <div class="field" style="{{ $fieldStyle(292, 412, 150, null, 10, 'normal') }}">{{ $text('numero_cuenta') }}</div>
+        <div class="field" style="{{ $fieldStyle(691, 412, 120, null, 10, 'normal') }}">{{ Str::upper($text('banco')) }}</div>
+        <div class="field" style="{{ $fieldStyle(291, 434, 150, null, 10, 'normal') }}">{{ $text('cci') }}</div>
 
-        <div class="section-title">DATOS PERSONALES:</div>
-        <table>
-            <tr><td class="label">AP. PATERNO</td><td>{{ $value('apellido_paterno') }}</td><td class="label">AP. MATERNO</td><td>{{ $value('apellido_materno') }}</td><td class="label">NOMBRES</td><td>{{ $value('nombres') }}</td></tr>
-            <tr><td class="label">DNI / DOC.</td><td>{{ $document }}</td><td class="label">Edad</td><td>{{ $edad }}</td><td class="label">Fecha nacimiento</td><td>{{ $fechaNacimiento }}</td></tr>
-            <tr><td class="label">Sexo</td><td>{{ $value('sexo') }}</td><td class="label">G. sanguin.</td><td>{{ $value('grupo_sanguineo') }}</td><td class="label">Celular movil</td><td>{{ $value('telefono') }}</td></tr>
-            <tr><td class="label">E-mail</td><td colspan="2">{{ $value('correo') }}</td><td class="label">Nacionalidad</td><td colspan="2">{{ $value('nacionalidad') === 'Otra' ? $value('nacionalidad_otra') : $value('nacionalidad') }}</td></tr>
-            <tr><td class="label">Estado civil</td><td>{{ $value('estado_civil') === 'Otro' ? $value('estado_civil_otro') : $value('estado_civil') }}</td><td class="label">N. brevete</td><td colspan="3">{{ $value('brevete') }}</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(282, 466, 205, null, 9, 'normal') }}">{{ Str::upper($familiares->first()?->nombres_apellidos ?? '') }}</div>
+        <div class="field" style="{{ $fieldStyle(720, 466, 85, null, 10, 'normal') }}">{{ $familiares->first()?->telefono ?? '' }}</div>
+        <div class="field" style="{{ $fieldStyle(281, 490, 120, null, 9, 'normal') }}">{{ Str::upper($familiares->first()?->parentesco ?? '') }}</div>
+        <div class="field" style="{{ $fieldStyle(720, 490, 85, null, 10, 'normal') }}">{{ $familiares->first()?->telefono ?? '' }}</div>
 
-        <div class="section-title">DOMICILIO ACTUAL</div>
-        <table>
-            <tr><td class="label">Direccion</td><td colspan="5">{{ $domicilio !== '' ? $domicilio : $value('domicilio_extranjero') }}</td></tr>
-            <tr><td class="label">Distrito</td><td>{{ $value('domicilio_distrito') }}</td><td class="label">Provincia</td><td>{{ $value('domicilio_provincia') }}</td><td class="label">Departamento</td><td>{{ $value('domicilio_departamento') }}</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(188, 543, 60, null, 11, 'normal', 'center') }}">{{ $text('talla_zapato') }}</div>
+        <div class="field" style="{{ $fieldStyle(336, 543, 55, null, 11, 'normal', 'center') }}">{{ Str::upper($text('talla_polo')) }}</div>
+        <div class="field" style="{{ $fieldStyle(528, 543, 60, null, 11, 'normal', 'center') }}">{{ $text('talla_pantalon') }}</div>
+        <div class="field" style="{{ $fieldStyle(795, 543, 40, null, 11, 'normal', 'center') }}">{{ Str::upper($text('talla_respirador')) }}</div>
 
-        <div class="section-title">LUGAR DE NACIMIENTO</div>
-        <table>
-            <tr><td class="label">Distrito</td><td>{{ $value('distrito_nacimiento') }}</td><td class="label">Provincia</td><td>{{ $value('provincia_nacimiento') }}</td><td class="label">Departamento / Pais</td><td>{{ $value('departamento_nacimiento', $value('pais_nacimiento_otro')) }}</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(289, 593, 160, null, 10, 'normal') }}">{{ Str::upper($text('grado_instruccion')) }}</div>
+        <div class="field" style="{{ $fieldStyle(693, 593, 145, null, 10, 'normal') }}">{{ Str::upper($text('carrera')) }}</div>
+        <div class="field" style="{{ $fieldStyle(289, 614, 180, null, 10, 'normal') }}">{{ Str::upper($text('profesion_oficio')) }}</div>
+        <div class="field" style="{{ $fieldStyle(693, 614, 145, null, 10, 'normal') }}">{{ Str::upper($text('institucion')) }}</div>
+        <div class="field" style="{{ $fieldStyle(289, 634, 90, null, 10, 'normal') }}">{{ $text('anio_egreso') }}</div>
 
-        <div class="section-title">DATOS BANCARIOS / EPPS / TALLA</div>
-        <table>
-            <tr><td class="label">Nro cuenta - banco</td><td>{{ $value('numero_cuenta') }} - {{ $value('banco') === 'Otro' ? $value('banco_otro') : $value('banco') }}</td><td class="label">CCI</td><td>{{ $value('cci') }}</td></tr>
-            <tr><td class="label">Zapato/botas</td><td>{{ $value('talla_zapato') }}</td><td class="label">Camisa/chaleco</td><td>{{ $value('talla_polo') }}</td></tr>
-            <tr><td class="label">Pantalon</td><td>{{ $value('talla_pantalon') }}</td><td class="label">Respirador</td><td>{{ $value('talla_respirador') }}</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(454, 675, 160, null, 10, 'normal', 'center') }}">{{ Str::upper($text('especialidad')) }}</div>
+        <div class="field" style="{{ $fieldStyle(800, 675, 140, null, 10, 'normal', 'center') }}">{{ Str::upper($text('puesto')) }}</div>
+        <div class="field" style="{{ $fieldStyle(458, 696, 120, null, 10, 'normal', 'center') }}">{{ Str::upper($text('anio_experiencia')) }}</div>
+        <div class="field" style="{{ $fieldStyle(804, 696, 120, null, 10, 'normal', 'center') }}">{{ Str::upper($text('categoria_trabajador')) }}</div>
 
-        <div class="section-title">GRADO DE INSTRUCCION / OCUPACION / OFICIO</div>
-        <table>
-            <tr><td class="label">Grado de instruccion</td><td>{{ $value('grado_instruccion') }}</td><td class="label">Carrera</td><td>{{ $value('carrera') }}</td></tr>
-            <tr><td class="label">Profesion u oficio</td><td>{{ $value('profesion_oficio') }}</td><td class="label">Institucion</td><td>{{ $value('institucion') }}</td></tr>
-            <tr><td class="label">Anio de egreso</td><td>{{ $value('anio_egreso') }}</td><td class="label">Especialidad</td><td>{{ $value('especialidad') }}</td></tr>
-            <tr><td class="label">Tipo trabajador</td><td>{{ $value('tipo_trabajador') }}</td><td class="label">Categoria</td><td>{{ $value('categoria_trabajador') }}</td></tr>
-        </table>
+        <div class="field" style="{{ $fieldStyle(248, 747, 210, null, 9.5, 'normal') }}">{{ Str::upper($text('sistema_pensionario')) }}</div>
+        <div class="field" style="{{ $fieldStyle(775, 747, 110, null, 9.5, 'normal', 'center') }}">{{ Str::upper($text('tipo_afp')) }}</div>
+        <div class="field" style="{{ $fieldStyle(250, 770, 110, null, 9.5, 'normal') }}">{{ Str::upper($text('tipo_comision')) }}</div>
+        <div class="field" style="{{ $fieldStyle(766, 770, 130, null, 9, 'normal', 'center') }}">{{ Str::upper($text('cuspp')) }}</div>
 
-        <div class="section-title">SISTEMA PENSIONARIO</div>
-        <table>
-            <tr><td class="label">Sistema pensionario</td><td>{{ $value('sistema_pensionario') }}</td><td class="label">Tipo AFP</td><td>{{ $value('tipo_afp') }}</td></tr>
-            <tr><td class="label">Tipo comision</td><td>{{ $value('tipo_comision') }}</td><td class="label">CUSPP</td><td>{{ $value('cuspp') }}</td></tr>
-        </table>
+        @foreach($orderedRelatives as $index => $relative)
+            @php $baseY = 822 + ($index * 22); @endphp
+            <div class="field" style="{{ $fieldStyle(175, $baseY, 245, null, 8.4, 'normal') }}">{{ Str::upper($relative['name']) }}</div>
+            <div class="field" style="{{ $fieldStyle(421, $baseY, 150, null, 8.4, 'normal') }}">{{ $relative['date'] }}</div>
+            <div class="field" style="{{ $fieldStyle(663, $baseY, 70, null, 8.4, 'normal', 'center') }}">{{ $relative['vive'] }}</div>
+            <div class="field" style="{{ $fieldStyle(806, $baseY, 110, null, 8.4, 'normal') }}">{{ $relative['phone'] }}</div>
+        @endforeach
 
-        <div class="section-title">DATOS FAMILIARES</div>
-        <table>
-            <tr><th>Parentesco</th><th>Apellidos y nombres</th><th>Fecha de nacimiento</th><th>Vive conmigo</th><th>Telefono</th></tr>
-            @foreach($familiaresOrden as $row)
-                <tr><td>{{ $row['parentesco'] }}</td><td>{{ $row['nombres'] }}</td><td>{{ $row['fecha'] }}</td><td>{{ $row['vive'] }}</td><td>{{ $row['telefono'] }}</td></tr>
-            @endforeach
-        </table>
+        <div class="field" style="{{ $fieldStyle(813, 955, 40, null, 10, 'bold', 'center') }}">SI</div>
 
-        <p class="center" style="margin-top:10px;font-weight:bold;">DECLARO BAJO JURAMENTO QUE LOS DATOS CONSIGNADOS SON VERDADEROS</p>
-        <table class="no-border">
-            <tr>
-                <td class="signature-box">
-                    @if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif<br>
-                    ................................................<br>TRABAJADOR
-                </td>
-                <td class="signature-box">................................................<br>Vº Bº P&S PROSERGE</td>
-                <td class="huella-box">
-                    @if($huellaDataUrl)<img class="image-box" src="{{ $huellaDataUrl }}" alt="Huella">@endif<br>
-                    Huella Digital
-                </td>
-            </tr>
-        </table>
-        <p class="small">En caso de Emergencia Contacte a {{ $contacto?->nombres_apellidos ?: '-' }}. Relacion con Usted: {{ $contacto?->parentesco ?: '-' }}. Celular {{ $contacto?->telefono ?: '-' }}</p>
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(144, 1007, 185, 55) }}">
+        @endif
+        @if($huellaUri)
+            <img class="signature-image" src="{{ $huellaUri }}" alt="Huella" style="{{ $fieldStyle(429, 995, 130, 70) }}">
+        @endif
     </div>
 
     <div class="page">
-        <div class="doc-title">INDUCCION DE PERSONAL NUEVO</div>
-        <table><tr><td class="label">Nombre de la nueva persona funcionaria</td><td>{{ $fullName }}</td></tr><tr><td class="label">Cargo a desempenar</td><td>{{ $value('puesto') }}</td></tr><tr><td class="label">Jefatura inmediata</td><td></td></tr></table>
-        <div class="section-title">DESCRIPCION DE ACTIVIDADES DE INDUCCION Y ENTRENAMIENTO EN EL PUESTO</div>
-        <table>
-            <tr><th>Descripcion de la actividad</th><th>Fecha</th><th>Aplica SI/NO</th><th>Ejecutada SI/NO</th><th>Area responsable</th><th>Firma</th></tr>
-            @foreach(['Recorrido por las instalaciones y presentacion de colaboradores.', 'Informacion del procedimiento ante dano o mal funcionamiento de equipos.', 'Induccion - Anexo 5.', 'Manual de procedimientos de seguridad.', 'Induccion - Anexo 4.', 'Induccion por Almacen o Logistica y entrega de EPPs.'] as $activity)
-                <tr><td>{{ $activity }}</td><td></td><td></td><td></td><td>OPERACIONES</td><td></td></tr>
-            @endforeach
-        </table>
+        @if($pageBg[2])<img class="page-bg" src="{{ $pageBg[2] }}" alt="Plantilla ficha 2">@endif
+        <div class="field" style="{{ $fieldStyle(353, 228, 260, null, 10.5, 'normal') }}">{{ Str::upper($fullName) }}</div>
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(145, 724, 190, 48) }}">
+        @endif
     </div>
 
     <div class="page">
-        <div class="doc-title">Formato de Eleccion del Sistema Pensionario</div>
-        <div class="section-title">I.- DATOS DEL TRABAJADOR</div>
-        <table>
-            <tr><td class="label">Apellido Paterno</td><td>{{ $value('apellido_paterno') }}</td><td class="label">Apellido Materno</td><td>{{ $value('apellido_materno') }}</td><td class="label">Nombres</td><td>{{ $value('nombres') }}</td></tr>
-            <tr><td class="label">Tipo de documento</td><td>{{ $ficha->tipo_documento }}</td><td class="label">Numero</td><td>{{ $ficha->numero_documento }}</td><td class="label">Sexo</td><td>{{ $value('sexo') }}</td></tr>
-            <tr><td class="label">Fecha nacimiento</td><td>{{ $fechaNacimiento }}</td><td class="label">Distrito</td><td>{{ $value('domicilio_distrito') }}</td><td class="label">Provincia</td><td>{{ $value('domicilio_provincia') }}</td></tr>
-        </table>
-        <div class="section-title">III.- DATOS DEL VINCULO LABORAL</div>
-        <table>
-            <tr><td class="label">Nombre o razon social</td><td>{{ $value('empleador_razon_social') }}</td><td class="label">Nro. RUC</td><td>{{ $value('empleador_ruc') }}</td></tr>
-            <tr><td class="label">Departamento del domicilio fiscal</td><td colspan="3">{{ $value('empleador_domicilio_fiscal') }}</td></tr>
-            <tr><td class="label">Fecha de inicio de la relacion laboral</td><td>Dia {{ $inicio['dia'] }} Mes {{ $inicio['mes'] }} Anio {{ $inicio['anio'] }}</td><td class="label">Remuneracion</td><td>{{ $value('remuneracion') }}</td></tr>
-        </table>
-        <div class="section-title">IV.- ELECCION DEL SISTEMA PENSIONARIO</div>
-        <table><tr><td>ONP</td><td class="center">{{ $value('sistema_pensionario') === 'ONP' ? 'X' : '' }}</td></tr><tr><td>Sistema Privado de Pensiones</td><td class="center">{{ $value('sistema_pensionario') === 'Sistema Privado de Pensiones' ? 'X' : '' }}</td></tr></table>
-        <p style="margin-top:40px;">Firma del Trabajador: @if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif</p>
-        <p class="center">Ciudad de {{ $ciudad }}, {{ $quintaDia }} de {{ $quintaMes }} del {{ $quintaAnio }}</p>
+        @if($pageBg[3])<img class="page-bg" src="{{ $pageBg[3] }}" alt="Plantilla ficha 3">@endif
+        <div class="field" style="{{ $fieldStyle(304, 196, 140, null, 10, 'normal') }}">{{ Str::upper($text('apellido_paterno')) }}</div>
+        <div class="field" style="{{ $fieldStyle(304, 224, 140, null, 10, 'normal') }}">{{ Str::upper($text('apellido_materno')) }}</div>
+        <div class="field" style="{{ $fieldStyle(304, 253, 220, null, 10, 'normal') }}">{{ Str::upper($text('nombres')) }}</div>
+        <div class="field" style="{{ $fieldStyle(509, 282, 90, null, 10, 'normal') }}">{{ $documentNumber }}</div>
+        <div class="field" style="{{ $fieldStyle(356, 371, 28, null, 10, 'normal', 'center') }}">{{ Str::startsWith(Str::upper($text('sexo')), 'F') ? '' : 'X' }}</div>
+        <div class="field" style="{{ $fieldStyle(409, 371, 28, null, 10, 'normal', 'center') }}">{{ Str::startsWith(Str::upper($text('sexo')), 'F') ? 'X' : '' }}</div>
+        <div class="field" style="{{ $fieldStyle(443, 476, 110, null, 10, 'normal') }}">{{ Str::upper($text('domicilio_distrito')) }}</div>
+        <div class="field" style="{{ $fieldStyle(443, 499, 110, null, 10, 'normal') }}">{{ Str::upper($text('domicilio_provincia')) }}</div>
+        <div class="field" style="{{ $fieldStyle(491, 523, 120, null, 10, 'normal') }}">{{ Str::upper($text('domicilio_departamento')) }}</div>
+        @if($entry)
+            <div class="field" style="{{ $fieldStyle(492, 726, 28, null, 9.5, 'normal', 'center') }}">{{ $entry->format('d') }}</div>
+            <div class="field" style="{{ $fieldStyle(632, 726, 42, null, 9.5, 'normal', 'center') }}">{{ $entry->format('m') }}</div>
+            <div class="field" style="{{ $fieldStyle(785, 726, 52, null, 9.5, 'normal', 'center') }}">{{ $entry->format('Y') }}</div>
+        @endif
+        <div class="field" style="{{ $fieldStyle(722, 852, 58, null, 11, 'bold', 'center') }}">{{ $isPrivatePension ? 'X' : '' }}</div>
+        <div class="field" style="{{ $fieldStyle(289, 964, 320, null, 10, 'normal') }}">{{ $city }}</div>
+        <div class="field" style="{{ $fieldStyle(454, 964, 60, null, 10, 'normal') }}">{{ $quintaDay }}</div>
+        <div class="field" style="{{ $fieldStyle(578, 964, 95, null, 10, 'normal') }}">{{ $quintaMonth }}</div>
+        <div class="field" style="{{ $fieldStyle(722, 964, 50, null, 10, 'normal') }}">{{ $quintaYear }}</div>
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(384, 884, 180, 60) }}">
+        @endif
     </div>
 
     <div class="page">
-        <div class="doc-title">Constancia de Entrega del Boletin Informativo acerca de las caracteristicas del SPP y SNP</div>
-        <p>Por medio del presente documento dejo constancia de haber recibido de parte de mi empleador P & S Produccion y Servicios Generales S.R.L., con RUC 20539399536, el Boletin Informativo y el Formato de Eleccion del Sistema Pensionario.</p>
-        <p>Datos del Trabajador:</p>
-        <table><tr><td class="label">Nombres y Apellidos</td><td>{{ $fullName }}</td></tr><tr><td class="label">Tipo y numero de documento</td><td>{{ $document }}</td></tr><tr><td class="label">Firma y huella digital</td><td>@if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif @if($huellaDataUrl)<img class="image-box" src="{{ $huellaDataUrl }}" alt="Huella">@endif</td></tr></table>
-        <p class="center" style="margin-top:80px;">Ciudad de {{ $ciudad }}, {{ $quintaDia }} de {{ $quintaMes }} del {{ $quintaAnio }}</p>
+        @if($pageBg[4])<img class="page-bg" src="{{ $pageBg[4] }}" alt="Plantilla ficha 4">@endif
+        <div class="field" style="{{ $fieldStyle(274, 807, 210, null, 10, 'normal') }}">{{ Str::upper($fullName) }}</div>
+        <div class="field" style="{{ $fieldStyle(410, 854, 100, null, 10, 'normal') }}">{{ $documentNumber }}</div>
+        <div class="field" style="{{ $fieldStyle(169, 1026, 110, null, 10, 'normal') }}">{{ $city }}</div>
+        <div class="field" style="{{ $fieldStyle(319, 1026, 90, null, 10, 'normal') }}">{{ $quintaDay }}</div>
+        <div class="field" style="{{ $fieldStyle(469, 1026, 110, null, 10, 'normal') }}">{{ $quintaMonth }}</div>
+        <div class="field" style="{{ $fieldStyle(625, 1026, 85, null, 10, 'normal') }}">{{ $quintaYear }}</div>
     </div>
 
     <div class="page">
-        <div class="doc-title">DECLARACION JURADA DE INGRESOS DE RENTA DE QUINTA CATEGORIA</div>
-        <div class="section-title">A. IDENTIFICACION DE TRABAJADOR</div>
-        <table><tr><td class="label">Apellidos y nombres</td><td>{{ $fullName }}</td></tr><tr><td class="label">Domicilio</td><td>{{ $domicilioDeclaracion }}</td></tr></table>
-        <p>Por la presente cumplo con informar que mi empleador principal es:</p>
-        <p>- P&S PROSERGE S.R.L. con RUC 20539399536 {{ $value('quinta_empleador_principal') === 'P&S PROSERGE S.R.L.' ? '(X)' : '( )' }}</p>
-        <p>- Otra empresa {{ $value('quinta_otra_empresa', '................................') }} RUC Nro {{ $value('quinta_otra_empresa_ruc', '........................') }} {{ $value('quinta_empleador_principal') === 'Otra empresa' ? '(X)' : '( )' }}</p>
-        <p>Y sera la UNICA encargada de efectuar retenciones de Quinta Categoria durante el ejercicio del anio {{ $value('quinta_ejercicio_anio', $quintaAnio) }}.</p>
-        <p>En caso de haber designado a P&S PROSERGE S.R.L. como empleador principal, informo que:</p>
-        <p>( {{ $value('quinta_percibe_otras') === 'No' ? 'X' : ' ' }} ) NO percibo otras remuneraciones de Quinta Categoria.</p>
-        <p>( {{ $value('quinta_percibe_otras') === 'Si' ? 'X' : ' ' }} ) SI percibo otras remuneraciones para que este acumule y efectue la retencion correspondiente.</p>
-        <p>( {{ $value('quinta_adjunta_dj_anterior') === 'Si' ? 'X' : ' ' }} ) Adjunto la Declaracion Jurada de mi anterior empleador.</p>
-        <p>( {{ $value('quinta_declara_sin_ingresos') === 'Si' ? 'X' : ' ' }} ) Declaro bajo juramento que durante el ejercicio del anio en curso no tuve ingresos que afectan al Impuesto de Quinta Categoria ni de Cuarta categoria.</p>
-        <div class="section-title">B. DECLARACION DE INGRESOS</div>
-        <table>
-            <tr><th>Otros Empleadores (Razon Social)</th><th>RUC</th><th>Monto Anual</th><th>Retencion de Impuestos</th></tr>
-            @forelse($otrosEmpleadores as $empleador)
-                <tr><td>{{ $empleador['empresa'] ?? '' }}</td><td>{{ $empleador['ruc'] ?? '' }}</td><td>{{ $empleador['monto'] ?? '' }}</td><td>{{ $empleador['retencion'] ?? '' }}</td></tr>
-            @empty
-                <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
-                <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
-            @endforelse
-        </table>
-        <p style="margin-top:28px;">{{ $ciudad }}, {{ $quintaDia }} de {{ $quintaMes }} del {{ $quintaAnio }}</p>
-        <p class="center" style="margin-top:50px;">@if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif<br>Firma del trabajador</p>
+        @if($pageBg[5])<img class="page-bg" src="{{ $pageBg[5] }}" alt="Plantilla ficha 5">@endif
+        <div class="field" style="{{ $fieldStyle(310, 168, 478, null, 10, 'normal') }}">{{ Str::upper($fullName) }}</div>
+        <div class="field" style="{{ $fieldStyle(225, 191, 560, null, 10, 'normal') }}">{{ Str::upper($text('quinta_domicilio', $text('domicilio_direccion'))) }}</div>
+        <div class="field" style="{{ $fieldStyle(152, 366, 20, null, 12, 'bold', 'center') }}">{{ Str::lower($text('quinta_percibe_otras')) === 'si' ? 'X' : '' }}</div>
+        <div class="field" style="{{ $fieldStyle(152, 474, 20, null, 12, 'bold', 'center') }}">{{ Str::lower($text('quinta_adjunta_dj_anterior')) === 'si' ? 'X' : '' }}</div>
+        @php $employer = $otherEmployers[0] ?? []; @endphp
+        <div class="field" style="{{ $fieldStyle(177, 694, 190, null, 10, 'normal') }}">{{ Str::upper((string) ($employer['razon_social'] ?? $text('quinta_otra_empresa'))) }}</div>
+        <div class="field" style="{{ $fieldStyle(411, 694, 72, null, 10, 'normal', 'center') }}">{{ (string) ($employer['ruc'] ?? $text('quinta_otra_empresa_ruc')) }}</div>
+        <div class="field" style="{{ $fieldStyle(530, 694, 75, null, 10, 'normal', 'center') }}">{{ (string) ($employer['monto_anual'] ?? '') }}</div>
+        <div class="field" style="{{ $fieldStyle(705, 694, 90, null, 10, 'normal', 'center') }}">{{ (string) ($employer['retencion'] ?? '') }}</div>
+        <div class="field" style="{{ $fieldStyle(507, 854, 120, null, 10, 'normal') }}">{{ $city }}</div>
+        <div class="field" style="{{ $fieldStyle(603, 854, 55, null, 10, 'normal') }}">{{ $quintaDay }}</div>
+        <div class="field" style="{{ $fieldStyle(684, 854, 120, null, 10, 'normal') }}">{{ $quintaMonth }}</div>
+        <div class="field" style="{{ $fieldStyle(842, 854, 70, null, 10, 'normal') }}">{{ $quintaYear }}</div>
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(425, 906, 170, 46) }}">
+        @endif
+        <div class="field" style="{{ $fieldStyle(392, 966, 170, null, 10, 'normal') }}">{{ $documentNumber }}</div>
     </div>
 
     <div class="page">
-        <div class="doc-title">LEY N° 28882<br>DECLARACION JURADA DE DOMICILIO</div>
-        <p>Yo, {{ $fullName }} de Nacionalidad {{ $value('nacionalidad') === 'Otra' ? $value('nacionalidad_otra') : $value('nacionalidad') }}; con {{ $document }}; domiciliado en: {{ $domicilioDeclaracion }}; en pleno goce de los Derechos Constitucionales y en concordancia con lo previsto en la Ley de Procedimientos Administrativos N° 27444.</p>
-        <h3 class="center">DECLARO BAJO JURAMENTO</h3>
-        <p>Que, la direccion que senalo lineas arriba, es mi domicilio real, actual, efectivo y verdadero, donde tengo vivencia real, fisica y permanente. Formula la presente Declaracion Jurada para los fines legales de: TRABAJO.</p>
-        <p class="center" style="margin-top:70px;">Ciudad de {{ $ciudad }}, {{ $quintaDia }} de {{ $quintaMes }} del {{ $quintaAnio }}</p>
-        <table class="no-border" style="margin-top:70px;"><tr><td class="center">@if($huellaDataUrl)<img class="image-box" src="{{ $huellaDataUrl }}" alt="Huella">@endif<br>Huella Digital</td><td class="center">@if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif<br>Firma</td></tr></table>
+        @if($pageBg[6])<img class="page-bg" src="{{ $pageBg[6] }}" alt="Plantilla ficha 6">@endif
+        <div class="field" style="{{ $fieldStyle(171, 322, 310, null, 12, 'normal') }}">{{ Str::upper($fullName) }}</div>
+        <div class="field" style="{{ $fieldStyle(774, 322, 120, null, 12, 'normal') }}">{{ $documentType }}</div>
+        <div class="field" style="{{ $fieldStyle(129, 370, 110, null, 12, 'normal') }}">{{ $documentNumber }}</div>
+        <div class="field" style="{{ $fieldStyle(381, 369, 471, null, 12, 'normal') }}">{{ Str::upper($text('domicilio_direccion', $text('domicilio_extranjero'))) }}</div>
+        <div class="field" style="{{ $fieldStyle(354, 881, 180, null, 11, 'normal') }}">{{ $city }}</div>
+        <div class="field" style="{{ $fieldStyle(590, 881, 50, null, 11, 'normal') }}">{{ $quintaDay }}</div>
+        <div class="field" style="{{ $fieldStyle(725, 881, 100, null, 11, 'normal') }}">{{ $quintaMonth }}</div>
+        <div class="field" style="{{ $fieldStyle(838, 881, 90, null, 11, 'normal') }}">{{ $quintaYear }}</div>
+        @if($huellaUri)
+            <img class="signature-image" src="{{ $huellaUri }}" alt="Huella" style="{{ $fieldStyle(134, 885, 98, 116) }}">
+        @endif
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(570, 989, 190, 54) }}">
+        @endif
     </div>
 
     <div class="page">
-        <div class="doc-title">CROQUIS DOMICILIARIO</div>
-        <table><tr><td class="label">Apellidos y nombres</td><td>{{ $fullName }}</td></tr><tr><td class="label">DNI / Documento</td><td>{{ $ficha->numero_documento }}</td></tr><tr><td class="label">Direccion</td><td>{{ $domicilioDeclaracion }}</td></tr></table>
-        <div class="blank-box" style="margin-top:20px;"></div>
-        <table class="no-border" style="margin-top:30px;"><tr><td class="center">@if($huellaDataUrl)<img class="image-box" src="{{ $huellaDataUrl }}" alt="Huella">@endif<br>HUELLA</td><td class="center">@if($firmaBase64)<img class="image-box" src="{{ $firmaBase64 }}" alt="Firma">@endif<br>FIRMA</td></tr></table>
+        @if($pageBg[7])<img class="page-bg" src="{{ $pageBg[7] }}" alt="Plantilla ficha 7">@endif
+        <div class="field" style="{{ $fieldStyle(309, 187, 260, null, 12, 'normal') }}">{{ Str::upper($fullName) }}</div>
+        <div class="field" style="{{ $fieldStyle(194, 219, 110, null, 10, 'normal') }}">{{ $documentNumber }}</div>
+        <div class="field multiline" style="{{ $fieldStyle(189, 236, 245, 30, 8.5, 'normal') }}">{{ Str::upper($text('domicilio_direccion', $text('domicilio_extranjero'))) }}</div>
+        @if($firmaUri)
+            <img class="signature-image" src="{{ $firmaUri }}" alt="Firma" style="{{ $fieldStyle(660, 195, 110, 80) }}">
+        @endif
+        @if($huellaUri)
+            <img class="signature-image" src="{{ $huellaUri }}" alt="Huella" style="{{ $fieldStyle(783, 195, 90, 80) }}">
+        @endif
     </div>
 </body>
 </html>

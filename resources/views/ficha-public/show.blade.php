@@ -34,6 +34,12 @@
         <div class="ficha-alert ficha-alert-danger">{{ session('error') }}</div>
     @endif
 
+    @if($mode === 'edit')
+        <div class="ficha-alert" id="localDraftNotice" style="display:none;">
+            Se recupero un borrador local de esta ficha en este dispositivo.
+        </div>
+    @endif
+
     @if(in_array($mode, ['invalid', 'expired', 'disabled'], true))
         <div class="ficha-card">
             <div class="ficha-card-body">
@@ -347,9 +353,12 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const isReadonly = @json($mode !== 'edit');
+    const form = document.getElementById('workerFichaForm');
     const canvas = document.getElementById('signaturePad');
     const hidden = document.getElementById('firmaBase64');
     const clearBtn = document.getElementById('clearSignature');
+    const draftNotice = document.getElementById('localDraftNotice');
+    const draftStorageKey = 'proserge:ficha-borrador:' + @json($token);
     let drawing = false;
     let hasSignature = Boolean(hidden && hidden.value);
 
@@ -434,6 +443,128 @@ document.addEventListener('DOMContentLoaded', function () {
             preview.style.display = 'block';
         });
     }
+
+    const readDraft = function () {
+        if (isReadonly) return null;
+        try {
+            const raw = window.localStorage.getItem(draftStorageKey);
+            return raw ? JSON.parse(raw) : null;
+        } catch (error) {
+            return null;
+        }
+    };
+
+    const writeDraft = function () {
+        if (isReadonly || !form) return;
+
+        const draft = {
+            fields: {},
+            familiares: [],
+            declaraciones: {},
+            firma_base64: hidden?.value || '',
+            quinta_otros_empleadores_json: '',
+            saved_at: new Date().toISOString(),
+        };
+
+        form.querySelectorAll('[data-ficha-key]').forEach(function (input) {
+            if (!input.name) return;
+            draft.fields[input.getAttribute('data-ficha-key')] = input.value;
+        });
+
+        const familyRows = document.querySelectorAll('#familyTableBody [data-family-item]');
+        familyRows.forEach(function (row) {
+            const payload = {};
+            row.querySelectorAll('[name]').forEach(function (input) {
+                const match = input.name.match(/\[([a-z_]+)\]$/i);
+                if (!match) return;
+                const key = match[1];
+                if (input.type === 'checkbox') {
+                    payload[key] = input.checked;
+                    return;
+                }
+                payload[key] = input.value;
+            });
+            draft.familiares.push(payload);
+        });
+
+        form.querySelectorAll('input[name^="declaraciones["]').forEach(function (input) {
+            const match = input.name.match(/declaraciones\[([^\]]+)\]/);
+            if (!match) return;
+            draft.declaraciones[match[1]] = input.checked;
+        });
+
+        const employersField = document.getElementById('field_quinta_otros_empleadores_json');
+        if (employersField) {
+            draft.quinta_otros_empleadores_json = employersField.value || '';
+        }
+
+        window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    };
+
+    const clearDraft = function () {
+        try {
+            window.localStorage.removeItem(draftStorageKey);
+        } catch (error) {
+            // noop
+        }
+    };
+
+    const restoreDraft = function () {
+        const draft = readDraft();
+        if (!draft || !form) return;
+
+        Object.entries(draft.fields || {}).forEach(function ([key, value]) {
+            const input = form.querySelector('[data-ficha-key="' + key + '"]');
+            if (!input || input.disabled || input.readOnly) return;
+            input.value = value ?? '';
+            if (input.tagName === 'SELECT') {
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                return;
+            }
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+
+        const employersField = document.getElementById('field_quinta_otros_empleadores_json');
+        if (employersField && typeof draft.quinta_otros_empleadores_json === 'string') {
+            employersField.value = draft.quinta_otros_empleadores_json;
+        }
+
+        const familyTableBody = document.getElementById('familyTableBody');
+        if (familyTableBody && Array.isArray(draft.familiares) && draft.familiares.length > 0) {
+            familyTableBody.innerHTML = '';
+            draft.familiares.forEach(function (familiar, index) {
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-family-item', '');
+                tr.innerHTML =
+                    '<td><input class="ficha-input" name="familiares[' + index + '][parentesco]" value="' + escapeHtml(familiar.parentesco || '') + '"></td>' +
+                    '<td><input class="ficha-input" name="familiares[' + index + '][nombres_apellidos]" value="' + escapeHtml(familiar.nombres_apellidos || '') + '">' +
+                    '<input type="hidden" name="familiares[' + index + '][tipo_documento]" value="' + escapeHtml(familiar.tipo_documento || 'DNI') + '">' +
+                    '<input type="hidden" name="familiares[' + index + '][numero_documento]" value="' + escapeHtml(familiar.numero_documento || '') + '">' +
+                    '<input type="hidden" name="familiares[' + index + '][contacto_emergencia]" value="' + ((familiar.contacto_emergencia ?? false) ? '1' : '0') + '"></td>' +
+                    '<td><input class="ficha-input" type="date" name="familiares[' + index + '][fecha_nacimiento]" value="' + escapeHtml(familiar.fecha_nacimiento || '') + '"></td>' +
+                    '<td style="text-align:center;"><input type="checkbox" name="familiares[' + index + '][vive_con_trabajador]" value="1" ' + ((familiar.vive_con_trabajador ?? false) ? 'checked' : '') + '></td>' +
+                    '<td><input class="ficha-input" name="familiares[' + index + '][telefono]" value="' + escapeHtml(familiar.telefono || '') + '"></td>' +
+                    '<td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
+                familyTableBody.appendChild(tr);
+            });
+        }
+
+        Object.entries(draft.declaraciones || {}).forEach(function ([key, checked]) {
+            const input = form.querySelector('input[name="declaraciones[' + key + ']"]');
+            if (input) {
+                input.checked = Boolean(checked);
+            }
+        });
+
+        if (hidden && draft.firma_base64) {
+            hidden.value = draft.firma_base64;
+            hasSignature = true;
+        }
+
+        if (draftNotice) {
+            draftNotice.style.display = 'block';
+        }
+    };
 
     const byKey = (key) => document.querySelector('[data-ficha-key="' + key + '"]');
     const fieldWrap = (key) => document.querySelector('[data-ficha-field="' + key + '"]');
@@ -658,6 +789,29 @@ document.addEventListener('DOMContentLoaded', function () {
             button.closest('[data-family-item]').remove();
             reindexFamilies();
         });
+    }
+
+    if (!isReadonly) {
+        restoreDraft();
+        if (employerBody) {
+            employerBody.innerHTML = '';
+            readEmployers().forEach(addEmployerRow);
+            if (employerBody.children.length === 0) addEmployerRow();
+        }
+        applyConditionals();
+        updateQuintaDefaults();
+
+        let autosaveTimer = null;
+        const scheduleDraftSave = function () {
+            window.clearTimeout(autosaveTimer);
+            autosaveTimer = window.setTimeout(writeDraft, 500);
+        };
+
+        form?.addEventListener('input', scheduleDraftSave, true);
+        form?.addEventListener('change', scheduleDraftSave, true);
+        form?.addEventListener('submit', clearDraft);
+    } else if (@json(session('success') ? true : false)) {
+        clearDraft();
     }
 });
 </script>
