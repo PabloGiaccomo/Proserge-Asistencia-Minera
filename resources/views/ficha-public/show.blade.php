@@ -144,7 +144,7 @@
                                         @endif
 
                                         @if($type === 'select')
-                                            <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $fieldDisabled ? 'disabled' : '' }}>
+                                            <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $fieldDisabled ? 'disabled' : '' }} {{ (!$fieldDisabled && $field['required'] && !$locked) ? 'required' : '' }}>
                                                 <option value="">Seleccionar</option>
                                                 @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)
                                                     <option value="{{ $optionValue }}" @selected((string) $value === (string) $optionValue)>{{ $optionLabel }}</option>
@@ -154,9 +154,9 @@
                                                 <input type="hidden" name="fields[{{ $key }}]" value="{{ $value }}">
                                             @endif
                                         @elseif($isTextarea)
-                                            <textarea class="ficha-textarea" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }}>{{ $value }}</textarea>
+                                            <textarea class="ficha-textarea" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $field['required']) ? 'required' : '' }}>{{ $value }}</textarea>
                                         @else
-                                            <input class="ficha-input" id="field_{{ $key }}" type="{{ $type }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }}>
+                                            <input class="ficha-input" id="field_{{ $key }}" type="{{ $type }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $field['required']) ? 'required' : '' }}>
                                         @endif
 
                                         @error('fields.' . $key)

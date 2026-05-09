@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SubjectBase64,
     [Parameter(Mandatory = $true)]
-    [string]$BodyBase64
+    [string]$BodyBase64,
+    [Parameter(Mandatory = $false)]
+    [string]$HtmlBodyBase64 = ""
 )
 
 $fromAccount = "sistemas@proserge.com"
@@ -21,6 +23,12 @@ try {
     $bodyBytes = [Convert]::FromBase64String($BodyBase64)
     $body = [System.Text.Encoding]::UTF8.GetString($bodyBytes)
     $mail.Body = $body
+
+    if ($HtmlBodyBase64 -and $HtmlBodyBase64.Trim() -ne "") {
+        $htmlBodyBytes = [Convert]::FromBase64String($HtmlBodyBase64)
+        $htmlBody = [System.Text.Encoding]::UTF8.GetString($htmlBodyBytes)
+        $mail.HTMLBody = $htmlBody
+    }
 
     $account = $outlook.Session.Accounts | Where-Object { $_.SmtpAddress -eq $fromAccount }
     if ($account) {

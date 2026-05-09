@@ -69,7 +69,7 @@ class PersonalFichaCatalog
                 'fields' => [
                     self::field('telefono', 'Telefono celular', 'tel', true),
                     self::field('telefono_alterno', 'Telefono alterno', 'tel', false),
-                    self::field('correo', 'Correo electronico', 'email', false),
+                    self::field('correo', 'Correo electronico', 'email', true),
                 ],
             ],
             [

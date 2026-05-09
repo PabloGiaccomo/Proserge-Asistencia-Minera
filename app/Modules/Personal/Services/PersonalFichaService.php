@@ -39,60 +39,91 @@ class PersonalFichaService
             ]);
         }
 
-        $requiredMissing = collect(PersonalFichaCatalog::requiredKeys())
-            ->filter(fn (string $key): bool => trim((string) ($data[$key] ?? '')) === '')
-            ->values()
-            ->all();
-
-        $verifyFields = collect($verifyFields)
-            ->merge($requiredMissing)
-            ->filter(fn ($key): bool => array_key_exists((string) $key, PersonalFichaCatalog::fields()))
-            ->map(fn ($key): string => (string) $key)
-            ->unique()
-            ->values()
-            ->all();
-
         return DB::transaction(function () use ($data, $documentType, $documentNumber, $verifyFields, $source, $user): array {
             $existing = $this->findPersonalByDocument($documentType, $documentNumber);
-            if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
-                throw ValidationException::withMessages([
-                    'fields.numero_documento' => 'Ya existe un trabajador activo o pendiente con este documento.',
-                ]);
-            }
+            $data = $this->mergedImportFichaData($existing, $data);
 
-            $payload = $this->personalPayloadFromFicha($data, PersonalFicha::ESTADO_PENDIENTE);
+            $requiredMissing = collect(PersonalFichaCatalog::requiredKeys())
+                ->filter(fn (string $key): bool => trim((string) ($data[$key] ?? '')) === '')
+                ->values()
+                ->all();
+
+            $verifyFields = collect($verifyFields)
+                ->merge($requiredMissing)
+                ->filter(fn ($key): bool => array_key_exists((string) $key, PersonalFichaCatalog::fields()))
+                ->map(fn ($key): string => (string) $key)
+                ->unique()
+                ->values()
+                ->all();
+
+            $payload = $this->personalPayloadFromFicha(
+                $data,
+                $existing ? $this->resolveImportedPersonalState($existing) : PersonalFicha::ESTADO_PENDIENTE
+            );
             $personal = $existing
                 ? $this->personalService->update($existing, $payload)
                 : $this->personalService->create($payload);
 
-            $ficha = PersonalFicha::query()->create([
-                'id' => (string) Str::uuid(),
-                'personal_id' => $personal->id,
-                'estado' => PersonalFicha::ESTADO_PENDIENTE,
-                'tipo_documento' => $documentType,
-                'numero_documento' => $documentNumber,
-                'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
-                'macro_original_nombre' => $source['original_name'] ?? null,
-                'macro_original_path' => $source['path'] ?? null,
-                'datos_detectados_json' => $source['detected'] ?? $data,
-                'datos_json' => $data,
-                'campos_verificacion_json' => $verifyFields,
-                'advertencias_json' => $source['warnings'] ?? [],
-                'created_by_usuario_id' => $user->id,
-            ]);
+            $ficha = $personal->fichaColaborador;
+            if ($ficha) {
+                $ficha->forceFill([
+                    'estado' => PersonalFicha::ESTADO_PENDIENTE,
+                    'tipo_documento' => $documentType,
+                    'numero_documento' => $documentNumber,
+                    'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                    'macro_original_nombre' => $source['original_name'] ?? $ficha->macro_original_nombre,
+                    'macro_original_path' => $source['path'] ?? $ficha->macro_original_path,
+                    'datos_detectados_json' => $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $source['detected'] ?? $data),
+                    'datos_json' => $this->mergeNonEmptyFichaData($ficha->datos_json ?? [], $data),
+                    'campos_verificacion_json' => $verifyFields,
+                    'advertencias_json' => array_values(array_unique(array_merge($ficha->advertencias_json ?? [], $source['warnings'] ?? []))),
+                    'submitted_at' => null,
+                    'approved_at' => null,
+                    'approved_by_usuario_id' => null,
+                    'observed_at' => null,
+                    'rejected_at' => null,
+                ])->save();
+            } else {
+                $ficha = PersonalFicha::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'personal_id' => $personal->id,
+                    'estado' => PersonalFicha::ESTADO_PENDIENTE,
+                    'tipo_documento' => $documentType,
+                    'numero_documento' => $documentNumber,
+                    'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                    'macro_original_nombre' => $source['original_name'] ?? null,
+                    'macro_original_path' => $source['path'] ?? null,
+                    'datos_detectados_json' => $source['detected'] ?? $data,
+                    'datos_json' => $data,
+                    'campos_verificacion_json' => $verifyFields,
+                    'advertencias_json' => $source['warnings'] ?? [],
+                    'created_by_usuario_id' => $user->id,
+                ]);
+            }
 
             if (!empty($source['path'])) {
-                PersonalFichaArchivo::query()->create([
-                    'id' => (string) Str::uuid(),
-                    'personal_ficha_id' => $ficha->id,
-                    'tipo' => 'macro_contrato',
-                    'nombre_original' => $source['original_name'] ?? null,
-                    'path' => $source['path'],
-                    'mime' => $source['mime'] ?? null,
-                    'size' => $source['size'] ?? null,
-                    'uploaded_by_usuario_id' => $user->id,
-                    'uploaded_by_public' => false,
-                ]);
+                $existingMacro = PersonalFichaArchivo::query()
+                    ->where('personal_ficha_id', $ficha->id)
+                    ->where('tipo', 'macro_contrato')
+                    ->first();
+
+                if ($existingMacro?->path !== ($source['path'] ?? null)) {
+                    if ($existingMacro) {
+                        $existingMacro->delete();
+                    }
+
+                    PersonalFichaArchivo::query()->create([
+                        'id' => (string) Str::uuid(),
+                        'personal_ficha_id' => $ficha->id,
+                        'tipo' => 'macro_contrato',
+                        'nombre_original' => $source['original_name'] ?? null,
+                        'path' => $source['path'],
+                        'mime' => $source['mime'] ?? null,
+                        'size' => $source['size'] ?? null,
+                        'uploaded_by_usuario_id' => $user->id,
+                        'uploaded_by_public' => false,
+                    ]);
+                }
             }
 
             [$token, $link] = $this->createSecureLink($ficha);
@@ -313,11 +344,12 @@ class PersonalFichaService
         $existing = $this->findPersonalByDocument($type, $number);
         if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
             return [
-                'available' => false,
+                'available' => true,
                 'type' => $type,
                 'number' => $number,
-                'message' => 'Ya existe en Personal con estado ' . PersonalFichaCatalog::stateLabel((string) $existing->estado) . '.',
+                'message' => 'Ya existe en Personal con estado ' . PersonalFichaCatalog::stateLabel((string) $existing->estado) . '. La macro completara o actualizara los datos existentes.',
                 'personal_id' => $existing->id,
+                'will_update_existing' => true,
             ];
         }
 
@@ -1135,6 +1167,14 @@ class PersonalFichaService
 
     private function createSecureLink(PersonalFicha $ficha, int $hours = 24): array
     {
+        PersonalFichaLink::query()
+            ->where('personal_ficha_id', $ficha->id)
+            ->where('estado', PersonalFichaLink::ESTADO_ACTIVO)
+            ->update([
+                'estado' => PersonalFichaLink::ESTADO_INHABILITADO,
+                'disabled_at' => now(),
+            ]);
+
         do {
             $token = Str::random(80);
             $hash = hash('sha256', $token);
@@ -1311,6 +1351,53 @@ class PersonalFichaService
         }
 
         return $query->with('fichaColaborador')->first();
+    }
+
+    private function mergedImportFichaData(?Personal $personal, array $incoming): array
+    {
+        if (!$personal) {
+            return $incoming;
+        }
+
+        $base = $personal->fichaColaborador
+            ? $this->fichaDataForPublic($personal->fichaColaborador)
+            : $this->seedFichaDataFromPersonal($personal);
+
+        return $this->normalizeFichaData($this->mergeNonEmptyFichaData($base, $incoming));
+    }
+
+    private function seedFichaDataFromPersonal(Personal $personal): array
+    {
+        $data = PersonalFichaCatalog::emptyData();
+        $nameParts = preg_split('/\s+/', trim((string) $personal->nombre_completo)) ?: [];
+
+        if (count($nameParts) >= 3 && $personal->nombre_completo !== 'Pendiente completar nombres') {
+            $data['apellido_paterno'] = $nameParts[0] ?? '';
+            $data['apellido_materno'] = $nameParts[1] ?? '';
+            $data['nombres'] = implode(' ', array_slice($nameParts, 2));
+        } else {
+            $data['nombres'] = trim((string) $personal->nombre_completo);
+        }
+
+        $data['tipo_documento'] = (string) ($personal->tipo_documento ?? 'DNI');
+        $data['numero_documento'] = (string) ($personal->numero_documento ?? $personal->dni ?? '');
+        $data['puesto'] = (string) ($personal->puesto ?? '');
+        $data['ocupacion'] = (string) ($personal->ocupacion ?? '');
+        $data['contrato'] = (string) ($personal->contrato ?? 'REG');
+        $data['correo'] = (string) ($personal->correo ?? '');
+        $data['telefono'] = (string) ($personal->telefono ?? '');
+        $data['fecha_ingreso'] = (string) optional($personal->fecha_ingreso)->toDateString();
+
+        return $this->normalizeFichaData($data);
+    }
+
+    private function resolveImportedPersonalState(Personal $personal): string
+    {
+        $current = strtoupper((string) $personal->estado);
+
+        return in_array($current, ['ACTIVO', 'INACTIVO', 'CESADO'], true)
+            ? $current
+            : PersonalFicha::ESTADO_PENDIENTE;
     }
 
     private function personalPayloadFromFicha(array $data, string $estado): array
