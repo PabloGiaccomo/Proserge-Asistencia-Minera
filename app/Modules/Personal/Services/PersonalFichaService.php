@@ -709,6 +709,38 @@ class PersonalFichaService
         return mb_strtolower($email);
     }
 
+    public function markLinkEmailed(PersonalFicha $ficha): array
+    {
+        $ficha->loadMissing(['personal', 'link']);
+        $link = $ficha->link;
+
+        if (!$link) {
+            throw ValidationException::withMessages([
+                'ficha' => 'La ficha no tiene un link disponible.',
+            ]);
+        }
+
+        $email = $this->resolvedFichaEmail($ficha);
+        if (!$email) {
+            throw ValidationException::withMessages([
+                'correo' => 'No se encontro un correo valido para este trabajador.',
+            ]);
+        }
+
+        $wasResent = $link->emailed_at !== null;
+
+        $link->forceFill([
+            'emailed_at' => now(),
+            'emailed_to' => $email,
+        ])->save();
+
+        return [
+            'email' => $email,
+            'resent' => $wasResent,
+            'link' => $link->fresh(),
+        ];
+    }
+
     public function sendLinkByEmail(PersonalFicha $ficha): array
     {
         $ficha->loadMissing(['personal', 'link']);

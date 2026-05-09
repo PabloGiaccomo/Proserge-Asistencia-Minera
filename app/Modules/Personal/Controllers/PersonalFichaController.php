@@ -6,6 +6,7 @@ use App\Http\Controllers\WebPageController;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
 use App\Modules\Personal\Services\PersonalFichaExportService;
+use App\Modules\Personal\Services\OutlookMailService;
 use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaService;
@@ -27,6 +28,7 @@ class PersonalFichaController extends WebPageController
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalFichaPdfService $pdfService,
         private readonly PersonalFichaExportService $exportService,
+        private readonly OutlookMailService $outlookMailService,
     ) {
     }
 
@@ -270,21 +272,35 @@ class PersonalFichaController extends WebPageController
             ->with('regularization_link', $result['url'] ?? null);
     }
 
-    public function sendTemporalEmail(string $id): RedirectResponse
+    public function sendTemporalEmail(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
 
         try {
-            $result = $this->fichaService->sendLinkByEmail($ficha);
+            $result = $this->outlookMailService->send($ficha);
         } catch (ValidationException $exception) {
+            $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo enviar el correo.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['error' => $error], 422);
+            }
+
             return redirect()
                 ->route('personal.fichas.temporales')
-                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo enviar el correo.');
+                ->with('error', $error);
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'email' => $result['email'],
+                'resent' => $result['resent'],
+            ]);
         }
 
         return redirect()
             ->route('personal.fichas.temporales')
-            ->with('success', ($result['resent'] ? 'Se reenvi' : 'Se envi') . 'o el link temporal al correo ' . $result['email'] . '.');
+            ->with('success', 'Correo enviado a ' . $result['email'] . ' via Outlook.');
     }
 
     public function destroyTemporal(string $id): RedirectResponse

@@ -114,12 +114,11 @@
                                             {{ $ficha->estado === 'FICHA_ENVIADA' ? 'Validar / activar' : 'Ver ficha' }}
                                         </a>
                                         @if($correo && $row['url'])
-                                            <form method="POST" action="{{ route('personal.fichas.send-email', $ficha->id) }}" onsubmit="return confirm('{{ $emailSentAt ? 'Se volvera a enviar el correo al trabajador. ¿Deseas continuar?' : 'Se enviara el link temporal al correo del trabajador. ¿Deseas continuar?' }}');">
-                                                @csrf
-                                                <button type="submit" class="btn btn-outline btn-xs">
-                                                    {{ $emailSentAt ? 'Volver a enviar correo' : 'Enviar al correo' }}
-                                                </button>
-                                            </form>
+                                            <button type="button"
+                                                class="btn btn-outline btn-xs js-send-email"
+                                                data-send-url="{{ route('personal.fichas.send-email', $ficha->id) }}">
+                                                {{ $emailSentAt ? 'Volver a enviar correo' : 'Enviar al correo' }}
+                                            </button>
                                         @else
                                             <button type="button" class="btn btn-outline btn-xs" disabled title="{{ $correo ? 'No se encontró un link recuperable' : 'No se encontró correo' }}" style="opacity:.55; cursor:not-allowed;">
                                                 Enviar al correo
@@ -177,6 +176,38 @@ document.addEventListener('DOMContentLoaded', function () {
             } catch (error) {
                 document.execCommand('copy');
             }
+        });
+    });
+
+    document.querySelectorAll('.js-send-email').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (button.disabled) return;
+
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Enviando...';
+
+            fetch(button.dataset.sendUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': @json(csrf_token()),
+                    'Accept': 'application/json',
+                },
+            }).then(function (response) {
+                if (response.ok) {
+                    button.textContent = 'Volver a enviar correo';
+                } else {
+                    return response.json().then(function (data) {
+                        alert(data.error || 'Error al enviar el correo');
+                        button.textContent = originalText;
+                    });
+                }
+            }).catch(function () {
+                alert('Error de conexion al enviar el correo');
+                button.textContent = originalText;
+            }).finally(function () {
+                button.disabled = false;
+            });
         });
     });
 });
