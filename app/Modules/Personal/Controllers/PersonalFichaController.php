@@ -270,6 +270,23 @@ class PersonalFichaController extends WebPageController
             ->with('regularization_link', $result['url'] ?? null);
     }
 
+    public function sendTemporalEmail(string $id): RedirectResponse
+    {
+        $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
+
+        try {
+            $result = $this->fichaService->sendLinkByEmail($ficha);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.fichas.temporales')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo enviar el correo.');
+        }
+
+        return redirect()
+            ->route('personal.fichas.temporales')
+            ->with('success', ($result['resent'] ? 'Se reenvi' : 'Se envi') . 'o el link temporal al correo ' . $result['email'] . '.');
+    }
+
     public function destroyTemporal(string $id): RedirectResponse
     {
         $this->assertCanDeletePersonal();
