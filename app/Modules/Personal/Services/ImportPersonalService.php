@@ -21,6 +21,8 @@ class ImportPersonalService
 
     private const MAX_CHANGE_DETAILS = 200;
 
+    private const IMPORT_BATCH_SIZE = 100;
+
     private const DEFAULT_COLUMNS = [
         'dni' => 3,
         'nombre' => 5,
@@ -100,7 +102,7 @@ class ImportPersonalService
         $mineSync = $this->syncMines($detectedMines);
         $mineMap = $mineSync['map'];
 
-        return DB::transaction(function () use ($dataRows, $columns, $mineMap, $mineSync): array {
+        return (function () use ($dataRows, $columns, $mineMap, $mineSync): array {
             $hasTelefonoColumn = Schema::hasColumn('personal', 'telefono');
             $hasTelefono1Column = Schema::hasColumn('personal', 'telefono_1');
             $hasTelefono2Column = Schema::hasColumn('personal', 'telefono_2');
@@ -179,7 +181,9 @@ class ImportPersonalService
             $processedDni = [];
             $activeDbDni = Personal::query()->where('estado', 'ACTIVO')->pluck('dni')->all();
 
-            foreach ($dataRows as $row) {
+            foreach (array_chunk($dataRows, self::IMPORT_BATCH_SIZE) as $chunkRows) {
+                DB::transaction(function () use ($chunkRows, $columns, $mineMap, $hasTelefonoColumn, $hasTelefono1Column, $hasTelefono2Column, $existing, &$processedDni, &$stats): void {
+                    foreach ($chunkRows as $row) {
                 $dni = PersonalNormalizer::dni($row[$columns['dni']] ?? null);
                 if (!PersonalNormalizer::isValidDni($dni)) {
                     $stats['omitidos']++;
@@ -396,9 +400,13 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
                     $workerChanges = [];
                     $this->syncMineStatuses($personal, $row, $mineMap, $stats, $workerChanges);
                 }
+                    }
+                });
             }
 
-            foreach ($activeDbDni as $dbDni) {
+            foreach (array_chunk($activeDbDni, self::IMPORT_BATCH_SIZE) as $dniChunk) {
+                DB::transaction(function () use ($dniChunk, $existing, &$processedDni, &$stats): void {
+                    foreach ($dniChunk as $dbDni) {
                 if (!isset($processedDni[$dbDni])) {
                     Personal::query()->where('dni', $dbDni)->update(['estado' => 'INACTIVO']);
                     $stats['inactivados']++;
@@ -413,7 +421,12 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
                         ];
                     }
                 }
+                    }
+                });
             }
+
+            $stats['bloquesProcesados'] = count(array_chunk($dataRows, self::IMPORT_BATCH_SIZE));
+            $stats['tamanoBloque'] = self::IMPORT_BATCH_SIZE;
 
             return $stats;
         });

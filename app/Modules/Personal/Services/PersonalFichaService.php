@@ -2,6 +2,7 @@
 
 namespace App\Modules\Personal\Services;
 
+use App\Mail\PersonalFichaLinkMail;
 use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
@@ -14,6 +15,7 @@ use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -627,6 +629,8 @@ class PersonalFichaService
                     'personal' => $ficha->personal,
                     'link' => $summary['link'],
                     'url' => $summary['url'],
+                    'correo' => $this->resolvedFichaEmail($ficha),
+                    'email_sent_at' => $summary['link']?->emailed_at,
                     'estado_label' => PersonalFichaCatalog::stateLabel($ficha->estado),
                     'missing_fields' => $summary['missing_fields'],
                     'missing_documents' => $summary['missing_documents'],
@@ -686,6 +690,69 @@ class PersonalFichaService
         ])->save();
 
         return $link->fresh();
+    }
+
+    public function resolvedFichaEmail(?PersonalFicha $ficha): ?string
+    {
+        if (!$ficha) {
+            return null;
+        }
+
+        $ficha->loadMissing('personal');
+        $data = is_array($ficha->datos_json ?? null) ? $ficha->datos_json : [];
+        $email = PersonalNormalizer::text($ficha->personal?->correo ?? $data['correo'] ?? '');
+
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return null;
+        }
+
+        return mb_strtolower($email);
+    }
+
+    public function sendLinkByEmail(PersonalFicha $ficha): array
+    {
+        $ficha->loadMissing(['personal', 'link']);
+        $link = $ficha->link;
+
+        if (!$link) {
+            throw ValidationException::withMessages([
+                'ficha' => 'La ficha no tiene un link disponible para enviar.',
+            ]);
+        }
+
+        $email = $this->resolvedFichaEmail($ficha);
+        if (!$email) {
+            throw ValidationException::withMessages([
+                'correo' => 'No se encontro un correo valido para este trabajador.',
+            ]);
+        }
+
+        $url = $this->publicUrlForLink($link);
+        if (!$url) {
+            throw ValidationException::withMessages([
+                'ficha' => 'No se pudo reconstruir el link temporal para enviarlo por correo.',
+            ]);
+        }
+
+        $wasSent = $link->emailed_at !== null;
+
+        Mail::to($email)->send(new PersonalFichaLinkMail(
+            $ficha->fresh(['personal', 'link']),
+            $url,
+            $wasSent,
+        ));
+
+        $link->forceFill([
+            'emailed_at' => now(),
+            'emailed_to' => $email,
+        ])->save();
+
+        return [
+            'email' => $email,
+            'resent' => $wasSent,
+            'link' => $link->fresh(),
+            'url' => $url,
+        ];
     }
 
     public function ensureRegularizationLink(PersonalFicha $ficha, int $hours = 24): array
@@ -1177,14 +1244,9 @@ class PersonalFichaService
             if ($ficha && !$ficha->submitted_at) {
                 $personal = $ficha->personal;
                 if ($personal && in_array(strtoupper((string) $personal->estado), [PersonalFicha::ESTADO_PENDIENTE, PersonalFicha::ESTADO_LINK_VENCIDO], true)) {
-                    try {
-                        $this->personalService->deleteCompletely($personal);
-                        return;
-                    } catch (ValidationException) {
-                        $personal->forceFill([
-                            'estado' => PersonalFicha::ESTADO_LINK_VENCIDO,
-                        ])->save();
-                    }
+                    $personal->forceFill([
+                        'estado' => PersonalFicha::ESTADO_LINK_VENCIDO,
+                    ])->save();
                 }
 
                 $ficha->forceFill([

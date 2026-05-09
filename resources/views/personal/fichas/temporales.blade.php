@@ -66,6 +66,8 @@
                                 $ficha = $row['ficha'];
                                 $personal = $row['personal'];
                                 $link = $row['link'];
+                                $correo = $row['correo'] ?? null;
+                                $emailSentAt = $row['email_sent_at'] ?? null;
                                 $missingFields = $row['missing_fields'] ?? [];
                                 $missingDocuments = $row['missing_documents'] ?? [];
                                 $statusClass = match($ficha->estado) {
@@ -79,6 +81,14 @@
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
                                     <div class="ficha-card-subtitle">{{ $personal?->puesto ?: 'Puesto pendiente' }}</div>
+                                    @if($correo)
+                                        <div class="ficha-card-subtitle">{{ $correo }}</div>
+                                    @endif
+                                    @if($emailSentAt)
+                                        <div class="ficha-card-subtitle" style="color:#2563eb; margin-top:4px;">
+                                            Correo enviado: {{ optional($emailSentAt)->format('d/m/Y H:i') }}
+                                        </div>
+                                    @endif
                                     @if(count($missingFields) > 0 || count($missingDocuments) > 0)
                                         <div class="ficha-card-subtitle" style="color:#b45309; margin-top:4px;">
                                             Faltan datos o documentos importantes
@@ -103,6 +113,18 @@
                                         <a href="{{ route('personal.fichas.review', $ficha->id) }}" class="btn {{ $ficha->estado === 'FICHA_ENVIADA' ? 'btn-primary' : 'btn-outline' }} btn-xs">
                                             {{ $ficha->estado === 'FICHA_ENVIADA' ? 'Validar / activar' : 'Ver ficha' }}
                                         </a>
+                                        @if($correo && $row['url'])
+                                            <form method="POST" action="{{ route('personal.fichas.send-email', $ficha->id) }}" onsubmit="return confirm('{{ $emailSentAt ? 'Se volvera a enviar el correo al trabajador. ¿Deseas continuar?' : 'Se enviara el link temporal al correo del trabajador. ¿Deseas continuar?' }}');">
+                                                @csrf
+                                                <button type="submit" class="btn btn-outline btn-xs">
+                                                    {{ $emailSentAt ? 'Volver a enviar correo' : 'Enviar al correo' }}
+                                                </button>
+                                            </form>
+                                        @else
+                                            <button type="button" class="btn btn-outline btn-xs" disabled title="{{ $correo ? 'No se encontró un link recuperable' : 'No se encontró correo' }}" style="opacity:.55; cursor:not-allowed;">
+                                                Enviar al correo
+                                            </button>
+                                        @endif
                                         @allowed('personal', 'eliminar')
                                             @if($link && !$ficha->submitted_at)
                                                 <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">

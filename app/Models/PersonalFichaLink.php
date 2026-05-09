@@ -29,6 +29,8 @@ class PersonalFichaLink extends Model
         'submitted_at',
         'disabled_at',
         'last_accessed_at',
+        'emailed_at',
+        'emailed_to',
     ];
 
     protected $casts = [
@@ -37,6 +39,7 @@ class PersonalFichaLink extends Model
         'submitted_at' => 'datetime',
         'disabled_at' => 'datetime',
         'last_accessed_at' => 'datetime',
+        'emailed_at' => 'datetime',
     ];
 
     public function ficha(): BelongsTo

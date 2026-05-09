@@ -18,6 +18,7 @@ use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Throwable;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -217,14 +218,25 @@ class PersonalPageController extends WebPageController
     {
         $validated = $request->validate($this->manualCreateRules());
 
-        $result = $this->fichaService->createManual(
-            $validated['fields'] ?? [],
-            [
-                'es_supervisor' => $validated['es_supervisor'] ?? false,
-                'minas' => $this->buildMinePayload($validated),
-            ],
-            $this->requireAuthenticatedUser(),
-        );
+        try {
+            $result = $this->fichaService->createManual(
+                $validated['fields'] ?? [],
+                [
+                    'es_supervisor' => $validated['es_supervisor'] ?? false,
+                    'minas' => $this->buildMinePayload($validated),
+                ],
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'No se pudo crear el trabajador. Revisa la configuracion del servidor o intenta nuevamente.');
+        }
 
         return view('personal.fichas.link', [
             'result' => $result,
