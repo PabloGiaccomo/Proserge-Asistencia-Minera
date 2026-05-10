@@ -37,10 +37,39 @@ class PersonalFichaController extends WebPageController
         return view('personal.fichas.import');
     }
 
-    public function temporales(): View
+    public function temporales(Request $request): View
     {
+        $estado = strtoupper((string) $request->query('estado', ''));
+        $rows = $this->fichaService->temporaryLinkRows($estado !== '' ? $estado : null);
+        $stateOrder = [
+            PersonalFicha::ESTADO_PENDIENTE,
+            PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE,
+            PersonalFicha::ESTADO_ENVIADA,
+            PersonalFicha::ESTADO_OBSERVADO,
+            PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO,
+        ];
+
+        $availableStates = collect($rows)
+            ->pluck('estado_key')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $estadoOptions = ['' => 'Todos'];
+        foreach ($stateOrder as $stateKey) {
+            if ($availableStates->contains($stateKey)) {
+                $estadoOptions[$stateKey] = $this->fichaService->temporaryDisplayLabel($stateKey);
+            }
+        }
+
+        if ($estado !== '' && !array_key_exists($estado, $estadoOptions)) {
+            $estadoOptions[$estado] = $this->fichaService->temporaryDisplayLabel($estado);
+        }
+
         return view('personal.fichas.temporales', [
-            'rows' => $this->fichaService->temporaryLinkRows(),
+            'rows' => $rows,
+            'estadoFilter' => $estado,
+            'estadoOptions' => $estadoOptions,
         ]);
     }
 
@@ -310,7 +339,7 @@ class PersonalFichaController extends WebPageController
         $ficha = PersonalFicha::query()->with(['personal', 'link', 'familiares', 'archivos'])->findOrFail($id);
 
         try {
-            $this->fichaService->deleteDraftFicha($ficha);
+            $this->fichaService->removeFromTemporaryList($ficha);
         } catch (ValidationException $exception) {
             return redirect()
                 ->route('personal.fichas.temporales')
@@ -319,7 +348,7 @@ class PersonalFichaController extends WebPageController
 
         return redirect()
             ->route('personal.fichas.temporales')
-            ->with('success', 'Trabajador temporal eliminado por completo.');
+            ->with('success', 'Registro eliminado de Temporales y links.');
     }
 
     public function cancelImport(Request $request): RedirectResponse

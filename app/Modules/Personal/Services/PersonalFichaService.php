@@ -23,6 +23,9 @@ use Illuminate\Validation\ValidationException;
 
 class PersonalFichaService
 {
+    public const TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE = 'LINK_ENVIADO_PENDIENTE';
+    public const TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO = 'LINK_ENVIADO_VENCIDO';
+
     public function __construct(private readonly PersonalService $personalService)
     {
     }
@@ -635,26 +638,40 @@ class PersonalFichaService
         return route('ficha-colaborador.show', ['token' => $token]);
     }
 
-    public function temporaryLinkRows(): array
+    public function temporaryLinkRows(?string $estado = null): array
     {
         $this->expireStaleLinks();
+        $this->ensurePendingFichasForIncompletePersonal();
+
+        $normalizedEstado = $estado ? strtoupper($estado) : null;
 
         return PersonalFicha::query()
             ->with(['personal', 'link', 'archivos'])
             ->latest('created_at')
             ->limit(300)
             ->get()
-            ->filter(function (PersonalFicha $ficha): bool {
+            ->filter(function (PersonalFicha $ficha) use ($normalizedEstado): bool {
+                $displayState = $this->temporaryDisplayState($ficha);
+
+                if ($normalizedEstado !== null && $normalizedEstado !== '' && $displayState !== $normalizedEstado) {
+                    return false;
+                }
+
                 $hasWorkflowState = in_array($ficha->estado, [
                     PersonalFicha::ESTADO_PENDIENTE,
                     PersonalFicha::ESTADO_ENVIADA,
                     PersonalFicha::ESTADO_OBSERVADO,
                 ], true);
 
+                if ($normalizedEstado !== null && $normalizedEstado !== '') {
+                    return true;
+                }
+
                 return $hasWorkflowState || $this->needsRegularization($ficha);
             })
             ->map(function (PersonalFicha $ficha): array {
                 $summary = $this->regularizationSummary($ficha);
+                $displayState = $this->temporaryDisplayState($ficha);
 
                 return [
                     'ficha' => $ficha,
@@ -663,13 +680,64 @@ class PersonalFichaService
                     'url' => $summary['url'],
                     'correo' => $this->resolvedFichaEmail($ficha),
                     'email_sent_at' => $summary['link']?->emailed_at,
-                    'estado_label' => PersonalFichaCatalog::stateLabel($ficha->estado),
+                    'estado_key' => $displayState,
+                    'estado_label' => $this->temporaryDisplayLabel($displayState),
                     'missing_fields' => $summary['missing_fields'],
                     'missing_documents' => $summary['missing_documents'],
                     'can_regularize' => $summary['can_regularize'],
                 ];
             })
+            ->filter(fn (array $row): bool => !empty($row['url']) || !empty($row['can_regularize']))
             ->all();
+    }
+
+    public function temporaryDisplayState(PersonalFicha $ficha): string
+    {
+        $ficha->loadMissing('link');
+        $link = $ficha->link;
+
+        if (
+            $ficha->estado === PersonalFicha::ESTADO_LINK_VENCIDO
+            || $link?->estado === PersonalFichaLink::ESTADO_VENCIDO
+        ) {
+            return self::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO;
+        }
+
+        if (
+            $ficha->estado === PersonalFicha::ESTADO_PENDIENTE
+            && $link?->estado === PersonalFichaLink::ESTADO_ACTIVO
+            && $link->enabled_manually_at !== null
+            && $link->expires_at?->greaterThan(now())
+        ) {
+            return self::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE;
+        }
+
+        return strtoupper((string) $ficha->estado);
+    }
+
+    public function temporaryDisplayLabel(string $state): string
+    {
+        return match (strtoupper($state)) {
+            self::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE => 'Link enviado - pendiente',
+            self::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO => 'Link enviado - vencido',
+            default => PersonalFichaCatalog::stateLabel($state),
+        };
+    }
+
+    public function ensurePendingFichasForIncompletePersonal(): void
+    {
+        Personal::query()
+            ->with('fichaColaborador.link')
+            ->whereIn('estado', [
+                PersonalFicha::ESTADO_PENDIENTE,
+                PersonalFicha::ESTADO_ENVIADA,
+                PersonalFicha::ESTADO_LINK_VENCIDO,
+                PersonalFicha::ESTADO_OBSERVADO,
+            ])
+            ->get()
+            ->each(function (Personal $personal): void {
+                $this->ensurePendingFichaForPersonal($personal);
+            });
     }
 
     public function expireStaleLinks(): int
@@ -829,14 +897,30 @@ class PersonalFichaService
             ]);
         }
 
+        if ($ficha->estado === PersonalFicha::ESTADO_LINK_VENCIDO) {
+            $ficha->forceFill([
+                'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            ])->save();
+
+            if ($ficha->personal && strtoupper((string) $ficha->personal->estado) === PersonalFicha::ESTADO_LINK_VENCIDO) {
+                $ficha->personal->forceFill([
+                    'estado' => PersonalFicha::ESTADO_PENDIENTE,
+                ])->save();
+            }
+        }
+
         if ($ficha->link && $ficha->link->estado === PersonalFichaLink::ESTADO_ACTIVO && $ficha->link->expires_at?->greaterThan(now())) {
+            $ficha->link->forceFill([
+                'enabled_manually_at' => $ficha->link->enabled_manually_at ?: now(),
+            ])->save();
+
             return [
                 'link' => $ficha->link->fresh(),
                 'url' => $this->publicUrlForLink($ficha->link),
             ];
         }
 
-        [$token, $link] = $this->createSecureLink($ficha, $hours);
+        [$token, $link] = $this->createSecureLink($ficha, $hours, true);
 
         return [
             'link' => $link,
@@ -845,7 +929,7 @@ class PersonalFichaService
         ];
     }
 
-    public function deleteDraftFicha(PersonalFicha $ficha): void
+    public function removeFromTemporaryList(PersonalFicha $ficha): void
     {
         DB::transaction(function () use ($ficha): void {
             $ficha->loadMissing(['personal', 'link', 'familiares', 'archivos']);
@@ -863,14 +947,35 @@ class PersonalFichaService
 
             PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
             PersonalFichaLink::query()->where('personal_ficha_id', $ficha->id)->delete();
-
-            $personal = $ficha->personal;
             $ficha->delete();
-
-            if ($personal) {
-                $this->personalService->deleteCompletely($personal);
-            }
         });
+    }
+
+    public function ensurePendingFichaForPersonal(Personal $personal): PersonalFicha
+    {
+        $personal->loadMissing('fichaColaborador.link');
+
+        if ($personal->fichaColaborador) {
+            return $personal->fichaColaborador;
+        }
+
+        $documentType = PersonalNormalizer::documentType($personal->tipo_documento ?? 'DNI', $personal->numero_documento ?? $personal->dni ?? '');
+        $documentNumber = PersonalNormalizer::documentNumber($personal->numero_documento ?? $personal->dni ?? '');
+        $data = $this->seedFichaDataFromPersonal($personal);
+
+        return PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => $documentType,
+            'numero_documento' => $documentNumber,
+            'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? $personal->contrato ?? null),
+            'datos_detectados_json' => $data,
+            'datos_json' => $data,
+            'campos_verificacion_json' => PersonalFichaCatalog::defaultVerificationKeys(),
+            'advertencias_json' => [],
+            'created_by_usuario_id' => null,
+        ]);
     }
 
     public function normalizeFichaData(array $fields): array
@@ -1153,19 +1258,24 @@ class PersonalFichaService
         $missingDocuments = $this->missingRequiredDocumentKeys($ficha);
         $link = $ficha->link;
 
+        $requiresManualEnable = $this->needsRegularization($ficha);
+        $hasActiveLink = $link
+            && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
+            && $link->expires_at?->greaterThan(now());
+
         return [
             'missing_fields' => $missingFields,
             'missing_documents' => $missingDocuments,
-            'can_regularize' => $this->needsRegularization($ficha),
-            'has_active_link' => $link
-                && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
-                && $link->expires_at?->greaterThan(now()),
+            'can_regularize' => $requiresManualEnable,
+            'has_active_link' => $hasActiveLink,
             'link' => $link,
-            'url' => $this->publicUrlForLink($link),
+            'url' => $hasActiveLink && (!$requiresManualEnable || $link->enabled_manually_at !== null)
+                ? $this->publicUrlForLink($link)
+                : null,
         ];
     }
 
-    private function createSecureLink(PersonalFicha $ficha, int $hours = 24): array
+    private function createSecureLink(PersonalFicha $ficha, int $hours = 24, bool $enabledManually = false): array
     {
         PersonalFichaLink::query()
             ->where('personal_ficha_id', $ficha->id)
@@ -1173,6 +1283,7 @@ class PersonalFichaService
             ->update([
                 'estado' => PersonalFichaLink::ESTADO_INHABILITADO,
                 'disabled_at' => now(),
+                'enabled_manually_at' => null,
             ]);
 
         do {
@@ -1189,6 +1300,7 @@ class PersonalFichaService
             'token_encrypted' => Crypt::encryptString($token),
             'estado' => PersonalFichaLink::ESTADO_ACTIVO,
             'expires_at' => $expiresAt,
+            'enabled_manually_at' => $enabledManually ? now() : null,
         ]);
 
         return [$token, $link];

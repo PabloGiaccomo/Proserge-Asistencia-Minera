@@ -4,6 +4,28 @@
 
 @section('content')
 <div class="module-page">
+    <style>
+        .import-scroll-panel {
+            max-height: 520px;
+            overflow: auto;
+            padding-right: 6px;
+        }
+
+        .import-scroll-panel::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        .import-scroll-panel::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 999px;
+        }
+
+        .import-scroll-panel::-webkit-scrollbar-track {
+            background: #f8fafc;
+            border-radius: 999px;
+        }
+    </style>
     <div class="page-header">
         <div class="page-header-top">
             <div>
@@ -23,21 +45,69 @@
         </div>
     </div>
 
+    @php
+        $importSummaryLinesSession = session('import_summary_lines', []);
+        $importResult = session('import_result');
+        $hasImportResult = is_array($importResult);
+
+        if ($hasImportResult && count($importSummaryLinesSession) === 0) {
+            $summaryPartsFallback = [];
+
+            if (($importResult['nuevos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['nuevos'] ?? 0) . ' nuevo(s)';
+            if (($importResult['actualizados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['actualizados'] ?? 0) . ' actualizado(s)';
+            if (($importResult['reactivados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['reactivados'] ?? 0) . ' reactivado(s)';
+            if (($importResult['inactivados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['inactivados'] ?? 0) . ' inactivado(s)';
+            if (($importResult['camposActualizados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['camposActualizados'] ?? 0) . ' campo(s) modificado(s)';
+            if (($importResult['relacionesMinaCreadasOActualizadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['relacionesMinaCreadasOActualizadas'] ?? 0) . ' cambio(s) en minas';
+            if (($importResult['relacionesMinaEliminadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['relacionesMinaEliminadas'] ?? 0) . ' relacion(es) de mina eliminada(s)';
+            if (($importResult['duplicados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['duplicados'] ?? 0) . ' duplicado(s)';
+            if (($importResult['omitidos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['omitidos'] ?? 0) . ' omitido(s)';
+
+            $importSummaryLinesSession = $summaryPartsFallback !== []
+                ? ['Cambios detectados en la importacion: ' . implode(', ', $summaryPartsFallback) . '.']
+                : ['No hay cambios en la BD para esta importacion.'];
+        }
+    @endphp
+
     @if (session('success'))
         <div class="alert-item success" style="margin-bottom:16px; align-items:flex-start;">
             <div class="alert-item-label" style="line-height:1.6;">
                 {{ session('success') }}
             </div>
         </div>
-        
-        @if(session('import_result'))
+
+        @if(false && count($importSummaryLinesSession) > 0)
+            <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
+                <div class="card-body">
+                    <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">Resumen de cambios aplicados</div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        @foreach($importSummaryLinesSession as $line)
+                            <div class="text-muted" style="line-height:1.6;">• {{ $line }}</div>
+                        @endforeach
+                    </div>
+                </div>
+        </div>
+    @endif
+
+    @if($hasImportResult && count($importSummaryLinesSession) > 0)
+        <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
+            <div class="card-body">
+                <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">Resumen de cambios aplicados</div>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    @foreach($importSummaryLinesSession as $line)
+                        <div class="text-muted" style="line-height:1.6;">- {{ $line }}</div>
+                    @endforeach
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if($hasImportResult)
         <div class="card" style="margin-bottom:16px;">
             <div class="card-header">
                 <span class="card-title">Resultado de Importación</span>
             </div>
             <div class="card-body">
-                @php($importResult = session('import_result'))
-
 <div class="grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px;">
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['nuevos'] ?? 0 }}</strong><div class="text-muted">Nuevos</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['actualizados'] ?? 0 }}</strong><div class="text-muted">Actualizados</div></div></div>
@@ -55,7 +125,7 @@
                         </div>
                     @endif
 
-                    <div class="table-responsive">
+                    <div class="table-responsive import-scroll-panel">
                         <table class="data-table">
                             <thead>
                                 <tr>
@@ -92,7 +162,7 @@
                 @if(!empty($importResult['nuevosDetalle']))
                     <div style="margin-top:20px;">
                         <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores nuevos detectados</h3>
-                        <div class="table-responsive">
+                        <div class="table-responsive import-scroll-panel">
                             <table class="data-table">
                                 <thead>
 <tr>
@@ -124,7 +194,7 @@
                         @if(!empty($importResult['reactivadosDetalle']))
                             <div>
                                 <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores reactivados</h3>
-                                <div class="table-responsive">
+                                <div class="table-responsive import-scroll-panel">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
@@ -150,7 +220,7 @@
                         @if(!empty($importResult['inactivadosDetalle']))
                             <div>
                                 <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores inactivados</h3>
-                                <div class="table-responsive">
+                                <div class="table-responsive import-scroll-panel">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
@@ -177,6 +247,31 @@
             </div>
         </div>
         @endif
+    @endif
+
+    @if(false && $hasImportResult && count($importSummaryLinesSession) === 0)
+        @php
+            $importResultFallback = session('import_result');
+            $summaryPartsFallback = [];
+
+            if (($importResultFallback['nuevos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['nuevos'] ?? 0) . ' nuevo(s)';
+            if (($importResultFallback['actualizados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['actualizados'] ?? 0) . ' actualizado(s)';
+            if (($importResultFallback['reactivados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['reactivados'] ?? 0) . ' reactivado(s)';
+            if (($importResultFallback['inactivados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['inactivados'] ?? 0) . ' inactivado(s)';
+            if (($importResultFallback['camposActualizados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['camposActualizados'] ?? 0) . ' campo(s) modificado(s)';
+            if (($importResultFallback['relacionesMinaCreadasOActualizadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['relacionesMinaCreadasOActualizadas'] ?? 0) . ' cambio(s) en minas';
+            if (($importResultFallback['relacionesMinaEliminadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['relacionesMinaEliminadas'] ?? 0) . ' relacion(es) de mina eliminada(s)';
+            if (($importResultFallback['duplicados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['duplicados'] ?? 0) . ' duplicado(s)';
+            if (($importResultFallback['omitidos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['omitidos'] ?? 0) . ' omitido(s)';
+        @endphp
+        <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
+            <div class="card-body">
+                <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">Resumen de cambios aplicados</div>
+                <div class="text-muted" style="line-height:1.6;">
+                    - {{ $summaryPartsFallback !== [] ? 'Cambios detectados en la importacion: ' . implode(', ', $summaryPartsFallback) . '.' : 'La importacion termino, pero no se detectaron cambios visibles en esta corrida.' }}
+                </div>
+            </div>
+        </div>
     @endif
 
     @if ($errors->any())

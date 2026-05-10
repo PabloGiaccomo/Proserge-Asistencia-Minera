@@ -4,7 +4,9 @@ namespace App\Modules\Personal\Services;
 
 use App\Models\Mina;
 use App\Models\Personal;
+use App\Models\PersonalFicha;
 use App\Models\PersonalMina;
+use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -175,6 +177,7 @@ class ImportPersonalService
             }
 
             $existing = Personal::query()
+                ->with('fichaColaborador')
                 ->get($existingSelect)
                 ->keyBy('dni');
 
@@ -196,13 +199,21 @@ class ImportPersonalService
                 }
                 $processedDni[$dni] = true;
 
-                $nombre = PersonalNormalizer::text($row[$columns['nombre']] ?? '') ?: 'Sin nombre';
-                $puesto = PersonalNormalizer::text($row[$columns['puesto']] ?? '') ?: 'Sin puesto';
+                $nombreImportado = PersonalNormalizer::text($row[$columns['nombre']] ?? '');
+                $puestoImportado = PersonalNormalizer::text($row[$columns['puesto']] ?? '');
+                $ocupacionImportada = PersonalNormalizer::text($row[$columns['ocupacion']] ?? '');
+                $contratoImportadoRaw = PersonalNormalizer::text($row[$columns['contrato']] ?? null);
+                $correoImportado = Schema::hasColumn('personal', 'correo') && isset($columns['correo']) && $columns['correo'] !== null
+                    ? (PersonalNormalizer::text($row[$columns['correo']] ?? '') ?: null)
+                    : null;
+
+                $nombre = $nombreImportado !== '' ? $nombreImportado : 'Sin nombre';
+                $puesto = $puestoImportado !== '' ? $puestoImportado : 'Sin puesto';
                 $puesto = mb_substr($puesto, 0, self::MAX_PUESTO_LENGTH);
-                $ocupacion = PersonalNormalizer::text($row[$columns['ocupacion']] ?? '');
-                $contrato = PersonalNormalizer::contract($row[$columns['contrato']] ?? null);
+                $ocupacion = $ocupacionImportada;
+                $contrato = $contratoImportadoRaw !== '' ? PersonalNormalizer::contract($contratoImportadoRaw) : null;
                 $fechaIngreso = PersonalNormalizer::isoDate($row[$columns['fecha_ingreso']] ?? null);
-                $isSupervisor = PersonalNormalizer::isSupervisorOccupation($ocupacion);
+                $isSupervisor = PersonalNormalizer::isSupervisorOccupation($ocupacionImportada);
                 $phoneRaw = $this->extractPhoneRaw($row, $columns);
 $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
 
@@ -241,6 +252,7 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                 if ($personal) {
                     $updates = [];
                     $workerChanges = [];
+                    $mergedFichaData = [];
 
                     if (strtoupper((string) $personal->estado) === 'INACTIVO') {
                         $updates['estado'] = 'ACTIVO';
@@ -265,24 +277,28 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                         $updates['numero_documento'] = $dni;
                     }
 
-                    if ($personal->nombre_completo !== $nombre) {
-                        $updates['nombre_completo'] = $nombre;
-                        $this->registerFieldChange($workerChanges, $stats, 'nombre_completo', 'Nombre', $personal->nombre_completo, $nombre);
+                    if ($nombreImportado !== '' && $personal->nombre_completo !== $nombreImportado) {
+                        $updates['nombre_completo'] = $nombreImportado;
+                        $mergedFichaData = array_merge($mergedFichaData, $this->nameFieldsFromFullName($nombreImportado));
+                        $this->registerFieldChange($workerChanges, $stats, 'nombre_completo', 'Nombre', $personal->nombre_completo, $nombreImportado);
                     }
 
-                    if ($personal->puesto !== $puesto) {
+                    if ($puestoImportado !== '' && $personal->puesto !== $puesto) {
                         $updates['puesto'] = $puesto;
+                        $mergedFichaData['puesto'] = $puesto;
                         $stats['puestosActualizados']++;
                         $this->registerFieldChange($workerChanges, $stats, 'puesto', 'Cargo/Puesto', $personal->puesto, $puesto);
                     }
 
-                    if ((string) $personal->ocupacion !== $ocupacion) {
+                    if ($ocupacionImportada !== '' && (string) $personal->ocupacion !== $ocupacion) {
                         $updates['ocupacion'] = $ocupacion ?: null;
+                        $mergedFichaData['ocupacion'] = $ocupacion;
                         $this->registerFieldChange($workerChanges, $stats, 'ocupacion', 'Ocupación', $personal->ocupacion, $ocupacion ?: null);
                     }
 
-                    if ((string) $personal->contrato !== $contrato) {
+                    if ($contrato !== null && (string) $personal->contrato !== $contrato) {
                         $updates['contrato'] = $contrato;
+                        $mergedFichaData['contrato'] = $contrato;
                         $this->registerFieldChange(
                             $workerChanges,
                             $stats,
@@ -293,13 +309,14 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                         );
                     }
 
-                    if ((bool) $personal->es_supervisor !== $isSupervisor) {
+                    if ($ocupacionImportada !== '' && (bool) $personal->es_supervisor !== $isSupervisor) {
                         $updates['es_supervisor'] = $isSupervisor;
                         $this->registerFieldChange($workerChanges, $stats, 'es_supervisor', 'Supervisor', $personal->es_supervisor ? 'Sí' : 'No', $isSupervisor ? 'Sí' : 'No');
                     }
 
                     if ($fechaIngreso !== null && optional($personal->fecha_ingreso)->toDateString() !== $fechaIngreso) {
                         $updates['fecha_ingreso'] = $fechaIngreso;
+                        $mergedFichaData['fecha_ingreso'] = $fechaIngreso;
                         $this->registerFieldChange($workerChanges, $stats, 'fecha_ingreso', 'Fecha ingreso', optional($personal->fecha_ingreso)->toDateString(), $fechaIngreso);
                     }
 
@@ -309,45 +326,49 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
 ) ?? ($personal->telefono ?? null);
                     $newCombinedPhone = PersonalNormalizer::combinePhones($phoneData['telefono_1'], $phoneData['telefono_2']);
 
-                    if ((string) ($oldCombinedPhone ?? '') !== (string) ($newCombinedPhone ?? '')) {
+                    if ($phoneData['valid_count'] > 0 && (string) ($oldCombinedPhone ?? '') !== (string) ($newCombinedPhone ?? '')) {
                         $this->registerFieldChange($workerChanges, $stats, 'telefono', 'Teléfono', $oldCombinedPhone, $newCombinedPhone);
                     }
 
-                    if ((string) ($personal->telefono ?? '') !== (string) ($newCombinedPhone ?? '')) {
+                    if ($phoneData['valid_count'] > 0 && (string) ($personal->telefono ?? '') !== (string) ($newCombinedPhone ?? '')) {
                         $updates['telefono'] = $newCombinedPhone;
+                        $mergedFichaData['telefono'] = $newCombinedPhone;
                     }
 
-                    if ($hasTelefono1Column && (string) ($personal->telefono_1 ?? '') !== (string) ($phoneData['telefono_1'] ?? '')) {
+                    if ($phoneData['valid_count'] > 0 && $hasTelefono1Column && (string) ($personal->telefono_1 ?? '') !== (string) ($phoneData['telefono_1'] ?? '')) {
                         $updates['telefono_1'] = $phoneData['telefono_1'];
                     }
 
-                    if ($hasTelefono2Column && (string) ($personal->telefono_2 ?? '') !== (string) ($phoneData['telefono_2'] ?? '')) {
+                    if ($phoneData['valid_count'] > 0 && $hasTelefono2Column && (string) ($personal->telefono_2 ?? '') !== (string) ($phoneData['telefono_2'] ?? '')) {
                         $updates['telefono_2'] = $phoneData['telefono_2'];
                     }
 
-                    if (Schema::hasColumn('personal', 'correo') && isset($columns['correo']) && $columns['correo'] !== null) {
-                        $correo = PersonalNormalizer::text($row[$columns['correo']] ?? '') ?: null;
-                        if ((string) ($personal->correo ?? '') !== (string) ($correo ?? '')) {
-                            $updates['correo'] = $correo;
-                            $this->registerFieldChange($workerChanges, $stats, 'correo', 'Correo', $personal->correo, $correo);
-                        }
+                    if ($correoImportado !== null && (string) ($personal->correo ?? '') !== (string) $correoImportado) {
+                        $updates['correo'] = $correoImportado;
+                        $mergedFichaData['correo'] = $correoImportado;
+                        $this->registerFieldChange($workerChanges, $stats, 'correo', 'Correo', $personal->correo, $correoImportado);
                     }
 
-if (count($updates) > 0) {
+                    if (count($updates) > 0) {
                         Personal::query()->where('id', $personal->id)->update($updates);
                         $personal->fill($updates);
+                        $this->syncFichaWithImportData($personal, $mergedFichaData);
+                    }
+
+                    $this->syncMineStatuses($personal, $row, $mineMap, $stats, $workerChanges);
+
+                    if (count($workerChanges) > 0) {
                         $stats['actualizados']++;
                         $stats['cambiosDetectadosTotal']++;
 
                         if (count($stats['cambiosDetectados']) < self::MAX_CHANGE_DETAILS) {
                             $stats['cambiosDetectados'][] = [
                                 'dni' => $dni,
-                                'nombre' => $nombre,
+                                'nombre' => $nombreImportado !== '' ? $nombreImportado : $personal->nombre_completo,
                                 'cambios' => array_values($workerChanges),
                             ];
                         }
                     }
-                    $this->syncMineStatuses($personal, $row, $mineMap, $stats, $workerChanges);
                 } else {
                     $newData = [
                         'id' => (string) Str::uuid(),
@@ -382,9 +403,22 @@ if (count($updates) > 0) {
                         $newData['telefono_2'] = $phoneData['telefono_2'];
                     }
 
+                    if (Schema::hasColumn('personal', 'correo')) {
+                        $newData['correo'] = $correoImportado;
+                    }
+
                     $personal = Personal::query()->create($newData);
 
                     $existing->put($dni, $personal);
+                    $this->syncFichaWithImportData($personal, $this->buildFichaImportData(
+                        $nombreImportado,
+                        $puesto,
+                        $ocupacion,
+                        $contrato,
+                        $fechaIngreso,
+                        PersonalNormalizer::combinePhones($phoneData['telefono_1'], $phoneData['telefono_2']),
+                        $correoImportado
+                    ));
                     $stats['nuevos']++;
 
 if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
@@ -429,7 +463,86 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
             $stats['tamanoBloque'] = self::IMPORT_BATCH_SIZE;
 
             return $stats;
-        });
+        })();
+    }
+
+    private function syncFichaWithImportData(Personal $personal, array $importedData): void
+    {
+        $importedData = array_filter(
+            $importedData,
+            static fn ($value): bool => PersonalNormalizer::text($value) !== ''
+        );
+
+        if ($importedData === []) {
+            return;
+        }
+
+        $ficha = $personal->fichaColaborador;
+        if (!$ficha) {
+            return;
+        }
+
+        $currentData = is_array($ficha->datos_json ?? null) ? $ficha->datos_json : [];
+        $detectedData = is_array($ficha->datos_detectados_json ?? null) ? $ficha->datos_detectados_json : [];
+
+        $ficha->forceFill([
+            'datos_json' => $this->mergeFichaData($currentData, $importedData),
+            'datos_detectados_json' => $this->mergeFichaData($detectedData, $importedData),
+        ])->save();
+    }
+
+    private function mergeFichaData(array $base, array $incoming): array
+    {
+        foreach ($incoming as $key => $value) {
+            if (PersonalNormalizer::text($value) === '') {
+                continue;
+            }
+
+            $base[$key] = $value;
+        }
+
+        return $base;
+    }
+
+    private function buildFichaImportData(
+        string $nombreCompleto,
+        string $puesto,
+        string $ocupacion,
+        ?string $contrato,
+        ?string $fechaIngreso,
+        ?string $telefono,
+        ?string $correo
+    ): array {
+        return array_merge(
+            $this->nameFieldsFromFullName($nombreCompleto),
+            [
+                'puesto' => $puesto,
+                'ocupacion' => $ocupacion,
+                'contrato' => $contrato,
+                'fecha_ingreso' => $fechaIngreso,
+                'telefono' => $telefono,
+                'correo' => $correo,
+            ]
+        );
+    }
+
+    private function nameFieldsFromFullName(string $nombreCompleto): array
+    {
+        $nombreCompleto = trim($nombreCompleto);
+        if ($nombreCompleto === '') {
+            return [];
+        }
+
+        $parts = preg_split('/\s+/', $nombreCompleto) ?: [];
+        if (count($parts) >= 3) {
+            return [
+                'apellido_paterno' => $parts[0] ?? '',
+                'apellido_materno' => $parts[1] ?? '',
+                'nombres' => implode(' ', array_slice($parts, 2)),
+            ];
+        }
+
+        return ['nombres' => $nombreCompleto];
     }
 
     private function resolveHeadersAndDataRows(array $rows): array

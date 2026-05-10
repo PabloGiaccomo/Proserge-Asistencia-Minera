@@ -29,6 +29,92 @@
             width: 16px;
             height: 16px;
         }
+
+        .dg-head-cell {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dg-filter-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            color: #475569;
+            font-size: 10px;
+            margin-left: 4px;
+            line-height: 1;
+            border: 0;
+            cursor: pointer;
+        }
+
+        .dg-filter-icon.is-active {
+            background: #07142a;
+            color: #fff;
+        }
+
+        .dg-filter-popover {
+            position: fixed;
+            top: 0;
+            left: 0;
+            min-width: 210px;
+            max-width: min(260px, calc(100vw - 24px));
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(2, 6, 23, 0.14);
+            padding: 10px;
+            z-index: 1200;
+            display: none;
+        }
+
+        .dg-filter-popover.is-open {
+            display: block;
+        }
+
+        .dg-popover-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 8px;
+        }
+
+        .filter-compact-select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #334155;
+            background: #fff;
+            cursor: pointer;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .filter-compact-select:hover {
+            border-color: #cbd5e1;
+        }
+
+        .filter-compact-select:focus {
+            outline: none;
+            border-color: #19D3C5;
+            box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.1);
+        }
+
+        .temporales-toolbar-search {
+            margin-bottom: 14px;
+        }
+
+        .temporales-toolbar-search .simple-search-input {
+            max-width: 460px;
+        }
     </style>
     <div class="page-header">
         <div class="page-header-top">
@@ -70,17 +156,47 @@
         <div class="ficha-card-header">
             <div>
                 <h2 class="ficha-card-title">{{ count($rows) }} registros temporales</h2>
-                <p class="ficha-card-subtitle">Los links antiguos sin token recuperable aparecen como no disponibles; los nuevos se pueden copiar desde aqui.</p>
+                <p class="ficha-card-subtitle">Los trabajadores con ficha pendiente aparecen aqui, pero el link solo se habilita cuando se presiona el boton correspondiente.</p>
             </div>
         </div>
         <div class="ficha-card-body">
+            <form method="GET" action="{{ route('personal.fichas.temporales') }}" id="temporalesFilterForm" hidden>
+                <input type="hidden" name="estado" id="temporalesEstadoInput" value="{{ $estadoFilter ?? '' }}">
+            </form>
+            <div class="temporales-toolbar-search">
+                @include('components.ui.simple-search', [
+                    'searchId' => 'temporales-search',
+                    'placeholder' => 'Buscar por nombre, documento, puesto o contrato...',
+                    'showClear' => true,
+                ])
+            </div>
             <div class="ficha-batch-table-wrap">
                 <table class="ficha-batch-table">
                     <thead>
                         <tr>
                             <th>Trabajador</th>
                             <th>Documento</th>
-                            <th>Estado</th>
+                            <th>
+                                <div class="dg-head-cell">
+                                    <span>Estado</span>
+                                    <button
+                                        type="button"
+                                        class="dg-filter-icon js-dg-filter-trigger {{ filled($estadoFilter ?? '') ? 'is-active' : '' }}"
+                                        data-target="temporalesEstadoPopover"
+                                        title="Filtrar Estado"
+                                        aria-label="Filtrar Estado">≡</button>
+                                    <div id="temporalesEstadoPopover" class="dg-filter-popover" onclick="event.stopPropagation()">
+                                        <label class="dg-popover-label" for="temporalesEstadoSelect">Estado</label>
+                                        <select id="temporalesEstadoSelect" class="filter-compact-select">
+                                            @foreach(($estadoOptions ?? []) as $estadoKey => $estadoLabel)
+                                                <option value="{{ $estadoKey }}" {{ ($estadoFilter ?? '') === (string) $estadoKey ? 'selected' : '' }}>
+                                                    {{ $estadoLabel }}
+                                                </option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                </div>
+                            </th>
                             <th>Vence</th>
                             <th>Link</th>
                             <th>Acciones</th>
@@ -96,14 +212,22 @@
                                 $emailSentAt = $row['email_sent_at'] ?? null;
                                 $missingFields = $row['missing_fields'] ?? [];
                                 $missingDocuments = $row['missing_documents'] ?? [];
-                                $statusClass = match($ficha->estado) {
+                                $statusClass = match($row['estado_key'] ?? $ficha->estado) {
+                                    'LINK_ENVIADO_PENDIENTE' => 'ficha-status-sent',
+                                    'LINK_ENVIADO_VENCIDO' => 'ficha-status-expired',
                                     'FICHA_ENVIADA' => 'ficha-status-sent',
                                     'APROBADO' => 'ficha-status-approved',
                                     'LINK_VENCIDO', 'RECHAZADO' => 'ficha-status-expired',
                                     default => 'ficha-status-pending',
                                 };
                             @endphp
-                            <tr>
+                            <tr
+                                class="js-person-card"
+                                data-nombre="{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}"
+                                data-dni="{{ trim(($ficha->tipo_documento ?? '') . ' ' . ($ficha->numero_documento ?? '')) }}"
+                                data-puesto="{{ $personal?->puesto ?: 'Puesto pendiente' }}"
+                                data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
+                                data-minas="{{ $row['estado_label'] }}">
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
                                     <div class="ficha-card-subtitle">{{ $personal?->puesto ?: 'Puesto pendiente' }}</div>
@@ -117,7 +241,7 @@
                                     @endif
                                     @if(count($missingFields) > 0 || count($missingDocuments) > 0)
                                         <div class="ficha-card-subtitle" style="color:#b45309; margin-top:4px;">
-                                            Faltan datos o documentos importantes
+                                            Celular: {{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '-') }}
                                         </div>
                                     @endif
                                 </td>
@@ -130,8 +254,8 @@
                                             <input id="temporalLink{{ $index }}" class="ficha-input" type="text" value="{{ $row['url'] }}" readonly>
                                             <button type="button" class="btn btn-primary js-copy-ficha-link" data-target="temporalLink{{ $index }}">Copiar</button>
                                         </div>
-                                    @else
-                                        <span class="ficha-card-subtitle">No recuperable. Genera un link nuevo reimportando la macro.</span>
+                                    @elseif(!empty($row['can_regularize']))
+                                        <span class="ficha-card-subtitle">Link no habilitado todavia. Presiona "Habilitar link temporal".</span>
                                     @endif
                                 </td>
                                 <td>
@@ -162,7 +286,7 @@
                                                 </svg>
                                             </button>
                                         @else
-                                            <button type="button" class="btn btn-outline btn-xs" disabled title="{{ $correo ? 'No se encontró un link recuperable' : 'No se encontró correo' }}" style="opacity:.55; cursor:not-allowed;">
+                                            <button type="button" class="btn btn-outline btn-xs temporal-icon-btn" disabled title="{{ $correo ? 'No se encontró un link recuperable o aun no fue habilitado' : 'No se encontró correo' }}" aria-label="{{ $correo ? 'No se encontró un link recuperable o aun no fue habilitado' : 'No se encontró correo' }}" style="opacity:.55; cursor:not-allowed;">
                                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                     <path d="M4 4h16v16H4z"/>
                                                     <path d="m22 6-10 7L2 6"/>
@@ -170,7 +294,7 @@
                                             </button>
                                         @endif
                                         @allowed('personal', 'eliminar')
-                                            @if($link && !$ficha->submitted_at)
+                                            @if($row['url'] && $link && !$ficha->submitted_at)
                                                 <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">
                                                     @csrf
                                                     <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 1 día" aria-label="Ampliar 1 día">
@@ -186,15 +310,18 @@
                                                     @csrf
                                                     <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Habilitar link temporal" aria-label="Habilitar link temporal">
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                            <path d="M10 13a5 5 0 0 1 7 0l1 1a5 5 0 0 1-7 7l-1-1"/>
-                                                            <path d="M14 11a5 5 0 0 1-7 0l-1-1a5 5 0 0 1 7-7l1 1"/>
+                                                            <circle cx="7" cy="15" r="4"/>
+                                                            <path d="M7 13v4"/>
+                                                            <path d="M5 15h4"/>
+                                                            <path d="M14 7h7"/>
+                                                            <path d="M14 12h5"/>
                                                         </svg>
                                                     </button>
                                                 </form>
                                             @endif
-                                            <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" onsubmit="return confirm('Se eliminara por completo este trabajador temporal y su ficha.');">
+                                            <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" onsubmit="return confirm('Se eliminara este registro de Temporales y links, pero el trabajador seguira en Personal.');">
                                                 @csrf
-                                                <button type="submit" class="btn btn-danger btn-xs temporal-icon-btn" title="Borrar completo" aria-label="Borrar completo">
+                                                <button type="submit" class="btn btn-danger btn-xs temporal-icon-btn" title="Quitar de Temporales y links" aria-label="Quitar de Temporales y links">
                                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                         <path d="M3 6h18"/>
                                                         <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
@@ -226,6 +353,69 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const estadoInput = document.getElementById('temporalesEstadoInput');
+    const filterForm = document.getElementById('temporalesFilterForm');
+    const estadoSelect = document.getElementById('temporalesEstadoSelect');
+    const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
+    const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
+
+    function closeAllPopovers() {
+        filterPopovers.forEach(function (popover) {
+            popover.classList.remove('is-open');
+        });
+    }
+
+    function positionPopover(trigger, popover) {
+        const rect = trigger.getBoundingClientRect();
+        const popoverWidth = popover.offsetWidth || 210;
+        const viewportWidth = window.innerWidth;
+        const left = Math.min(
+            Math.max(12, rect.right - popoverWidth),
+            Math.max(12, viewportWidth - popoverWidth - 12)
+        );
+
+        popover.style.top = `${rect.bottom + 8}px`;
+        popover.style.left = `${left}px`;
+    }
+
+    filterTriggers.forEach(function (trigger) {
+        const targetId = trigger.dataset.target;
+        const popover = targetId ? document.getElementById(targetId) : null;
+        if (!popover) return;
+
+        trigger.addEventListener('click', function (event) {
+            event.stopPropagation();
+            const willOpen = !popover.classList.contains('is-open');
+            closeAllPopovers();
+            if (willOpen) {
+                popover.classList.add('is-open');
+                positionPopover(trigger, popover);
+            }
+        });
+    });
+
+    document.addEventListener('click', function () {
+        closeAllPopovers();
+    });
+
+    window.addEventListener('resize', function () {
+        filterTriggers.forEach(function (trigger) {
+            const targetId = trigger.dataset.target;
+            const popover = targetId ? document.getElementById(targetId) : null;
+            if (popover && popover.classList.contains('is-open')) {
+                positionPopover(trigger, popover);
+            }
+        });
+    });
+
+    if (estadoSelect) {
+        estadoSelect.addEventListener('change', function () {
+            if (!estadoInput || !filterForm) return;
+            estadoInput.value = estadoSelect.value || '';
+            filterForm.submit();
+        });
+    }
+
     document.querySelectorAll('.js-copy-ficha-link').forEach(function (button) {
         button.addEventListener('click', async function () {
             const input = document.getElementById(button.dataset.target);

@@ -28,6 +28,7 @@ class PersonalFichaLink extends Model
         'read_until',
         'submitted_at',
         'disabled_at',
+        'enabled_manually_at',
         'last_accessed_at',
         'emailed_at',
         'emailed_to',
@@ -38,6 +39,7 @@ class PersonalFichaLink extends Model
         'read_until' => 'datetime',
         'submitted_at' => 'datetime',
         'disabled_at' => 'datetime',
+        'enabled_manually_at' => 'datetime',
         'last_accessed_at' => 'datetime',
         'emailed_at' => 'datetime',
     ];
