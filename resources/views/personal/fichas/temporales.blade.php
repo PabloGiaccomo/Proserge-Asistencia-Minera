@@ -130,8 +130,23 @@
             font-size: 13px;
         }
 
-        .temporales-pagination-links nav > div:first-child {
-            display: none;
+        .temporales-pagination-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .temporales-page-size {
+            color: #64748b;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .temporales-page-size strong {
+            color: #0f172a;
         }
 
         .temporales-page-jump {
@@ -143,6 +158,50 @@
 
         .temporales-page-jump input {
             width: 76px;
+        }
+
+        .personal-pagination {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .personal-pager-btn {
+            min-width: 34px;
+            height: 34px;
+            padding: 0 10px;
+            border: 1px solid #d7e0ea;
+            border-radius: 8px;
+            background: #fff;
+            color: #334155;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .personal-pager-btn:hover:not(:disabled) {
+            border-color: #19D3C5;
+            color: #0f172a;
+            background: #f8fafc;
+        }
+
+        .personal-pager-btn.active {
+            background: #07142a;
+            border-color: #07142a;
+            color: #fff;
+        }
+
+        .personal-pager-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .personal-pager-ellipsis {
+            color: #94a3b8;
+            font-weight: 700;
+            padding: 0 2px;
         }
     </style>
     <div class="page-header">
@@ -184,14 +243,11 @@
     <div class="ficha-card">
         <div class="ficha-card-header">
             <div>
-                <h2 class="ficha-card-title">{{ $rowsTotal ?? $rows->total() }} registros temporales</h2>
+                <h2 class="ficha-card-title"><span id="temporalesCount">{{ $rowsTotal ?? $rows->count() }}</span> registros temporales</h2>
                 <p class="ficha-card-subtitle">Los trabajadores con ficha pendiente aparecen aqui, pero el link solo se habilita cuando se presiona el boton correspondiente.</p>
             </div>
         </div>
         <div class="ficha-card-body">
-            <form method="GET" action="{{ route('personal.fichas.temporales') }}" id="temporalesFilterForm" hidden>
-                <input type="hidden" name="estado" id="temporalesEstadoInput" value="{{ $estadoFilter ?? '' }}">
-            </form>
             <div class="temporales-toolbar-search">
                 @include('components.ui.simple-search', [
                     'searchId' => 'temporales-search',
@@ -246,7 +302,7 @@
                                     'LINK_ENVIADO_VENCIDO' => 'ficha-status-expired',
                                     'FICHA_ENVIADA' => 'ficha-status-sent',
                                     'APROBADO' => 'ficha-status-approved',
-                                    'LINK_VENCIDO', 'RECHAZADO' => 'ficha-status-expired',
+                                    'LINK_VENCIDO', 'VENCIDO', 'RECHAZADO' => 'ficha-status-expired',
                                     default => 'ficha-status-pending',
                                 };
                             @endphp
@@ -256,7 +312,9 @@
                                 data-dni="{{ trim(($ficha->tipo_documento ?? '') . ' ' . ($ficha->numero_documento ?? '')) }}"
                                 data-puesto="{{ $personal?->puesto ?: 'Puesto pendiente' }}"
                                 data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
-                                data-minas="{{ $row['estado_label'] }}">
+                                data-estado="{{ $row['estado_label'] }}"
+                                data-correo="{{ $correo ?? '' }}"
+                                data-celular="{{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '') }}">
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
                                     <div class="ficha-card-subtitle">{{ $personal?->puesto ?: 'Puesto pendiente' }}</div>
@@ -374,33 +432,23 @@
                     </tbody>
                 </table>
             </div>
-            @if(($rows->lastPage() ?? 1) > 1)
-                <div class="temporales-pagination">
-                    <div class="temporales-pagination-meta">
-                        Mostrando {{ $rows->firstItem() }}-{{ $rows->lastItem() }} de {{ $rows->total() }} registros
-                    </div>
-                    <div class="temporales-page-jump">
-                        <form method="GET" action="{{ route('personal.fichas.temporales') }}">
-                            @if(filled($estadoFilter ?? ''))
-                                <input type="hidden" name="estado" value="{{ $estadoFilter }}">
-                            @endif
-                            <label for="temporalesPageInput" class="ficha-card-subtitle" style="margin:0;">Ir a pagina</label>
-                            <input
-                                id="temporalesPageInput"
-                                class="ficha-input"
-                                type="number"
-                                name="page"
-                                min="1"
-                                max="{{ $rows->lastPage() }}"
-                                value="{{ $rows->currentPage() }}">
-                            <button type="submit" class="btn btn-outline btn-sm">Ir</button>
-                        </form>
-                    </div>
-                    <div class="temporales-pagination-links">
-                        {{ $rows->onEachSide(1)->links() }}
-                    </div>
+            <div class="temporales-pagination">
+                <div class="temporales-pagination-controls">
+                    <div class="temporales-page-size">Mostrar <strong>10</strong> registros</div>
+                    <div class="temporales-pagination-meta" id="temporalesPaginationMeta"></div>
                 </div>
-            @endif
+                <div class="temporales-page-jump">
+                    <label for="temporalesPageInput" class="ficha-card-subtitle" style="margin:0;">Ir a pagina</label>
+                    <input
+                        id="temporalesPageInput"
+                        class="ficha-input"
+                        type="number"
+                        min="1"
+                        value="1">
+                    <button type="button" id="temporalesPageGo" class="btn btn-outline btn-sm">Ir</button>
+                </div>
+                <div class="personal-pagination" id="temporalesPaginationWrap"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -409,11 +457,19 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const estadoInput = document.getElementById('temporalesEstadoInput');
-    const filterForm = document.getElementById('temporalesFilterForm');
+    const rows = Array.from(document.querySelectorAll('.js-person-card'));
+    const searchInput = document.getElementById('temporales-search');
+    const searchClear = searchInput?.closest('.simple-search-wrapper')?.querySelector('[data-simple-search-clear]');
+    const paginationMeta = document.getElementById('temporalesPaginationMeta');
+    const paginationWrap = document.getElementById('temporalesPaginationWrap');
+    const countBadge = document.getElementById('temporalesCount');
+    const pageInput = document.getElementById('temporalesPageInput');
+    const pageGo = document.getElementById('temporalesPageGo');
     const estadoSelect = document.getElementById('temporalesEstadoSelect');
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
+    const pageSize = 10;
+    let currentPage = 1;
 
     function closeAllPopovers() {
         filterPopovers.forEach(function (popover) {
@@ -466,9 +522,206 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (estadoSelect) {
         estadoSelect.addEventListener('change', function () {
-            if (!estadoInput || !filterForm) return;
-            estadoInput.value = estadoSelect.value || '';
-            filterForm.submit();
+            const hasValue = (estadoSelect.value || '').trim().length > 0;
+            filterTriggers.forEach(function (trigger) {
+                trigger.classList.toggle('is-active', hasValue);
+            });
+            renderGrid(true);
+        });
+    }
+
+    function normalizeText(value) {
+        return (value || '')
+            .toString()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function applyFilters() {
+        const search = normalizeText(searchInput?.value || '');
+        const searchTokens = search.split(' ').filter(Boolean);
+        const estado = normalizeText(estadoSelect?.value || '');
+
+        return rows.filter(function (row) {
+            const searchable = normalizeText([
+                row.dataset.nombre,
+                row.dataset.dni,
+                row.dataset.puesto,
+                row.dataset.contrato,
+                row.dataset.estado,
+                row.dataset.correo,
+                row.dataset.celular,
+            ].join(' '));
+
+            if (searchTokens.length && !searchTokens.every(function (token) {
+                return searchable.includes(token);
+            })) {
+                return false;
+            }
+
+            if (estado && normalizeText(row.dataset.estado || '') !== estado) {
+                return false;
+            }
+
+            return true;
+        });
+    }
+
+    function renderPagination(totalPages) {
+        if (!paginationWrap) {
+            return;
+        }
+
+        if (totalPages <= 1) {
+            paginationWrap.innerHTML = '';
+            return;
+        }
+
+        const maxVisible = 7;
+        const visiblePages = [];
+
+        if (totalPages <= maxVisible) {
+            for (let page = 1; page <= totalPages; page += 1) {
+                visiblePages.push(page);
+            }
+        } else {
+            const pages = new Set([1, totalPages]);
+            const around = Math.max(1, Math.floor((maxVisible - 3) / 2));
+            const start = Math.max(2, currentPage - around);
+            const end = Math.min(totalPages - 1, currentPage + around);
+
+            for (let page = start; page <= end; page += 1) {
+                pages.add(page);
+            }
+
+            const ordered = Array.from(pages).sort(function (a, b) {
+                return a - b;
+            });
+
+            ordered.forEach(function (page, index) {
+                if (index > 0 && page - ordered[index - 1] > 1) {
+                    visiblePages.push('ellipsis');
+                }
+                visiblePages.push(page);
+            });
+        }
+
+        let html = '';
+        html += '<button type="button" class="personal-pager-btn" data-page="' + (currentPage - 1) + '"' + (currentPage === 1 ? ' disabled' : '') + '>&lsaquo;</button>';
+        visiblePages.forEach(function (page) {
+            if (page === 'ellipsis') {
+                html += '<span class="personal-pager-ellipsis">...</span>';
+                return;
+            }
+
+            html += '<button type="button" class="personal-pager-btn ' + (page === currentPage ? 'active' : '') + '" data-page="' + page + '">' + page + '</button>';
+        });
+        html += '<button type="button" class="personal-pager-btn" data-page="' + (currentPage + 1) + '"' + (currentPage === totalPages ? ' disabled' : '') + '>&rsaquo;</button>';
+        paginationWrap.innerHTML = html;
+    }
+
+    function clampPage(page, totalPages) {
+        if (Number.isNaN(page) || page < 1) {
+            return 1;
+        }
+
+        if (page > totalPages) {
+            return totalPages;
+        }
+
+        return page;
+    }
+
+    function renderGrid(resetPage) {
+        if (resetPage) {
+            currentPage = 1;
+        }
+
+        const filtered = applyFilters();
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        currentPage = clampPage(currentPage, totalPages);
+
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+
+        rows.forEach(function (row) {
+            row.style.display = 'none';
+        });
+
+        filtered.slice(start, end).forEach(function (row) {
+            row.style.display = 'table-row';
+        });
+
+        if (paginationMeta) {
+            paginationMeta.textContent = total === 0
+                ? '0 resultados'
+                : 'Mostrando ' + (start + 1) + '-' + Math.min(end, total) + ' de ' + total + ' registros';
+        }
+
+        if (countBadge) {
+            countBadge.textContent = String(total);
+        }
+
+        if (pageInput) {
+            pageInput.max = String(totalPages);
+            pageInput.value = String(currentPage);
+        }
+
+        renderPagination(totalPages);
+    }
+
+    if (searchInput) {
+        const syncSearchClear = function () {
+            if (searchClear) {
+                searchClear.style.display = searchInput.value.trim().length > 0 ? 'flex' : 'none';
+            }
+        };
+
+        searchInput.addEventListener('input', function () {
+            syncSearchClear();
+            renderGrid(true);
+        });
+
+        syncSearchClear();
+    }
+
+    if (searchInput && searchClear) {
+        searchClear.addEventListener('click', function () {
+            searchInput.value = '';
+            renderGrid(true);
+            searchClear.style.display = 'none';
+            searchInput.focus();
+        });
+    }
+
+    if (paginationWrap) {
+        paginationWrap.addEventListener('click', function (event) {
+            const button = event.target.closest('button[data-page]');
+            if (!button || button.hasAttribute('disabled')) {
+                return;
+            }
+
+            currentPage = Number(button.dataset.page || 1);
+            renderGrid(false);
+        });
+    }
+
+    if (pageGo && pageInput) {
+        pageGo.addEventListener('click', function () {
+            currentPage = Number(pageInput.value || 1);
+            renderGrid(false);
+        });
+        pageInput.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                currentPage = Number(pageInput.value || 1);
+                renderGrid(false);
+            }
         });
     }
 
@@ -524,6 +777,8 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
     });
+
+    renderGrid(true);
 });
 </script>
 @endpush

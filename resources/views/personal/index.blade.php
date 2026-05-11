@@ -475,6 +475,28 @@
     margin-top: 10px;
 }
 
+.worker-detail-modal .detail-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.worker-detail-modal .detail-footer > * {
+    min-width: 0;
+}
+
+.worker-detail-modal .detail-footer form {
+    margin: 0;
+    display: inline-flex;
+    max-width: 100%;
+}
+
+.worker-detail-modal .detail-footer .btn {
+    max-width: 100%;
+    white-space: normal;
+}
+
 @media (max-width: 768px) {
     .filter-panel-compact-row {
         flex-direction: column;
@@ -495,6 +517,15 @@
 
     .personal-page .toolbar-search {
         margin-top: 6px;
+    }
+
+    .worker-detail-modal .detail-footer {
+        flex-direction: column;
+    }
+
+    .worker-detail-modal .detail-footer form,
+    .worker-detail-modal .detail-footer .btn {
+        width: 100%;
     }
 }
 </style>

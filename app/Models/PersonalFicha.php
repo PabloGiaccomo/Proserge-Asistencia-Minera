@@ -74,7 +74,7 @@ class PersonalFicha extends Model
 
     public function link(): HasOne
     {
-        return $this->hasOne(PersonalFichaLink::class, 'personal_ficha_id')->latestOfMany();
+        return $this->hasOne(PersonalFichaLink::class, 'personal_ficha_id')->latestOfMany('created_at');
     }
 
     public function familiares(): HasMany

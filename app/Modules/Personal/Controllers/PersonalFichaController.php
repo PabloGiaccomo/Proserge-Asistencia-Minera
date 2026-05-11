@@ -12,7 +12,6 @@ use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionMatrix;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -41,25 +40,16 @@ class PersonalFichaController extends WebPageController
     public function temporales(Request $request): View
     {
         $estado = strtoupper((string) $request->query('estado', ''));
-        $allRows = $this->fichaService->temporaryLinkRows($estado !== '' ? $estado : null);
-        $perPage = 10;
-        $currentPage = max(1, (int) $request->query('page', 1));
-        $rowsCollection = collect($allRows);
-        $rows = new LengthAwarePaginator(
-            $rowsCollection->forPage($currentPage, $perPage)->values(),
-            $rowsCollection->count(),
-            $perPage,
-            $currentPage,
-            [
-                'path' => $request->url(),
-                'query' => $request->query(),
-            ]
+        $allRows = $this->fichaService->temporaryLinkRows(
+            $estado !== '' ? $estado : null
         );
+        $rows = collect($allRows)->values();
         $stateOrder = [
             PersonalFicha::ESTADO_PENDIENTE,
             PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE,
             PersonalFicha::ESTADO_ENVIADA,
             PersonalFicha::ESTADO_OBSERVADO,
+            PersonalFichaService::TEMPORAL_ESTADO_VENCIDO,
             PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO,
         ];
 
@@ -82,7 +72,7 @@ class PersonalFichaController extends WebPageController
 
         return view('personal.fichas.temporales', [
             'rows' => $rows,
-            'rowsTotal' => $rowsCollection->count(),
+            'rowsTotal' => $rows->count(),
             'estadoFilter' => $estado,
             'estadoOptions' => $estadoOptions,
         ]);

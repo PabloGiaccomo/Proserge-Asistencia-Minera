@@ -41,6 +41,12 @@
         @endif
     </div>
 
+    @if(!empty($ficha))
+        <form id="regularizeLinkForm" method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" style="display:none;">
+            @csrf
+        </form>
+    @endif
+
     <form method="POST" action="{{ route('personal.update', $trabajador['id'] ?? request('id')) }}" enctype="multipart/form-data" class="ficha-workspace" style="display:flex; flex-direction:column; gap:16px;">
         @csrf
         @method('PUT')
@@ -72,9 +78,9 @@
                         $missingDocumentLabels = collect($regularizationSummary['missing_documents'] ?? [])
                             ->map(fn ($key) => $documentCatalog[$key]['label'] ?? $key)
                             ->values();
-                        $activeRegularizationLink = $regularizationSummary['url'] ?? null;
+                        $activeRegularizationLink = session('regularization_link') ?: ($regularizationSummary['url'] ?? null);
                         $activeRegularizationMeta = $regularizationSummary['link'] ?? null;
-                        $hasActiveRegularizationLink = (bool) ($regularizationSummary['has_active_link'] ?? false);
+                        $hasActiveRegularizationLink = filled($activeRegularizationLink);
                     @endphp
                     <section class="ficha-section">
                         <div class="ficha-section-header">
@@ -103,10 +109,13 @@
                                         </div>
                                     @else
                                         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-                                            <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" onsubmit="return confirm('Se habilitara un link temporal para que el trabajador regularice su ficha.');">
-                                                @csrf
-                                                <button type="submit" class="btn btn-primary">Habilitar link temporal</button>
-                                            </form>
+                                            <button
+                                                type="submit"
+                                                form="regularizeLinkForm"
+                                                class="btn btn-primary"
+                                                onclick="return confirm('Se habilitara un link temporal para que el trabajador regularice su ficha.');">
+                                                Habilitar link temporal
+                                            </button>
                                         </div>
                                     @endif
                                 @else

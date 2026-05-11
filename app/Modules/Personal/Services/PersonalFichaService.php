@@ -23,6 +23,7 @@ use Illuminate\Validation\ValidationException;
 
 class PersonalFichaService
 {
+    public const TEMPORAL_ESTADO_VENCIDO = 'VENCIDO';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE = 'LINK_ENVIADO_PENDIENTE';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO = 'LINK_ENVIADO_VENCIDO';
 
@@ -638,18 +639,47 @@ class PersonalFichaService
         return route('ficha-colaborador.show', ['token' => $token]);
     }
 
-    public function temporaryLinkRows(?string $estado = null): array
+    public function temporaryLinkRows(?string $estado = null, ?string $search = null): array
     {
         $this->expireStaleLinks();
         $this->ensurePendingFichasForIncompletePersonal();
 
         $normalizedEstado = $estado ? strtoupper($estado) : null;
+        $normalizedSearch = $this->normalizeTemporarySearchText($search);
 
-        return PersonalFicha::query()
+        $query = PersonalFicha::query()
             ->with(['personal', 'link', 'archivos'])
-            ->latest('created_at')
+            ->latest('created_at');
+
+        if ($normalizedSearch !== '') {
+            $tokens = collect(explode(' ', $normalizedSearch))
+                ->filter()
+                ->values()
+                ->all();
+
+            foreach ($tokens as $token) {
+                $like = '%' . $token . '%';
+
+                $query->where(function ($searchQuery) use ($like): void {
+                    $searchQuery
+                        ->whereRaw('LOWER(COALESCE(tipo_documento, "")) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(COALESCE(numero_documento, "")) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(COALESCE(macro_tipo_contrato, "")) LIKE ?', [$like])
+                        ->orWhereHas('personal', function ($personalQuery) use ($like): void {
+                            $personalQuery
+                                ->whereRaw('LOWER(COALESCE(nombre_completo, "")) LIKE ?', [$like])
+                                ->orWhereRaw('LOWER(COALESCE(puesto, "")) LIKE ?', [$like])
+                                ->orWhereRaw('LOWER(COALESCE(contrato, "")) LIKE ?', [$like])
+                                ->orWhereRaw('LOWER(COALESCE(correo, "")) LIKE ?', [$like])
+                                ->orWhereRaw('LOWER(COALESCE(telefono, "")) LIKE ?', [$like]);
+                        });
+                });
+            }
+        }
+
+        return $query
             ->get()
-            ->filter(function (PersonalFicha $ficha) use ($normalizedEstado): bool {
+            ->filter(function (PersonalFicha $ficha) use ($normalizedEstado, $normalizedSearch): bool {
                 $displayState = $this->temporaryDisplayState($ficha);
 
                 if ($normalizedEstado !== null && $normalizedEstado !== '' && $displayState !== $normalizedEstado) {
@@ -663,10 +693,16 @@ class PersonalFichaService
                 ], true);
 
                 if ($normalizedEstado !== null && $normalizedEstado !== '') {
-                    return true;
+                    $matchesWorkflow = true;
+                } else {
+                    $matchesWorkflow = $hasWorkflowState || $this->needsRegularization($ficha);
                 }
 
-                return $hasWorkflowState || $this->needsRegularization($ficha);
+                if (!$matchesWorkflow) {
+                    return false;
+                }
+
+                return true;
             })
             ->map(function (PersonalFicha $ficha): array {
                 $summary = $this->regularizationSummary($ficha);
@@ -690,6 +726,15 @@ class PersonalFichaService
             ->all();
     }
 
+    private function normalizeTemporarySearchText(?string $value): string
+    {
+        $text = mb_strtolower(trim((string) $value));
+        $text = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $text) ?? '';
+        $text = preg_replace('/\s+/u', ' ', $text) ?? '';
+
+        return trim(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text);
+    }
+
     public function temporaryDisplayState(PersonalFicha $ficha): string
     {
         $ficha->loadMissing('link');
@@ -699,7 +744,9 @@ class PersonalFichaService
             $ficha->estado === PersonalFicha::ESTADO_LINK_VENCIDO
             || $link?->estado === PersonalFichaLink::ESTADO_VENCIDO
         ) {
-            return self::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO;
+            return $link?->emailed_at
+                ? self::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO
+                : self::TEMPORAL_ESTADO_VENCIDO;
         }
 
         if (
@@ -717,6 +764,7 @@ class PersonalFichaService
     public function temporaryDisplayLabel(string $state): string
     {
         return match (strtoupper($state)) {
+            self::TEMPORAL_ESTADO_VENCIDO => 'Vencido',
             self::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE => 'Link enviado - pendiente',
             self::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO => 'Link enviado - vencido',
             default => PersonalFichaCatalog::stateLabel($state),
@@ -1276,16 +1324,17 @@ class PersonalFichaService
         $hasActiveLink = $link
             && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
             && $link->expires_at?->greaterThan(now());
+        $url = $hasActiveLink && (!$requiresManualEnable || $link->enabled_manually_at !== null)
+            ? $this->publicUrlForLink($link)
+            : null;
 
         return [
             'missing_fields' => $missingFields,
             'missing_documents' => $missingDocuments,
             'can_regularize' => $requiresManualEnable,
-            'has_active_link' => $hasActiveLink,
+            'has_active_link' => !empty($url),
             'link' => $link,
-            'url' => $hasActiveLink && (!$requiresManualEnable || $link->enabled_manually_at !== null)
-                ? $this->publicUrlForLink($link)
-                : null,
+            'url' => $url,
         ];
     }
 
