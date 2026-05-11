@@ -82,19 +82,19 @@
                 <div class="nav-subgroup">
                     @if($canRQMina)
                     <a href="{{ route('rq-mina.index') }}" class="nav-item {{ request()->is('rq-mina*') ? 'active' : '' }}">
-                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></span>
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18"/><path d="m5 20 5-8 4 5 3-4 2 3"/><path d="M14 7h5"/><path d="M16.5 4.5v5"/></svg></span>
                         <span class="nav-label">RQ Mina</span>
                     </a>
                     @endif
                     @if($canRQProserge)
                     <a href="{{ route('rq-proserge.index') }}" class="nav-item {{ request()->is('rq-proserge*') ? 'active' : '' }}">
-                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></span>
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 5H7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="m9 13 2 2 4-4"/></svg></span>
                         <span class="nav-label">RQ Proserge</span>
                     </a>
                     @endif
                     @if($canManPower)
                     <a href="{{ route('man-power.index') }}" class="nav-item {{ request()->is('man-power*') ? 'active' : '' }}">
-                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/></svg></span>
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                         <span class="nav-label">Man Power</span>
                     </a>
                     @endif

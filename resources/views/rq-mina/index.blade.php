@@ -1,4 +1,4 @@
-@extends('layouts.app')
+﻿@extends('layouts.app')
 
 @section('title', 'RQ Mina - Proserge')
 
@@ -47,15 +47,6 @@ $calcTotal = static function (array $detalle): int {
             <input type="hidden" name="page" value="{{ (int) request('page', 1) }}" data-reset-page>
             <input type="hidden" name="per_page" value="{{ (int) request('per_page', ($pg['per_page'] ?? 10)) }}">
 
-            <div class="filters-head">
-                <span>Filtros de búsqueda</span>
-                <button type="button" id="rqMinaToggleFilters" class="btn-filter-toggle" aria-expanded="true" aria-label="Ocultar filtros" title="Ocultar filtros">
-                    <span id="rqMinaToggleArrow" aria-hidden="true">▲</span>
-                </button>
-            </div>
-
-            <div id="rqMinaFiltersBody">
-                <div class="flex flex-col gap-3">
                     <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                         <div class="w-full md:max-w-3xl">
                             <label class="filter-label">Buscador general</label>
@@ -74,6 +65,15 @@ $calcTotal = static function (array $detalle): int {
                         </div>
                     </div>
 
+            <div class="filters-head">
+                <span>Filtros de búsqueda</span>
+                <button type="button" id="rqMinaToggleFilters" class="btn-filter-toggle" aria-expanded="true" aria-label="Ocultar filtros" title="Ocultar filtros">
+                    <span id="rqMinaToggleArrow" aria-hidden="true">&#9650;</span>
+                </button>
+            </div>
+
+            <div id="rqMinaFiltersBody">
+                <div class="flex flex-col gap-3">
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div class="filter-group">
                             <label class="filter-label">Mina</label>
@@ -150,28 +150,6 @@ $calcTotal = static function (array $detalle): int {
                     <span class="card-badge">{{ (int) ($pg['total'] ?? count($items)) }} registros</span>
                 </div>
 
-                <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-                    <div class="export-controls" style="display:flex;gap:8px;align-items:center;">
-                        <button type="button" id="btnExportPersonal" class="btn-filter-outline" aria-expanded="false" aria-controls="exportPersonalSection" onclick="toggleExportSection('exportPersonalSection','btnExportPersonal')">Exportar personal en excel ▾</button>
-                        <button type="button" id="btnExportFichas" class="btn-filter-outline" aria-expanded="false" aria-controls="exportFichasSection" onclick="toggleExportSection('exportFichasSection','btnExportFichas')">Exportar fichas ▾</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="exportPersonalSection" style="display:none;margin:12px 0;padding:12px;border-radius:6px;border:1px solid #e5e7eb;background:#fafafa;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span class="text-sm" style="font-weight:600;">Exportar personal en Excel</span>
-                <a href="{{ $baseUrl }}?{{ http_build_query(array_merge($baseQuery, ['export' => 'personal_excel'])) }}" class="btn-filter-outline">Descargar Excel</a>
-                <span class="text-xs text-slate-500">(se exportan los datos según los filtros aplicados)</span>
-            </div>
-        </div>
-
-        <div id="exportFichasSection" style="display:none;margin:12px 0;padding:12px;border-radius:6px;border:1px solid #e5e7eb;background:#fafafa;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span class="text-sm" style="font-weight:600;">Exportar fichas</span>
-                <a href="{{ $baseUrl }}?{{ http_build_query(array_merge($baseQuery, ['export' => 'fichas'])) }}" class="btn-filter-outline">Descargar Fichas</a>
-                <span class="text-xs text-slate-500">(descarga de fichas según filtros)</span>
             </div>
         </div>
 
@@ -606,8 +584,8 @@ document.addEventListener('DOMContentLoaded', function () {
             toggleButtonId: 'rqMinaToggleFilters',
             panelBodyId: 'rqMinaFiltersBody',
             iconElementId: 'rqMinaToggleArrow',
-            expandedIcon: '▲',
-            collapsedIcon: '▼',
+            expandedIcon: '\u25B2',
+            collapsedIcon: '\u25BC',
             expandedLabel: 'Ocultar filtros',
             collapsedLabel: 'Mostrar filtros',
         });
@@ -633,19 +611,7 @@ function changeRqMinaPageSize(size) {
     window.location.href = '{{ $baseUrl }}?' + params.toString();
 }
 
-function toggleExportSection(sectionId, btnId) {
-    const sec = document.getElementById(sectionId);
-    const btn = document.getElementById(btnId);
-    if (!sec || !btn) return;
-    const isHidden = sec.style.display === 'none' || getComputedStyle(sec).display === 'none';
-    if (isHidden) {
-        sec.style.display = 'block';
-        btn.setAttribute('aria-expanded', 'true');
-    } else {
-        sec.style.display = 'none';
-        btn.setAttribute('aria-expanded', 'false');
-    }
-}
 </script>
 
 @endsection
+
