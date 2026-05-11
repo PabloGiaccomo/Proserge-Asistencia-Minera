@@ -12,6 +12,7 @@ use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionMatrix;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,7 +41,20 @@ class PersonalFichaController extends WebPageController
     public function temporales(Request $request): View
     {
         $estado = strtoupper((string) $request->query('estado', ''));
-        $rows = $this->fichaService->temporaryLinkRows($estado !== '' ? $estado : null);
+        $allRows = $this->fichaService->temporaryLinkRows($estado !== '' ? $estado : null);
+        $perPage = 10;
+        $currentPage = max(1, (int) $request->query('page', 1));
+        $rowsCollection = collect($allRows);
+        $rows = new LengthAwarePaginator(
+            $rowsCollection->forPage($currentPage, $perPage)->values(),
+            $rowsCollection->count(),
+            $perPage,
+            $currentPage,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
         $stateOrder = [
             PersonalFicha::ESTADO_PENDIENTE,
             PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE,
@@ -49,7 +63,7 @@ class PersonalFichaController extends WebPageController
             PersonalFichaService::TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO,
         ];
 
-        $availableStates = collect($rows)
+        $availableStates = collect($allRows)
             ->pluck('estado_key')
             ->filter()
             ->unique()
@@ -68,6 +82,7 @@ class PersonalFichaController extends WebPageController
 
         return view('personal.fichas.temporales', [
             'rows' => $rows,
+            'rowsTotal' => $rowsCollection->count(),
             'estadoFilter' => $estado,
             'estadoOptions' => $estadoOptions,
         ]);

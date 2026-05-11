@@ -46,9 +46,9 @@
     </div>
 
     @php
-        $importSummaryLinesSession = session('import_summary_lines', []);
         $importResult = session('import_result');
         $hasImportResult = is_array($importResult);
+        $importSummaryLinesSession = session('import_summary_lines', []);
 
         if ($hasImportResult && count($importSummaryLinesSession) === 0) {
             $summaryPartsFallback = [];

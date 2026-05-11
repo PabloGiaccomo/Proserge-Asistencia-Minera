@@ -115,6 +115,35 @@
         .temporales-toolbar-search .simple-search-input {
             max-width: 460px;
         }
+
+        .temporales-pagination {
+            margin-top: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .temporales-pagination-meta {
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .temporales-pagination-links nav > div:first-child {
+            display: none;
+        }
+
+        .temporales-page-jump {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .temporales-page-jump input {
+            width: 76px;
+        }
     </style>
     <div class="page-header">
         <div class="page-header-top">
@@ -155,7 +184,7 @@
     <div class="ficha-card">
         <div class="ficha-card-header">
             <div>
-                <h2 class="ficha-card-title">{{ count($rows) }} registros temporales</h2>
+                <h2 class="ficha-card-title">{{ $rowsTotal ?? $rows->total() }} registros temporales</h2>
                 <p class="ficha-card-subtitle">Los trabajadores con ficha pendiente aparecen aqui, pero el link solo se habilita cuando se presiona el boton correspondiente.</p>
             </div>
         </div>
@@ -345,6 +374,33 @@
                     </tbody>
                 </table>
             </div>
+            @if(($rows->lastPage() ?? 1) > 1)
+                <div class="temporales-pagination">
+                    <div class="temporales-pagination-meta">
+                        Mostrando {{ $rows->firstItem() }}-{{ $rows->lastItem() }} de {{ $rows->total() }} registros
+                    </div>
+                    <div class="temporales-page-jump">
+                        <form method="GET" action="{{ route('personal.fichas.temporales') }}">
+                            @if(filled($estadoFilter ?? ''))
+                                <input type="hidden" name="estado" value="{{ $estadoFilter }}">
+                            @endif
+                            <label for="temporalesPageInput" class="ficha-card-subtitle" style="margin:0;">Ir a pagina</label>
+                            <input
+                                id="temporalesPageInput"
+                                class="ficha-input"
+                                type="number"
+                                name="page"
+                                min="1"
+                                max="{{ $rows->lastPage() }}"
+                                value="{{ $rows->currentPage() }}">
+                            <button type="submit" class="btn btn-outline btn-sm">Ir</button>
+                        </form>
+                    </div>
+                    <div class="temporales-pagination-links">
+                        {{ $rows->onEachSide(1)->links() }}
+                    </div>
+                </div>
+            @endif
         </div>
     </div>
 </div>

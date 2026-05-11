@@ -648,7 +648,6 @@ class PersonalFichaService
         return PersonalFicha::query()
             ->with(['personal', 'link', 'archivos'])
             ->latest('created_at')
-            ->limit(300)
             ->get()
             ->filter(function (PersonalFicha $ficha) use ($normalizedEstado): bool {
                 $displayState = $this->temporaryDisplayState($ficha);
@@ -728,15 +727,30 @@ class PersonalFichaService
     {
         Personal::query()
             ->with('fichaColaborador.link')
-            ->whereIn('estado', [
-                PersonalFicha::ESTADO_PENDIENTE,
-                PersonalFicha::ESTADO_ENVIADA,
-                PersonalFicha::ESTADO_LINK_VENCIDO,
-                PersonalFicha::ESTADO_OBSERVADO,
-            ])
-            ->get()
-            ->each(function (Personal $personal): void {
-                $this->ensurePendingFichaForPersonal($personal);
+            ->where(function ($query): void {
+                $query
+                    ->whereNull('estado')
+                    ->orWhere('estado', '!=', 'CESADO');
+            })
+            ->orderBy('created_at')
+            ->chunk(200, function ($personales): void {
+                foreach ($personales as $personal) {
+                    /** @var Personal $personal */
+                    $ficha = $personal->fichaColaborador;
+
+                    $shouldEnsureFicha = $ficha === null
+                        || in_array(strtoupper((string) $personal->estado), [
+                            PersonalFicha::ESTADO_PENDIENTE,
+                            PersonalFicha::ESTADO_ENVIADA,
+                            PersonalFicha::ESTADO_LINK_VENCIDO,
+                            PersonalFicha::ESTADO_OBSERVADO,
+                        ], true)
+                        || $this->hasMissingRequiredFields($ficha);
+
+                    if ($shouldEnsureFicha) {
+                        $this->ensurePendingFichaForPersonal($personal);
+                    }
+                }
             });
     }
 
