@@ -6,7 +6,6 @@ use App\Http\Controllers\WebPageController;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
 use App\Modules\Personal\Services\PersonalFichaExportService;
-use App\Modules\Personal\Services\OutlookMailService;
 use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaService;
@@ -28,7 +27,6 @@ class PersonalFichaController extends WebPageController
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalFichaPdfService $pdfService,
         private readonly PersonalFichaExportService $exportService,
-        private readonly OutlookMailService $outlookMailService,
     ) {
     }
 
@@ -311,7 +309,7 @@ class PersonalFichaController extends WebPageController
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
 
         try {
-            $result = $this->outlookMailService->send($ficha);
+            $result = $this->fichaService->sendLinkByEmail($ficha);
         } catch (ValidationException $exception) {
             $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo enviar el correo.';
 
@@ -334,7 +332,7 @@ class PersonalFichaController extends WebPageController
 
         return redirect()
             ->route('personal.fichas.temporales')
-            ->with('success', 'Correo enviado a ' . $result['email'] . ' via Outlook.');
+            ->with('success', 'Correo enviado a ' . $result['email'] . '.');
     }
 
     public function destroyTemporal(string $id): RedirectResponse

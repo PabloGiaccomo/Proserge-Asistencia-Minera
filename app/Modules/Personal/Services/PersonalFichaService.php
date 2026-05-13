@@ -945,6 +945,13 @@ class PersonalFichaService
     {
         $ficha->loadMissing(['personal', 'link']);
         $link = $ficha->link;
+        $mailer = (string) config('mail.default', 'log');
+
+        if (in_array($mailer, ['log', 'array'], true)) {
+            throw ValidationException::withMessages([
+                'correo' => 'El servidor todavia no tiene configurado un mailer real para enviar correos. Configura SMTP en el .env.',
+            ]);
+        }
 
         if (!$link) {
             throw ValidationException::withMessages([
