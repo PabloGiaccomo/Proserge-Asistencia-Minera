@@ -23,8 +23,9 @@
                 <div style="grid-column:1 / -1;">
                     <label class="filter-label">Trabajador</label>
                     @php
-                        $oldPersonalId = old('personal_id');
+                        $oldPersonalId = old('personal_id', request('personal_id'));
                         $selectedTrabajador = $trabajadores->firstWhere('id', $oldPersonalId);
+                        $tipoActual = old('tipo', request('tipo', 'vacaciones'));
                     @endphp
                     <input type="hidden" name="personal_id" id="personalIdInput" value="{{ $oldPersonalId }}" required>
                     <input
@@ -43,6 +44,7 @@
                     <label class="filter-label">Tipo</label>
                     <select name="tipo" id="tipoBloqueo" class="form-control" required>
                         <option value="vacaciones">Vacaciones</option>
+                        <option value="gestacion">Gestacion</option>
                         <option value="descanso_medico">Descanso médico</option>
                         <option value="inhabilitado">Inhabilitado</option>
                         <option value="restriccion_temporal">Restricción temporal</option>
@@ -81,11 +83,15 @@
 
 @php
     $trabajadoresSearchData = $trabajadores->map(function ($t) {
+        $fichaData = is_array($t->fichaColaborador?->datos_json ?? null) ? $t->fichaColaborador->datos_json : [];
+        $sexo = strtolower(trim((string) ($fichaData['sexo'] ?? '')));
         return [
             'id' => $t->id,
             'nombre' => $t->nombre_completo,
             'dni' => $t->dni,
             'estado' => strtoupper((string) $t->estado),
+            'sexo' => $sexo,
+            'is_mujer' => $sexo !== '' && (str_starts_with($sexo, 'f') || in_array($sexo, ['mujer', 'femenino'], true)),
         ];
     })->values();
 @endphp
@@ -102,6 +108,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const toggle = function () {
         wrapper.style.display = tipo.value === 'otro' ? 'block' : 'none';
     };
+
+    const tipoActual = @json($tipoActual ?? 'vacaciones');
+    if (tipoActual && tipo) {
+        tipo.value = tipoActual;
+    }
 
     tipo.addEventListener('change', toggle);
     toggle();
@@ -128,13 +139,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const filtrarTrabajadores = function(query) {
         if (!query || query.length < 2) {
-            return trabajadores.slice(0, 50);
+            return trabajadores.filter(function(t) {
+                return !tipo || tipo.value !== 'gestacion' || t.is_mujer;
+            }).slice(0, 50);
         }
 
         const q = normalizeText(query);
         const tokens = q.split(' ').filter(function(p) { return p.length > 0; });
 
         return trabajadores.filter(function(t) {
+            if (tipo && tipo.value === 'gestacion' && !t.is_mujer) {
+                return false;
+            }
+
             const textoCompleto = (t.nombre || '') + ' ' + (t.dni || '') + ' ' + (t.estado || '');
             const textoNorm = normalizeText(textoCompleto);
 
@@ -188,6 +205,21 @@ document.addEventListener('DOMContentLoaded', function () {
             hint.textContent = 'Trabajador seleccionado.';
         }
     });
+
+    if (tipo) {
+        tipo.addEventListener('change', function() {
+            if (tipo.value === 'gestacion') {
+                const selected = trabajadores.find(function(t) { return t.id === personalIdInput.value; });
+                if (selected && !selected.is_mujer) {
+                    personalIdInput.value = '';
+                    searchInput.value = '';
+                    if (hint) {
+                        hint.textContent = 'Gestacion solo aplica para trabajadoras con sexo femenino en ficha.';
+                    }
+                }
+            }
+        });
+    }
 
     document.addEventListener('click', function(event) {
         if (!resultsWrap.contains(event.target) && event.target !== searchInput) {

@@ -22,7 +22,7 @@
                 @method('PUT')
 
                 @php
-                    $known = ['vacaciones', 'descanso_medico', 'inhabilitado', 'restriccion_temporal'];
+                    $known = ['vacaciones', 'descanso_medico', 'gestacion', 'inhabilitado', 'restriccion_temporal'];
                     $tipoActual = old('tipo', $bloqueo->tipo);
                     $isOther = !in_array($tipoActual, $known, true);
                 @endphp
@@ -32,6 +32,7 @@
                     <select name="tipo" id="tipoBloqueo" class="form-control" required>
                         <option value="vacaciones" {{ $tipoActual === 'vacaciones' ? 'selected' : '' }}>Vacaciones</option>
                         <option value="descanso_medico" {{ $tipoActual === 'descanso_medico' ? 'selected' : '' }}>Descanso médico</option>
+                        <option value="gestacion" {{ $tipoActual === 'gestacion' ? 'selected' : '' }}>Gestacion</option>
                         <option value="inhabilitado" {{ $tipoActual === 'inhabilitado' ? 'selected' : '' }}>Inhabilitado</option>
                         <option value="restriccion_temporal" {{ $tipoActual === 'restriccion_temporal' ? 'selected' : '' }}>Restricción temporal</option>
                         <option value="otro" {{ $isOther ? 'selected' : '' }}>Otro</option>

@@ -97,6 +97,7 @@ class BienestarPageController extends Controller
             'total_activos_hoy' => (clone $resumenActivosHoy)->count(),
             'descanso_medico_hoy' => (clone $resumenActivosHoy)->where('tipo', 'descanso_medico')->count(),
             'vacaciones_hoy' => (clone $resumenActivosHoy)->where('tipo', 'vacaciones')->count(),
+            'gestacion_hoy' => (clone $resumenActivosHoy)->where('tipo', 'gestacion')->count(),
             'restriccion_hoy' => (clone $resumenActivosHoy)->where('tipo', 'restriccion_temporal')->count(),
             'trabajadores_no_disponibles_periodo' => $bloqueos->pluck('personal_id')->unique()->count(),
             'bloqueos_en_periodo' => $bloqueos->count(),
@@ -117,6 +118,7 @@ class BienestarPageController extends Controller
     public function show(string $id): View
     {
         $trabajador = Personal::query()
+            ->with('fichaColaborador')
             ->select(['id', 'dni', 'nombre_completo', 'puesto', 'estado'])
             ->findOrFail($id);
 
@@ -146,12 +148,13 @@ class BienestarPageController extends Controller
             'monthLabel' => ucfirst($monthStart->locale('es')->translatedFormat('F Y')),
             'prevMonth' => $monthStart->copy()->subMonth()->format('Y-m'),
             'nextMonth' => $monthStart->copy()->addMonth()->format('Y-m'),
+            'isMujer' => $this->isFemalePersonal($trabajador),
         ]);
     }
 
     public function storeBloqueo(Request $request, string $id)
     {
-        $trabajador = Personal::query()->findOrFail($id);
+        $trabajador = Personal::query()->with('fichaColaborador')->findOrFail($id);
 
         $payload = $request->validate([
             'tipo' => ['required', 'string', 'max:40'],
@@ -169,6 +172,10 @@ class BienestarPageController extends Controller
                 return back()->withErrors(['otro_tipo' => 'Debes indicar el tipo cuando seleccionas "Otro".'])->withInput();
             }
             $tipo = Str::of($otro)->lower()->replace(' ', '_')->value();
+        }
+
+        if ($tipo === 'gestacion' && !$this->isFemalePersonal($trabajador)) {
+            return back()->withErrors(['tipo' => 'Solo se puede registrar gestacion para trabajadoras con sexo femenino en la ficha.'])->withInput();
         }
 
         $usuarioId = (string) (session('user.id') ?? session('user_id') ?? '');
@@ -201,6 +208,7 @@ class BienestarPageController extends Controller
     public function createBloqueo(): View
     {
         $trabajadores = Personal::query()
+            ->with('fichaColaborador')
             ->select(['id', 'dni', 'nombre_completo', 'estado'])
             ->orderBy('nombre_completo')
             ->get();
@@ -231,6 +239,11 @@ class BienestarPageController extends Controller
             $tipo = Str::of($otro)->lower()->replace(' ', '_')->value();
         }
 
+        $trabajador = Personal::query()->with('fichaColaborador')->findOrFail($payload['personal_id']);
+        if ($tipo === 'gestacion' && !$this->isFemalePersonal($trabajador)) {
+            return back()->withErrors(['tipo' => 'Solo se puede registrar gestacion para trabajadoras con sexo femenino en la ficha.'])->withInput();
+        }
+
         $usuarioId = (string) (session('user.id') ?? session('user_id') ?? '');
         if ($usuarioId === '' || !Usuario::query()->where('id', $usuarioId)->exists()) {
             $usuarioId = (string) (Usuario::query()->value('id') ?? '');
@@ -242,7 +255,7 @@ class BienestarPageController extends Controller
 
         PersonalBloqueo::query()->create([
             'id' => (string) Str::uuid(),
-            'personal_id' => $payload['personal_id'],
+            'personal_id' => $trabajador->id,
             'tipo' => $tipo,
             'motivo' => $payload['motivo'],
             'detalle' => $payload['detalle'] ?? null,
@@ -254,7 +267,7 @@ class BienestarPageController extends Controller
         ]);
 
         return redirect()
-            ->route('bienestar.show', ['id' => $payload['personal_id'], 'mes' => Carbon::parse($payload['fecha_inicio'])->format('Y-m')])
+            ->route('bienestar.show', ['id' => $trabajador->id, 'mes' => Carbon::parse($payload['fecha_inicio'])->format('Y-m')])
             ->with('success', 'Bloqueo registrado correctamente.');
     }
 
@@ -272,7 +285,7 @@ class BienestarPageController extends Controller
 
     public function updateBloqueo(Request $request, string $bloqueoId)
     {
-        $bloqueo = PersonalBloqueo::query()->findOrFail($bloqueoId);
+        $bloqueo = PersonalBloqueo::query()->with('personal.fichaColaborador')->findOrFail($bloqueoId);
 
         $payload = $request->validate([
             'tipo' => ['required', 'string', 'max:40'],
@@ -290,6 +303,10 @@ class BienestarPageController extends Controller
                 return back()->withErrors(['otro_tipo' => 'Debes indicar el tipo cuando seleccionas "Otro".'])->withInput();
             }
             $tipo = Str::of($otro)->lower()->replace(' ', '_')->value();
+        }
+
+        if ($tipo === 'gestacion' && (!$bloqueo->personal || !$this->isFemalePersonal($bloqueo->personal))) {
+            return back()->withErrors(['tipo' => 'Solo se puede registrar gestacion para trabajadoras con sexo femenino en la ficha.'])->withInput();
         }
 
         $bloqueo->update([
@@ -338,6 +355,18 @@ class BienestarPageController extends Controller
         }
     }
 
+    private function isFemalePersonal(Personal $personal): bool
+    {
+        $personal->loadMissing('fichaColaborador');
+        $data = is_array($personal->fichaColaborador?->datos_json ?? null)
+            ? $personal->fichaColaborador->datos_json
+            : [];
+
+        $sexo = Str::lower(trim((string) ($data['sexo'] ?? '')));
+
+        return $sexo !== '' && (str_starts_with($sexo, 'f') || in_array($sexo, ['mujer', 'femenino'], true));
+    }
+
     private function buildCalendar(Carbon $monthStart, Collection $bloqueos): array
     {
         $start = $monthStart->copy()->startOfMonth();
@@ -361,6 +390,7 @@ class BienestarPageController extends Controller
             $primary = $matches
                 ->sortBy(function (PersonalBloqueo $bloqueo): int {
                     return match ((string) $bloqueo->tipo) {
+                        'gestacion' => 1,
                         'descanso_medico' => 1,
                         'inhabilitado' => 2,
                         'restriccion_temporal' => 3,

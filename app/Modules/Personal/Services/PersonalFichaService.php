@@ -330,6 +330,44 @@ class PersonalFichaService
         });
     }
 
+    public function updateDocuments(Personal $personal, array $documentos, Usuario $user): PersonalFicha
+    {
+        $documentPaths = $this->storeFichaDocuments($personal->fichaColaborador?->id, $documentos);
+
+        return DB::transaction(function () use ($personal, $documentPaths, $user): PersonalFicha {
+            $ficha = $personal->fichaColaborador()->first();
+
+            if (!$ficha) {
+                $data = $this->seedFichaDataFromPersonal($personal);
+                $documentType = PersonalNormalizer::documentType($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
+                $documentNumber = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
+                $estadoFicha = strtoupper((string) $personal->estado) === 'ACTIVO'
+                    ? PersonalFicha::ESTADO_APROBADO
+                    : (string) $personal->estado;
+
+                $ficha = PersonalFicha::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'personal_id' => $personal->id,
+                    'estado' => $estadoFicha,
+                    'tipo_documento' => $documentType,
+                    'numero_documento' => $documentNumber,
+                    'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
+                    'datos_detectados_json' => $data,
+                    'datos_json' => $data,
+                    'campos_verificacion_json' => [],
+                    'advertencias_json' => [],
+                    'created_by_usuario_id' => $user->id,
+                    'approved_at' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? now() : null,
+                    'approved_by_usuario_id' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? $user->id : null,
+                ]);
+            }
+
+            $this->syncFichaDocuments($ficha, $documentPaths, $user);
+
+            return $ficha->fresh(['personal', 'link', 'familiares', 'archivos']);
+        });
+    }
+
     public function documentAvailability(array $fields): array
     {
         $data = $this->normalizeFichaData($fields);

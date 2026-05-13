@@ -47,6 +47,7 @@ class PersonalBloqueo extends Model
         return match (strtolower((string) $this->tipo)) {
             'vacaciones' => 'Vacaciones',
             'descanso_medico' => 'Descanso médico',
+            'gestacion' => 'Gestacion',
             'inhabilitado' => 'Inhabilitado',
             'restriccion_temporal' => 'Restricción temporal',
             default => ucfirst(str_replace('_', ' ', (string) $this->tipo)),

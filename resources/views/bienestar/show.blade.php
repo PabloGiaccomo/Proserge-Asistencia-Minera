@@ -34,6 +34,7 @@
             <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
                 <span class="badge" style="background:#fde68a; color:#92400e;">Vacaciones</span>
                 <span class="badge" style="background:#fecaca; color:#991b1b;">Descanso médico</span>
+                <span class="badge" style="background:#fce7f3; color:#9d174d;">Gestacion</span>
                 <span class="badge" style="background:#c7d2fe; color:#3730a3;">Inhabilitado</span>
                 <span class="badge" style="background:#bfdbfe; color:#1e3a8a;">Restricción temporal</span>
                 <span class="badge" style="background:#e5e7eb; color:#374151;">Otro</span>
@@ -52,6 +53,7 @@
                                 $styleMap = [
                                     'vacaciones' => ['border' => '#f59e0b', 'bg' => '#fffbeb', 'text' => '#92400e'],
                                     'descanso_medico' => ['border' => '#f87171', 'bg' => '#fff1f2', 'text' => '#991b1b'],
+                                    'gestacion' => ['border' => '#f472b6', 'bg' => '#fdf2f8', 'text' => '#9d174d'],
                                     'inhabilitado' => ['border' => '#818cf8', 'bg' => '#eef2ff', 'text' => '#3730a3'],
                                     'restriccion_temporal' => ['border' => '#60a5fa', 'bg' => '#eff6ff', 'text' => '#1e3a8a'],
                                     'default' => ['border' => '#94a3b8', 'bg' => '#f8fafc', 'text' => '#334155'],

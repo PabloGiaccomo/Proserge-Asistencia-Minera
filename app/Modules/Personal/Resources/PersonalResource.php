@@ -34,6 +34,7 @@ class PersonalResource extends JsonResource
         $primaryBloqueo = $activeBloqueos
             ->sortBy(function ($bloqueo): int {
                 return match ((string) $bloqueo->tipo) {
+                    'gestacion' => 1,
                     'descanso_medico' => 1,
                     'inhabilitado' => 2,
                     'restriccion_temporal' => 3,
@@ -156,9 +157,11 @@ class PersonalResource extends JsonResource
             $descansoMsg = 'Sin descanso médico vigente. Estado de salud operativo.';
         }
 
+        $gestacionMsg = $buildStatusText('gestacion', 'Gestacion');
+
         $paradaTypes = $allBloqueos
             ->filter(function ($b): bool {
-                return !in_array((string) ($b->tipo ?? ''), ['vacaciones', 'descanso_medico'], true);
+                return !in_array((string) ($b->tipo ?? ''), ['vacaciones', 'descanso_medico', 'gestacion'], true);
             })
             ->values();
 
@@ -225,7 +228,7 @@ class PersonalResource extends JsonResource
         $hasCentroTrabajoActivo = $ubicacionSituacion !== null;
 
         $hasParadaActiva = $activeBloqueos->contains(function ($bloqueo): bool {
-            return !in_array((string) ($bloqueo->tipo ?? ''), ['vacaciones', 'descanso_medico'], true);
+            return !in_array((string) ($bloqueo->tipo ?? ''), ['vacaciones', 'descanso_medico', 'gestacion'], true);
         });
         $hasRqProsergeParadaActiva = collect($this->whenLoaded('rqProsergeDetalles', fn () => $this->rqProsergeDetalles, collect()))
             ->isNotEmpty();
@@ -242,7 +245,7 @@ class PersonalResource extends JsonResource
         $estadoVisible = match (true) {
             $contratoVencido || $ceseVigente || ($contrato === 'INDET' && $estadoPersonal === 'CESADO') => 'CESADO',
             $terminarFicha => 'INACTIVO',
-            $bienestarInactivo => 'INACTIVO',
+            $bienestarInactivo || ($primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion') => 'INACTIVO',
             $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
             $trabajadorNoIntermitenteActivo || $intermitenteActivo => 'ACTIVO',
             default => 'INACTIVO',
@@ -253,6 +256,7 @@ class PersonalResource extends JsonResource
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'descanso_medico' => 'descanso_medico',
+            $primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion' => 'gestacion',
             $hasParadaActiva || $hasRqProsergeParadaActiva => 'parada',
             $ubicacionSituacion === 'oficina' => 'oficina',
             $ubicacionSituacion === 'taller' => 'taller',
@@ -266,6 +270,7 @@ class PersonalResource extends JsonResource
             'terminar_ficha' => 'Terminar ficha',
             'vacaciones' => 'Vacaciones',
             'descanso_medico' => 'Descanso medico',
+            'gestacion' => 'Gestacion',
             'parada' => 'En parada',
             'oficina' => 'En oficina',
             'taller' => 'En taller',
@@ -320,6 +325,7 @@ class PersonalResource extends JsonResource
             'resumen_bienestar' => [
                 'vacaciones' => $vacacionesMsg,
                 'descanso_medico' => $descansoMsg,
+                'gestacion' => $gestacionMsg !== '' ? $gestacionMsg : 'Sin periodo de gestacion registrado.',
                 'parada' => $paradaMsg,
             ],
             'minas' => array_values($mineNames),

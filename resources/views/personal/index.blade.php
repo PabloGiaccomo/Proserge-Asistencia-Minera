@@ -316,6 +316,12 @@
     border-color: #fca5a5;
 }
 
+.dg-pill-situacion-gestacion {
+    background: #fce7f3;
+    color: #9d174d;
+    border-color: #f9a8d4;
+}
+
 .dg-pill-situacion-parada {
     background: #ffe4e6;
     color: #9f1239;
@@ -857,6 +863,7 @@
                                                 <option value="no_habilitado">No habilitado</option>
                                                 <option value="vacaciones">Vacaciones</option>
                                                 <option value="descanso_medico">Descanso medico</option>
+                                                <option value="gestacion">Gestacion</option>
                                                 <option value="terminar_ficha">Terminar ficha</option>
                                             </select>
                                         </div>
@@ -933,6 +940,7 @@
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
+                                        'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',
                                         default => 'dg-pill-situacion-inactivo',
                                     };
@@ -1029,6 +1037,19 @@
                                                     </svg>
                                                 </a>
                                             @endif
+                                            <a
+                                                href="{{ route('personal.documentos.index', $trabajador['id'] ?? '') }}"
+                                                class="btn btn-outline btn-xs personal-icon-btn"
+                                                title="Ver documentos"
+                                                aria-label="Ver documentos">
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M4 4h16v16H4z"/>
+                                                    <path d="M8 2v4"/>
+                                                    <path d="M16 2v4"/>
+                                                    <path d="M8 11h8"/>
+                                                    <path d="M8 15h5"/>
+                                                </svg>
+                                            </a>
                                             @if($canCeasePersonal && !empty($trabajador['puede_cesar']))
                                                 <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? '') }}" onsubmit="return confirm('Se marcara a este trabajador como cesado.');">
                                                     @csrf
@@ -1156,6 +1177,7 @@ function showWorkerDetail(card) {
     const ingreso = ingresoRaw ? new Date(ingresoRaw).toLocaleDateString('es-PE') : '-';
     const vacStr = resumenBienestar.vacaciones || 'Sin vacaciones próximas en los siguientes 2 meses. Disponible por ahora.';
     const descansoStr = resumenBienestar.descanso_medico || 'Sin descanso médico vigente. Estado de salud operativo.';
+    const gestacionStr = resumenBienestar.gestacion || 'Sin periodo de gestacion registrado.';
     const parStr = resumenBienestar.parada || 'Sin parada vigente en este momento.';
     const telefono = telefonoRaw;
     const documento = [worker.tipo_documento || 'DNI', worker.numero_documento || worker.dni || '-'].join(' ').trim();
@@ -1248,6 +1270,10 @@ function showWorkerDetail(card) {
                             <span class="detail-value">${descansoStr}</span>
                         </div>
                         <div class="detail-item">
+                            <span class="detail-label">Gestacion</span>
+                            <span class="detail-value">${gestacionStr}</span>
+                        </div>
+                        <div class="detail-item">
                             <span class="detail-label">Parada</span>
                             <span class="detail-value">${parStr}</span>
                         </div>
@@ -1257,6 +1283,7 @@ function showWorkerDetail(card) {
             <div class="detail-footer">
                 ${worker.ficha_id ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
+                <a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>
                 <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
                 ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" onsubmit="return confirm('Se marcara a este trabajador como cesado.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
                 ${canDeletePersonal ? `<form method="POST" action="/personal/${worker.id}/eliminar" onsubmit="return confirm('Se eliminara por completo este trabajador.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-danger">Eliminar</button></form>` : ''}

@@ -19,6 +19,7 @@
         <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $resumen['descanso_medico_hoy'] ?? 0 }}</strong><div class="text-muted">Descanso médico hoy</div></div></div>
         <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $resumen['vacaciones_hoy'] ?? 0 }}</strong><div class="text-muted">Vacaciones hoy</div></div></div>
         <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $resumen['restriccion_hoy'] ?? 0 }}</strong><div class="text-muted">Restricción temporal hoy</div></div></div>
+        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $resumen['gestacion_hoy'] ?? 0 }}</strong><div class="text-muted">Gestacion hoy</div></div></div>
         <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $resumen['trabajadores_no_disponibles_periodo'] ?? 0 }}</strong><div class="text-muted">No disponibles en rango</div></div></div>
     </div>
 
