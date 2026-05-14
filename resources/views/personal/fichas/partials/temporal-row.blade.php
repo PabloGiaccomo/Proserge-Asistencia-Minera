@@ -93,7 +93,7 @@
             @endif
             @allowed('personal', 'eliminar')
                 @if($row['url'] && $link && !$ficha->submitted_at)
-                    <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form" data-action-name="ampliado" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">
+                    <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form" data-action-name="ampliado">
                         @csrf
                         <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 1 día" aria-label="Ampliar 1 día">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
