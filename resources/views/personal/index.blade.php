@@ -663,9 +663,17 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    position: relative;
-    margin-left: auto;
     z-index: 20;
+    flex-wrap: wrap;
+}
+
+.personal-grid-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
 }
 
 .personal-view-toggle {
@@ -679,16 +687,16 @@
 }
 
 .personal-column-popover {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
+    position: fixed;
+    top: 0;
+    left: 0;
     width: min(260px, calc(100vw - 32px));
     background: #fff;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
     padding: 12px;
-    z-index: 40;
+    z-index: 120;
     display: none;
     max-height: 70vh;
     overflow: auto;
@@ -1406,39 +1414,51 @@
         </div>
     </form>
 
+    <div class="personal-column-popover" id="personalColumnsPopover">
+        <p class="personal-column-popover-title">Mostrar columnas</p>
+        <p class="personal-column-popover-help">La vista recuerda columnas, busqueda, pagina y posicion en esta maquina.</p>
+        <div class="personal-column-list">
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="documento" checked> Documento</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="celular" checked> Celular</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="correo" checked> Correo</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="puesto" checked> Puesto</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="contrato" checked> Contrato</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="estado" checked> Estado</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="situacion" checked> Situacion</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="ocupacion" checked> Ocupacion</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="acciones" checked> Acciones</label>
+        </div>
+        <div class="personal-view-actions">
+            <button type="button" class="btn btn-outline btn-sm" id="personalExpandToggle">Extender pantalla</button>
+        </div>
+    </div>
+
+    <div class="personal-grid-toolbar">
+        <div class="personal-view-tools">
+            <button type="button" class="btn btn-outline" id="personalResetViewButton" data-reset-url="{{ route('personal.index') }}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                </svg>
+                Restaurar filtros
+            </button>
+            <button type="button" class="btn btn-outline personal-view-toggle" id="personalColumnsToggle" aria-expanded="false" aria-controls="personalColumnsPopover">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="16" rx="2"/>
+                    <path d="M9 4v16"/>
+                    <path d="M15 4v16"/>
+                </svg>
+                Vista
+            </button>
+            <span class="card-badge" id="personalCount">{{ count($trabajadores ?? []) }} trabajadores</span>
+        </div>
+    </div>
+
     <!-- Results -->
     <div class="card">
         <div class="card-header personal-grid-header">
             <span class="card-title">Listado de Personal</span>
-            <div class="personal-view-tools">
-                <button type="button" class="btn btn-outline personal-view-toggle" id="personalColumnsToggle" aria-expanded="false" aria-controls="personalColumnsPopover">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="16" rx="2"/>
-                        <path d="M9 4v16"/>
-                        <path d="M15 4v16"/>
-                    </svg>
-                    Vista
-                </button>
-                <div class="personal-column-popover" id="personalColumnsPopover">
-                    <p class="personal-column-popover-title">Mostrar columnas</p>
-                    <p class="personal-column-popover-help">La vista recuerda columnas, busqueda, pagina y posicion en esta maquina.</p>
-                    <div class="personal-column-list">
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="documento" checked> Documento</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="celular" checked> Celular</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="correo" checked> Correo</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="puesto" checked> Puesto</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="contrato" checked> Contrato</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="estado" checked> Estado</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="situacion" checked> Situacion</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="ocupacion" checked> Ocupacion</label>
-                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="acciones" checked> Acciones</label>
-                    </div>
-                    <div class="personal-view-actions">
-                        <button type="button" class="btn btn-outline btn-sm" id="personalExpandToggle">Extender pantalla</button>
-                    </div>
-                </div>
-                <span class="card-badge" id="personalCount">{{ count($trabajadores ?? []) }} trabajadores</span>
-            </div>
         </div>
         <div class="card-body">
             @if(empty($trabajadores))
@@ -2163,6 +2183,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const ocupMineCheckboxes = Array.from(document.querySelectorAll('.js-ocup-mine-check'));
     const ocupOfficeCheckboxes = Array.from(document.querySelectorAll('.js-ocup-office-check'));
     const ocupWorkshopCheckboxes = Array.from(document.querySelectorAll('.js-ocup-workshop-check'));
+    const resetViewButton = document.getElementById('personalResetViewButton');
     const columnsToggle = document.getElementById('personalColumnsToggle');
     const columnsPopover = document.getElementById('personalColumnsPopover');
     const expandToggle = document.getElementById('personalExpandToggle');
@@ -2209,6 +2230,14 @@ document.addEventListener('DOMContentLoaded', function () {
         const nextState = Object.assign({}, readViewState(), patch || {});
         try {
             window.localStorage.setItem(viewStateKey, JSON.stringify(nextState));
+        } catch (error) {
+            // noop
+        }
+    };
+
+    const clearViewState = function () {
+        try {
+            window.localStorage.removeItem(viewStateKey);
         } catch (error) {
             // noop
         }
@@ -2320,9 +2349,9 @@ document.addEventListener('DOMContentLoaded', function () {
         gridShell.style.removeProperty('--personal-grid-expanded-width');
     };
 
-    const buildPageSizeOptions = function () {
+    const buildPageSizeOptions = function (totalCount) {
         if (!pageSizeSelect) return;
-        const total = rows.length;
+        const total = Math.max(1, Number(totalCount || rows.length || 1));
         const base = [10, 50, 100, 200, 300, total];
         const values = Array.from(new Set(base.filter(function (value) {
             return Number.isFinite(value) && value > 0 && value <= total;
@@ -2337,6 +2366,25 @@ document.addEventListener('DOMContentLoaded', function () {
         pageSizeSelect.innerHTML = values.map(function (value) {
             return '<option value="' + value + '">' + value + '</option>';
         }).join('');
+    };
+
+    const syncPageSizeOptions = function (totalCount, preferredValue) {
+        if (!pageSizeSelect) return;
+
+        buildPageSizeOptions(totalCount);
+
+        const optionValues = Array.from(pageSizeSelect.options).map(function (option) {
+            return String(option.value);
+        });
+        const preferred = String(preferredValue || pageSize || pageSizeSelect.value || '');
+
+        if (preferred && optionValues.indexOf(preferred) !== -1) {
+            pageSizeSelect.value = preferred;
+        } else if (optionValues.length > 0) {
+            pageSizeSelect.value = optionValues[optionValues.length - 1];
+        }
+
+        pageSize = Number(pageSizeSelect.value || optionValues[0] || 10);
     };
 
     const syncTopScrollbar = function () {
@@ -2411,6 +2459,29 @@ document.addEventListener('DOMContentLoaded', function () {
         columnsToggle.setAttribute('aria-expanded', 'false');
     };
 
+    const positionColumnsPopover = function () {
+        if (!columnsPopover || !columnsToggle) return;
+
+        const triggerRect = columnsToggle.getBoundingClientRect();
+        const gap = 8;
+        const viewportMargin = 12;
+
+        columnsPopover.style.top = (triggerRect.bottom + gap) + 'px';
+        columnsPopover.style.left = '0px';
+
+        const popoverRect = columnsPopover.getBoundingClientRect();
+        let left = triggerRect.right - popoverRect.width;
+        const maxLeft = window.innerWidth - popoverRect.width - viewportMargin;
+        left = Math.max(viewportMargin, Math.min(left, maxLeft));
+
+        columnsPopover.style.left = left + 'px';
+
+        const finalRect = columnsPopover.getBoundingClientRect();
+        if (finalRect.bottom > (window.innerHeight - viewportMargin)) {
+            columnsPopover.style.top = Math.max(viewportMargin, triggerRect.top - popoverRect.height - gap) + 'px';
+        }
+    };
+
     const fitPopoverWithinViewport = function (panel) {
         const triggerEl = panel && panel._triggerEl;
         if (!panel || !triggerEl) return;
@@ -2442,9 +2513,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     window.addEventListener('resize', function () {
         repositionOpenPopover();
+        if (columnsPopover?.classList.contains('is-open')) {
+            positionColumnsPopover();
+        }
     });
 
-    document.addEventListener('scroll', repositionOpenPopover, true);
+    document.addEventListener('scroll', function () {
+        repositionOpenPopover();
+        if (columnsPopover?.classList.contains('is-open')) {
+            positionColumnsPopover();
+        }
+    }, true);
 
     document.addEventListener('click', function (event) {
         const inPopover = event.target.closest('.dg-filter-popover');
@@ -2468,6 +2547,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (willOpen) {
                 columnsPopover.classList.add('is-open');
                 columnsToggle.setAttribute('aria-expanded', 'true');
+                positionColumnsPopover();
             }
         };
 
@@ -2480,6 +2560,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         columnsPopover.addEventListener('click', function (event) {
             event.stopPropagation();
+        });
+    }
+
+    if (resetViewButton) {
+        resetViewButton.addEventListener('click', function () {
+            clearViewState();
+            const targetUrl = resetViewButton.dataset.resetUrl || window.location.pathname;
+            window.location.href = targetUrl;
         });
     }
 
@@ -2514,7 +2602,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const savedState = readViewState();
     setBootProgress(18, 'Cargando preferencias...');
 
-    buildPageSizeOptions();
+    buildPageSizeOptions(rows.length);
 
     if (searchInput && typeof savedState.search === 'string') {
         searchInput.value = savedState.search;
@@ -2669,16 +2757,20 @@ document.addEventListener('DOMContentLoaded', function () {
         if (resetPage) currentPage = 1;
         const filtered = applyFiltersAndSort();
         const total = filtered.length;
+        syncPageSizeOptions(total, pageSize);
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
         currentPage = clampPage(currentPage, totalPages);
         const start = (currentPage - 1) * pageSize;
         const end = start + pageSize;
+        const visibleRows = filtered.slice(start, end);
 
         rows.forEach(r => r.style.display = 'none');
-        filtered.slice(start, end).forEach(r => r.style.display = 'table-row');
+        visibleRows.forEach(r => r.style.display = 'table-row');
 
         if (paginationInfo) {
-            paginationInfo.textContent = total === 0 ? '0 resultados' : 'Mostrando ' + (start + 1) + '-' + Math.min(end, total) + ' de ' + total;
+            paginationInfo.textContent = total === 0
+                ? '0 resultados'
+                : 'Mostrando ' + (start + 1) + '-' + (start + visibleRows.length) + ' de ' + total;
         }
         if (countBadge) {
             countBadge.textContent = total + ' trabajadores';
