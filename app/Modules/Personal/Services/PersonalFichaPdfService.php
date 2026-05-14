@@ -152,6 +152,8 @@ class PersonalFichaPdfService
 
                 $scaleX = $size['width'] / 935;
                 $scaleY = $size['height'] / 1210;
+                $offsetX = 0.0;
+                $offsetY = -1.5;
                 $field = function (
                     float $x,
                     float $y,
@@ -169,20 +171,19 @@ class PersonalFichaPdfService
 
                     $style = $bold ? 'B' : '';
                     $encodedValue = $this->pdfText($value);
-                    $pdf->SetFont('Times', $style, $font);
+                    $pdf->SetFont('Arial', $style, $font);
                     $pdf->SetTextColor(0, 0, 0);
-                    $pdf->SetFillColor(255, 255, 0);
 
-                    $fieldHeight = ($height !== null ? $height * $scaleY : max($font * 1.18, 9));
+                    $fieldHeight = ($height !== null ? $height * $scaleY : max($font * 1.02, 8));
                     $fieldWidth = ($width ?? 80) * $scaleX;
                     $fitFont = $font;
                     while ($fitFont > 6 && $pdf->GetStringWidth($encodedValue) > ($fieldWidth - 2)) {
                         $fitFont -= 0.5;
-                        $pdf->SetFont('Times', $style, $fitFont);
+                        $pdf->SetFont('Arial', $style, $fitFont);
                     }
 
-                    $pdf->SetXY($x * $scaleX, $y * $scaleY);
-                    $pdf->Cell($fieldWidth, $fieldHeight, $encodedValue, 0, 0, $align, true);
+                    $pdf->SetXY(($x + $offsetX) * $scaleX, ($y + $offsetY) * $scaleY);
+                    $pdf->Cell($fieldWidth, $fieldHeight, $encodedValue, 0, 0, $align, false);
                 };
 
                 if ($page === 1) {

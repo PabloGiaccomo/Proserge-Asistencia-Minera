@@ -758,9 +758,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 },
             }).then(function (response) {
                 if (response.ok) {
-                    button.dataset.idleTitle = 'Volver a enviar correo';
-                    button.setAttribute('title', 'Volver a enviar correo');
-                    button.setAttribute('aria-label', 'Volver a enviar correo');
+                    return response.json().then(function (data) {
+                        button.dataset.idleTitle = 'Volver a enviar correo';
+                        button.setAttribute('title', 'Volver a enviar correo');
+                        button.setAttribute('aria-label', 'Volver a enviar correo');
+
+                        if (data.mailto_url) {
+                            window.location.href = data.mailto_url;
+                        }
+                    });
                 } else {
                     return response.json().then(function (data) {
                         alert(data.error || 'Error al enviar el correo');

@@ -58,7 +58,7 @@ class OutlookMailService
 
         $htmlBody = $this->buildHtmlBody($nombre, $documento, $url, $wasResent);
 
-        $this->sendViaOutlook($email, $subject, $body, $htmlBody);
+        $delivery = $this->deliver($email, $subject, $body, $htmlBody);
 
         $link->forceFill([
             'emailed_at' => now(),
@@ -69,24 +69,47 @@ class OutlookMailService
             'email' => $email,
             'resent' => $wasResent,
             'link' => $link->fresh(),
+            'delivery' => $delivery['mode'],
+            'mailto_url' => $delivery['mailto_url'] ?? null,
         ];
+    }
+
+    private function deliver(string $to, string $subject, string $body, ?string $htmlBody = null): array
+    {
+        if ($this->canUseWindowsOutlook()) {
+            $this->sendViaOutlook($to, $subject, $body, $htmlBody);
+
+            return [
+                'mode' => 'outlook',
+            ];
+        }
+
+        return [
+            'mode' => 'mailto',
+            'mailto_url' => $this->buildMailtoUrl($to, $subject, $body),
+        ];
+    }
+
+    private function canUseWindowsOutlook(): bool
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return false;
+        }
+
+        return file_exists($this->scriptPath);
     }
 
     private function sendViaOutlook(string $to, string $subject, string $body, ?string $htmlBody = null): void
     {
-        if (!file_exists($this->scriptPath)) {
-            throw ValidationException::withMessages([
-                'correo' => 'El script de Outlook no se encuentra en el servidor.',
-            ]);
-        }
-
         $escapedTo = escapeshellarg($to);
         $subjectBase64 = base64_encode($subject);
         $bodyBase64 = base64_encode($body);
         $htmlBodyBase64 = $htmlBody !== null ? base64_encode($htmlBody) : '';
+        $powershell = $this->powershellBinary();
 
         $command = sprintf(
-            'powershell -ExecutionPolicy Bypass -File %s -To %s -SubjectBase64 %s -BodyBase64 %s -HtmlBodyBase64 %s 2>&1',
+            '%s -ExecutionPolicy Bypass -File %s -To %s -SubjectBase64 %s -BodyBase64 %s -HtmlBodyBase64 %s 2>&1',
+            $powershell,
             escapeshellarg($this->scriptPath),
             $escapedTo,
             $subjectBase64,
@@ -104,6 +127,30 @@ class OutlookMailService
                 'correo' => $errorMsg,
             ]);
         }
+    }
+
+    private function powershellBinary(): string
+    {
+        foreach (['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'] as $candidate) {
+            $result = shell_exec('where ' . escapeshellarg($candidate) . ' 2>NUL');
+            if (is_string($result) && trim($result) !== '') {
+                return $candidate;
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'correo' => 'No se encontro PowerShell en esta computadora para abrir Outlook.',
+        ]);
+    }
+
+    private function buildMailtoUrl(string $to, string $subject, string $body): string
+    {
+        $query = http_build_query([
+            'subject' => $subject,
+            'body' => $body,
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        return 'mailto:' . rawurlencode($to) . '?' . $query;
     }
 
     private function buildHtmlBody(string $nombre, string $documento, string $url, bool $wasResent): string

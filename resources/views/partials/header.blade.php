@@ -285,6 +285,54 @@
         }).join('');
     }
 
+    function submitNotificationForm(form) {
+        if (!form || !form.action) {
+            return Promise.resolve();
+        }
+
+        var formData = new FormData(form);
+        if (!formData.has('_token')) {
+            formData.append('_token', csrfToken);
+        }
+
+        return fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            body: formData,
+        }).then(function(response) {
+            if (!response.ok) {
+                return response.json()
+                    .catch(function() { return { error: 'No se pudo actualizar la notificacion.' }; })
+                    .then(function(data) {
+                        throw new Error(data.error || 'No se pudo actualizar la notificacion.');
+                    });
+            }
+
+            return response.json().catch(function() {
+                return { ok: true };
+            });
+        }).then(function() {
+            poll();
+        }).catch(function(error) {
+            alert(error && error.message ? error.message : 'No se pudo actualizar la notificacion.');
+        });
+    }
+
+    document.addEventListener('submit', function(event) {
+        var form = event.target;
+        if (!form || !form.matches('.header-notif-panel form')) {
+            return;
+        }
+
+        event.preventDefault();
+        submitNotificationForm(form);
+    });
+
     function poll() {
         debugLog('poll.request', { url: pollUrl, at: new Date().toISOString() });
 

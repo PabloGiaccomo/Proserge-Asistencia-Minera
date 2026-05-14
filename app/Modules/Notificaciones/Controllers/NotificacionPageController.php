@@ -45,22 +45,22 @@ class NotificacionPageController extends Controller
         return response()->json(['count' => $this->inbox->unreadCount($userId)]);
     }
 
-    public function markRead(string $recipientId): RedirectResponse
+    public function markRead(Request $request, string $recipientId): RedirectResponse|JsonResponse
     {
         if (!$this->notificationTablesReady()) {
-            return back()->with('error', 'No existen tablas de notificaciones en la base de datos.');
+            return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
         $recipient = $this->findRecipientForCurrentUser($recipientId);
         $this->inbox->markAsRead($recipient);
 
-        return back()->with('success', 'Notificacion marcada como leida.');
+        return $this->notificationSuccessResponse($request, 'Notificacion marcada como leida.');
     }
 
-    public function markAllRead(): RedirectResponse
+    public function markAllRead(Request $request): RedirectResponse|JsonResponse
     {
         if (!$this->notificationTablesReady()) {
-            return back()->with('error', 'No existen tablas de notificaciones en la base de datos.');
+            return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
         $userId = (string) session('user.id', '');
@@ -68,19 +68,21 @@ class NotificacionPageController extends Controller
 
         $updated = $this->inbox->markAllAsRead($userId);
 
-        return back()->with('success', sprintf('Se marcaron %d notificaciones como leidas.', $updated));
+        return $this->notificationSuccessResponse($request, sprintf('Se marcaron %d notificaciones como leidas.', $updated), [
+            'updated' => $updated,
+        ]);
     }
 
-    public function archive(string $recipientId): RedirectResponse
+    public function archive(Request $request, string $recipientId): RedirectResponse|JsonResponse
     {
         if (!$this->notificationTablesReady()) {
-            return back()->with('error', 'No existen tablas de notificaciones en la base de datos.');
+            return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
         $recipient = $this->findRecipientForCurrentUser($recipientId);
         $this->inbox->archive($recipient);
 
-        return back()->with('success', 'Notificacion archivada.');
+        return $this->notificationSuccessResponse($request, 'Notificacion archivada.');
     }
 
     public function openAction(string $recipientId): RedirectResponse
@@ -196,5 +198,30 @@ class NotificacionPageController extends Controller
             'items' => $items,
             'timestamp' => now()->timestamp,
         ]);
+    }
+
+    private function notificationSuccessResponse(Request $request, string $message, array $extra = []): RedirectResponse|JsonResponse
+    {
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'ok' => true,
+                'message' => $message,
+                ...$extra,
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
+
+    private function notificationErrorResponse(Request $request, string $message): RedirectResponse|JsonResponse
+    {
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'ok' => false,
+                'error' => $message,
+            ], 422);
+        }
+
+        return back()->with('error', $message);
     }
 }

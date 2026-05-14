@@ -168,6 +168,83 @@
     color: #dc2626;
 }
 
+.personal-page {
+    position: relative;
+}
+
+.personal-boot-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 88px 16px 16px;
+    background: rgba(248, 250, 252, 0.92);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+}
+
+.personal-page.is-booting .personal-boot-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.personal-boot-card {
+    width: min(440px, 100%);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+    padding: 18px 18px 16px;
+}
+
+.personal-boot-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.personal-boot-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.personal-boot-status {
+    font-size: 12px;
+    font-weight: 600;
+    color: #0d9488;
+}
+
+.personal-boot-copy {
+    margin: 0 0 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #64748b;
+}
+
+.personal-boot-progress {
+    position: relative;
+    height: 10px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.personal-boot-progress-bar {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #19d3c5 0%, #0ea5e9 100%);
+    transition: width 0.16s ease;
+}
+
 .dg-filter-icon {
     display: inline-flex;
     align-items: center;
@@ -382,6 +459,476 @@
     border-color: #cbd5e1;
 }
 
+.personal-page .table-responsive.personal-grid-wrap {
+    position: relative;
+    overflow: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable both-edges;
+}
+
+.personal-page .personal-grid-shell {
+    width: 100%;
+    max-width: 100%;
+}
+
+.personal-page .personal-grid-scroll-top {
+    position: sticky;
+    top: 0;
+    z-index: 7;
+    height: 16px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid #e2e8f0;
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    background: #f8fafc;
+    display: none;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+}
+
+.personal-page .personal-grid-scroll-top.is-visible {
+    display: block;
+}
+
+.personal-page .personal-grid-scroll-top-inner {
+    height: 1px;
+}
+
+.personal-page .personal-grid-shell.is-expanded {
+    width: 100%;
+    max-width: 100%;
+}
+
+.personal-page .personal-grid-shell.is-expanded .personal-grid-wrap,
+.personal-page .personal-grid-shell.is-expanded .personal-grid-scroll-top {
+    width: 100%;
+    max-width: 100%;
+}
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
+}
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="trabajador"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="trabajador"] { min-width: 240px; width: 240px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="correo"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="correo"] { min-width: 220px; width: 220px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="puesto"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="puesto"] { min-width: 210px; width: 210px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="situacion"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="situacion"] { min-width: 160px; width: 160px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="ocupacion"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="ocupacion"] { min-width: 420px; width: 420px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="acciones"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="acciones"] { min-width: 220px; width: 220px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td,
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th {
+    white-space: nowrap;
+}
+
+.personal-page .personal-grid-shell.is-expanded .personal-action-buttons {
+    flex-wrap: nowrap;
+}
+
+.personal-page .personal-grid-shell.is-expanded .personal-action-buttons form {
+    display: inline-flex;
+}
+
+.personal-page .data-table.personal-grid-compact {
+    width: 100%;
+    min-width: 1120px;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.personal-page .data-table.personal-grid-compact th,
+.personal-page .data-table.personal-grid-compact td {
+    padding: 8px 10px;
+    font-size: 12px;
+    vertical-align: top;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.personal-page .data-table.personal-grid-compact thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8fafc;
+}
+
+.personal-page .data-table.personal-grid-compact th[data-column="trabajador"],
+.personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
+    min-width: 220px;
+    width: 220px;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fff;
+}
+
+.personal-page .data-table.personal-grid-compact thead th[data-column="trabajador"] {
+    z-index: 4;
+    background: #f8fafc;
+}
+
+.personal-page .data-table.personal-grid-compact th[data-column="documento"],
+.personal-page .data-table.personal-grid-compact td[data-column="documento"] { width: 130px; min-width: 130px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="celular"],
+.personal-page .data-table.personal-grid-compact td[data-column="celular"] { width: 118px; min-width: 118px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="correo"],
+.personal-page .data-table.personal-grid-compact td[data-column="correo"] { width: 180px; min-width: 180px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="puesto"],
+.personal-page .data-table.personal-grid-compact td[data-column="puesto"] { width: 170px; min-width: 170px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="contrato"],
+.personal-page .data-table.personal-grid-compact td[data-column="contrato"] { width: 120px; min-width: 120px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="estado"],
+.personal-page .data-table.personal-grid-compact td[data-column="estado"] { width: 108px; min-width: 108px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="situacion"],
+.personal-page .data-table.personal-grid-compact td[data-column="situacion"] { width: 135px; min-width: 135px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="ocupacion"],
+.personal-page .data-table.personal-grid-compact td[data-column="ocupacion"] { width: 260px; min-width: 260px; }
+
+.personal-page .data-table.personal-grid-compact th[data-column="acciones"],
+.personal-page .data-table.personal-grid-compact td[data-column="acciones"] { width: 132px; min-width: 132px; }
+
+.personal-page .data-table.personal-grid-compact td[data-column="documento"],
+.personal-page .data-table.personal-grid-compact td[data-column="celular"],
+.personal-page .data-table.personal-grid-compact td[data-column="correo"],
+.personal-page .data-table.personal-grid-compact td[data-column="puesto"],
+.personal-page .data-table.personal-grid-compact td[data-column="contrato"],
+.personal-page .data-table.personal-grid-compact td[data-column="estado"],
+.personal-page .data-table.personal-grid-compact td[data-column="situacion"] {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.personal-page .data-table.personal-grid-compact td[data-column="contrato"] .dg-pill,
+.personal-page .data-table.personal-grid-compact td[data-column="estado"] .dg-pill,
+.personal-page .data-table.personal-grid-compact td[data-column="situacion"] .dg-pill {
+    display: inline-flex;
+    width: 100%;
+    max-width: 100%;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
+    font-size: 13px;
+    line-height: 1.15;
+    font-weight: 500;
+    color: #0f172a;
+    word-break: break-word;
+}
+
+.personal-page .data-table.personal-grid-compact td[data-column="trabajador"] .personal-worker-name {
+    display: block;
+    line-height: 1.15;
+}
+
+.personal-page .data-table.personal-grid-compact td[data-column="ocupacion"] {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.personal-page .data-table.personal-grid-compact .is-col-hidden {
+    display: none;
+}
+
+.personal-view-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    margin-left: auto;
+    z-index: 20;
+}
+
+.personal-view-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    z-index: 21;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.personal-column-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(260px, calc(100vw - 32px));
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+    padding: 12px;
+    z-index: 40;
+    display: none;
+    max-height: 70vh;
+    overflow: auto;
+    pointer-events: auto;
+}
+
+.personal-column-popover.is-open {
+    display: block;
+}
+
+.personal-column-popover-title {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.personal-column-popover-help {
+    margin: 0 0 10px;
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.personal-column-list {
+    display: grid;
+    gap: 8px;
+}
+
+.personal-view-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.personal-column-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #334155;
+}
+
+.personal-column-option input {
+    margin: 0;
+}
+
+.dg-ocupacion-list.dg-ocupacion-grid {
+    display: grid;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.dg-ocup-chip-btn {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+}
+
+.dg-ocup-chip-btn:focus-visible .dg-pill,
+.dg-ocup-chip-btn:hover .dg-pill {
+    box-shadow: 0 0 0 2px rgba(15, 98, 254, 0.14);
+}
+
+.dg-pill-ocup-primary {
+    border-width: 2px;
+    font-weight: 800;
+}
+
+.dg-ocup-board {
+    display: grid;
+    gap: 5px;
+}
+
+.dg-ocup-flat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    min-width: max-content;
+}
+
+.dg-ocup-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+    max-width: 220px;
+    padding: 7px 10px;
+    border: 1px solid #dbe3ef;
+    background: #fff;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.dg-ocup-cell-mina {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.dg-ocup-cell-mina-proceso {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #b45309;
+}
+
+.dg-ocup-cell-mina-no-habilitado {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.dg-ocup-cell-oficina {
+    border-color: #6ee7b7;
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.dg-ocup-cell-taller {
+    border-color: #fcd34d;
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.dg-ocup-cell-empty {
+    border-style: dashed;
+    border-color: #dbe3ef;
+    background: #f8fafc;
+    color: #94a3b8;
+}
+
+.is-ocup-state-hidden .dg-ocup-cell,
+.is-ocup-state-hidden .dg-pill {
+    border-style: dashed !important;
+    border-color: #dbe3ef !important;
+    background: #f8fafc !important;
+    color: #94a3b8 !important;
+    box-shadow: none !important;
+}
+
+.dg-ocup-row {
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+}
+
+.dg-ocup-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-top: 5px;
+}
+
+.dg-ocup-values {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.dg-ocup-values::-webkit-scrollbar {
+    height: 6px;
+}
+
+.dg-ocup-values::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+}
+
+.dg-ocup-empty {
+    font-size: 11px;
+    color: #94a3b8;
+    padding-top: 4px;
+}
+
+.is-ocup-section-hidden {
+    display: none;
+}
+
+.is-ocup-row-hidden {
+    display: none;
+}
+
+.dg-ocup-filter-checks {
+    display: grid;
+    gap: 6px;
+    max-height: 180px;
+    overflow: auto;
+    margin-top: 8px;
+    padding-right: 2px;
+}
+
+.dg-ocup-filter-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #334155;
+}
+
+.dg-ocup-filter-option input {
+    margin: 0;
+}
+
+.personal-grid-shell.is-ocup-grouped .dg-ocup-flat {
+    display: none;
+}
+
+.personal-grid-shell:not(.is-ocup-grouped) .dg-ocup-board {
+    display: none;
+}
+
+.personal-grid-shell:not(.is-ocup-grouped) .data-table.personal-grid-compact {
+    table-layout: auto;
+    width: max-content;
+}
+
+.personal-grid-shell:not(.is-ocup-grouped) .data-table.personal-grid-compact th[data-column="ocupacion"],
+.personal-grid-shell:not(.is-ocup-grouped) .data-table.personal-grid-compact td[data-column="ocupacion"] {
+    width: auto;
+    min-width: 340px;
+}
+
 /* Personal index refinements */
 .personal-page .page-header {
     margin-bottom: 8px;
@@ -425,6 +972,15 @@
 
 .personal-page .card-body {
     padding-top: 14px;
+    overflow: visible;
+}
+
+.personal-page .card-header.personal-grid-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .personal-page .person-card {
@@ -479,6 +1035,11 @@
 
 .personal-page .personal-pagination-controls {
     margin-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .worker-detail-modal .detail-footer {
@@ -525,6 +1086,89 @@
         margin-top: 6px;
     }
 
+    .personal-page .data-table.personal-grid-compact {
+        min-width: 900px;
+    }
+
+    .personal-page .personal-grid-shell.is-expanded {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .personal-view-tools {
+        width: 100%;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .personal-view-toggle {
+        padding-left: 10px;
+        padding-right: 10px;
+        font-size: 12px;
+    }
+
+    .personal-column-popover {
+        right: auto;
+        left: 0;
+        width: min(280px, calc(100vw - 32px));
+    }
+
+    .personal-view-actions {
+        width: 100%;
+    }
+
+    .personal-page .data-table.personal-grid-compact th,
+    .personal-page .data-table.personal-grid-compact td {
+        padding: 7px 8px;
+        font-size: 11px;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
+        width: 180px;
+        min-width: 180px;
+        font-size: 12px;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="trabajador"] .personal-worker-meta {
+        font-size: 10px;
+    }
+
+    .personal-page .data-table.personal-grid-compact th[data-column="documento"],
+    .personal-page .data-table.personal-grid-compact td[data-column="documento"] { width: 118px; min-width: 118px; }
+
+    .personal-page .data-table.personal-grid-compact th[data-column="celular"],
+    .personal-page .data-table.personal-grid-compact td[data-column="celular"] { width: 110px; min-width: 110px; }
+
+    .personal-page .data-table.personal-grid-compact th[data-column="correo"],
+    .personal-page .data-table.personal-grid-compact td[data-column="correo"] { width: 150px; min-width: 150px; }
+
+    .personal-page .data-table.personal-grid-compact th[data-column="puesto"],
+    .personal-page .data-table.personal-grid-compact td[data-column="puesto"] { width: 150px; min-width: 150px; }
+
+    .personal-page .data-table.personal-grid-compact th[data-column="ocupacion"],
+    .personal-page .data-table.personal-grid-compact td[data-column="ocupacion"] { width: 220px; min-width: 220px; }
+
+    .dg-ocup-row {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 4px;
+    }
+
+    .dg-ocup-label {
+        font-size: 9px;
+    }
+
+    .dg-ocup-cell {
+        min-width: 96px;
+        max-width: 160px;
+        font-size: 10px;
+        padding: 6px 8px;
+    }
+
+    .personal-icon-btn {
+        width: 30px;
+        height: 30px;
+    }
+
     .worker-detail-modal .detail-footer {
         flex-direction: column;
     }
@@ -535,7 +1179,18 @@
     }
 }
 </style>
-<div class="module-page personal-page">
+<div class="module-page personal-page is-booting" id="personalPageRoot">
+    <div class="personal-boot-overlay" id="personalBootOverlay" aria-hidden="true">
+        <div class="personal-boot-card">
+            <div class="personal-boot-head">
+                <h2 class="personal-boot-title">Cargando</h2>
+                <span class="personal-boot-status" id="personalBootStatus">Iniciando...</span>
+            </div>
+            <div class="personal-boot-progress" aria-hidden="true">
+                <div class="personal-boot-progress-bar" id="personalBootProgressBar"></div>
+            </div>
+        </div>
+    </div>
     <!-- Page Header -->
     <div class="page-header">
         <div class="page-header-top">
@@ -753,9 +1408,37 @@
 
     <!-- Results -->
     <div class="card">
-        <div class="card-header">
+        <div class="card-header personal-grid-header">
             <span class="card-title">Listado de Personal</span>
-            <span class="card-badge" id="personalCount">{{ count($trabajadores ?? []) }} trabajadores</span>
+            <div class="personal-view-tools">
+                <button type="button" class="btn btn-outline personal-view-toggle" id="personalColumnsToggle" aria-expanded="false" aria-controls="personalColumnsPopover">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="16" rx="2"/>
+                        <path d="M9 4v16"/>
+                        <path d="M15 4v16"/>
+                    </svg>
+                    Vista
+                </button>
+                <div class="personal-column-popover" id="personalColumnsPopover">
+                    <p class="personal-column-popover-title">Mostrar columnas</p>
+                    <p class="personal-column-popover-help">La vista recuerda columnas, busqueda, pagina y posicion en esta maquina.</p>
+                    <div class="personal-column-list">
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="documento" checked> Documento</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="celular" checked> Celular</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="correo" checked> Correo</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="puesto" checked> Puesto</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="contrato" checked> Contrato</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="estado" checked> Estado</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="situacion" checked> Situacion</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="ocupacion" checked> Ocupacion</label>
+                        <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="acciones" checked> Acciones</label>
+                    </div>
+                    <div class="personal-view-actions">
+                        <button type="button" class="btn btn-outline btn-sm" id="personalExpandToggle">Extender pantalla</button>
+                    </div>
+                </div>
+                <span class="card-badge" id="personalCount">{{ count($trabajadores ?? []) }} trabajadores</span>
+            </div>
         </div>
         <div class="card-body">
             @if(empty($trabajadores))
@@ -781,11 +1464,15 @@
                     </div>
                 </div>
             @else
-                <div class="table-responsive">
-                    <table class="data-table" id="personalDataGrid">
+                <div class="personal-grid-shell" id="personalGridShell">
+                    <div class="personal-grid-scroll-top" id="personalTopScrollbar" aria-hidden="true">
+                        <div class="personal-grid-scroll-top-inner" id="personalTopScrollbarInner"></div>
+                    </div>
+                    <div class="table-responsive personal-grid-wrap" id="personalTableWrap">
+                        <table class="data-table personal-grid-compact" id="personalDataGrid">
                         <thead>
                             <tr>
-                                <th>
+                                <th data-column="trabajador">
                                     <div class="dg-head-cell">
                                         <span>Trabajador</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterNombre" title="Filtrar Trabajador">≡</button>
@@ -799,7 +1486,7 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="documento">
                                     <div class="dg-head-cell">
                                         <span>Documento</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterDni" title="Filtrar documento">≡</button>
@@ -813,7 +1500,9 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="celular">Celular</th>
+                                <th data-column="correo">Correo</th>
+                                <th data-column="puesto">
                                     <div class="dg-head-cell">
                                         <span>Puesto</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterPuesto" title="Filtrar Puesto">≡</button>
@@ -823,7 +1512,7 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="contrato">
                                     <div class="dg-head-cell">
                                         <span>Contrato</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterContrato" title="Filtrar Contrato">≡</button>
@@ -833,7 +1522,7 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="estado">
                                     <div class="dg-head-cell">
                                         <span>Estado</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterEstado" title="Filtrar Estado">≡</button>
@@ -848,7 +1537,7 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="situacion">
                                     <div class="dg-head-cell">
                                         <span>Situación</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterBienestar" title="Filtrar Bienestar">≡</button>
@@ -869,36 +1558,57 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>
+                                <th data-column="ocupacion">
                                     <div class="dg-head-cell">
                                         <span>Ocupación</span>
                                         <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterOcupacion" title="Filtrar Ocupación">≡</button>
                                         <div id="dgFilterOcupacion" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
-                                            <label class="dg-popover-label">Mina</label>
-                                            <select id="dgOcupMina" class="filter-compact-select">
-                                                <option value="">Todas</option>
+                                            <label class="personal-column-option" style="margin-bottom:8px;">
+                                                <input type="checkbox" id="dgOcupGrouped" checked>
+                                                Agrupar
+                                            </label>
+                                            <label class="dg-popover-label">Estado de minas visible</label>
+                                            <div class="dg-ocup-filter-checks" style="margin-top:0;">
+                                                <label class="dg-ocup-filter-option">
+                                                    <input type="checkbox" id="dgOcupShowHabilitado" checked>
+                                                    <span>Habilitados</span>
+                                                </label>
+                                                <label class="dg-ocup-filter-option">
+                                                    <input type="checkbox" id="dgOcupShowProceso" checked>
+                                                    <span>En proceso</span>
+                                                </label>
+                                            </div>
+                                            <label class="dg-popover-label">Minas visibles en filtro</label>
+                                            <div class="dg-ocup-filter-checks" id="dgOcupMineChecks">
                                                 @foreach(($catalogMinas ?? []) as $catalogMina)
-                                                    <option value="{{ $catalogMina }}">{{ $catalogMina }}</option>
+                                                    <label class="dg-ocup-filter-option">
+                                                        <input type="checkbox" class="js-ocup-mine-check" value="{{ $catalogMina }}" checked>
+                                                        <span>{{ $catalogMina }}</span>
+                                                    </label>
                                                 @endforeach
-                                            </select>
-                                            <label class="dg-popover-label" style="margin-top:8px;">Oficina</label>
-                                            <select id="dgOcupOficina" class="filter-compact-select">
-                                                <option value="">Todas</option>
+                                            </div>
+                                            <label class="dg-popover-label" style="margin-top:10px;">Oficinas visibles en filtro</label>
+                                            <div class="dg-ocup-filter-checks" id="dgOcupOfficeChecks">
                                                 @foreach(($catalogOficinas ?? []) as $catalogOficina)
-                                                    <option value="{{ $catalogOficina }}">{{ $catalogOficina }}</option>
+                                                    <label class="dg-ocup-filter-option">
+                                                        <input type="checkbox" class="js-ocup-office-check" value="{{ $catalogOficina }}">
+                                                        <span>{{ $catalogOficina }}</span>
+                                                    </label>
                                                 @endforeach
-                                            </select>
-                                            <label class="dg-popover-label" style="margin-top:8px;">Taller</label>
-                                            <select id="dgOcupTaller" class="filter-compact-select">
-                                                <option value="">Todos</option>
+                                            </div>
+                                            <label class="dg-popover-label" style="margin-top:10px;">Talleres visibles en filtro</label>
+                                            <div class="dg-ocup-filter-checks" id="dgOcupWorkshopChecks">
                                                 @foreach(($catalogTalleres ?? []) as $catalogTaller)
-                                                    <option value="{{ $catalogTaller }}">{{ $catalogTaller }}</option>
+                                                    <label class="dg-ocup-filter-option">
+                                                        <input type="checkbox" class="js-ocup-workshop-check" value="{{ $catalogTaller }}">
+                                                        <span>{{ $catalogTaller }}</span>
+                                                    </label>
                                                 @endforeach
-                                            </select>
+                                            </div>
                                         </div>
                                     </div>
                                 </th>
-                                <th>Acciones</th>
+                                <th data-column="acciones">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -953,8 +1663,7 @@
                                     $ocupOficinas = array_values(array_filter($ocupAll, fn ($item) => str_contains(mb_strtolower((string) $item), 'oficina')));
                                     $ocupTalleres = array_values(array_filter($ocupAll, fn ($item) => str_contains(mb_strtolower((string) $item), 'taller')));
 
-                                    $ocupVisible = array_slice($ocupAll, 0, 2);
-                                    $ocupExtraCount = max(count($ocupAll) - count($ocupVisible), 0);
+                                    $ocupPrincipal = $ocupAll[0] ?? null;
                                     $documentDisplay = trim((string) (($trabajador['tipo_documento'] ?? 'DNI') . ' ' . ($trabajador['numero_documento'] ?? $trabajador['dni'] ?? '')));
                                 @endphp
                                 <tr class="js-person-row {{ !$trabajador['activo'] ? 'inactive' : '' }}"
@@ -963,6 +1672,7 @@
                                     data-nombre="{{ $trabajador['nombre'] ?? '' }}"
                                     data-dni="{{ $trabajador['numero_documento'] ?? $trabajador['dni'] ?? '' }}"
                                     data-puesto="{{ $trabajador['puesto'] ?? '' }}"
+                                    data-correo="{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '') }}"
                                     data-telefono="{{ $trabajador['telefono'] ?? '' }}"
                                     data-telefono-1="{{ $trabajador['telefono_1'] ?? '' }}"
                                     data-telefono-2="{{ $trabajador['telefono_2'] ?? '' }}"
@@ -972,45 +1682,163 @@
                                     data-estado="{{ mb_strtolower($estadoText) }}"
                                     data-bienestar="{{ $situacionKey }}"
                                     data-ocup-minas="{{ implode(' ', $ocupMinas) }}"
+                                    data-ocup-minas-list="{{ implode('||', $ocupMinas) }}"
                                     data-ocup-oficina="{{ implode(' ', $ocupOficinas) }}"
                                     data-ocup-taller="{{ implode(' ', $ocupTalleres) }}"
                                     onclick="showWorkerDetail(this)">
-                                    <td>{{ $trabajador['nombre'] ?? 'Sin nombre' }}</td>
-                                    <td>{{ $documentDisplay !== '' ? $documentDisplay : '-' }}</td>
-                                    <td>{{ $trabajador['puesto'] ?? '-' }}</td>
-                                    <td><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
-                                    <td><span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span></td>
-                                    <td>
+                                    <td data-column="trabajador">
+                                        <span class="personal-worker-name">{{ $trabajador['nombre'] ?? 'Sin nombre' }}</span>
+                                    </td>
+                                    <td data-column="documento">{{ $documentDisplay !== '' ? $documentDisplay : '-' }}</td>
+                                    <td data-column="celular">{{ $trabajador['telefono'] ?? ($trabajador['telefono_1'] ?? '-') }}</td>
+                                    <td data-column="correo">{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '-') }}</td>
+                                    <td data-column="puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
+                                    <td data-column="contrato"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
+                                    <td data-column="estado"><span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span></td>
+                                    <td data-column="situacion">
                                         <span class="dg-pill {{ $situacionClass }}">{{ $situacionLabel }}</span>
                                     </td>
-                                    <td>
-                                        @if(count($ocupVisible) > 0)
-                                            <div class="dg-ocupacion-list">
-                                                @foreach($ocupVisible as $ocup)
+                                    <td data-column="ocupacion">
+                                        @if(count($ocupAll) > 0)
+                                            <div class="dg-ocup-flat">
+                                                @foreach(($catalogMinas ?? []) as $ocup)
                                                     @php
-                                                        $ocupLower = mb_strtolower((string) $ocup);
+                                                        $hasOcup = in_array($ocup, $ocupMinas, true);
                                                         $ocupState = (string) (($trabajador['minas_estado'][$ocup] ?? 'habilitado'));
-                                                        $ocupClass = str_contains($ocupLower, 'oficina')
-                                                            ? 'dg-pill-ocup-oficina'
-                                                            : (str_contains($ocupLower, 'taller')
-                                                                ? 'dg-pill-ocup-taller'
-                                                                : match ($ocupState) {
+                                                        $ocupClass = !$hasOcup
+                                                            ? 'dg-ocup-cell-empty'
+                                                            : match ($ocupState) {
+                                                                'proceso' => 'dg-ocup-cell-mina-proceso',
+                                                                'no_habilitado' => 'dg-ocup-cell-mina-no-habilitado',
+                                                                default => 'dg-ocup-cell-mina',
+                                                            };
+                                                        $ocupPrimaryClass = $ocup === $ocupPrincipal && $hasOcup ? ' dg-pill-ocup-primary' : '';
+                                                    @endphp
+                                                    <button
+                                                        type="button"
+                                                        class="dg-ocup-chip-btn"
+                                                        data-ocup-item-key="{{ $ocup }}"
+                                                        data-ocup-item-category="mina"
+                                                        data-ocup-item-state="{{ $hasOcup ? $ocupState : 'no_habilitado' }}"
+                                                        data-ocup-filter-type="ocupMina"
+                                                        data-ocup-filter-value="{{ $ocup }}"
+                                                        title="Filtrar por {{ $ocup }}"
+                                                        onclick="event.stopPropagation();">
+                                                        <span class="dg-ocup-cell {{ $ocupClass }}{{ $ocupPrimaryClass }}">{{ $ocup }}</span>
+                                                    </button>
+                                                @endforeach
+                                                @foreach(($catalogOficinas ?? []) as $ocup)
+                                                    @php
+                                                        $hasOcup = in_array($ocup, $ocupOficinas, true);
+                                                        $ocupClass = $hasOcup ? 'dg-ocup-cell-oficina' : 'dg-ocup-cell-empty';
+                                                    @endphp
+                                                    <button
+                                                        type="button"
+                                                        class="dg-ocup-chip-btn"
+                                                        data-ocup-item-key="{{ $ocup }}"
+                                                        data-ocup-item-category="oficina"
+                                                        data-ocup-filter-type="ocupOffice"
+                                                        data-ocup-filter-value="{{ $ocup }}"
+                                                        title="Filtrar por {{ $ocup }}"
+                                                        onclick="event.stopPropagation();">
+                                                        <span class="dg-ocup-cell {{ $ocupClass }}">{{ $ocup }}</span>
+                                                    </button>
+                                                @endforeach
+                                                @foreach(($catalogTalleres ?? []) as $ocup)
+                                                    @php
+                                                        $hasOcup = in_array($ocup, $ocupTalleres, true);
+                                                        $ocupClass = $hasOcup ? 'dg-ocup-cell-taller' : 'dg-ocup-cell-empty';
+                                                    @endphp
+                                                    <button
+                                                        type="button"
+                                                        class="dg-ocup-chip-btn"
+                                                        data-ocup-item-key="{{ $ocup }}"
+                                                        data-ocup-item-category="taller"
+                                                        data-ocup-filter-type="ocupWorkshop"
+                                                        data-ocup-filter-value="{{ $ocup }}"
+                                                        title="Filtrar por {{ $ocup }}"
+                                                        onclick="event.stopPropagation();">
+                                                        <span class="dg-ocup-cell {{ $ocupClass }}">{{ $ocup }}</span>
+                                                    </button>
+                                                @endforeach
+                                            </div>
+                                            <div class="dg-ocup-board">
+                                                <div class="dg-ocup-row" data-ocup-section="mina">
+                                                    <span class="dg-ocup-label">Minas</span>
+                                                    <div class="dg-ocup-values">
+                                                        @forelse($ocupMinas as $ocup)
+                                                            @php
+                                                                $ocupState = (string) (($trabajador['minas_estado'][$ocup] ?? 'habilitado'));
+                                                                $ocupClass = match ($ocupState) {
                                                                     'proceso' => 'dg-pill-ocup-mina-proceso',
                                                                     'no_habilitado' => 'dg-pill-ocup-mina-no-habilitado',
                                                                     default => 'dg-pill-ocup-mina',
-                                                                });
-                                                    @endphp
-                                                    <span class="dg-pill {{ $ocupClass }}">{{ $ocup }}</span>
-                                                @endforeach
-                                                @if($ocupExtraCount > 0)
-                                                    <span class="dg-pill dg-pill-ocup-more">+{{ $ocupExtraCount }}</span>
-                                                @endif
+                                                                };
+                                                                $ocupPrimaryClass = $ocup === $ocupPrincipal ? ' dg-pill-ocup-primary' : '';
+                                                            @endphp
+                                                            <button
+                                                                type="button"
+                                                                class="dg-ocup-chip-btn"
+                                                                data-ocup-item-key="{{ $ocup }}"
+                                                                data-ocup-item-category="mina"
+                                                                data-ocup-item-state="{{ $ocupState }}"
+                                                                data-ocup-filter-type="ocupMina"
+                                                                data-ocup-filter-value="{{ $ocup }}"
+                                                                title="Filtrar por {{ $ocup }}"
+                                                                onclick="event.stopPropagation();">
+                                                                <span class="dg-pill {{ $ocupClass }}{{ $ocupPrimaryClass }}">{{ $ocup }}</span>
+                                                            </button>
+                                                        @empty
+                                                            <span class="dg-ocup-empty">-</span>
+                                                        @endforelse
+                                                    </div>
+                                                </div>
+                                                <div class="dg-ocup-row" data-ocup-section="oficina">
+                                                    <span class="dg-ocup-label">Oficinas</span>
+                                                    <div class="dg-ocup-values">
+                                                        @forelse($ocupOficinas as $ocup)
+                                                            <button
+                                                                type="button"
+                                                                class="dg-ocup-chip-btn"
+                                                                data-ocup-item-key="{{ $ocup }}"
+                                                                data-ocup-item-category="oficina"
+                                                                data-ocup-filter-type="ocupOffice"
+                                                                data-ocup-filter-value="{{ $ocup }}"
+                                                                title="Filtrar por {{ $ocup }}"
+                                                                onclick="event.stopPropagation();">
+                                                                <span class="dg-pill dg-pill-ocup-oficina">{{ $ocup }}</span>
+                                                            </button>
+                                                        @empty
+                                                            <span class="dg-ocup-empty">-</span>
+                                                        @endforelse
+                                                    </div>
+                                                </div>
+                                                <div class="dg-ocup-row" data-ocup-section="taller">
+                                                    <span class="dg-ocup-label">Talleres</span>
+                                                    <div class="dg-ocup-values">
+                                                        @forelse($ocupTalleres as $ocup)
+                                                            <button
+                                                                type="button"
+                                                                class="dg-ocup-chip-btn"
+                                                                data-ocup-item-key="{{ $ocup }}"
+                                                                data-ocup-item-category="taller"
+                                                                data-ocup-filter-type="ocupWorkshop"
+                                                                data-ocup-filter-value="{{ $ocup }}"
+                                                                title="Filtrar por {{ $ocup }}"
+                                                                onclick="event.stopPropagation();">
+                                                                <span class="dg-pill dg-pill-ocup-taller">{{ $ocup }}</span>
+                                                            </button>
+                                                        @empty
+                                                            <span class="dg-ocup-empty">-</span>
+                                                        @endforelse
+                                                    </div>
+                                                </div>
                                             </div>
                                         @else
                                             <span class="dg-pill dg-pill-neutral">-</span>
                                         @endif
                                     </td>
-                                    <td onclick="event.stopPropagation()">
+                                    <td data-column="acciones" onclick="event.stopPropagation()">
                                         <div class="personal-action-buttons">
                                             <a
                                                 href="{{ route('personal.edit', $trabajador['id'] ?? '') }}"
@@ -1099,17 +1927,14 @@
                                 </tr>
                             @endforeach
                         </tbody>
-                    </table>
+                        </table>
+                    </div>
                 </div>
 
                 <div class="personal-pagination-controls">
                     <div class="personal-page-size">
                         Mostrar
                         <select id="personalPageSize" class="personal-page-size-select">
-                            <option value="9" selected>9</option>
-                            <option value="12">12</option>
-                            <option value="18">18</option>
-                            <option value="24">24</option>
                         </select>
                         trabajadores
                     </div>
@@ -1311,7 +2136,16 @@ document.addEventListener('search:select', function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', function () {
+    const pageRoot = document.getElementById('personalPageRoot');
+    const bootOverlay = document.getElementById('personalBootOverlay');
+    const bootProgressBar = document.getElementById('personalBootProgressBar');
+    const bootStatus = document.getElementById('personalBootStatus');
     const rows = Array.from(document.querySelectorAll('.js-person-row'));
+    const gridShell = document.getElementById('personalGridShell');
+    const topScrollbar = document.getElementById('personalTopScrollbar');
+    const topScrollbarInner = document.getElementById('personalTopScrollbarInner');
+    const tableWrap = document.getElementById('personalTableWrap');
+    const dataGrid = document.getElementById('personalDataGrid');
     const pageSizeSelect = document.getElementById('personalPageSize');
     const paginationInfo = document.getElementById('personalPaginationInfo');
     const paginationWrap = document.getElementById('personalPagination');
@@ -1323,12 +2157,210 @@ document.addEventListener('DOMContentLoaded', function () {
     const contratoFilter = document.getElementById('dgContrato');
     const estadoFilter = document.getElementById('dgEstado');
     const bienestarFilter = document.getElementById('dgBienestar');
-    const ocupMinaFilter = document.getElementById('dgOcupMina');
-    const ocupOficinaFilter = document.getElementById('dgOcupOficina');
-    const ocupTallerFilter = document.getElementById('dgOcupTaller');
+    const ocupGroupedToggle = document.getElementById('dgOcupGrouped');
+    const ocupShowHabilitadoToggle = document.getElementById('dgOcupShowHabilitado');
+    const ocupShowProcesoToggle = document.getElementById('dgOcupShowProceso');
+    const ocupMineCheckboxes = Array.from(document.querySelectorAll('.js-ocup-mine-check'));
+    const ocupOfficeCheckboxes = Array.from(document.querySelectorAll('.js-ocup-office-check'));
+    const ocupWorkshopCheckboxes = Array.from(document.querySelectorAll('.js-ocup-workshop-check'));
+    const columnsToggle = document.getElementById('personalColumnsToggle');
+    const columnsPopover = document.getElementById('personalColumnsPopover');
+    const expandToggle = document.getElementById('personalExpandToggle');
+    const columnCheckboxes = Array.from(document.querySelectorAll('.js-col-toggle'));
+    const viewStateKey = 'proserge.personal.index.viewState.v1';
+    const defaultVisibleColumns = ['documento', 'celular', 'correo', 'puesto', 'contrato', 'estado', 'situacion', 'ocupacion', 'acciones'];
+    let syncingScroll = false;
 
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
+
+    const setBootProgress = function (value, message) {
+        if (bootProgressBar) {
+            bootProgressBar.style.width = Math.max(0, Math.min(100, value)) + '%';
+        }
+        if (bootStatus && message) {
+            bootStatus.textContent = message;
+        }
+    };
+
+    const finishBootLoading = function () {
+        setBootProgress(100, 'Vista lista');
+        window.requestAnimationFrame(function () {
+            setTimeout(function () {
+                if (pageRoot) {
+                    pageRoot.classList.remove('is-booting');
+                }
+                if (bootOverlay) {
+                    bootOverlay.setAttribute('aria-hidden', 'true');
+                }
+            }, 80);
+        });
+    };
+
+    const readViewState = function () {
+        try {
+            return JSON.parse(window.localStorage.getItem(viewStateKey) || '{}');
+        } catch (error) {
+            return {};
+        }
+    };
+
+    const saveViewState = function (patch) {
+        const nextState = Object.assign({}, readViewState(), patch || {});
+        try {
+            window.localStorage.setItem(viewStateKey, JSON.stringify(nextState));
+        } catch (error) {
+            // noop
+        }
+    };
+
+    const collectVisibleColumns = function () {
+        return columnCheckboxes
+            .filter(function (input) { return input.checked; })
+            .map(function (input) { return input.value; });
+    };
+
+    const applyVisibleColumns = function (visibleColumns) {
+        const visible = Array.isArray(visibleColumns) && visibleColumns.length > 0
+            ? visibleColumns
+            : defaultVisibleColumns;
+
+        columnCheckboxes.forEach(function (input) {
+            input.checked = visible.indexOf(input.value) !== -1;
+        });
+
+        document.querySelectorAll('[data-column]').forEach(function (cell) {
+            const key = cell.getAttribute('data-column');
+            if (!key || key === 'trabajador') {
+                cell.classList.remove('is-col-hidden');
+                return;
+            }
+
+            cell.classList.toggle('is-col-hidden', visible.indexOf(key) === -1);
+        });
+    };
+
+    const collectSelectedOcupMinas = function () {
+        return ocupMineCheckboxes
+            .filter(function (input) { return input.checked; })
+            .map(function (input) { return input.value; });
+    };
+
+    const collectSelectedOcupOffices = function () {
+        return ocupOfficeCheckboxes
+            .filter(function (input) { return input.checked; })
+            .map(function (input) { return input.value; });
+    };
+
+    const collectSelectedOcupWorkshops = function () {
+        return ocupWorkshopCheckboxes
+            .filter(function (input) { return input.checked; })
+            .map(function (input) { return input.value; });
+    };
+
+    const applyOccupationVisibility = function () {
+        const visibleMinas = new Set(collectSelectedOcupMinas());
+        const visibleOffices = new Set(collectSelectedOcupOffices());
+        const visibleWorkshops = new Set(collectSelectedOcupWorkshops());
+        const showHabilitado = !!ocupShowHabilitadoToggle?.checked;
+        const showProceso = !!ocupShowProcesoToggle?.checked;
+
+        document.querySelectorAll('.dg-ocup-chip-btn[data-ocup-item-key]').forEach(function (button) {
+            const key = button.dataset.ocupItemKey || '';
+            const category = button.dataset.ocupItemCategory || '';
+            const state = button.dataset.ocupItemState || '';
+            let visible = true;
+            let matchesState = true;
+
+            if (category === 'mina') {
+                visible = visibleMinas.has(key);
+                if (visible) {
+                    if (showHabilitado && showProceso) {
+                        matchesState = true;
+                    } else if (showHabilitado && !showProceso) {
+                        matchesState = state === 'habilitado';
+                    } else if (!showHabilitado && showProceso) {
+                        matchesState = state === 'proceso';
+                    } else {
+                        matchesState = state === 'no_habilitado';
+                    }
+                }
+            } else if (category === 'oficina') {
+                visible = visibleOffices.has(key);
+            } else if (category === 'taller') {
+                visible = visibleWorkshops.has(key);
+            }
+
+            button.style.display = visible ? '' : 'none';
+            button.classList.toggle('is-ocup-state-hidden', visible && !matchesState);
+        });
+
+        document.querySelectorAll('.dg-ocup-row[data-ocup-section]').forEach(function (row) {
+            const visibleChildren = Array.from(row.querySelectorAll('.dg-ocup-chip-btn')).filter(function (button) {
+                return button.style.display !== 'none';
+            });
+            row.classList.toggle('is-ocup-row-hidden', visibleChildren.length === 0);
+        });
+    };
+
+    const applyGroupedOccupation = function (grouped) {
+        if (!gridShell || !ocupGroupedToggle) return;
+        gridShell.classList.toggle('is-ocup-grouped', !!grouped);
+        ocupGroupedToggle.checked = !!grouped;
+    };
+
+    const applyExpandedState = function (expanded) {
+        if (!gridShell || !expandToggle) return;
+        gridShell.classList.toggle('is-expanded', !!expanded);
+        expandToggle.textContent = expanded ? 'Ajustar pantalla' : 'Extender pantalla';
+    };
+
+    const syncExpandedLayout = function () {
+        if (!gridShell) return;
+        gridShell.style.removeProperty('--personal-grid-expanded-width');
+    };
+
+    const buildPageSizeOptions = function () {
+        if (!pageSizeSelect) return;
+        const total = rows.length;
+        const base = [10, 50, 100, 200, 300, total];
+        const values = Array.from(new Set(base.filter(function (value) {
+            return Number.isFinite(value) && value > 0 && value <= total;
+        }))).sort(function (a, b) {
+            return a - b;
+        });
+
+        if (values.length === 0) {
+            values.push(total || 1);
+        }
+
+        pageSizeSelect.innerHTML = values.map(function (value) {
+            return '<option value="' + value + '">' + value + '</option>';
+        }).join('');
+    };
+
+    const syncTopScrollbar = function () {
+        if (!topScrollbar || !topScrollbarInner || !tableWrap || !dataGrid) return;
+        const needsHorizontalScroll = dataGrid.scrollWidth > tableWrap.clientWidth + 2;
+        topScrollbar.classList.toggle('is-visible', needsHorizontalScroll);
+        topScrollbar.style.width = tableWrap.clientWidth + 'px';
+        topScrollbarInner.style.width = dataGrid.scrollWidth + 'px';
+    };
+
+    const syncHorizontalScrollPosition = function (preferredScrollLeft) {
+        if (!tableWrap || !dataGrid) return;
+
+        const maxScrollLeft = Math.max(0, dataGrid.scrollWidth - tableWrap.clientWidth);
+        const requested = Number.isFinite(preferredScrollLeft)
+            ? preferredScrollLeft
+            : tableWrap.scrollLeft;
+        const nextScrollLeft = Math.max(0, Math.min(requested, maxScrollLeft));
+
+        tableWrap.scrollLeft = nextScrollLeft;
+        if (topScrollbar) {
+            topScrollbar.scrollLeft = nextScrollLeft;
+        }
+    };
 
     const closeAllPopovers = function () {
         filterPopovers.forEach(function (panel) {
@@ -1373,6 +2405,12 @@ document.addEventListener('DOMContentLoaded', function () {
         positionPopover(active, active._triggerEl);
     };
 
+    const closeColumnsPopover = function () {
+        if (!columnsPopover || !columnsToggle) return;
+        columnsPopover.classList.remove('is-open');
+        columnsToggle.setAttribute('aria-expanded', 'false');
+    };
+
     const fitPopoverWithinViewport = function (panel) {
         const triggerEl = panel && panel._triggerEl;
         if (!panel || !triggerEl) return;
@@ -1411,10 +2449,39 @@ document.addEventListener('DOMContentLoaded', function () {
     document.addEventListener('click', function (event) {
         const inPopover = event.target.closest('.dg-filter-popover');
         const inTrigger = event.target.closest('.js-dg-filter-trigger');
+        const inColumns = event.target.closest('#personalColumnsPopover');
+        const inColumnsTrigger = event.target.closest('#personalColumnsToggle');
         if (!inPopover && !inTrigger) {
             closeAllPopovers();
         }
+        if (!inColumns && !inColumnsTrigger) {
+            closeColumnsPopover();
+        }
     });
+
+    if (columnsToggle && columnsPopover) {
+        const toggleColumnsPopover = function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const willOpen = !columnsPopover.classList.contains('is-open');
+            closeColumnsPopover();
+            if (willOpen) {
+                columnsPopover.classList.add('is-open');
+                columnsToggle.setAttribute('aria-expanded', 'true');
+            }
+        };
+
+        columnsToggle.addEventListener('click', toggleColumnsPopover);
+        columnsToggle.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                toggleColumnsPopover(event);
+            }
+        });
+
+        columnsPopover.addEventListener('click', function (event) {
+            event.stopPropagation();
+        });
+    }
 
     const normalizeText = function(value) {
         return String(value || '')
@@ -1444,6 +2511,61 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let currentPage = 1;
     let pageSize = Number(pageSizeSelect?.value || 9);
+    const savedState = readViewState();
+    setBootProgress(18, 'Cargando preferencias...');
+
+    buildPageSizeOptions();
+
+    if (searchInput && typeof savedState.search === 'string') {
+        searchInput.value = savedState.search;
+    }
+
+    if (pageSizeSelect) {
+        const optionValues = Array.from(pageSizeSelect.options).map(function (option) {
+            return String(option.value);
+        });
+        const preferredPageSize = String(savedState.pageSize || '');
+        if (preferredPageSize && optionValues.indexOf(preferredPageSize) !== -1) {
+            pageSizeSelect.value = preferredPageSize;
+        }
+        pageSize = Number(pageSizeSelect.value || optionValues[0] || 10);
+    }
+
+    if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
+    if (sortDni && typeof savedState.sortDni === 'string') sortDni.value = savedState.sortDni;
+    if (puestoFilter && typeof savedState.puesto === 'string') puestoFilter.value = savedState.puesto;
+    if (contratoFilter && typeof savedState.contrato === 'string') contratoFilter.value = savedState.contrato;
+    if (estadoFilter && typeof savedState.estado === 'string') estadoFilter.value = savedState.estado;
+    if (bienestarFilter && typeof savedState.bienestar === 'string') bienestarFilter.value = savedState.bienestar;
+
+    setBootProgress(42, 'Aplicando columnas y filtros...');
+    applyVisibleColumns(savedState.visibleColumns || defaultVisibleColumns);
+    applyExpandedState(!!savedState.expanded);
+    applyGroupedOccupation(savedState.occupationGrouped !== false);
+    if (Array.isArray(savedState.selectedOcupMinas)) {
+        ocupMineCheckboxes.forEach(function (input) {
+            input.checked = savedState.selectedOcupMinas.indexOf(input.value) !== -1;
+        });
+    }
+    if (Array.isArray(savedState.selectedOcupOffices)) {
+        ocupOfficeCheckboxes.forEach(function (input) {
+            input.checked = savedState.selectedOcupOffices.indexOf(input.value) !== -1;
+        });
+    }
+    if (Array.isArray(savedState.selectedOcupWorkshops)) {
+        ocupWorkshopCheckboxes.forEach(function (input) {
+            input.checked = savedState.selectedOcupWorkshops.indexOf(input.value) !== -1;
+        });
+    }
+    if (ocupShowHabilitadoToggle) {
+        ocupShowHabilitadoToggle.checked = savedState.showOcupHabilitado !== false;
+    }
+    if (ocupShowProcesoToggle) {
+        ocupShowProcesoToggle.checked = savedState.showOcupProceso !== false;
+    }
+    applyOccupationVisibility();
+    setBootProgress(64, 'Preparando tabla...');
+    currentPage = Number(savedState.currentPage || 1);
 
     const applyFiltersAndSort = function() {
         const search = normalizeText(searchInput?.value || '');
@@ -1452,9 +2574,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const contrato = normalizeText(contratoFilter?.value || '');
         const estado = normalizeText(estadoFilter?.value || '');
         const bienestar = normalizeText(bienestarFilter?.value || '');
-        const ocupMina = normalizeText(ocupMinaFilter?.value || '');
-        const ocupOficina = normalizeText(ocupOficinaFilter?.value || '');
-        const ocupTaller = normalizeText(ocupTallerFilter?.value || '');
 
         let filtered = rows.filter(function(row) {
             const searchable = normalizeText([
@@ -1470,9 +2589,6 @@ document.addEventListener('DOMContentLoaded', function () {
             if (contrato && normalizeText(row.dataset.contrato).indexOf(contrato) === -1) return false;
             if (estado && normalizeText(row.dataset.estado) !== estado) return false;
             if (bienestar && normalizeText(row.dataset.bienestar) !== bienestar) return false;
-            if (ocupMina && normalizeText(row.dataset.occupMinas || row.dataset.ocupMinas).indexOf(ocupMina) === -1) return false;
-            if (ocupOficina && normalizeText(row.dataset.ocupOficina).indexOf(ocupOficina) === -1) return false;
-            if (ocupTaller && normalizeText(row.dataset.ocupTaller).indexOf(ocupTaller) === -1) return false;
             return true;
         });
 
@@ -1568,6 +2684,27 @@ document.addEventListener('DOMContentLoaded', function () {
             countBadge.textContent = total + ' trabajadores';
         }
         renderPagination(totalPages);
+        syncTopScrollbar();
+
+        saveViewState({
+            search: searchInput?.value || '',
+            currentPage: currentPage,
+            pageSize: pageSize,
+            sortNombre: sortNombre?.value || '',
+            sortDni: sortDni?.value || '',
+            puesto: puestoFilter?.value || '',
+            contrato: contratoFilter?.value || '',
+            estado: estadoFilter?.value || '',
+            bienestar: bienestarFilter?.value || '',
+            visibleColumns: collectVisibleColumns(),
+            selectedOcupMinas: collectSelectedOcupMinas(),
+            selectedOcupOffices: collectSelectedOcupOffices(),
+            selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+            showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
+            showOcupProceso: !!ocupShowProcesoToggle?.checked,
+            occupationGrouped: !!ocupGroupedToggle?.checked,
+            expanded: !!gridShell?.classList.contains('is-expanded'),
+        });
     };
 
     const simpleSearchInput = document.getElementById('personal-search');
@@ -1595,15 +2732,106 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!el) return;
         el.addEventListener('change', function () { renderGrid(true); });
     });
-    [ocupMinaFilter, ocupOficinaFilter, ocupTallerFilter].forEach(function(el) {
-        if (!el) return;
-        el.addEventListener('change', function () { renderGrid(true); });
-    });
-
     if (pageSizeSelect) {
         pageSizeSelect.addEventListener('change', function () {
             pageSize = Number(pageSizeSelect.value || 9);
             renderGrid(true);
+        });
+    }
+
+    columnCheckboxes.forEach(function (input) {
+        input.addEventListener('change', function () {
+            let visibleColumns = collectVisibleColumns();
+            if (visibleColumns.length === 0) {
+                input.checked = true;
+                visibleColumns = collectVisibleColumns();
+            }
+
+            applyVisibleColumns(visibleColumns);
+            saveViewState({
+                visibleColumns: visibleColumns,
+            });
+            syncTopScrollbar();
+        });
+    });
+
+    ocupMineCheckboxes.forEach(function (input) {
+        input.addEventListener('change', function () {
+            applyOccupationVisibility();
+            saveViewState({
+                selectedOcupMinas: collectSelectedOcupMinas(),
+                selectedOcupOffices: collectSelectedOcupOffices(),
+                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+            });
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
+    });
+
+    ocupOfficeCheckboxes.forEach(function (input) {
+        input.addEventListener('change', function () {
+            applyOccupationVisibility();
+            saveViewState({
+                selectedOcupMinas: collectSelectedOcupMinas(),
+                selectedOcupOffices: collectSelectedOcupOffices(),
+                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+            });
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
+    });
+
+    ocupWorkshopCheckboxes.forEach(function (input) {
+        input.addEventListener('change', function () {
+            applyOccupationVisibility();
+            saveViewState({
+                selectedOcupMinas: collectSelectedOcupMinas(),
+                selectedOcupOffices: collectSelectedOcupOffices(),
+                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
+                showOcupProceso: !!ocupShowProcesoToggle?.checked,
+            });
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
+    });
+
+    [ocupShowHabilitadoToggle, ocupShowProcesoToggle].forEach(function (input) {
+        if (!input) return;
+        input.addEventListener('change', function () {
+            applyOccupationVisibility();
+            saveViewState({
+                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
+                showOcupProceso: !!ocupShowProcesoToggle?.checked,
+            });
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
+    });
+
+    if (ocupGroupedToggle) {
+        ocupGroupedToggle.addEventListener('change', function () {
+            applyGroupedOccupation(ocupGroupedToggle.checked);
+            applyOccupationVisibility();
+            saveViewState({
+                occupationGrouped: !!ocupGroupedToggle.checked,
+            });
+            window.requestAnimationFrame(function () {
+                syncTopScrollbar();
+                renderGrid(false);
+            });
+        });
+    }
+
+    if (expandToggle) {
+        expandToggle.addEventListener('click', function () {
+            const nextExpanded = !gridShell?.classList.contains('is-expanded');
+            const currentScrollLeft = tableWrap ? tableWrap.scrollLeft : 0;
+            applyExpandedState(nextExpanded);
+            saveViewState({
+                expanded: nextExpanded,
+            });
+            window.requestAnimationFrame(function () {
+                syncExpandedLayout();
+                syncTopScrollbar();
+                syncHorizontalScrollPosition(currentScrollLeft);
+            });
         });
     }
 
@@ -1615,6 +2843,81 @@ document.addEventListener('DOMContentLoaded', function () {
             renderGrid(false);
         });
     }
+
+    if (tableWrap) {
+        tableWrap.addEventListener('scroll', function () {
+            if (topScrollbar && !syncingScroll) {
+                syncingScroll = true;
+                topScrollbar.scrollLeft = tableWrap.scrollLeft;
+                syncingScroll = false;
+            }
+            saveViewState({
+                tableScrollLeft: tableWrap.scrollLeft,
+                tableScrollTop: tableWrap.scrollTop,
+            });
+        }, { passive: true });
+    }
+
+    if (topScrollbar) {
+        topScrollbar.addEventListener('scroll', function () {
+            if (tableWrap && !syncingScroll) {
+                syncingScroll = true;
+                tableWrap.scrollLeft = topScrollbar.scrollLeft;
+                syncingScroll = false;
+            }
+        }, { passive: true });
+    }
+
+    window.addEventListener('scroll', function () {
+        saveViewState({
+            pageScrollY: window.scrollY,
+        });
+    }, { passive: true });
+
+    window.addEventListener('resize', function () {
+        syncExpandedLayout();
+        syncTopScrollbar();
+        syncHorizontalScrollPosition();
+    });
+
+    document.querySelectorAll('.dg-ocup-chip-btn').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const filterType = button.dataset.ocupFilterType;
+            const value = button.dataset.ocupFilterValue || '';
+            if (filterType === 'ocupMina') {
+                ocupMineCheckboxes.forEach(function (input) {
+                    input.checked = input.value === value;
+                });
+                ocupOfficeCheckboxes.forEach(function (input) { input.checked = false; });
+                ocupWorkshopCheckboxes.forEach(function (input) { input.checked = false; });
+            } else if (filterType === 'ocupOffice') {
+                ocupOfficeCheckboxes.forEach(function (input) {
+                    input.checked = input.value === value;
+                });
+                ocupMineCheckboxes.forEach(function (input) { input.checked = false; });
+                ocupWorkshopCheckboxes.forEach(function (input) { input.checked = false; });
+            } else if (filterType === 'ocupWorkshop') {
+                ocupWorkshopCheckboxes.forEach(function (input) {
+                    input.checked = input.value === value;
+                });
+                ocupMineCheckboxes.forEach(function (input) { input.checked = false; });
+                ocupOfficeCheckboxes.forEach(function (input) { input.checked = false; });
+            } else {
+                return;
+            }
+            applyOccupationVisibility();
+            saveViewState({
+                selectedOcupMinas: collectSelectedOcupMinas(),
+                selectedOcupOffices: collectSelectedOcupOffices(),
+                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
+                showOcupProceso: !!ocupShowProcesoToggle?.checked,
+            });
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
+    });
     
     // Dropdown Acciones - mostrar/ocultar sin mover contenido
     const accionesBtn = document.getElementById('accionesBtn');
@@ -1648,7 +2951,22 @@ document.addEventListener('DOMContentLoaded', function () {
     if (filterToggle) filterToggle.style.display = 'none';
     if (filterPanel) filterPanel.style.display = 'none';
 
-    renderGrid(true);
+    setBootProgress(82, 'Mostrando trabajadores...');
+    renderGrid(false);
+
+    window.requestAnimationFrame(function () {
+        setBootProgress(94, 'Ajustando vista final...');
+        syncExpandedLayout();
+        syncTopScrollbar();
+        if (tableWrap) {
+            tableWrap.scrollTop = Number(savedState.tableScrollTop || 0);
+        }
+        syncHorizontalScrollPosition(Number(savedState.tableScrollLeft || 0));
+        if (savedState.pageScrollY) {
+            window.scrollTo({ top: Number(savedState.pageScrollY || 0), behavior: 'auto' });
+        }
+        finishBootLoading();
+    });
 });
 </script>
 @endpush
