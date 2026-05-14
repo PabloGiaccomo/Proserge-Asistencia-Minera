@@ -3,8 +3,12 @@
 @section('title', 'Personal temporal y links - Proserge')
 
 @section('content')
-<div class="module-page ficha-workspace">
+<div class="module-page ficha-workspace is-booting" id="temporalesPageRoot">
     <style>
+        .ficha-workspace {
+            position: relative;
+        }
+
         .temporal-action-buttons {
             display: flex;
             gap: 6px;
@@ -203,7 +207,142 @@
             font-weight: 700;
             padding: 0 2px;
         }
+
+        .temporales-toast-stack {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1400;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .temporales-toast {
+            min-width: 260px;
+            max-width: min(360px, calc(100vw - 32px));
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid #99f6e4;
+            background: #ecfeff;
+            color: #115e59;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.35;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            pointer-events: auto;
+        }
+
+        .temporales-toast.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .temporales-toast a {
+            color: inherit;
+            font-weight: 700;
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
+        .temporales-boot-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1390;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 88px 16px 16px;
+            background: rgba(248, 250, 252, 0.92);
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s ease;
+        }
+
+        .ficha-workspace.is-booting .temporales-boot-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .temporales-boot-card {
+            width: min(420px, 100%);
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+            padding: 18px 18px 16px;
+        }
+
+        .temporales-boot-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .temporales-boot-title {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .temporales-boot-status {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0d9488;
+        }
+
+        .temporales-boot-progress {
+            position: relative;
+            height: 10px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            overflow: hidden;
+        }
+
+        .temporales-boot-progress-bar {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #19d3c5 0%, #0ea5e9 100%);
+            transition: width 0.16s ease;
+        }
+
+        @media (max-width: 640px) {
+            .temporales-toast-stack {
+                top: 14px;
+                right: 14px;
+                left: 14px;
+            }
+
+            .temporales-toast {
+                max-width: 100%;
+                min-width: 0;
+            }
+
+            .temporales-boot-overlay {
+                padding-top: 72px;
+            }
+        }
     </style>
+    <div class="temporales-boot-overlay" id="temporalesBootOverlay" aria-hidden="true">
+        <div class="temporales-boot-card">
+            <div class="temporales-boot-head">
+                <h2 class="temporales-boot-title">Cargando</h2>
+                <span class="temporales-boot-status" id="temporalesBootStatus">Iniciando...</span>
+            </div>
+            <div class="temporales-boot-progress" aria-hidden="true">
+                <div class="temporales-boot-progress-bar" id="temporalesBootProgressBar"></div>
+            </div>
+        </div>
+    </div>
     <div class="page-header">
         <div class="page-header-top">
             <div>
@@ -217,19 +356,8 @@
         </div>
     </div>
 
-    @if(session('success'))
-        <div class="ficha-alert">{{ session('success') }}</div>
-    @endif
-
     @if(session('error'))
         <div class="ficha-alert ficha-alert-danger">{{ session('error') }}</div>
-    @endif
-
-    @if(session('regularization_link'))
-        <div class="ficha-alert">
-            Link temporal habilitado:
-            <a href="{{ session('regularization_link') }}" target="_blank" rel="noopener">{{ session('regularization_link') }}</a>
-        </div>
     @endif
 
     @if(count(session('warning_lines', [])) > 0)
@@ -239,6 +367,8 @@
             @endforeach
         </div>
     @endif
+
+    <div class="temporales-toast-stack" id="temporalesToastStack" aria-live="polite" aria-atomic="true"></div>
 
     <div class="ficha-card">
         <div class="ficha-card-header">
@@ -382,7 +512,7 @@
                                         @endif
                                         @allowed('personal', 'eliminar')
                                             @if($row['url'] && $link && !$ficha->submitted_at)
-                                                <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">
+                                                <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form" onsubmit="return confirm('Se ampliara el link temporal por 1 dia mas.');">
                                                     @csrf
                                                     <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 1 día" aria-label="Ampliar 1 día">
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -393,7 +523,7 @@
                                                 </form>
                                             @endif
                                             @if(!empty($row['can_regularize']))
-                                                <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" onsubmit="return confirm('Se habilitara un link temporal para regularizar la ficha del trabajador.');">
+                                                <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" class="js-temporal-action-form">
                                                     @csrf
                                                     <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Habilitar link temporal" aria-label="Habilitar link temporal">
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -406,7 +536,7 @@
                                                     </button>
                                                 </form>
                                             @endif
-                                            <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" onsubmit="return confirm('Se eliminara este registro de Temporales y links, pero el trabajador seguira en Personal.');">
+                                            <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" class="js-temporal-action-form" onsubmit="return confirm('Se eliminara este registro de Temporales y links, pero el trabajador seguira en Personal.');">
                                                 @csrf
                                                 <button type="submit" class="btn btn-danger btn-xs temporal-icon-btn" title="Quitar de Temporales y links" aria-label="Quitar de Temporales y links">
                                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -457,7 +587,11 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const rows = Array.from(document.querySelectorAll('.js-person-card'));
+    const pageRoot = document.getElementById('temporalesPageRoot');
+    const bootOverlay = document.getElementById('temporalesBootOverlay');
+    const bootProgressBar = document.getElementById('temporalesBootProgressBar');
+    const bootStatus = document.getElementById('temporalesBootStatus');
+    const toastStack = document.getElementById('temporalesToastStack');
     const searchInput = document.getElementById('temporales-search');
     const searchClear = searchInput?.closest('.simple-search-wrapper')?.querySelector('[data-simple-search-clear]');
     const paginationMeta = document.getElementById('temporalesPaginationMeta');
@@ -470,6 +604,60 @@ document.addEventListener('DOMContentLoaded', function () {
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
     const pageSize = 10;
     let currentPage = 1;
+
+    function setBootProgress(value, message) {
+        if (bootProgressBar) {
+            bootProgressBar.style.width = Math.max(0, Math.min(100, value)) + '%';
+        }
+        if (bootStatus && message) {
+            bootStatus.textContent = message;
+        }
+    }
+
+    function finishBootLoading() {
+        setBootProgress(100, 'Vista lista');
+        window.requestAnimationFrame(function () {
+            setTimeout(function () {
+                if (pageRoot) {
+                    pageRoot.classList.remove('is-booting');
+                }
+                if (bootOverlay) {
+                    bootOverlay.setAttribute('aria-hidden', 'true');
+                }
+            }, 80);
+        });
+    }
+
+    function getRows() {
+        return Array.from(document.querySelectorAll('.js-person-card'));
+    }
+
+    function showToast(message, options) {
+        if (!toastStack || !message) {
+            return;
+        }
+
+        const settings = options || {};
+        const toast = document.createElement('div');
+        toast.className = 'temporales-toast';
+        if (settings.allowHtml) {
+            toast.innerHTML = message;
+        } else {
+            toast.textContent = message;
+        }
+        toastStack.appendChild(toast);
+
+        window.requestAnimationFrame(function () {
+            toast.classList.add('is-visible');
+        });
+
+        window.setTimeout(function () {
+            toast.classList.remove('is-visible');
+            window.setTimeout(function () {
+                toast.remove();
+            }, 220);
+        }, settings.duration || 2600);
+    }
 
     function closeAllPopovers() {
         filterPopovers.forEach(function (popover) {
@@ -520,6 +708,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    setBootProgress(18, 'Cargando registros...');
+
     if (estadoSelect) {
         estadoSelect.addEventListener('change', function () {
             const hasValue = (estadoSelect.value || '').trim().length > 0;
@@ -546,7 +736,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const searchTokens = search.split(' ').filter(Boolean);
         const estado = normalizeText(estadoSelect?.value || '');
 
-        return rows.filter(function (row) {
+        return getRows().filter(function (row) {
             const searchable = normalizeText([
                 row.dataset.nombre,
                 row.dataset.dni,
@@ -649,7 +839,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const start = (currentPage - 1) * pageSize;
         const end = start + pageSize;
 
-        rows.forEach(function (row) {
+        getRows().forEach(function (row) {
             row.style.display = 'none';
         });
 
@@ -674,6 +864,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         renderPagination(totalPages);
     }
+
+    setBootProgress(42, 'Aplicando filtros...');
 
     if (searchInput) {
         const syncSearchClear = function () {
@@ -725,66 +917,174 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    document.querySelectorAll('.js-copy-ficha-link').forEach(function (button) {
-        button.addEventListener('click', async function () {
-            const input = document.getElementById(button.dataset.target);
-            if (!input) return;
-            input.select();
-            input.setSelectionRange(0, 99999);
-            try {
-                await navigator.clipboard.writeText(input.value);
-                button.textContent = 'Copiado';
-                setTimeout(() => button.textContent = 'Copiar', 1800);
-            } catch (error) {
-                document.execCommand('copy');
-            }
-        });
-    });
+    function rebindRow(row) {
+        if (!row) {
+            return;
+        }
 
-    document.querySelectorAll('.js-send-email').forEach(function (button) {
-        button.addEventListener('click', function () {
-            if (button.disabled) return;
+        bindCopyButtons(row);
+        bindSendEmailButtons(row);
+        bindActionForms(row);
+    }
 
-            const originalTitle = button.getAttribute('title') || button.dataset.idleTitle || 'Enviar al correo';
-            button.disabled = true;
-            button.setAttribute('title', 'Enviando correo...');
-            button.setAttribute('aria-label', 'Enviando correo...');
+    function replaceRowFromHtml(currentRow, html) {
+        if (!currentRow || !html) {
+            return currentRow;
+        }
 
-            fetch(button.dataset.sendUrl, {
-                method: 'POST',
-                headers: {
-                    'X-CSRF-TOKEN': @json(csrf_token()),
-                    'Accept': 'application/json',
-                },
-            }).then(function (response) {
-                if (response.ok) {
-                    return response.json().then(function (data) {
-                        button.dataset.idleTitle = 'Volver a enviar correo';
-                        button.setAttribute('title', 'Volver a enviar correo');
-                        button.setAttribute('aria-label', 'Volver a enviar correo');
+        const template = document.createElement('tbody');
+        template.innerHTML = html.trim();
+        const nextRow = template.querySelector('.js-person-card');
 
-                        if (data.mailto_url) {
-                            window.location.href = data.mailto_url;
-                        }
-                    });
-                } else {
-                    return response.json().then(function (data) {
-                        alert(data.error || 'Error al enviar el correo');
-                        button.setAttribute('title', originalTitle);
-                        button.setAttribute('aria-label', originalTitle);
-                    });
+        if (!nextRow) {
+            return currentRow;
+        }
+
+        currentRow.replaceWith(nextRow);
+        rebindRow(nextRow);
+        return nextRow;
+    }
+
+    function bindCopyButtons(scope) {
+        (scope || document).querySelectorAll('.js-copy-ficha-link').forEach(function (button) {
+            if (button.dataset.boundCopy === '1') return;
+            button.dataset.boundCopy = '1';
+
+            button.addEventListener('click', async function () {
+                const input = document.getElementById(button.dataset.target);
+                if (!input) return;
+                input.select();
+                input.setSelectionRange(0, 99999);
+                try {
+                    await navigator.clipboard.writeText(input.value);
+                    button.textContent = 'Copiado';
+                    setTimeout(() => button.textContent = 'Copiar', 1800);
+                } catch (error) {
+                    document.execCommand('copy');
                 }
-            }).catch(function () {
-                alert('Error de conexion al enviar el correo');
-                button.setAttribute('title', originalTitle);
-                button.setAttribute('aria-label', originalTitle);
-            }).finally(function () {
-                button.disabled = false;
             });
         });
-    });
+    }
+
+    function bindSendEmailButtons(scope) {
+        (scope || document).querySelectorAll('.js-send-email').forEach(function (button) {
+            if (button.dataset.boundEmail === '1') return;
+            button.dataset.boundEmail = '1';
+
+            button.addEventListener('click', function () {
+                if (button.disabled) return;
+
+                const originalTitle = button.getAttribute('title') || button.dataset.idleTitle || 'Enviar al correo';
+                const row = button.closest('.js-person-card');
+                const workerName = (row?.dataset.nombre || 'trabajador').trim();
+                const resend = /volver a enviar/i.test(originalTitle);
+                button.disabled = true;
+                button.setAttribute('title', 'Enviando correo...');
+                button.setAttribute('aria-label', 'Enviando correo...');
+
+                fetch(button.dataset.sendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': @json(csrf_token()),
+                        'Accept': 'application/json',
+                    },
+                }).then(function (response) {
+                    if (response.ok) {
+                        return response.json().then(function () {
+                            button.dataset.idleTitle = 'Volver a enviar correo';
+                            button.setAttribute('title', 'Volver a enviar correo');
+                            button.setAttribute('aria-label', 'Volver a enviar correo');
+                            showToast((resend ? 'Correo reenviado a ' : 'Correo enviado a ') + workerName);
+                        });
+                    }
+
+                    return response.json().then(function (data) {
+                        throw new Error(data.error || 'Error al enviar el correo');
+                    });
+                }).catch(function (error) {
+                    alert(error.message || 'Error de conexion al enviar el correo');
+                    button.setAttribute('title', originalTitle);
+                    button.setAttribute('aria-label', originalTitle);
+                }).finally(function () {
+                    button.disabled = false;
+                });
+            });
+        });
+    }
+
+    function bindActionForms(scope) {
+        (scope || document).querySelectorAll('.js-temporal-action-form').forEach(function (form) {
+            if (form.dataset.boundAction === '1') return;
+            form.dataset.boundAction = '1';
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const submitButton = form.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.disabled = true;
+                }
+
+                const row = form.closest('.js-person-card');
+                const workerName = (row?.dataset.nombre || 'trabajador').trim();
+
+                fetch(form.action, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': @json(csrf_token()),
+                        'Accept': 'application/json',
+                    },
+                }).then(function (response) {
+                    if (response.ok) {
+                        return response.json();
+                    }
+
+                    return response.json().then(function (data) {
+                        throw new Error(data.error || 'No se pudo completar la acción.');
+                    });
+                }).then(function (data) {
+                    if (data.removed) {
+                        row?.remove();
+                        renderGrid(false);
+                        showToast(data.message || ('Registro quitado de Temporales y links para ' + workerName));
+                        return;
+                    }
+
+                    if (data.row_html && row) {
+                        replaceRowFromHtml(row, data.row_html);
+                        renderGrid(false);
+                    }
+
+                    showToast(data.message || 'Acción completada.');
+                }).catch(function (error) {
+                    alert(error.message || 'No se pudo completar la acción.');
+                }).finally(function () {
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                    }
+                });
+            });
+        });
+    }
+
+    bindCopyButtons(document);
+    bindSendEmailButtons(document);
+    bindActionForms(document);
+
+    setBootProgress(76, 'Mostrando filas...');
+
+    const successMessage = @json(session('success'));
+
+    if (successMessage) {
+        showToast(successMessage);
+    }
 
     renderGrid(true);
+
+    window.requestAnimationFrame(function () {
+        setBootProgress(94, 'Ajustando vista final...');
+        finishBootLoading();
+    });
 });
 </script>
 @endpush

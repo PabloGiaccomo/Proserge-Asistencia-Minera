@@ -130,7 +130,7 @@ class PersonalFichaService
                 }
             }
 
-            [$token, $link] = $this->createSecureLink($ficha);
+            [$token, $link] = $this->createSecureLink($ficha, 24, true);
 
             return [
                 'personal' => $personal->fresh(['fichaColaborador.link']),
@@ -742,26 +742,40 @@ class PersonalFichaService
 
                 return true;
             })
-            ->map(function (PersonalFicha $ficha): array {
-                $summary = $this->regularizationSummary($ficha);
-                $displayState = $this->temporaryDisplayState($ficha);
-
-                return [
-                    'ficha' => $ficha,
-                    'personal' => $ficha->personal,
-                    'link' => $summary['link'],
-                    'url' => $summary['url'],
-                    'correo' => $this->resolvedFichaEmail($ficha),
-                    'email_sent_at' => $summary['link']?->emailed_at,
-                    'estado_key' => $displayState,
-                    'estado_label' => $this->temporaryDisplayLabel($displayState),
-                    'missing_fields' => $summary['missing_fields'],
-                    'missing_documents' => $summary['missing_documents'],
-                    'can_regularize' => $summary['can_regularize'],
-                ];
-            })
-            ->filter(fn (array $row): bool => !empty($row['url']) || !empty($row['can_regularize']))
+            ->map(fn (PersonalFicha $ficha): ?array => $this->mapTemporaryFichaRow($ficha))
+            ->filter()
             ->all();
+    }
+
+    public function temporaryLinkRow(PersonalFicha $ficha): ?array
+    {
+        $ficha->loadMissing(['personal', 'link', 'archivos']);
+
+        return $this->mapTemporaryFichaRow($ficha);
+    }
+
+    private function mapTemporaryFichaRow(PersonalFicha $ficha): ?array
+    {
+        $summary = $this->regularizationSummary($ficha);
+        $displayState = $this->temporaryDisplayState($ficha);
+
+        $row = [
+            'ficha' => $ficha,
+            'personal' => $ficha->personal,
+            'link' => $summary['link'],
+            'url' => $summary['url'],
+            'correo' => $this->resolvedFichaEmail($ficha),
+            'email_sent_at' => $summary['link']?->emailed_at,
+            'estado_key' => $displayState,
+            'estado_label' => $this->temporaryDisplayLabel($displayState),
+            'missing_fields' => $summary['missing_fields'],
+            'missing_documents' => $summary['missing_documents'],
+            'can_regularize' => $summary['can_regularize'],
+        ];
+
+        return !empty($row['url']) || !empty($row['can_regularize'])
+            ? $row
+            : null;
     }
 
     private function normalizeTemporarySearchText(?string $value): string

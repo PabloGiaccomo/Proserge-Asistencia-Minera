@@ -281,22 +281,39 @@ class PersonalFichaController extends WebPageController
         return Storage::disk('local')->download($archivo->path, $archivo->nombre_original ?: basename($archivo->path));
     }
 
-    public function extendTemporal(string $id): RedirectResponse
+    public function extendTemporal(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $this->assertCanDeletePersonal();
 
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
         $this->fichaService->extendLink($ficha, 24);
 
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'El link temporal fue ampliado por 1 dia mas.',
+                ...$this->temporaryRowResponse($ficha->fresh(['personal', 'link', 'archivos'])),
+            ]);
+        }
+
         return redirect()
             ->route('personal.fichas.temporales')
             ->with('success', 'El link temporal fue ampliado por 1 dia mas.');
     }
 
-    public function regularizeLink(string $id): RedirectResponse
+    public function regularizeLink(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($id);
         $result = $this->fichaService->ensureRegularizationLink($ficha, 24);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Se habilito un link temporal para regularizar la ficha.',
+                'url' => $result['url'] ?? null,
+                ...$this->temporaryRowResponse($ficha->fresh(['personal', 'link', 'archivos'])),
+            ]);
+        }
 
         return redirect()
             ->back()
@@ -335,7 +352,7 @@ class PersonalFichaController extends WebPageController
             ->with('success', 'Correo enviado a ' . $result['email'] . '.');
     }
 
-    public function destroyTemporal(string $id): RedirectResponse
+    public function destroyTemporal(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $this->assertCanDeletePersonal();
 
@@ -344,9 +361,24 @@ class PersonalFichaController extends WebPageController
         try {
             $this->fichaService->removeFromTemporaryList($ficha);
         } catch (ValidationException $exception) {
+            $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo eliminar el trabajador temporal.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['error' => $error], 422);
+            }
+
             return redirect()
                 ->route('personal.fichas.temporales')
-                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo eliminar el trabajador temporal.');
+                ->with('error', $error);
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'removed' => true,
+                'id' => $id,
+                'message' => 'Registro eliminado de Temporales y links.',
+            ]);
         }
 
         return redirect()
@@ -442,6 +474,26 @@ class PersonalFichaController extends WebPageController
             ->keys()
             ->values()
             ->all();
+    }
+
+    private function temporaryRowResponse(PersonalFicha $ficha): array
+    {
+        $row = $this->fichaService->temporaryLinkRow($ficha);
+
+        return [
+            'row' => $row ? [
+                'id' => $ficha->id,
+                'estado_label' => $row['estado_label'] ?? null,
+                'url' => $row['url'] ?? null,
+                'can_regularize' => $row['can_regularize'] ?? false,
+            ] : null,
+            'row_html' => $row
+                ? view('personal.fichas.partials.temporal-row', [
+                    'row' => $row,
+                    'rowKey' => $ficha->id,
+                ])->render()
+                : null,
+        ];
     }
 
     private function assertCanDeletePersonal(): void

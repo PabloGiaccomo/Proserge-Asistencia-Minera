@@ -112,8 +112,7 @@
                                             <button
                                                 type="submit"
                                                 form="regularizeLinkForm"
-                                                class="btn btn-primary"
-                                                onclick="return confirm('Se habilitara un link temporal para que el trabajador regularice su ficha.');">
+                                                class="btn btn-primary">
                                                 Habilitar link temporal
                                             </button>
                                         </div>
