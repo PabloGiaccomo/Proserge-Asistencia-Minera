@@ -127,14 +127,22 @@
                             @php
                                 $archivo = $ficha->archivos->firstWhere('tipo', $docKey);
                                 $docLabel = $requirement['label'] ?? $requirement;
+                                $docRequired = (bool) ($requirement['required'] ?? true);
                             @endphp
                             <div class="ficha-field ficha-field-wide">
-                                <span class="ficha-label">{{ $docLabel }}</span>
+                                <span class="ficha-label">
+                                    {{ $docLabel }}
+                                    @if($docRequired)
+                                        <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Obligatorio</span>
+                                    @else
+                                        <span class="ficha-status ficha-status-pending" style="padding:2px 7px;font-size:10px;">Opcional</span>
+                                    @endif
+                                </span>
                                 <div class="ficha-input" style="height:auto;min-height:42px;">
                                     @if($archivo)
                                         <a href="{{ route('personal.fichas.archivos.download', $archivo->id) }}">{{ $archivo->nombre_original ?: 'Descargar documento' }}</a>
                                     @else
-                                        No adjuntado
+                                        {{ $docRequired ? 'No adjuntado' : 'No adjuntado (opcional)' }}
                                     @endif
                                 </div>
                             </div>

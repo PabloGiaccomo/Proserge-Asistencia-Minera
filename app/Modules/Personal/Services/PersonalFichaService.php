@@ -494,7 +494,7 @@ class PersonalFichaService
             ];
         }
 
-        return DB::transaction(function () use ($ficha, $link, $data, $familiares, $firmaBase64, $huella, $huellaPath, $documentPaths): PersonalFicha {
+        return DB::transaction(function () use ($ficha, $link, $data, $familiares, $firmaBase64, $huella, $huellaPath, $documentPaths, $wasApproved, $previousPersonalState): PersonalFicha {
             $ficha->forceFill([
                 'estado' => $wasApproved ? PersonalFicha::ESTADO_APROBADO : PersonalFicha::ESTADO_ENVIADA,
                 'datos_json' => $data,
@@ -520,30 +520,24 @@ class PersonalFichaService
                 ]);
             }
 
-            PersonalFichaArchivo::query()->create([
-                'id' => (string) Str::uuid(),
-                'personal_ficha_id' => $ficha->id,
-                'tipo' => 'huella',
-                'nombre_original' => $huella->getClientOriginalName(),
-                'path' => $huellaPath,
-                'mime' => $huella->getMimeType(),
-                'size' => $huella->getSize(),
-                'uploaded_by_public' => true,
-            ]);
+            $this->replaceFichaArchivo(
+                $ficha,
+                'huella',
+                $huella,
+                $huellaPath,
+                true,
+            );
 
             foreach ($documentPaths as $tipo => $payload) {
                 /** @var UploadedFile $documento */
                 $documento = $payload['file'];
-                PersonalFichaArchivo::query()->create([
-                    'id' => (string) Str::uuid(),
-                    'personal_ficha_id' => $ficha->id,
-                    'tipo' => $tipo,
-                    'nombre_original' => $documento->getClientOriginalName(),
-                    'path' => $payload['path'],
-                    'mime' => $documento->getMimeType(),
-                    'size' => $documento->getSize(),
-                    'uploaded_by_public' => true,
-                ]);
+                $this->replaceFichaArchivo(
+                    $ficha,
+                    $tipo,
+                    $documento,
+                    $payload['path'],
+                    true,
+                );
             }
 
             $link->forceFill([
@@ -562,15 +556,19 @@ class PersonalFichaService
             'module' => 'personal',
             'priority' => 'high',
             'category' => 'accion_requerida',
-            'target_user_ids' => $this->rrhhUserIds(),
+            'target_user_ids' => $this->reviewNotificationUserIds(),
+            'require_permission' => false,
             'entity_type' => PersonalFicha::class,
             'entity_id' => $ficha->id,
+            'action_route' => '/personal/fichas/{entity_id}/revisar',
+            'action_label' => 'Revisar ficha',
             'message' => 'Se completo la ficha de ' . (($ficha->datos_json['puesto'] ?? $ficha->personal?->puesto) ?: 'trabajador') . ' - ' . ($ficha->personal?->nombre_completo ?: 'Sin nombre') . '. Pendiente de revision.',
             'payload' => [
+                'ficha_id' => $ficha->id,
                 'personal_id' => $ficha->personal_id,
                 'numero_documento' => $ficha->numero_documento,
             ],
-            'dedupe_key' => 'personal_ficha_completada:' . $ficha->id,
+            'dedupe_key' => 'personal_ficha_completada:' . $ficha->id . ':' . optional($ficha->submitted_at)->format('YmdHis'),
         ]);
     }
 
@@ -1193,7 +1191,11 @@ class PersonalFichaService
     public function normalizeFamiliares(array $familiares): array
     {
         return collect($familiares)
-            ->filter(fn ($item): bool => is_array($item) && PersonalNormalizer::text($item['nombres_apellidos'] ?? '') !== '')
+            ->filter(function ($item): bool {
+                return is_array($item)
+                    && PersonalNormalizer::text($item['nombres_apellidos'] ?? '') !== ''
+                    && PersonalNormalizer::text($item['fecha_nacimiento'] ?? '') !== '';
+            })
             ->map(function (array $item): array {
                 $phoneData = PersonalNormalizer::normalizePhonePayload($item['telefono'] ?? '');
 
@@ -1483,19 +1485,6 @@ class PersonalFichaService
     private function syncFichaDocuments(PersonalFicha $ficha, array $documentPaths, Usuario $user): void
     {
         foreach ($documentPaths as $tipo => $payload) {
-            $existing = PersonalFichaArchivo::query()
-                ->where('personal_ficha_id', $ficha->id)
-                ->where('tipo', $tipo)
-                ->first();
-
-            if ($existing?->path && Storage::disk('local')->exists($existing->path)) {
-                Storage::disk('local')->delete($existing->path);
-            }
-
-            if ($existing) {
-                $existing->delete();
-            }
-
             /** @var UploadedFile $documento */
             $documento = $payload['file'];
             $path = $payload['path'];
@@ -1509,21 +1498,51 @@ class PersonalFichaService
                 );
             }
 
-            PersonalFichaArchivo::query()->create([
-                'id' => (string) Str::uuid(),
-                'personal_ficha_id' => $ficha->id,
-                'tipo' => $tipo,
-                'nombre_original' => $documento->getClientOriginalName(),
-                'path' => $path,
-                'mime' => $documento->getMimeType(),
-                'size' => $documento->getSize(),
-                'uploaded_by_usuario_id' => $user->id,
-                'uploaded_by_public' => false,
-            ]);
+            $this->replaceFichaArchivo(
+                $ficha,
+                $tipo,
+                $documento,
+                $path,
+                false,
+                $user,
+            );
         }
     }
 
-    private function rrhhUserIds(): array
+    private function replaceFichaArchivo(
+        PersonalFicha $ficha,
+        string $tipo,
+        UploadedFile $documento,
+        string $path,
+        bool $uploadedByPublic,
+        ?Usuario $user = null,
+    ): void {
+        $existingFiles = PersonalFichaArchivo::query()
+            ->where('personal_ficha_id', $ficha->id)
+            ->where('tipo', $tipo)
+            ->get();
+
+        foreach ($existingFiles as $existing) {
+            if ($existing->path && Storage::disk('local')->exists($existing->path)) {
+                Storage::disk('local')->delete($existing->path);
+            }
+            $existing->delete();
+        }
+
+        PersonalFichaArchivo::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $ficha->id,
+            'tipo' => $tipo,
+            'nombre_original' => $documento->getClientOriginalName(),
+            'path' => $path,
+            'mime' => $documento->getMimeType(),
+            'size' => $documento->getSize(),
+            'uploaded_by_usuario_id' => $uploadedByPublic ? null : $user?->id,
+            'uploaded_by_public' => $uploadedByPublic,
+        ]);
+    }
+
+    private function reviewNotificationUserIds(): array
     {
         return Usuario::query()
             ->with(['rol:id,nombre', 'rolesAdicionales:id,nombre'])
@@ -1535,7 +1554,8 @@ class PersonalFichaService
                     ->filter()
                     ->map(fn ($name): string => strtoupper((string) $name));
 
-                return $roles->contains('RRHH');
+                return $roles->contains('ADMIN')
+                    || $roles->contains(fn (string $name): bool => str_contains($name, 'RRHH'));
             })
             ->pluck('id')
             ->map(fn ($id): string => (string) $id)

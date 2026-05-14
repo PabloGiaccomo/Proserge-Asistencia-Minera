@@ -387,6 +387,12 @@
     border-color: #fcd34d;
 }
 
+.dg-pill-situacion-revision {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #f59e0b;
+}
+
 .dg-pill-situacion-descanso {
     background: #fee2e2;
     color: #991b1b;
@@ -1573,6 +1579,7 @@
                                                 <option value="vacaciones">Vacaciones</option>
                                                 <option value="descanso_medico">Descanso medico</option>
                                                 <option value="gestacion">Gestacion</option>
+                                                <option value="revisar_ficha">Revisar ficha</option>
                                                 <option value="terminar_ficha">Terminar ficha</option>
                                             </select>
                                         </div>
@@ -1669,6 +1676,7 @@
                                         'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
+                                        'revisar_ficha' => 'dg-pill-situacion-revision',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
                                         'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',

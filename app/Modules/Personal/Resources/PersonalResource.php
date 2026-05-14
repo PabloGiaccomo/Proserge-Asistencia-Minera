@@ -235,7 +235,8 @@ class PersonalResource extends JsonResource
 
         $contratoVencido = $fechaFinContrato !== null && $fechaFinContrato !== '' && $fechaFinContrato < $todayString;
         $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
-        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'OBSERVADO'], true)
+        $revisarFicha = $estadoPersonal === 'FICHA_ENVIADA';
+        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO', 'OBSERVADO'], true)
             || $ficha === null
             || count($missingRequiredFichaFields) > 0;
         $bienestarInactivo = $primaryBloqueo && in_array((string) $primaryBloqueo->tipo, ['vacaciones', 'descanso_medico'], true);
@@ -253,6 +254,7 @@ class PersonalResource extends JsonResource
 
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
+            $revisarFicha => 'revisar_ficha',
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'descanso_medico' => 'descanso_medico',
@@ -267,6 +269,7 @@ class PersonalResource extends JsonResource
         };
 
         $situacionLabel = match ($situacionKey) {
+            'revisar_ficha' => 'Revisar ficha',
             'terminar_ficha' => 'Terminar ficha',
             'vacaciones' => 'Vacaciones',
             'descanso_medico' => 'Descanso medico',

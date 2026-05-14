@@ -49,6 +49,10 @@ class PublicPersonalFichaController extends Controller
                 ->with('error', 'Este link ya no permite modificaciones.');
         }
 
+        $request->merge([
+            'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
+        ]);
+
         $validated = $request->validate($this->rules(), $this->messages());
         $fields = $validated['fields'];
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
@@ -69,20 +73,20 @@ class PublicPersonalFichaController extends Controller
 
         return redirect()
             ->route('ficha-colaborador.show', ['token' => $token])
-            ->with('success', 'Ficha enviada correctamente. El link queda en solo lectura durante 24 horas.');
+            ->with('success', 'Ficha enviada correctamente. RRHH revisara tu informacion. El link queda en solo lectura durante 24 horas.');
     }
 
     private function rules(): array
     {
         $rules = [
             'fields' => ['required', 'array'],
-            'familiares' => ['required', 'array', 'min:1'],
-            'familiares.*.nombres_apellidos' => ['required', 'string', 'max:191'],
-            'familiares.*.parentesco' => ['required', 'string', 'max:80'],
+            'familiares' => ['nullable', 'array'],
+            'familiares.*.nombres_apellidos' => ['nullable', 'string', 'max:191'],
+            'familiares.*.parentesco' => ['nullable', 'string', 'max:80'],
             'familiares.*.fecha_nacimiento' => ['nullable', 'date'],
             'familiares.*.tipo_documento' => ['nullable', 'string', 'max:40'],
             'familiares.*.numero_documento' => ['nullable', 'string', 'max:40'],
-            'familiares.*.telefono' => ['required', 'string', 'max:30'],
+            'familiares.*.telefono' => ['nullable', 'string', 'max:30'],
             'familiares.*.vive_con_trabajador' => ['nullable'],
             'familiares.*.contacto_emergencia' => ['nullable'],
             'firma_base64' => ['required', 'string'],
@@ -142,11 +146,6 @@ class PublicPersonalFichaController extends Controller
     {
         return [
             'fields.*.required' => 'Completa este campo obligatorio.',
-            'familiares.required' => 'Agrega al menos un familiar o contacto de emergencia.',
-            'familiares.min' => 'Agrega al menos un familiar o contacto de emergencia.',
-            'familiares.*.nombres_apellidos.required' => 'Ingresa nombres y apellidos del familiar.',
-            'familiares.*.parentesco.required' => 'Selecciona o escribe el parentesco.',
-            'familiares.*.telefono.required' => 'Ingresa un telefono de contacto.',
             'firma_base64.required' => 'La firma digital es obligatoria.',
             'huella.required' => 'La foto de huella es obligatoria.',
             'huella.image' => 'La huella debe ser una imagen nitida.',
@@ -156,5 +155,32 @@ class PublicPersonalFichaController extends Controller
             'documentos.*.max' => 'El documento no debe superar 10 MB.',
             'declaraciones.*.accepted' => 'Debes marcar esta declaracion para enviar la ficha.',
         ];
+    }
+
+    private function sanitizeFamiliares(mixed $familiares): array
+    {
+        if (!is_array($familiares)) {
+            return [];
+        }
+
+        return collect($familiares)
+            ->filter(fn ($item): bool => is_array($item))
+            ->map(function (array $item): array {
+                return [
+                    'nombres_apellidos' => trim((string) ($item['nombres_apellidos'] ?? '')),
+                    'parentesco' => trim((string) ($item['parentesco'] ?? '')),
+                    'fecha_nacimiento' => trim((string) ($item['fecha_nacimiento'] ?? '')),
+                    'tipo_documento' => trim((string) ($item['tipo_documento'] ?? 'DNI')),
+                    'numero_documento' => trim((string) ($item['numero_documento'] ?? '')),
+                    'telefono' => trim((string) ($item['telefono'] ?? '')),
+                    'vive_con_trabajador' => !empty($item['vive_con_trabajador']),
+                    'contacto_emergencia' => !empty($item['contacto_emergencia']),
+                ];
+            })
+            ->filter(function (array $item): bool {
+                return $item['nombres_apellidos'] !== '' && $item['fecha_nacimiento'] !== '';
+            })
+            ->values()
+            ->all();
     }
 }

@@ -4,6 +4,7 @@ namespace App\Modules\Notificaciones\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\NotificationRecipient;
+use App\Models\PersonalFicha;
 use App\Modules\Notificaciones\Services\NotificationInboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -100,7 +101,7 @@ class NotificacionPageController extends Controller
             $recipient->save();
         }
 
-        $route = $recipient->event?->action_route;
+        $route = $this->resolveActionRoute($recipient);
 
         if (!$route) {
             return redirect()->route('notificaciones.index');
@@ -119,6 +120,62 @@ class NotificacionPageController extends Controller
             ->where('usuario_id', $userId)
             ->with('event')
             ->firstOrFail();
+    }
+
+    private function resolveActionRoute(NotificationRecipient $recipient): ?string
+    {
+        $event = $recipient->event;
+        $route = (string) ($event?->action_route ?? '');
+        $title = mb_strtolower((string) ($event?->title ?? ''));
+        $label = mb_strtolower((string) ($event?->action_label ?? ''));
+        $payload = is_array($event?->payload ?? null) ? $event->payload : [];
+
+        $looksLikeFichaReview = $event?->entity_type === PersonalFicha::class
+            || str_contains($route, '/personal/fichas/')
+            || str_contains($label, 'revisar ficha')
+            || str_contains($title, 'ficha');
+
+        if ($looksLikeFichaReview) {
+            $fichaId = $this->resolveFichaIdFromNotification($event?->entity_id, $route, $payload);
+            if ($fichaId) {
+                return route('personal.fichas.review', $fichaId);
+            }
+        }
+
+        if ($route === '') {
+            return null;
+        }
+
+        return str_replace('/revision', '/revisar', $route);
+    }
+
+    private function resolveFichaIdFromNotification(?string $entityId, string $route, array $payload): ?string
+    {
+        if (filled($entityId) && PersonalFicha::query()->whereKey((string) $entityId)->exists()) {
+            return (string) $entityId;
+        }
+
+        if ($route !== '' && preg_match('#/personal/fichas/([^/]+)#', $route, $matches) === 1) {
+            $routeFichaId = (string) ($matches[1] ?? '');
+            if ($routeFichaId !== '' && PersonalFicha::query()->whereKey($routeFichaId)->exists()) {
+                return $routeFichaId;
+            }
+        }
+
+        $payloadFichaId = (string) ($payload['ficha_id'] ?? '');
+        if ($payloadFichaId !== '' && PersonalFicha::query()->whereKey($payloadFichaId)->exists()) {
+            return $payloadFichaId;
+        }
+
+        $personalId = (string) ($payload['personal_id'] ?? '');
+        if ($personalId !== '') {
+            return PersonalFicha::query()
+                ->where('personal_id', $personalId)
+                ->orderByDesc('created_at')
+                ->value('id');
+        }
+
+        return null;
     }
 
     private function notificationTablesReady(): bool

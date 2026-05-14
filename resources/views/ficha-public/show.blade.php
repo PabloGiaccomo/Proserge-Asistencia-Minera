@@ -19,7 +19,7 @@
             @if($mode === 'edit')
                 <span class="ficha-status ficha-status-pending">Pendiente</span>
             @elseif($mode === 'readonly')
-                <span class="ficha-status ficha-status-sent">Enviada</span>
+                <span class="ficha-status ficha-status-sent">Ficha enviada</span>
             @elseif(in_array($mode, ['expired', 'disabled', 'invalid'], true))
                 <span class="ficha-status ficha-status-expired">No disponible</span>
             @endif
@@ -27,11 +27,23 @@
     </div>
 
     @if(session('success'))
-        <div class="ficha-alert">{{ session('success') }}</div>
+        <div class="ficha-alert">{{ str_contains((string) session('success'), 'Ficha enviada') ? session('success') : 'Ficha enviada correctamente. RRHH revisara tu informacion.' }}</div>
     @endif
 
     @if(session('error'))
         <div class="ficha-alert ficha-alert-danger">{{ session('error') }}</div>
+    @endif
+
+    @if($errors->any())
+        <div class="ficha-alert ficha-alert-danger">
+            <strong>No se pudo enviar la ficha.</strong>
+            Revisa los campos marcados y vuelve a intentarlo.
+            <ul style="margin:8px 0 0 18px; padding:0;">
+                @foreach($errors->all() as $message)
+                    <li>{{ $message }}</li>
+                @endforeach
+            </ul>
+        </div>
     @endif
 
     @if($mode === 'edit')
@@ -264,7 +276,8 @@
                                                 {{ $storedDoc?->nombre_original ?: 'Documento registrado' }}
                                             </div>
                                         @else
-                                            <input id="documento_{{ $docKey }}" class="ficha-input" type="file" name="documentos[{{ $docKey }}]" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" {{ $docRequired ? 'required' : '' }}>
+                                            <input id="documento_{{ $docKey }}" class="ficha-input js-draft-file-input" type="file" name="documentos[{{ $docKey }}]" data-file-draft-key="documentos.{{ $docKey }}" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" {{ $docRequired ? 'required' : '' }}>
+                                            <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="documento_{{ $docKey }}" style="margin-top:6px; display:none;"></div>
                                             @error('documentos.' . $docKey) <span class="ficha-error">{{ $message }}</span> @enderror
                                         @endif
                                     </div>
@@ -325,7 +338,8 @@
                                 <div class="ficha-fields" style="padding:0;">
                                     <div class="ficha-field ficha-field-wide">
                                         <label class="ficha-label" for="huella">Foto de huella <span class="ficha-required">*</span></label>
-                                        <input id="huella" class="ficha-input" type="file" name="huella" accept="image/*" capture="environment">
+                                        <input id="huella" class="ficha-input js-draft-file-input" type="file" name="huella" data-file-draft-key="huella" accept="image/*" capture="environment">
+                                        <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="huella" style="margin-top:6px; display:none;"></div>
                                         @error('huella') <span class="ficha-error">{{ $message }}</span> @enderror
                                     </div>
                                     <div class="ficha-field">
@@ -359,6 +373,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const clearBtn = document.getElementById('clearSignature');
     const draftNotice = document.getElementById('localDraftNotice');
     const draftStorageKey = 'proserge:ficha-borrador:' + @json($token);
+    const draftFileDbName = 'proserge-ficha-drafts';
+    const draftFileStoreName = 'files';
+    const draftFileInputs = Array.from(document.querySelectorAll('.js-draft-file-input'));
     let drawing = false;
     let hasSignature = Boolean(hidden && hidden.value);
 
@@ -444,6 +461,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    draftFileInputs.forEach(function (input) {
+        input.addEventListener('change', function () {
+            saveDraftFile(input);
+        });
+    });
+
     const readDraft = function () {
         if (isReadonly) return null;
         try {
@@ -452,6 +475,138 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (error) {
             return null;
         }
+    };
+
+    const openDraftFileDb = function () {
+        if (isReadonly || !window.indexedDB) {
+            return Promise.resolve(null);
+        }
+
+        return new Promise(function (resolve) {
+            const request = window.indexedDB.open(draftFileDbName, 1);
+
+            request.onupgradeneeded = function (event) {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(draftFileStoreName)) {
+                    db.createObjectStore(draftFileStoreName, { keyPath: 'id' });
+                }
+            };
+
+            request.onsuccess = function () {
+                resolve(request.result);
+            };
+
+            request.onerror = function () {
+                resolve(null);
+            };
+        });
+    };
+
+    const draftFileRecordId = function (key) {
+        return draftStorageKey + ':' + key;
+    };
+
+    const setFileStatus = function (input, message) {
+        const statusNode = input
+            ? document.querySelector('[data-file-status-for="' + input.id + '"]')
+            : null;
+
+        if (!statusNode) return;
+
+        if (!message) {
+            statusNode.textContent = '';
+            statusNode.style.display = 'none';
+            return;
+        }
+
+        statusNode.textContent = message;
+        statusNode.style.display = 'block';
+    };
+
+    const saveDraftFile = async function (input) {
+        if (isReadonly || !input || !input.dataset.fileDraftKey) return;
+
+        const db = await openDraftFileDb();
+        if (!db) return;
+
+        const tx = db.transaction(draftFileStoreName, 'readwrite');
+        const store = tx.objectStore(draftFileStoreName);
+        const recordId = draftFileRecordId(input.dataset.fileDraftKey);
+        const file = input.files && input.files[0] ? input.files[0] : null;
+
+        if (!file) {
+            store.delete(recordId);
+            setFileStatus(input, '');
+            return;
+        }
+
+        store.put({
+            id: recordId,
+            key: input.dataset.fileDraftKey,
+            file: file,
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            saved_at: new Date().toISOString(),
+        });
+
+        setFileStatus(input, 'Documento recuperable en este equipo: ' + file.name);
+    };
+
+    const loadDraftFile = async function (input) {
+        if (isReadonly || !input || !input.dataset.fileDraftKey) return false;
+
+        const db = await openDraftFileDb();
+        if (!db) return false;
+
+        const record = await new Promise(function (resolve) {
+            const tx = db.transaction(draftFileStoreName, 'readonly');
+            const store = tx.objectStore(draftFileStoreName);
+            const request = store.get(draftFileRecordId(input.dataset.fileDraftKey));
+            request.onsuccess = function () {
+                resolve(request.result || null);
+            };
+            request.onerror = function () {
+                resolve(null);
+            };
+        });
+
+        if (!record || !record.file) {
+            setFileStatus(input, '');
+            return false;
+        }
+
+        try {
+            const transfer = new DataTransfer();
+            transfer.items.add(record.file);
+            input.files = transfer.files;
+            setFileStatus(input, 'Documento recuperado: ' + (record.name || 'archivo guardado'));
+
+            if (input.id === 'huella' && preview) {
+                preview.src = URL.createObjectURL(record.file);
+                preview.style.display = 'block';
+            }
+
+            return true;
+        } catch (error) {
+            setFileStatus(input, 'Documento guardado en este equipo: ' + (record.name || 'archivo') + '. Si no aparece adjunto, vuelve a seleccionarlo.');
+            return false;
+        }
+    };
+
+    const clearDraftFiles = async function () {
+        if (isReadonly || draftFileInputs.length === 0) return;
+
+        const db = await openDraftFileDb();
+        if (!db) return;
+
+        const tx = db.transaction(draftFileStoreName, 'readwrite');
+        const store = tx.objectStore(draftFileStoreName);
+        draftFileInputs.forEach(function (input) {
+            if (!input.dataset.fileDraftKey) return;
+            store.delete(draftFileRecordId(input.dataset.fileDraftKey));
+            setFileStatus(input, '');
+        });
     };
 
     const writeDraft = function () {
@@ -507,11 +662,15 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (error) {
             // noop
         }
+        clearDraftFiles();
     };
 
-    const restoreDraft = function () {
+    const restoreDraft = async function () {
         const draft = readDraft();
-        if (!draft || !form) return;
+        if (!draft || !form) {
+            await Promise.all(draftFileInputs.map(loadDraftFile));
+            return;
+        }
 
         Object.entries(draft.fields || {}).forEach(function ([key, value]) {
             const input = form.querySelector('[data-ficha-key="' + key + '"]');
@@ -560,6 +719,8 @@ document.addEventListener('DOMContentLoaded', function () {
             hidden.value = draft.firma_base64;
             hasSignature = true;
         }
+
+        await Promise.all(draftFileInputs.map(loadDraftFile));
 
         if (draftNotice) {
             draftNotice.style.display = 'block';
@@ -802,6 +963,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateQuintaDefaults();
 
         let autosaveTimer = null;
+        let draftSubmitting = false;
         const scheduleDraftSave = function () {
             window.clearTimeout(autosaveTimer);
             autosaveTimer = window.setTimeout(writeDraft, 500);
@@ -809,7 +971,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
         form?.addEventListener('input', scheduleDraftSave, true);
         form?.addEventListener('change', scheduleDraftSave, true);
-        form?.addEventListener('submit', clearDraft);
+        form?.addEventListener('submit', async function (event) {
+            if (draftSubmitting) {
+                draftSubmitting = false;
+                return;
+            }
+
+            event.preventDefault();
+            draftSubmitting = true;
+            await Promise.all(draftFileInputs.map(loadDraftFile));
+            syncEmployers();
+            form.requestSubmit();
+        });
     } else if (@json(session('success') ? true : false)) {
         clearDraft();
     }
