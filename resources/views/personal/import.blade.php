@@ -114,8 +114,16 @@
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['camposActualizados'] ?? 0 }}</strong><div class="text-muted">Campos modificados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['reactivados'] ?? 0 }}</strong><div class="text-muted">Reactivados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['inactivados'] ?? 0 }}</strong><div class="text-muted">Inactivados</div></div></div>
+                    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['omitidos'] ?? 0 }}</strong><div class="text-muted">Omitidos</div></div></div>
+                    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['duplicados'] ?? 0 }}</strong><div class="text-muted">Duplicados</div></div></div>
+                    @if(($importResult['tipoImportacion'] ?? null) === 'contactos' || (($importResult['correosInvalidos'] ?? 0) > 0))
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['noEncontrados'] ?? 0 }}</strong><div class="text-muted">DNI no encontrados</div></div></div>
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['correosInvalidos'] ?? 0 }}</strong><div class="text-muted">Correos invalidos</div></div></div>
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['sinCambios'] ?? 0 }}</strong><div class="text-muted">Sin cambios</div></div></div>
+                    @endif
                 </div>
 
+                <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores actualizados</h3>
                 @if(!empty($importResult['cambiosDetectados']))
                     @if(($importResult['cambiosDetectadosTotal'] ?? 0) > count($importResult['cambiosDetectados'] ?? []))
                         <div class="alert-item" style="margin-bottom:12px; align-items:flex-start; background:#fff7ed; border:1px solid #fdba74;">
@@ -157,6 +165,63 @@
                     </div>
                 @else
                     <p class="text-muted" style="margin:0;">No se detectaron cambios de datos sobre trabajadores existentes en esta importación.</p>
+                @endif
+
+                @if(!empty($importResult['correosInvalidosDetalle']))
+                    <div style="margin-top:20px;">
+                        <h3 style="margin:0 0 12px; font-size:16px;">Correos invalidos detectados</h3>
+                        <div class="table-responsive import-scroll-panel">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>DNI</th>
+                                        <th>Trabajador</th>
+                                        <th>Correo del Excel</th>
+                                        <th>Motivo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($importResult['correosInvalidosDetalle'] as $item)
+                                        <tr>
+                                            <td>{{ $item['dni'] ?? '-' }}</td>
+                                            <td>{{ $item['nombre'] ?? '-' }}</td>
+                                            <td>{{ $item['correo'] ?? '-' }}</td>
+                                            <td>{{ $item['motivo'] ?? 'Formato de correo invalido' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
+
+                @php
+                    $notUpdatedRows = array_merge($importResult['omitidosDetalle'] ?? [], $importResult['noActualizadosDetalle'] ?? []);
+                @endphp
+                @if(!empty($notUpdatedRows))
+                    <div style="margin-top:20px;">
+                        <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores no actualizados / omitidos</h3>
+                        <div class="table-responsive import-scroll-panel">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>DNI</th>
+                                        <th>Trabajador</th>
+                                        <th>Motivo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($notUpdatedRows as $item)
+                                        <tr>
+                                            <td>{{ $item['dni'] ?? '-' }}</td>
+                                            <td>{{ $item['nombre'] ?? '-' }}</td>
+                                            <td>{{ $item['motivo'] ?? '-' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 @endif
 
                 @if(!empty($importResult['nuevosDetalle']))
@@ -383,6 +448,8 @@
                         <li>Columnas base: <strong>DNI</strong>, <strong>Apellidos y Nombres</strong>, <strong>Cargo/Puesto</strong>, <strong>Fecha Ingreso</strong>.</li>
                         <li>Estados por mina: <strong>HABILITADO</strong>, <strong>EN PROCESO</strong>, <strong>NO HABILITADO</strong>.</li>
                         <li>La columna <strong>OCUPACIÓN</strong> define supervisor cuando es <strong>E</strong> o <strong>P</strong>.</li>
+                        <li>Tambien acepta el Excel de contactos con columnas <strong>DNI</strong>, <strong>NOMBRES</strong>, <strong>CARGO</strong>, <strong>CELULAR</strong> y <strong>CORREO</strong>.</li>
+                        <li>El Excel de contactos solo actualiza trabajadores existentes por DNI; no crea ni inactiva personal.</li>
                     </ul>
 
                     <div class="badge badge-warning" style="padding:10px 14px; border-radius:12px; display:inline-flex; width:fit-content;">
@@ -397,11 +464,14 @@
          aria-live="polite"
          aria-busy="true"
          style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,.35); align-items:center; justify-content:center; padding:16px;">
-        <div style="background:#ffffff; border-radius:16px; padding:16px 18px; display:flex; align-items:center; gap:12px; box-shadow:0 12px 38px rgba(15,23,42,.25); max-width:420px; width:100%;">
+        <div style="background:#ffffff; border-radius:16px; padding:16px 18px; display:flex; align-items:center; gap:12px; box-shadow:0 12px 38px rgba(15,23,42,.25); max-width:460px; width:100%;">
             <div id="loadingSpinner" style="width:22px; height:22px; border:3px solid #D1FAF5; border-top-color:#0F766E; border-radius:9999px;"></div>
-            <div>
+            <div style="flex:1; min-width:0;">
                 <div style="font-weight:700; color:#0F172A;">Importando personal...</div>
-                <div style="font-size:13px; color:#475569;">Estamos procesando el archivo. Esto puede tardar unos segundos.</div>
+                <div id="importProgressText" style="font-size:13px; color:#475569;">Subiendo archivo y preparando lectura.</div>
+                <div style="height:8px; background:#E2E8F0; border-radius:999px; overflow:hidden; margin-top:10px;">
+                    <div id="importProgressBar" style="width:8%; height:100%; background:#0F766E; border-radius:999px; transition:width .35s ease;"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -413,6 +483,7 @@
 let importLocked = false;
 let importSubmitting = false;
 let loadingSpinnerAnimation = null;
+let importProgressTimer = null;
 
 function openFilePicker() {
     if (importLocked) return;
@@ -528,6 +599,8 @@ function changeSelectedFile() {
 function setLoadingState(isLoading) {
     const overlay = document.getElementById('importLoadingOverlay');
     const spinner = document.getElementById('loadingSpinner');
+    const progressBar = document.getElementById('importProgressBar');
+    const progressText = document.getElementById('importProgressText');
     const input = document.getElementById('file');
     const submitBtnInline = document.getElementById('submitBtnInline');
     const changeFileButton = document.getElementById('changeFileButton');
@@ -543,6 +616,7 @@ function setLoadingState(isLoading) {
         importLocked = true;
 
         overlay.style.display = 'flex';
+        startImportProgress(progressBar, progressText);
 
         input.readOnly = true;
         submitBtnInline.disabled = true;
@@ -568,6 +642,41 @@ function setLoadingState(isLoading) {
             }
         );
     }
+}
+
+function startImportProgress(progressBar, progressText) {
+    if (!progressBar || !progressText) {
+        return;
+    }
+
+    const messages = [
+        'Subiendo archivo y preparando lectura.',
+        'Leyendo filas del Excel.',
+        'Validando formato y columnas.',
+        'Comparando DNI, cargo, celular y correo.',
+        'Aplicando cambios y preparando resumen.'
+    ];
+    let progress = 8;
+    let step = 0;
+
+    progressBar.style.width = progress + '%';
+    progressText.textContent = messages[0];
+
+    if (importProgressTimer) {
+        clearInterval(importProgressTimer);
+    }
+
+    importProgressTimer = setInterval(function () {
+        step += 1;
+        const increment = progress < 60 ? 9 : (progress < 84 ? 5 : 2);
+        progress = Math.min(94, progress + increment);
+        progressBar.style.width = progress + '%';
+        progressText.textContent = messages[Math.min(messages.length - 1, Math.floor(step / 2))];
+
+        if (progress >= 94) {
+            progressText.textContent = 'Terminando importacion. Mantente en esta pantalla.';
+        }
+    }, 850);
 }
 
 document.addEventListener('DOMContentLoaded', function () {

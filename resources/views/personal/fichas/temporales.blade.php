@@ -796,7 +796,25 @@
                                 </div>
                             </th>
                             <th>Vence</th>
-                            <th>Link</th>
+                            <th>
+                                <div class="dg-head-cell">
+                                    <span>Link</span>
+                                    <button
+                                        type="button"
+                                        class="dg-filter-icon js-dg-filter-trigger"
+                                        data-target="temporalesLinkPopover"
+                                        title="Filtrar Link"
+                                        aria-label="Filtrar Link">â‰¡</button>
+                                    <div id="temporalesLinkPopover" class="dg-filter-popover" onclick="event.stopPropagation()">
+                                        <label class="dg-popover-label" for="temporalesLinkSelect">Link</label>
+                                        <select id="temporalesLinkSelect" class="filter-compact-select">
+                                            <option value="">Todos</option>
+                                            <option value="habilitado">Habilitados</option>
+                                            <option value="deshabilitado">Deshabilitados</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
@@ -1013,6 +1031,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const bulkExtendCount = document.getElementById('bulkExtendCount');
     const saveBulkExtendButton = document.getElementById('saveBulkExtendButton');
     const estadoSelect = document.getElementById('temporalesEstadoSelect');
+    const linkSelect = document.getElementById('temporalesLinkSelect');
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
     const emailTemplateDefaultSubject = @json($emailTemplate['default_subject']);
@@ -1674,11 +1693,28 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (estadoSelect) {
         estadoSelect.addEventListener('change', function () {
-            const hasValue = (estadoSelect.value || '').trim().length > 0;
-            filterTriggers.forEach(function (trigger) {
-                trigger.classList.toggle('is-active', hasValue);
-            });
+            syncFilterTriggerStates();
             renderGrid(true);
+        });
+    }
+
+    if (linkSelect) {
+        linkSelect.addEventListener('change', function () {
+            syncFilterTriggerStates();
+            renderGrid(true);
+        });
+    }
+
+    function syncFilterTriggerStates() {
+        filterTriggers.forEach(function (trigger) {
+            const targetId = trigger.dataset.target;
+            const hasValue = targetId === 'temporalesEstadoPopover'
+                ? (estadoSelect?.value || '').trim().length > 0
+                : targetId === 'temporalesLinkPopover'
+                    ? (linkSelect?.value || '').trim().length > 0
+                    : false;
+
+            trigger.classList.toggle('is-active', hasValue);
         });
     }
 
@@ -1697,6 +1733,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const search = normalizeText(searchInput?.value || '');
         const searchTokens = search.split(' ').filter(Boolean);
         const estado = normalizeText(estadoSelect?.value || '');
+        const linkState = (linkSelect?.value || '').trim();
 
         return getRows().filter(function (row) {
             const searchable = normalizeText([
@@ -1716,6 +1753,14 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             if (estado && normalizeText(row.dataset.estado || '') !== estado) {
+                return false;
+            }
+
+            if (linkState === 'habilitado' && row.dataset.hasLink !== '1') {
+                return false;
+            }
+
+            if (linkState === 'deshabilitado' && row.dataset.hasLink === '1') {
                 return false;
             }
 
@@ -2073,6 +2118,7 @@ document.addEventListener('DOMContentLoaded', function () {
         showToast(successMessage);
     }
 
+    syncFilterTriggerStates();
     renderGrid(true);
 
     window.requestAnimationFrame(function () {

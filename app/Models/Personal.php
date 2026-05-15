@@ -39,6 +39,11 @@ class Personal extends Model
         'fecha_ingreso' => 'date',
     ];
 
+    public function setNombreCompletoAttribute(mixed $value): void
+    {
+        $this->attributes['nombre_completo'] = mb_strtoupper(trim((string) $value), 'UTF-8');
+    }
+
     public function minas(): BelongsToMany
     {
         return $this->belongsToMany(Mina::class, 'personal_mina', 'personal_id', 'mina_id')

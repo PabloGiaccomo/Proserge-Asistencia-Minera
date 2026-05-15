@@ -29,14 +29,22 @@ class PersonalImportController extends Controller
             $result = $this->service->import($request->file('file'));
             $summaryLines = $this->buildSummaryLines($result);
 
-            $message = sprintf(
-                'Importacion completada: %d nuevos, %d actualizados, %d reactivados, %d inactivados y %d campos modificados.',
-                $result['nuevos'] ?? 0,
-                $result['actualizados'] ?? 0,
-                $result['reactivados'] ?? 0,
-                $result['inactivados'] ?? 0,
-                $result['camposActualizados'] ?? 0,
-            );
+            if (($result['tipoImportacion'] ?? null) === 'contactos') {
+                $message = sprintf(
+                    'Importacion de contactos completada: %d trabajador(es) actualizado(s) y %d campo(s) modificado(s).',
+                    $result['actualizados'] ?? 0,
+                    $result['camposActualizados'] ?? 0,
+                );
+            } else {
+                $message = sprintf(
+                    'Importacion completada: %d nuevos, %d actualizados, %d reactivados, %d inactivados y %d campos modificados.',
+                    $result['nuevos'] ?? 0,
+                    $result['actualizados'] ?? 0,
+                    $result['reactivados'] ?? 0,
+                    $result['inactivados'] ?? 0,
+                    $result['camposActualizados'] ?? 0,
+                );
+            }
 
             \Illuminate\Support\Facades\Log::info('ImportPersonalSummary', $result);
 
@@ -95,6 +103,13 @@ class PersonalImportController extends Controller
         $relacionesEliminadas = (int) ($result['relacionesMinaEliminadas'] ?? 0);
         $telefonosDetectados = (int) ($result['telefonosDetectados'] ?? 0);
         $telefonosOmitidos = (int) ($result['telefonosCasosOmitidos'] ?? 0);
+        $noEncontrados = (int) ($result['noEncontrados'] ?? 0);
+        $correosInvalidos = (int) ($result['correosInvalidos'] ?? 0);
+        $sinCambios = (int) ($result['sinCambios'] ?? 0);
+
+        if (!empty($result['formatoDetectado'])) {
+            $lines[] = 'Formato detectado: ' . $result['formatoDetectado'] . '.';
+        }
 
         if (($nuevos + $actualizados + $reactivados + $inactivados) === 0) {
             $lines[] = 'No se detectaron altas ni cambios sobre el personal con este archivo.';
@@ -130,6 +145,20 @@ class PersonalImportController extends Controller
                 $parts[] = $omitidos . ' omitido(s)';
             }
             $lines[] = 'Observaciones detectadas: ' . implode(', ', $parts) . '.';
+        }
+
+        if (($noEncontrados + $correosInvalidos + $sinCambios) > 0) {
+            $parts = [];
+            if ($noEncontrados > 0) {
+                $parts[] = $noEncontrados . ' DNI no encontrado(s)';
+            }
+            if ($correosInvalidos > 0) {
+                $parts[] = $correosInvalidos . ' correo(s) invalido(s)';
+            }
+            if ($sinCambios > 0) {
+                $parts[] = $sinCambios . ' trabajador(es) sin cambios';
+            }
+            $lines[] = 'Detalle de contactos: ' . implode(', ', $parts) . '.';
         }
 
         if (($relacionesCreadas + $relacionesActualizadas + $relacionesEliminadas) > 0) {

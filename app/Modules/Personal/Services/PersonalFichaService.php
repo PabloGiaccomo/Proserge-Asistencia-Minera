@@ -1685,6 +1685,6 @@ class PersonalFichaService
             $data['nombres'] ?? '',
         ])->map(fn ($value): string => PersonalNormalizer::text($value))->filter()->implode(' ');
 
-        return $name !== '' ? $name : 'Pendiente completar nombres';
+        return $name !== '' ? mb_strtoupper($name, 'UTF-8') : 'PENDIENTE COMPLETAR NOMBRES';
     }
 }

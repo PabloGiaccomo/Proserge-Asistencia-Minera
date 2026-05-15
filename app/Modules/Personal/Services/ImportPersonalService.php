@@ -35,6 +35,14 @@ class ImportPersonalService
         'correo' => null,
     ];
 
+    private const CONTACT_FORMAT_REQUIRED_COLUMNS = [
+        'dni',
+        'nombre',
+        'puesto',
+        'telefono',
+        'correo',
+    ];
+
     private const PHONE_ALIASES = [
         'celularparticular',
         'celular',
@@ -99,6 +107,20 @@ class ImportPersonalService
             return false;
         }));
 
+        $contactColumns = $this->detectContactColumns($headers);
+        if ($contactColumns !== null) {
+            return $this->importContactRows($dataRows, $contactColumns);
+        }
+
+        if ($this->looksLikeContactWorkbook($headers)) {
+            throw new \RuntimeException('El Excel de contactos no tiene todas las columnas requeridas. Debe incluir DNI, NOMBRES, CARGO, CELULAR y CORREO.');
+        }
+
+        $strictColumns = $this->detectColumns($headers, false);
+        if (!$this->isSupportedMasterFormat($headers, $dataRows, $strictColumns)) {
+            throw new \RuntimeException('No se reconocio el formato del archivo. Sube el Master General o el Excel de contactos con columnas DNI, NOMBRES, CARGO, CELULAR y CORREO.');
+        }
+
         $columns = $this->detectColumns($headers);
         $detectedMines = $this->detectMineColumns($headers, $dataRows, $columns);
         $mineSync = $this->syncMines($detectedMines);
@@ -110,6 +132,8 @@ class ImportPersonalService
             $hasTelefono2Column = Schema::hasColumn('personal', 'telefono_2');
 
             $stats = [
+                'tipoImportacion' => 'master',
+                'formatoDetectado' => 'Master General',
                 'nuevos' => 0,
                 'reactivados' => 0,
                 'inactivados' => 0,
@@ -133,8 +157,12 @@ class ImportPersonalService
                 'telefonosCasosInvalidosLimpios' => 0,
                 'telefonosCasosOmitidos' => 0,
                 'telefonosConMasDeDos' => 0,
+                'correosInvalidos' => 0,
+                'correosInvalidosDetalle' => [],
                 'cambiosDetectadosTotal' => 0,
                 'cambiosDetectados' => [],
+                'omitidosDetalle' => [],
+                'noActualizadosDetalle' => [],
                 'nuevosDetalle' => [],
                 'reactivadosDetalle' => [],
                 'inactivadosDetalle' => [],
@@ -187,25 +215,29 @@ class ImportPersonalService
             foreach (array_chunk($dataRows, self::IMPORT_BATCH_SIZE) as $chunkRows) {
                 DB::transaction(function () use ($chunkRows, $columns, $mineMap, $hasTelefonoColumn, $hasTelefono1Column, $hasTelefono2Column, $existing, &$processedDni, &$stats): void {
                     foreach ($chunkRows as $row) {
-                $dni = PersonalNormalizer::dni($row[$columns['dni']] ?? null);
+                $rawDni = PersonalNormalizer::text($row[$columns['dni']] ?? null);
+                $dni = PersonalNormalizer::dni($rawDni);
                 if (!PersonalNormalizer::isValidDni($dni)) {
                     $stats['omitidos']++;
+                    $this->registerNotUpdatedDetail($stats, 'omitidosDetalle', $dni ?: $rawDni, PersonalNormalizer::text($row[$columns['nombre']] ?? null), 'DNI invalido o vacio');
                     continue;
                 }
 
                 if (isset($processedDni[$dni])) {
                     $stats['duplicados']++;
+                    $this->registerNotUpdatedDetail($stats, 'noActualizadosDetalle', $dni, PersonalNormalizer::text($row[$columns['nombre']] ?? null), 'DNI duplicado en el archivo');
                     continue;
                 }
                 $processedDni[$dni] = true;
 
-                $nombreImportado = PersonalNormalizer::text($row[$columns['nombre']] ?? '');
+                $nombreImportado = mb_strtoupper(PersonalNormalizer::text($row[$columns['nombre']] ?? ''), 'UTF-8');
                 $puestoImportado = PersonalNormalizer::text($row[$columns['puesto']] ?? '');
                 $ocupacionImportada = PersonalNormalizer::text($row[$columns['ocupacion']] ?? '');
                 $contratoImportadoRaw = PersonalNormalizer::text($row[$columns['contrato']] ?? null);
-                $correoImportado = Schema::hasColumn('personal', 'correo') && isset($columns['correo']) && $columns['correo'] !== null
-                    ? (PersonalNormalizer::text($row[$columns['correo']] ?? '') ?: null)
-                    : null;
+                $correoRaw = Schema::hasColumn('personal', 'correo') && isset($columns['correo']) && $columns['correo'] !== null
+                    ? PersonalNormalizer::text($row[$columns['correo']] ?? '')
+                    : '';
+                $correoImportado = $correoRaw !== '' ? $this->normalizeEmail($correoRaw) : null;
 
                 $nombre = $nombreImportado !== '' ? $nombreImportado : 'Sin nombre';
                 $puesto = $puestoImportado !== '' ? $puestoImportado : 'Sin puesto';
@@ -245,6 +277,12 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                         'raw' => $phoneData['raw'] ?? null,
                         'telefonos_detectados' => $phoneData['all_valid_numbers'] ?? [],
                     ]);
+                }
+
+                if ($correoRaw !== '' && $correoImportado === null) {
+                    $stats['correosInvalidos']++;
+                    $this->registerInvalidEmailDetail($stats, $dni, $nombreImportado, $correoRaw);
+                    $this->registerNotUpdatedDetail($stats, 'noActualizadosDetalle', $dni, $nombreImportado, 'Correo invalido: ' . $correoRaw);
                 }
 
                 $personal = $existing->get($dni);
@@ -466,6 +504,278 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
         })();
     }
 
+    private function importContactRows(array $dataRows, array $columns): array
+    {
+        $hasTelefonoColumn = Schema::hasColumn('personal', 'telefono');
+        $hasTelefono1Column = Schema::hasColumn('personal', 'telefono_1');
+        $hasTelefono2Column = Schema::hasColumn('personal', 'telefono_2');
+        $hasCorreoColumn = Schema::hasColumn('personal', 'correo');
+
+        $stats = $this->emptyStats();
+        $stats['tipoImportacion'] = 'contactos';
+        $stats['formatoDetectado'] = 'Excel de correos y celulares';
+        $stats['filasLeidas'] = count($dataRows);
+        $stats['noEncontrados'] = 0;
+        $stats['correosInvalidos'] = 0;
+        $stats['sinCambios'] = 0;
+
+        $existingSelect = [
+            'id',
+            'dni',
+            'nombre_completo',
+            'puesto',
+            'estado',
+        ];
+
+        if ($hasTelefonoColumn) {
+            $existingSelect[] = 'telefono';
+        }
+
+        if ($hasTelefono1Column) {
+            $existingSelect[] = 'telefono_1';
+        }
+
+        if ($hasTelefono2Column) {
+            $existingSelect[] = 'telefono_2';
+        }
+
+        if ($hasCorreoColumn) {
+            $existingSelect[] = 'correo';
+        }
+
+        $existing = Personal::query()
+            ->with('fichaColaborador')
+            ->get($existingSelect)
+            ->keyBy('dni');
+
+        $processedDni = [];
+
+        foreach (array_chunk($dataRows, self::IMPORT_BATCH_SIZE) as $chunkRows) {
+            DB::transaction(function () use ($chunkRows, $columns, $hasTelefonoColumn, $hasTelefono1Column, $hasTelefono2Column, $hasCorreoColumn, $existing, &$processedDni, &$stats): void {
+                foreach ($chunkRows as $row) {
+                    if (!$this->rowHasContent($row)) {
+                        continue;
+                    }
+
+                    $rawDni = PersonalNormalizer::text($row[$columns['dni']] ?? null);
+                    $rowName = PersonalNormalizer::text($row[$columns['nombre']] ?? null);
+                    $dni = PersonalNormalizer::dni($rawDni);
+                    if (!PersonalNormalizer::isValidDni($dni)) {
+                        $stats['omitidos']++;
+                        $this->registerNotUpdatedDetail($stats, 'omitidosDetalle', $dni ?: $rawDni, $rowName, 'DNI invalido o vacio');
+                        continue;
+                    }
+
+                    if (isset($processedDni[$dni])) {
+                        $stats['duplicados']++;
+                        $this->registerNotUpdatedDetail($stats, 'noActualizadosDetalle', $dni, $rowName, 'DNI duplicado en el archivo');
+                        continue;
+                    }
+                    $processedDni[$dni] = true;
+
+                    $personal = $existing->get($dni);
+                    if (!$personal) {
+                        $stats['omitidos']++;
+                        $stats['noEncontrados']++;
+                        $this->registerNotUpdatedDetail($stats, 'omitidosDetalle', $dni, $rowName, 'DNI no encontrado en personal');
+                        continue;
+                    }
+
+                    $puestoImportado = PersonalNormalizer::text($row[$columns['puesto']] ?? '');
+                    $puesto = $puestoImportado !== ''
+                        ? mb_substr($puestoImportado, 0, self::MAX_PUESTO_LENGTH)
+                        : '';
+                    $correoRaw = $hasCorreoColumn ? PersonalNormalizer::text($row[$columns['correo']] ?? '') : '';
+                    $correoImportado = $this->normalizeEmail($correoRaw);
+                    $phoneData = PersonalNormalizer::normalizePhonePayload($row[$columns['telefono']] ?? null);
+
+                    $this->addPhoneStats($stats, $dni, $phoneData);
+
+                    $updates = [];
+                    $workerChanges = [];
+                    $mergedFichaData = [];
+                    $notUpdatedReasons = [];
+                    $hasNotUpdatedDetail = false;
+
+                    if ($puesto !== '' && (string) $personal->puesto !== $puesto) {
+                        $updates['puesto'] = $puesto;
+                        $mergedFichaData['puesto'] = $puesto;
+                        $stats['puestosActualizados']++;
+                        $this->registerFieldChange($workerChanges, $stats, 'puesto', 'Cargo/Puesto', $personal->puesto, $puesto);
+                    }
+
+                    $oldCombinedPhone = PersonalNormalizer::combinePhones(
+                        $personal->telefono_1 ?? null,
+                        $personal->telefono_2 ?? null
+                    ) ?? ($personal->telefono ?? null);
+                    $newCombinedPhone = PersonalNormalizer::combinePhones($phoneData['telefono_1'], $phoneData['telefono_2']);
+
+                    if ($phoneData['valid_count'] > 0 && (string) ($oldCombinedPhone ?? '') !== (string) ($newCombinedPhone ?? '')) {
+                        $this->registerFieldChange($workerChanges, $stats, 'telefono', 'Telefono', $oldCombinedPhone, $newCombinedPhone);
+                    }
+
+                    if ($phoneData['valid_count'] > 0 && $hasTelefonoColumn && (string) ($personal->telefono ?? '') !== (string) ($newCombinedPhone ?? '')) {
+                        $updates['telefono'] = $newCombinedPhone;
+                        $mergedFichaData['telefono'] = $newCombinedPhone;
+                    }
+
+                    if ($phoneData['valid_count'] > 0 && $hasTelefono1Column && (string) ($personal->telefono_1 ?? '') !== (string) ($phoneData['telefono_1'] ?? '')) {
+                        $updates['telefono_1'] = $phoneData['telefono_1'];
+                    }
+
+                    if ($phoneData['valid_count'] > 0 && $hasTelefono2Column && (string) ($personal->telefono_2 ?? '') !== (string) ($phoneData['telefono_2'] ?? '')) {
+                        $updates['telefono_2'] = $phoneData['telefono_2'];
+                    }
+
+                    if ($correoRaw !== '' && $correoImportado === null) {
+                        $stats['correosInvalidos']++;
+                        $notUpdatedReasons[] = 'Correo invalido: ' . $correoRaw;
+                        $this->registerInvalidEmailDetail($stats, $dni, $personal->nombre_completo ?: $rowName, $correoRaw);
+                        $this->registerNotUpdatedDetail(
+                            $stats,
+                            'noActualizadosDetalle',
+                            $dni,
+                            $personal->nombre_completo ?: $rowName,
+                            'Correo invalido: ' . $correoRaw
+                        );
+                        $hasNotUpdatedDetail = true;
+                    } elseif ($correoImportado !== null && (string) ($personal->correo ?? '') !== (string) $correoImportado) {
+                        $updates['correo'] = $correoImportado;
+                        $mergedFichaData['correo'] = $correoImportado;
+                        $this->registerFieldChange($workerChanges, $stats, 'correo', 'Correo', $personal->correo, $correoImportado);
+                    }
+
+                    if (count($updates) > 0) {
+                        Personal::query()->where('id', $personal->id)->update($updates);
+                        $personal->fill($updates);
+                        $this->syncFichaWithImportData($personal, $mergedFichaData);
+                    }
+
+                    if (count($workerChanges) > 0) {
+                        $stats['actualizados']++;
+                        $stats['cambiosDetectadosTotal']++;
+
+                        if (count($stats['cambiosDetectados']) < self::MAX_CHANGE_DETAILS) {
+                            $stats['cambiosDetectados'][] = [
+                                'dni' => $dni,
+                                'nombre' => $personal->nombre_completo ?: PersonalNormalizer::text($row[$columns['nombre']] ?? ''),
+                                'cambios' => array_values($workerChanges),
+                            ];
+                        }
+                    } else {
+                        $stats['sinCambios']++;
+                        if (!$hasNotUpdatedDetail) {
+                            $this->registerNotUpdatedDetail(
+                                $stats,
+                                'noActualizadosDetalle',
+                                $dni,
+                                $personal->nombre_completo ?: $rowName,
+                                $notUpdatedReasons !== [] ? implode('; ', $notUpdatedReasons) : 'Sin cambios para aplicar'
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
+        $stats['bloquesProcesados'] = count(array_chunk($dataRows, self::IMPORT_BATCH_SIZE));
+        $stats['tamanoBloque'] = self::IMPORT_BATCH_SIZE;
+
+        return $stats;
+    }
+
+    private function emptyStats(): array
+    {
+        return [
+            'nuevos' => 0,
+            'reactivados' => 0,
+            'inactivados' => 0,
+            'puestosActualizados' => 0,
+            'duplicados' => 0,
+            'omitidos' => 0,
+            'minasDetectadas' => [],
+            'minasActivasDetectadas' => 0,
+            'minasCreadas' => 0,
+            'minasReutilizadas' => 0,
+            'minasActualizadas' => 0,
+            'relacionesMinaCreadas' => 0,
+            'relacionesMinaActualizadas' => 0,
+            'relacionesMinaCreadasOActualizadas' => 0,
+            'relacionesMinaEliminadas' => 0,
+            'actualizados' => 0,
+            'camposActualizados' => 0,
+            'telefonosDetectados' => 0,
+            'trabajadoresCon1Telefono' => 0,
+            'trabajadoresCon2Telefonos' => 0,
+            'telefonosCasosInvalidosLimpios' => 0,
+            'telefonosCasosOmitidos' => 0,
+            'telefonosConMasDeDos' => 0,
+            'correosInvalidos' => 0,
+            'correosInvalidosDetalle' => [],
+            'cambiosDetectadosTotal' => 0,
+            'cambiosDetectados' => [],
+            'omitidosDetalle' => [],
+            'noActualizadosDetalle' => [],
+            'nuevosDetalle' => [],
+            'reactivadosDetalle' => [],
+            'inactivadosDetalle' => [],
+        ];
+    }
+
+    private function addPhoneStats(array &$stats, string $dni, array $phoneData): void
+    {
+        if ($phoneData['valid_count'] === 1) {
+            $stats['trabajadoresCon1Telefono']++;
+        }
+
+        if ($phoneData['valid_count'] === 2) {
+            $stats['trabajadoresCon2Telefonos']++;
+        }
+
+        if ($phoneData['valid_count'] > 0) {
+            $stats['telefonosDetectados'] += (int) $phoneData['valid_count'];
+        }
+
+        if ($phoneData['had_invalid_cleanup'] || $phoneData['had_duplicates']) {
+            $stats['telefonosCasosInvalidosLimpios']++;
+        }
+
+        if ($phoneData['raw_has_content'] && $phoneData['valid_count'] === 0) {
+            $stats['telefonosCasosOmitidos']++;
+        }
+
+        if ($phoneData['had_more_than_two']) {
+            $stats['telefonosConMasDeDos']++;
+
+            Log::warning('Import Personal: se detectaron mas de dos telefonos, se conservaron solo dos.', [
+                'dni' => $dni,
+                'raw' => $phoneData['raw'] ?? null,
+                'telefonos_detectados' => $phoneData['all_valid_numbers'] ?? [],
+            ]);
+        }
+    }
+
+    private function normalizeEmail(string $value): ?string
+    {
+        $email = mb_strtolower(trim($value));
+        if ($email === '') {
+            return null;
+        }
+
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
+    }
+
+    private function rowHasContent(array $row): bool
+    {
+        foreach ($row as $cell) {
+            if (PersonalNormalizer::text($cell) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function syncFichaWithImportData(Personal $personal, array $importedData): void
     {
         $importedData = array_filter(
@@ -528,7 +838,7 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
 
     private function nameFieldsFromFullName(string $nombreCompleto): array
     {
-        $nombreCompleto = trim($nombreCompleto);
+        $nombreCompleto = mb_strtoupper(trim($nombreCompleto), 'UTF-8');
         if ($nombreCompleto === '') {
             return [];
         }
@@ -617,6 +927,152 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
         }
 
         return $score;
+    }
+
+    private function detectContactColumns(array $headers): ?array
+    {
+        $columns = [
+            'dni' => null,
+            'nombre' => null,
+            'puesto' => null,
+            'telefono' => null,
+            'correo' => null,
+        ];
+
+        foreach ($headers as $index => $header) {
+            $text = PersonalNormalizer::text($header);
+            if ($text === '') {
+                continue;
+            }
+
+            $key = PersonalNormalizer::normalizeKey($text);
+
+            if ($columns['dni'] === null && in_array($key, ['dni', 'documento', 'nrodocumento', 'numerodocumento'], true)) {
+                $columns['dni'] = $index;
+                continue;
+            }
+
+            if ($columns['nombre'] === null && in_array($key, ['nombres', 'nombrecompleto', 'apellidosynombres', 'apellidosnombres'], true)) {
+                $columns['nombre'] = $index;
+                continue;
+            }
+
+            if ($columns['puesto'] === null && in_array($key, ['cargo', 'puesto', 'cargopuesto', 'cargogeneral'], true)) {
+                $columns['puesto'] = $index;
+                continue;
+            }
+
+            if ($columns['telefono'] === null && in_array($key, self::PHONE_ALIASES, true)) {
+                $columns['telefono'] = $index;
+                continue;
+            }
+
+            if ($columns['correo'] === null && in_array($key, ['correo', 'email', 'correoelectronico', 'mailelectronico'], true)) {
+                $columns['correo'] = $index;
+            }
+        }
+
+        foreach (self::CONTACT_FORMAT_REQUIRED_COLUMNS as $required) {
+            if ($columns[$required] === null) {
+                return null;
+            }
+        }
+
+        return $columns;
+    }
+
+    private function looksLikeContactWorkbook(array $headers): bool
+    {
+        $found = [
+            'dni' => false,
+            'nombre' => false,
+            'puesto' => false,
+            'telefono' => false,
+            'correo' => false,
+            'fecha_fin' => false,
+            'ocupacion' => false,
+            'contrato' => false,
+        ];
+
+        foreach ($headers as $header) {
+            $key = PersonalNormalizer::normalizeKey(PersonalNormalizer::text($header));
+            if ($key === '') {
+                continue;
+            }
+
+            if (in_array($key, ['dni', 'documento', 'nrodocumento', 'numerodocumento'], true)) {
+                $found['dni'] = true;
+            }
+
+            if (in_array($key, ['nombres', 'nombrecompleto', 'apellidosynombres', 'apellidosnombres'], true)) {
+                $found['nombre'] = true;
+            }
+
+            if (in_array($key, ['cargo', 'puesto', 'cargopuesto', 'cargogeneral'], true)) {
+                $found['puesto'] = true;
+            }
+
+            if (in_array($key, self::PHONE_ALIASES, true)) {
+                $found['telefono'] = true;
+            }
+
+            if (in_array($key, ['correo', 'email', 'correoelectronico', 'mailelectronico'], true)) {
+                $found['correo'] = true;
+            }
+
+            if (str_contains($key, 'fechafin') || str_contains($key, 'fechadefin') || str_contains($key, 'findecontrato')) {
+                $found['fecha_fin'] = true;
+            }
+
+            if (str_contains($key, 'ocup')) {
+                $found['ocupacion'] = true;
+            }
+
+            if (str_contains($key, 'contrato')) {
+                $found['contrato'] = true;
+            }
+        }
+
+        $hasContactCore = $found['dni'] && $found['nombre'] && $found['puesto'] && ($found['telefono'] || $found['correo'] || $found['fecha_fin']);
+        $looksLikeMaster = $found['ocupacion'] || $found['contrato'];
+
+        return $hasContactCore && !$looksLikeMaster;
+    }
+
+    private function isSupportedMasterFormat(array $headers, array $dataRows, array $strictColumns): bool
+    {
+        $hasCoreHeaders = $strictColumns['dni'] !== null
+            && $strictColumns['nombre'] !== null
+            && $strictColumns['puesto'] !== null
+            && $strictColumns['fecha_ingreso'] !== null;
+
+        if ($hasCoreHeaders) {
+            return true;
+        }
+
+        if ($this->scoreHeaderCandidate($headers) >= 3) {
+            return true;
+        }
+
+        return $this->looksLikeLegacyMasterByPosition($dataRows);
+    }
+
+    private function looksLikeLegacyMasterByPosition(array $dataRows): bool
+    {
+        $sample = array_slice($dataRows, 0, 40);
+        $validRows = 0;
+
+        foreach ($sample as $row) {
+            $dni = PersonalNormalizer::dni($row[self::DEFAULT_COLUMNS['dni']] ?? null);
+            $nombre = PersonalNormalizer::text($row[self::DEFAULT_COLUMNS['nombre']] ?? null);
+            $puesto = PersonalNormalizer::text($row[self::DEFAULT_COLUMNS['puesto']] ?? null);
+
+            if (PersonalNormalizer::isValidDni($dni) && $nombre !== '' && $puesto !== '') {
+                $validRows++;
+            }
+        }
+
+        return $validRows >= 3;
     }
 
     private function readRows(UploadedFile $file): array
@@ -823,7 +1279,7 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
         return max(0, $index - 1);
     }
 
-    private function detectColumns(array $headers): array
+    private function detectColumns(array $headers, bool $applyFallbacks = true): array
     {
         $indexes = [
             'dni' => null,
@@ -897,14 +1353,16 @@ $normalizedHeader = PersonalNormalizer::normalizeKey($upper);
             }
         }
 
-        foreach (self::DEFAULT_COLUMNS as $key => $fallback) {
-            if ($indexes[$key] === null) {
-                $indexes[$key] = $fallback;
+        if ($applyFallbacks) {
+            foreach (self::DEFAULT_COLUMNS as $key => $fallback) {
+                if ($indexes[$key] === null) {
+                    $indexes[$key] = $fallback;
+                }
             }
-        }
 
-        if (count($indexes['telefonos']) === 0 && isset($headers[12])) {
-            $indexes['telefonos'][] = 12;
+            if (count($indexes['telefonos']) === 0 && isset($headers[12])) {
+                $indexes['telefonos'][] = 12;
+            }
         }
 
         return $indexes;
@@ -930,6 +1388,43 @@ $normalizedHeader = PersonalNormalizer::normalizeKey($upper);
         }
 
         return implode(' / ', $values);
+    }
+
+    private function registerNotUpdatedDetail(array &$stats, string $bucket, mixed $dni, mixed $nombre, string $motivo): void
+    {
+        if (!isset($stats[$bucket]) || !is_array($stats[$bucket])) {
+            $stats[$bucket] = [];
+        }
+
+        if (count($stats[$bucket]) >= self::MAX_CHANGE_DETAILS) {
+            return;
+        }
+
+        $dniText = PersonalNormalizer::text($dni);
+
+        $stats[$bucket][] = [
+            'dni' => $dniText !== '' ? $dniText : 'Sin DNI',
+            'nombre' => PersonalNormalizer::text($nombre) ?: '-',
+            'motivo' => $motivo,
+        ];
+    }
+
+    private function registerInvalidEmailDetail(array &$stats, mixed $dni, mixed $nombre, string $correo): void
+    {
+        if (!isset($stats['correosInvalidosDetalle']) || !is_array($stats['correosInvalidosDetalle'])) {
+            $stats['correosInvalidosDetalle'] = [];
+        }
+
+        if (count($stats['correosInvalidosDetalle']) >= self::MAX_CHANGE_DETAILS) {
+            return;
+        }
+
+        $stats['correosInvalidosDetalle'][] = [
+            'dni' => PersonalNormalizer::text($dni) ?: 'Sin DNI',
+            'nombre' => PersonalNormalizer::text($nombre) ?: '-',
+            'correo' => $correo,
+            'motivo' => 'Formato de correo invalido',
+        ];
     }
 
     private function registerFieldChange(array &$workerChanges, array &$stats, string $key, string $label, mixed $before, mixed $after): void
