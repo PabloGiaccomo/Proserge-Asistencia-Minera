@@ -145,10 +145,143 @@
             justify-content: flex-start;
         }
 
+        .temporales-actions-wrap {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .temporales-actions-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 230px;
+            padding: 8px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #fff;
+            box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+            display: none;
+            z-index: 1300;
+        }
+
+        .temporales-actions-menu.is-open {
+            display: grid;
+            gap: 4px;
+        }
+
+        .temporales-action-item {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: #334155;
+            border-radius: 9px;
+            padding: 10px 12px;
+            text-align: left;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .temporales-action-item:hover {
+            background: #f8fafc;
+            color: #0f172a;
+        }
+
         .email-template-modal {
             width: min(960px, calc(100vw - 28px));
             border-radius: 14px;
             padding: 24px;
+        }
+
+        .bulk-email-modal {
+            width: min(760px, calc(100vw - 28px));
+            border-radius: 14px;
+            padding: 24px;
+        }
+
+        .bulk-extend-modal {
+            width: min(720px, calc(100vw - 28px));
+            border-radius: 14px;
+            padding: 24px;
+        }
+
+        .bulk-email-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .bulk-email-list {
+            display: grid;
+            gap: 8px;
+            max-height: 420px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .bulk-email-person {
+            display: grid;
+            grid-template-columns: 22px minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: #fff;
+        }
+
+        .bulk-email-person.is-disabled {
+            background: #f8fafc;
+            color: #94a3b8;
+        }
+
+        .bulk-email-person input {
+            margin-top: 3px;
+        }
+
+        .bulk-email-person-name {
+            color: #0f172a;
+            font-weight: 800;
+            line-height: 1.35;
+        }
+
+        .bulk-email-person-meta {
+            margin-top: 3px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.35;
+            word-break: break-all;
+        }
+
+        .bulk-email-person.is-disabled .bulk-email-person-name,
+        .bulk-email-person.is-disabled .bulk-email-person-meta {
+            color: #94a3b8;
+        }
+
+        .bulk-email-empty {
+            border: 1px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 18px;
+            color: #64748b;
+            font-size: 13px;
+            line-height: 1.5;
+            background: #f8fafc;
+        }
+
+        .bulk-extend-date {
+            margin-bottom: 14px;
+            display: grid;
+            gap: 7px;
+            max-width: 320px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .email-template-grid {
@@ -295,6 +428,77 @@
             word-break: break-all;
         }
 
+        .bulk-email-progress {
+            position: fixed;
+            top: 88px;
+            left: 50%;
+            width: min(520px, calc(100vw - 32px));
+            transform: translate(-50%, -10px);
+            z-index: 1500;
+            border: 1px solid #bae6fd;
+            border-radius: 14px;
+            background: #ffffff;
+            box-shadow: 0 22px 54px rgba(15, 23, 42, 0.18);
+            padding: 14px 16px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .bulk-email-progress.is-visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+            pointer-events: auto;
+        }
+
+        .bulk-email-progress-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .bulk-email-progress-title {
+            margin: 0;
+            color: #0f172a;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .bulk-email-progress-count {
+            color: #0f766e;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .bulk-email-progress-track {
+            height: 10px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            overflow: hidden;
+        }
+
+        .bulk-email-progress-bar {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #19d3c5 0%, #0ea5e9 100%);
+            transition: width 0.18s ease;
+        }
+
+        .bulk-email-progress-detail {
+            margin-top: 8px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .bulk-email-progress.is-complete {
+            border-color: #99f6e4;
+            background: #ecfeff;
+        }
+
         .temporales-boot-overlay {
             position: fixed;
             inset: 0;
@@ -396,10 +600,19 @@
                 <p class="page-subtitle">Trabajadores generados desde macro pendientes de completar, validar o activar.</p>
             </div>
             <div class="page-actions">
-                @allowed('personal', 'editar')
-                    <button type="button" class="btn btn-outline" id="openEmailTemplateModal">Editar correo de envio</button>
-                @endallowed
-                <a href="{{ route('personal.fichas.import') }}" class="btn btn-primary">Importar macro</a>
+                <div class="temporales-actions-wrap">
+                    <button type="button" class="btn btn-primary" id="temporalesActionsButton" aria-expanded="false" aria-haspopup="true">Acciones</button>
+                    <div class="temporales-actions-menu" id="temporalesActionsMenu">
+                        @allowed('personal', 'importar')
+                            <a href="{{ route('personal.fichas.import') }}" class="temporales-action-item">Importar macro</a>
+                        @endallowed
+                        @allowed('personal', 'editar')
+                            <button type="button" class="temporales-action-item" id="openEmailTemplateModal">Editar correo de envio</button>
+                            <button type="button" class="temporales-action-item" id="openBulkEmailModal">Enviar comunicaciones</button>
+                            <button type="button" class="temporales-action-item" id="openBulkExtendModal">Ampliar links activos</button>
+                        @endallowed
+                    </div>
+                </div>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver a Personal</a>
             </div>
         </div>
@@ -418,6 +631,16 @@
     @endif
 
     <div class="temporales-toast-stack" id="temporalesToastStack" aria-live="polite" aria-atomic="true"></div>
+    <div class="bulk-email-progress" id="bulkEmailProgress" aria-live="polite" aria-atomic="true">
+        <div class="bulk-email-progress-head">
+            <h2 class="bulk-email-progress-title" id="bulkEmailProgressTitle">Enviando correos</h2>
+            <span class="bulk-email-progress-count" id="bulkEmailProgressCount">0/0</span>
+        </div>
+        <div class="bulk-email-progress-track" aria-hidden="true">
+            <div class="bulk-email-progress-bar" id="bulkEmailProgressBar"></div>
+        </div>
+        <div class="bulk-email-progress-detail" id="bulkEmailProgressDetail">Preparando envio...</div>
+    </div>
 
     @allowed('personal', 'editar')
         <div id="emailTemplateModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('emailTemplateModal')">
@@ -464,6 +687,66 @@
                         <button type="button" class="btn btn-outline" id="resetEmailTemplate">Restaurar base</button>
                         <button type="button" class="btn btn-outline" onclick="closeModal('emailTemplateModal')">Cancelar</button>
                         <button type="submit" class="btn btn-primary" id="saveEmailTemplate">Guardar correo</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endallowed
+
+    @allowed('personal', 'editar')
+        <div id="bulkEmailModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('bulkEmailModal')">
+            <div class="modal-backdrop" onclick="closeModal('bulkEmailModal')"></div>
+            <div class="modal-content bulk-email-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">Enviar comunicaciones</h2>
+                        <p class="modal-subtitle" style="margin:6px 0 0;">Solo aparecen trabajadores con link temporal habilitado.</p>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeModal('bulkEmailModal')" aria-label="Cerrar">X</button>
+                </div>
+                <form id="bulkEmailForm" action="{{ route('personal.fichas.send-bulk-email') }}" method="POST">
+                    @csrf
+                    <div class="bulk-email-toolbar">
+                        <label class="bulk-email-select-all">
+                            <input id="bulkEmailSelectAll" type="checkbox" checked>
+                            Seleccionar todos
+                        </label>
+                        <div class="ficha-card-subtitle" id="bulkEmailCount">0 seleccionados</div>
+                    </div>
+                    <div class="bulk-email-list" id="bulkEmailList"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('bulkEmailModal')">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="sendBulkEmailButton">Enviar seleccionados</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endallowed
+
+    @allowed('personal', 'editar')
+        <div id="bulkExtendModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('bulkExtendModal')">
+            <div class="modal-backdrop" onclick="closeModal('bulkExtendModal')"></div>
+            <div class="modal-content bulk-extend-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">Ampliar links activos</h2>
+                        <p class="modal-subtitle" style="margin:6px 0 0;">Se ampliaran todos los links habilitados hasta la fecha indicada.</p>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeModal('bulkExtendModal')" aria-label="Cerrar">X</button>
+                </div>
+                <form id="bulkExtendForm" action="{{ route('personal.fichas.extend-bulk-active') }}" method="POST">
+                    @csrf
+                    <label class="bulk-extend-date">
+                        Nueva fecha de vencimiento
+                        <input id="bulkExtendDate" class="ficha-input" type="datetime-local" name="expires_at" required>
+                    </label>
+                    <div class="bulk-email-toolbar">
+                        <div class="ficha-card-subtitle" id="bulkExtendCount">0 links activos</div>
+                    </div>
+                    <div class="bulk-email-list" id="bulkExtendList"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('bulkExtendModal')">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="saveBulkExtendButton">Ampliar links</button>
                     </div>
                 </form>
             </div>
@@ -538,12 +821,16 @@
                             @endphp
                             <tr
                                 class="js-person-card"
+                                data-row-id="{{ $ficha->id }}"
                                 data-nombre="{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}"
                                 data-dni="{{ trim(($ficha->tipo_documento ?? '') . ' ' . ($ficha->numero_documento ?? '')) }}"
                                 data-puesto="{{ $personal?->puesto ?: 'Puesto pendiente' }}"
                                 data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
                                 data-estado="{{ $row['estado_label'] }}"
                                 data-correo="{{ $correo ?? '' }}"
+                                data-has-link="{{ $row['url'] ? '1' : '0' }}"
+                                data-can-email="{{ ($row['url'] && $correo) ? '1' : '0' }}"
+                                data-expires-at="{{ optional($link?->expires_at)->format('d/m/Y H:i') ?: '' }}"
                                 data-celular="{{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '') }}">
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
@@ -697,7 +984,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const paginationMeta = document.getElementById('temporalesPaginationMeta');
     const paginationWrap = document.getElementById('temporalesPaginationWrap');
     const countBadge = document.getElementById('temporalesCount');
+    const temporalesActionsButton = document.getElementById('temporalesActionsButton');
+    const temporalesActionsMenu = document.getElementById('temporalesActionsMenu');
     const openEmailTemplateButton = document.getElementById('openEmailTemplateModal');
+    const openBulkEmailButton = document.getElementById('openBulkEmailModal');
+    const openBulkExtendButton = document.getElementById('openBulkExtendModal');
     const emailTemplateForm = document.getElementById('emailTemplateForm');
     const emailTemplateSubject = document.getElementById('emailTemplateSubject');
     const emailTemplateBody = document.getElementById('emailTemplateBody');
@@ -706,6 +997,21 @@ document.addEventListener('DOMContentLoaded', function () {
     const emailTemplateWarning = document.getElementById('emailTemplateWarning');
     const saveEmailTemplateButton = document.getElementById('saveEmailTemplate');
     const resetEmailTemplateButton = document.getElementById('resetEmailTemplate');
+    const bulkEmailForm = document.getElementById('bulkEmailForm');
+    const bulkEmailList = document.getElementById('bulkEmailList');
+    const bulkEmailSelectAll = document.getElementById('bulkEmailSelectAll');
+    const bulkEmailCount = document.getElementById('bulkEmailCount');
+    const sendBulkEmailButton = document.getElementById('sendBulkEmailButton');
+    const bulkEmailProgress = document.getElementById('bulkEmailProgress');
+    const bulkEmailProgressTitle = document.getElementById('bulkEmailProgressTitle');
+    const bulkEmailProgressCount = document.getElementById('bulkEmailProgressCount');
+    const bulkEmailProgressBar = document.getElementById('bulkEmailProgressBar');
+    const bulkEmailProgressDetail = document.getElementById('bulkEmailProgressDetail');
+    const bulkExtendForm = document.getElementById('bulkExtendForm');
+    const bulkExtendDate = document.getElementById('bulkExtendDate');
+    const bulkExtendList = document.getElementById('bulkExtendList');
+    const bulkExtendCount = document.getElementById('bulkExtendCount');
+    const saveBulkExtendButton = document.getElementById('saveBulkExtendButton');
     const estadoSelect = document.getElementById('temporalesEstadoSelect');
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
@@ -716,6 +1022,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const emailTokenVence = '@{{ vence }}';
     const emailTokenLink = '@{{ link }}';
     const emailTokenTipoEnvio = '@{{ tipo_envio }}';
+    const bulkEmailBatchSize = 10;
     let pageSize = Number(pageSizeSelect?.value || 10);
     let currentPage = 1;
     let lastEmailTemplateField = emailTemplateBody;
@@ -848,8 +1155,32 @@ document.addEventListener('DOMContentLoaded', function () {
         renderEmailTemplatePreview();
     }
 
+    function closeActionsMenu() {
+        if (temporalesActionsMenu) {
+            temporalesActionsMenu.classList.remove('is-open');
+        }
+        if (temporalesActionsButton) {
+            temporalesActionsButton.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    if (temporalesActionsButton && temporalesActionsMenu) {
+        temporalesActionsButton.addEventListener('click', function (event) {
+            event.stopPropagation();
+            const willOpen = !temporalesActionsMenu.classList.contains('is-open');
+            closeAllPopovers();
+            temporalesActionsMenu.classList.toggle('is-open', willOpen);
+            temporalesActionsButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+
+        temporalesActionsMenu.addEventListener('click', function (event) {
+            event.stopPropagation();
+        });
+    }
+
     if (openEmailTemplateButton) {
         openEmailTemplateButton.addEventListener('click', function () {
+            closeActionsMenu();
             renderEmailTemplatePreview();
             openModal('emailTemplateModal');
         });
@@ -929,10 +1260,371 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function updateBulkEmailCount() {
+        if (!bulkEmailList) {
+            return;
+        }
+
+        const enabledChecks = Array.from(bulkEmailList.querySelectorAll('.js-bulk-email-check:not(:disabled)'));
+        const checked = enabledChecks.filter(function (input) {
+            return input.checked;
+        });
+
+        if (bulkEmailCount) {
+            bulkEmailCount.textContent = checked.length + ' seleccionado(s)';
+        }
+        if (bulkEmailSelectAll) {
+            bulkEmailSelectAll.checked = enabledChecks.length > 0 && checked.length === enabledChecks.length;
+            bulkEmailSelectAll.indeterminate = checked.length > 0 && checked.length < enabledChecks.length;
+            bulkEmailSelectAll.disabled = enabledChecks.length === 0;
+        }
+        if (sendBulkEmailButton) {
+            sendBulkEmailButton.disabled = checked.length === 0;
+        }
+    }
+
+    function renderBulkEmailList() {
+        if (!bulkEmailList) {
+            return;
+        }
+
+        const rows = getRows().filter(function (row) {
+            return row.dataset.hasLink === '1';
+        });
+
+        if (rows.length === 0) {
+            bulkEmailList.innerHTML = '<div class="bulk-email-empty">No hay trabajadores con link habilitado para enviar correo.</div>';
+            updateBulkEmailCount();
+            return;
+        }
+
+        bulkEmailList.innerHTML = rows.map(function (row) {
+            const canEmail = row.dataset.canEmail === '1';
+            const name = row.dataset.nombre || 'Trabajador pendiente';
+            const email = row.dataset.correo || '';
+            const rowId = row.dataset.rowId || '';
+            const meta = canEmail ? email : 'Sin correo valido registrado';
+
+            return '<label class="bulk-email-person ' + (canEmail ? '' : 'is-disabled') + '">' +
+                '<input type="checkbox" class="js-bulk-email-check" value="' + escapeHtml(rowId) + '"' + (canEmail ? ' checked' : ' disabled') + '>' +
+                '<span>' +
+                    '<span class="bulk-email-person-name">' + escapeHtml(name) + '</span>' +
+                    '<span class="bulk-email-person-meta">' + escapeHtml(meta) + '</span>' +
+                '</span>' +
+            '</label>';
+        }).join('');
+
+        bulkEmailList.querySelectorAll('.js-bulk-email-check').forEach(function (input) {
+            input.addEventListener('change', updateBulkEmailCount);
+        });
+        updateBulkEmailCount();
+    }
+
+    function activeLinkRows() {
+        return getRows().filter(function (row) {
+            return row.dataset.hasLink === '1';
+        });
+    }
+
+    function toDatetimeLocalValue(date) {
+        const pad = function (value) {
+            return String(value).padStart(2, '0');
+        };
+
+        return date.getFullYear() + '-' +
+            pad(date.getMonth() + 1) + '-' +
+            pad(date.getDate()) + 'T' +
+            pad(date.getHours()) + ':' +
+            pad(date.getMinutes());
+    }
+
+    function renderBulkExtendList() {
+        if (!bulkExtendList) {
+            return;
+        }
+
+        const rows = activeLinkRows();
+        if (bulkExtendCount) {
+            bulkExtendCount.textContent = rows.length + ' link(s) activo(s)';
+        }
+        if (saveBulkExtendButton) {
+            saveBulkExtendButton.disabled = rows.length === 0;
+        }
+
+        if (rows.length === 0) {
+            bulkExtendList.innerHTML = '<div class="bulk-email-empty">No hay links habilitados para ampliar.</div>';
+            return;
+        }
+
+        bulkExtendList.innerHTML = rows.map(function (row) {
+            const name = row.dataset.nombre || 'Trabajador pendiente';
+            const expiresAt = row.dataset.expiresAt || '-';
+
+            return '<div class="bulk-email-person">' +
+                '<span></span>' +
+                '<span>' +
+                    '<span class="bulk-email-person-name">' + escapeHtml(name) + '</span>' +
+                    '<span class="bulk-email-person-meta">Vence actual: ' + escapeHtml(expiresAt) + '</span>' +
+                '</span>' +
+            '</div>';
+        }).join('');
+    }
+
+    if (openBulkEmailButton) {
+        openBulkEmailButton.addEventListener('click', function () {
+            closeActionsMenu();
+            renderBulkEmailList();
+            openModal('bulkEmailModal');
+        });
+    }
+
+    if (openBulkExtendButton) {
+        openBulkExtendButton.addEventListener('click', function () {
+            closeActionsMenu();
+            const now = new Date();
+            const minDate = new Date(now.getTime() + 5 * 60 * 1000);
+            const defaultDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            if (bulkExtendDate) {
+                bulkExtendDate.min = toDatetimeLocalValue(minDate);
+                if (!bulkExtendDate.value) {
+                    bulkExtendDate.value = toDatetimeLocalValue(defaultDate);
+                }
+            }
+            renderBulkExtendList();
+            openModal('bulkExtendModal');
+        });
+    }
+
+    if (bulkExtendForm) {
+        bulkExtendForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            const rows = activeLinkRows();
+            const selectedIds = rows.map(function (row) {
+                return row.dataset.rowId || '';
+            }).filter(Boolean);
+
+            if (selectedIds.length === 0 || !bulkExtendDate?.value) {
+                renderBulkExtendList();
+                return;
+            }
+
+            if (saveBulkExtendButton) {
+                saveBulkExtendButton.disabled = true;
+                saveBulkExtendButton.textContent = 'Ampliando...';
+            }
+
+            const formData = new FormData();
+            formData.append('expires_at', bulkExtendDate.value);
+            selectedIds.forEach(function (id) {
+                formData.append('ficha_ids[]', id);
+            });
+
+            fetch(bulkExtendForm.action, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': @json(csrf_token()),
+                },
+                body: formData,
+            })
+                .then(function (response) {
+                    return response.json().then(function (data) {
+                        if (!response.ok) {
+                            throw new Error(data.error || data.message || 'No se pudieron ampliar los links');
+                        }
+
+                        return data;
+                    });
+                })
+                .then(function (data) {
+                    closeModal('bulkExtendModal');
+                    const skippedCount = Array.isArray(data.skipped) ? data.skipped.length : 0;
+                    showToast((data.message || 'Links ampliados.') + (skippedCount > 0 ? ' ' + skippedCount + ' omitido(s).' : ''), { duration: 3600 });
+                    window.setTimeout(function () {
+                        window.location.reload();
+                    }, 900);
+                })
+                .catch(function (error) {
+                    alert(error.message || 'No se pudieron ampliar los links');
+                    renderBulkExtendList();
+                })
+                .finally(function () {
+                    if (saveBulkExtendButton) {
+                        saveBulkExtendButton.textContent = 'Ampliar links';
+                    }
+                });
+        });
+    }
+
+    if (bulkEmailSelectAll) {
+        bulkEmailSelectAll.addEventListener('change', function () {
+            if (!bulkEmailList) {
+                return;
+            }
+
+            bulkEmailList.querySelectorAll('.js-bulk-email-check:not(:disabled)').forEach(function (input) {
+                input.checked = bulkEmailSelectAll.checked;
+            });
+            updateBulkEmailCount();
+        });
+    }
+
+    function chunkArray(items, size) {
+        const chunks = [];
+        for (let index = 0; index < items.length; index += size) {
+            chunks.push(items.slice(index, index + size));
+        }
+
+        return chunks;
+    }
+
+    function updateBulkProgress(processed, total, title, detail, complete) {
+        if (!bulkEmailProgress) {
+            return;
+        }
+
+        const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+        bulkEmailProgress.classList.add('is-visible');
+        bulkEmailProgress.classList.toggle('is-complete', !!complete);
+        if (bulkEmailProgressTitle) {
+            bulkEmailProgressTitle.textContent = title || 'Enviando correos';
+        }
+        if (bulkEmailProgressCount) {
+            bulkEmailProgressCount.textContent = processed + '/' + total;
+        }
+        if (bulkEmailProgressBar) {
+            bulkEmailProgressBar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+        }
+        if (bulkEmailProgressDetail) {
+            bulkEmailProgressDetail.textContent = detail || '';
+        }
+    }
+
+    function hideBulkProgressAfterDelay(delay) {
+        if (!bulkEmailProgress) {
+            return;
+        }
+
+        window.setTimeout(function () {
+            bulkEmailProgress.classList.remove('is-visible', 'is-complete');
+            if (bulkEmailProgressBar) {
+                bulkEmailProgressBar.style.width = '0%';
+            }
+        }, delay || 2600);
+    }
+
+    function postBulkEmailChunk(ids) {
+        const formData = new FormData();
+        ids.forEach(function (id) {
+            formData.append('ficha_ids[]', id);
+        });
+
+        return fetch(bulkEmailForm.action, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': @json(csrf_token()),
+            },
+            body: formData,
+        }).then(function (response) {
+            return response.json().then(function (data) {
+                if (!response.ok && !Array.isArray(data.failed)) {
+                    throw new Error(data.error || data.message || 'No se pudieron enviar los correos');
+                }
+
+                return data;
+            });
+        });
+    }
+
+    if (bulkEmailForm) {
+        bulkEmailForm.addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const selectedIds = bulkEmailList
+                ? Array.from(bulkEmailList.querySelectorAll('.js-bulk-email-check:checked:not(:disabled)')).map(function (input) {
+                    return input.value;
+                })
+                : [];
+
+            if (selectedIds.length === 0) {
+                updateBulkEmailCount();
+                return;
+            }
+
+            if (sendBulkEmailButton) {
+                sendBulkEmailButton.disabled = true;
+                sendBulkEmailButton.textContent = 'Enviando...';
+            }
+
+            closeModal('bulkEmailModal');
+
+            const chunks = chunkArray(selectedIds, bulkEmailBatchSize);
+            let processed = 0;
+            let sentCount = 0;
+            let failedCount = 0;
+
+            updateBulkProgress(0, selectedIds.length, 'Enviando correos', 'Preparando tandas de ' + bulkEmailBatchSize + ' correos...', false);
+
+            try {
+                for (let index = 0; index < chunks.length; index += 1) {
+                    const chunk = chunks[index];
+                    updateBulkProgress(
+                        processed,
+                        selectedIds.length,
+                        'Enviando correos',
+                        'Enviando tanda ' + (index + 1) + ' de ' + chunks.length + '...',
+                        false
+                    );
+
+                    const data = await postBulkEmailChunk(chunk);
+                    const sent = Array.isArray(data.sent) ? data.sent.length : 0;
+                    const failed = Array.isArray(data.failed) ? data.failed.length : 0;
+                    sentCount += sent;
+                    failedCount += failed;
+                    processed += chunk.length;
+
+                    updateBulkProgress(
+                        processed,
+                        selectedIds.length,
+                        'Enviando correos',
+                        sentCount + ' enviados, ' + failedCount + ' con observacion.',
+                        false
+                    );
+                }
+
+                updateBulkProgress(
+                    selectedIds.length,
+                    selectedIds.length,
+                    'Correos enviados',
+                    sentCount + ' correo(s) enviado(s).' + (failedCount > 0 ? ' ' + failedCount + ' no se pudieron enviar.' : ''),
+                    true
+                );
+                hideBulkProgressAfterDelay(2800);
+            } catch (error) {
+                updateBulkProgress(
+                    processed,
+                    selectedIds.length,
+                    'Envio detenido',
+                    error.message || 'No se pudieron enviar todos los correos.',
+                    false
+                );
+                alert(error.message || 'No se pudieron enviar los correos');
+            } finally {
+                if (sendBulkEmailButton) {
+                    sendBulkEmailButton.textContent = 'Enviar seleccionados';
+                }
+                updateBulkEmailCount();
+            }
+        });
+    }
+
     function closeAllPopovers() {
         filterPopovers.forEach(function (popover) {
             popover.classList.remove('is-open');
         });
+        closeActionsMenu();
     }
 
     function positionPopover(trigger, popover) {

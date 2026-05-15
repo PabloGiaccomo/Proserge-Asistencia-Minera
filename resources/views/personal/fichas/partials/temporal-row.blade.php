@@ -26,6 +26,9 @@
     data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
     data-estado="{{ $row['estado_label'] }}"
     data-correo="{{ $correo ?? '' }}"
+    data-has-link="{{ $row['url'] ? '1' : '0' }}"
+    data-can-email="{{ ($row['url'] && $correo) ? '1' : '0' }}"
+    data-expires-at="{{ optional($link?->expires_at)->format('d/m/Y H:i') ?: '' }}"
     data-celular="{{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '') }}">
     <td>
         <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>

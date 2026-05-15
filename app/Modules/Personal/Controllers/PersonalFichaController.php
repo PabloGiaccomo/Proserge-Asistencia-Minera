@@ -5,6 +5,7 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
+use App\Models\PersonalFichaLink;
 use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
@@ -17,6 +18,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -387,6 +389,153 @@ class PersonalFichaController extends WebPageController
         return redirect()
             ->route('personal.fichas.temporales')
             ->with('success', 'Correo enviado a ' . $result['email'] . '.');
+    }
+
+    public function sendBulkTemporalEmails(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ficha_ids' => ['required', 'array', 'min:1', 'max:10'],
+            'ficha_ids.*' => ['string', 'size:36'],
+        ]);
+
+        $requestedIds = collect($validated['ficha_ids'])
+            ->map(fn ($id): string => (string) $id)
+            ->unique()
+            ->values();
+
+        $fichas = PersonalFicha::query()
+            ->with(['personal', 'link', 'archivos'])
+            ->whereIn('id', $requestedIds)
+            ->get()
+            ->keyBy('id');
+
+        $sent = [];
+        $failed = [];
+
+        foreach ($requestedIds as $id) {
+            /** @var PersonalFicha|null $ficha */
+            $ficha = $fichas->get($id);
+            if (!$ficha) {
+                $failed[] = [
+                    'id' => $id,
+                    'name' => 'Registro no encontrado',
+                    'message' => 'No se encontro la ficha seleccionada.',
+                ];
+                continue;
+            }
+
+            $row = $this->fichaService->temporaryLinkRow($ficha);
+            if (!$row || empty($row['url'])) {
+                $failed[] = [
+                    'id' => $id,
+                    'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                    'message' => 'No tiene un link temporal habilitado.',
+                ];
+                continue;
+            }
+
+            try {
+                $result = $this->fichaService->sendLinkByEmail($ficha);
+                $sent[] = [
+                    'id' => $id,
+                    'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                    'email' => $result['email'],
+                    'resent' => $result['resent'],
+                ];
+            } catch (ValidationException $exception) {
+                $failed[] = [
+                    'id' => $id,
+                    'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                    'message' => collect($exception->errors())->flatten()->first() ?: 'No se pudo enviar el correo.',
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => count($sent) > 0,
+            'message' => count($sent) . ' correo(s) enviado(s).',
+            'sent' => $sent,
+            'failed' => $failed,
+        ], count($sent) > 0 ? 200 : 422);
+    }
+
+    public function extendBulkActiveLinks(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ficha_ids' => ['required', 'array', 'min:1'],
+            'ficha_ids.*' => ['string', 'size:36'],
+            'expires_at' => ['required', 'date', 'after:now'],
+        ]);
+
+        $targetExpiresAt = Carbon::parse($validated['expires_at'])->seconds(0);
+        $requestedIds = collect($validated['ficha_ids'])
+            ->map(fn ($id): string => (string) $id)
+            ->unique()
+            ->values();
+
+        $fichas = PersonalFicha::query()
+            ->with(['personal', 'link', 'archivos'])
+            ->whereIn('id', $requestedIds)
+            ->get()
+            ->keyBy('id');
+
+        $extended = [];
+        $skipped = [];
+
+        foreach ($requestedIds as $id) {
+            /** @var PersonalFicha|null $ficha */
+            $ficha = $fichas->get($id);
+            if (!$ficha) {
+                $skipped[] = [
+                    'id' => $id,
+                    'name' => 'Registro no encontrado',
+                    'message' => 'No se encontro la ficha seleccionada.',
+                ];
+                continue;
+            }
+
+            $row = $this->fichaService->temporaryLinkRow($ficha);
+            $link = $ficha->link;
+
+            if (!$row || empty($row['url']) || !$link || $link->estado !== PersonalFichaLink::ESTADO_ACTIVO || $link->disabled_at) {
+                $skipped[] = [
+                    'id' => $id,
+                    'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                    'message' => 'No tiene un link temporal activo habilitado.',
+                ];
+                continue;
+            }
+
+            if ($link->expires_at && $link->expires_at->greaterThanOrEqualTo($targetExpiresAt)) {
+                $skipped[] = [
+                    'id' => $id,
+                    'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                    'message' => 'Ya vence en una fecha igual o posterior.',
+                ];
+                continue;
+            }
+
+            $link->forceFill([
+                'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+                'disabled_at' => null,
+                'submitted_at' => null,
+                'read_until' => null,
+                'expires_at' => $targetExpiresAt,
+            ])->save();
+
+            $extended[] = [
+                'id' => $id,
+                'name' => $ficha->personal?->nombre_completo ?: 'Trabajador pendiente',
+                'expires_at' => $targetExpiresAt->format('d/m/Y H:i'),
+            ];
+        }
+
+        return response()->json([
+            'success' => count($extended) > 0,
+            'message' => count($extended) . ' link(s) ampliado(s) hasta ' . $targetExpiresAt->format('d/m/Y H:i') . '.',
+            'extended' => $extended,
+            'skipped' => $skipped,
+        ], count($extended) > 0 ? 200 : 422);
     }
 
     public function destroyTemporal(Request $request, string $id): JsonResponse|RedirectResponse
