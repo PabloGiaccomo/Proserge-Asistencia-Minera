@@ -68,6 +68,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/fichas/generar-link', [PersonalFichaController::class, 'generateLink'])->middleware('web.permission:personal,crear')->name('personal.fichas.generate-link');
     Route::post('/personal/fichas/cancelar-importacion', [PersonalFichaController::class, 'cancelImport'])->middleware('web.permission:personal,importar')->name('personal.fichas.cancel-import');
     Route::get('/personal/fichas/temporales', [PersonalFichaController::class, 'temporales'])->middleware('web.permission:personal,ver')->name('personal.fichas.temporales');
+    Route::post('/personal/fichas/correo-envio', [PersonalFichaController::class, 'updateEmailTemplate'])->middleware('web.permission:personal,editar')->name('personal.fichas.email-template.update');
     Route::post('/personal/fichas/{id}/extender', [PersonalFichaController::class, 'extendTemporal'])->middleware('web.permission:personal,editar')->name('personal.fichas.extend');
     Route::post('/personal/fichas/{id}/enviar-correo', [PersonalFichaController::class, 'sendTemporalEmail'])->middleware('web.permission:personal,editar')->name('personal.fichas.send-email');
     Route::post('/personal/fichas/{id}/regularizar-link', [PersonalFichaController::class, 'regularizeLink'])->middleware('web.permission:personal,editar')->name('personal.fichas.regularize-link');

@@ -7,6 +7,7 @@
     $missingFields = $row['missing_fields'] ?? [];
     $missingDocuments = $row['missing_documents'] ?? [];
     $rowKey = $rowKey ?? $ficha->id;
+    $regularizationLinkEnabled = !empty($row['can_regularize']) && !empty($row['url']);
     $statusClass = match($row['estado_key'] ?? $ficha->estado) {
         'LINK_ENVIADO_PENDIENTE' => 'ficha-status-sent',
         'LINK_ENVIADO_VENCIDO' => 'ficha-status-expired',
@@ -106,7 +107,12 @@
                 @if(!empty($row['can_regularize']))
                     <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" class="js-temporal-action-form" data-action-name="link temporal habilitado">
                         @csrf
-                        <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Habilitar link temporal" aria-label="Habilitar link temporal">
+                        <button
+                            type="submit"
+                            class="btn btn-outline btn-xs temporal-icon-btn"
+                            title="{{ $regularizationLinkEnabled ? 'Link temporal ya habilitado' : 'Habilitar link temporal' }}"
+                            aria-label="{{ $regularizationLinkEnabled ? 'Link temporal ya habilitado' : 'Habilitar link temporal' }}"
+                            @disabled($regularizationLinkEnabled)>
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="7" cy="15" r="4"/>
                                 <path d="M7 13v4"/>

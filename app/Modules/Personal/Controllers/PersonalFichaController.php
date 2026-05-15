@@ -8,6 +8,7 @@ use App\Models\PersonalFichaArchivo;
 use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
+use App\Modules\Personal\Services\PersonalFichaEmailTemplateService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionMatrix;
@@ -27,6 +28,7 @@ class PersonalFichaController extends WebPageController
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalFichaPdfService $pdfService,
         private readonly PersonalFichaExportService $exportService,
+        private readonly PersonalFichaEmailTemplateService $emailTemplateService,
     ) {
     }
 
@@ -73,7 +75,42 @@ class PersonalFichaController extends WebPageController
             'rowsTotal' => $rows->count(),
             'estadoFilter' => $estado,
             'estadoOptions' => $estadoOptions,
+            'emailTemplate' => $this->emailTemplateService->get(),
         ]);
+    }
+
+    public function updateEmailTemplate(Request $request): JsonResponse|RedirectResponse
+    {
+        $validated = $request->validate([
+            'subject' => ['required', 'string', 'max:180'],
+            'body' => ['required', 'string', 'max:8000'],
+        ]);
+
+        if (!str_contains((string) $validated['body'], '{{ link }}')) {
+            $message = 'El mensaje debe incluir el marcador {{ link }} para ubicar el enlace en el correo.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['error' => $message], 422);
+            }
+
+            return redirect()
+                ->route('personal.fichas.temporales')
+                ->with('error', $message);
+        }
+
+        $template = $this->emailTemplateService->save($validated['subject'], $validated['body']);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Plantilla de correo actualizada.',
+                'template' => $template,
+            ]);
+        }
+
+        return redirect()
+            ->route('personal.fichas.temporales')
+            ->with('success', 'Plantilla de correo actualizada.');
     }
 
     public function parseMacro(Request $request): View|RedirectResponse

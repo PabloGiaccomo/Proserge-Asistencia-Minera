@@ -11,6 +11,7 @@ class OutlookMailService
 
     public function __construct(
         private readonly PersonalFichaService $fichaService,
+        private readonly PersonalFichaEmailTemplateService $emailTemplateService,
     ) {
         $this->scriptPath = storage_path('scripts/send-outlook-email.ps1');
     }
@@ -42,21 +43,9 @@ class OutlookMailService
 
         $wasResent = $link->emailed_at !== null;
 
-        $documento = trim($ficha->tipo_documento . ' ' . $ficha->numero_documento);
-        $nombre = $ficha->personal?->nombre_completo ?? 'Trabajador';
-
-        $subject = ($wasResent ? 'Reenvio' : 'Envio') . ' de link para completar ficha - ' . $documento;
-
-        $body = "Hola " . $nombre . ",\r\n\r\n"
-            . "Se te ha generado un enlace para completar tu ficha de personal en el sistema Proserge.\r\n\r\n"
-            . "Documento: " . $documento . "\r\n"
-            . "Enlace: " . $url . "\r\n\r\n"
-            . "** IMPORTANTE: Para una mejor experiencia, abre este enlace desde una computadora o PC. **\r\n\r\n"
-            . "Ingresa al enlace para completar tus datos.\r\n\r\n"
-            . "Saludos,\r\n"
-            . "Equipo Proserge";
-
-        $htmlBody = $this->buildHtmlBody($nombre, $documento, $url, $wasResent);
+        $subject = $this->emailTemplateService->renderSubject($ficha, $wasResent);
+        $body = $this->emailTemplateService->renderPlainText($ficha, $url, $wasResent);
+        $htmlBody = $this->buildHtmlBody($ficha, $url, $wasResent);
 
         $delivery = $this->deliver($email, $subject, $body, $htmlBody);
 
@@ -153,12 +142,10 @@ class OutlookMailService
         return 'mailto:' . rawurlencode($to) . '?' . $query;
     }
 
-    private function buildHtmlBody(string $nombre, string $documento, string $url, bool $wasResent): string
+    private function buildHtmlBody(PersonalFicha $ficha, string $url, bool $wasResent): string
     {
         $titulo = $wasResent ? 'Reenvio de enlace temporal' : 'Enlace temporal para completar ficha';
-        $saludo = htmlspecialchars($nombre, ENT_QUOTES, 'UTF-8');
-        $documentoHtml = htmlspecialchars($documento, ENT_QUOTES, 'UTF-8');
-        $urlHtml = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        $bodyHtml = $this->emailTemplateService->renderBodyHtml($ficha, $url, $wasResent);
 
         return <<<HTML
 <!DOCTYPE html>
@@ -177,28 +164,7 @@ class OutlookMailService
         </tr>
         <tr>
             <td style="padding:24px;">
-                <p style="margin:0 0 14px; font-size:15px; line-height:1.7;">Hola {$saludo},</p>
-                <p style="margin:0 0 16px; font-size:15px; line-height:1.7;">
-                    Se ha generado un enlace temporal para que completes tu ficha de personal en el sistema Proserge.
-                </p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px; background:#f8fafc; border:1px solid #e2e8f0;">
-                    <tr>
-                        <td style="padding:14px 16px; font-size:14px; line-height:1.7;">
-                            <strong>Documento:</strong> {$documentoHtml}<br>
-                            <strong>Enlace:</strong> <a href="{$urlHtml}" style="color:#0f62fe; text-decoration:none;">Abrir ficha</a>
-                        </td>
-                    </tr>
-                </table>
-                <p style="margin:0 0 16px; font-size:14px; line-height:1.7;">
-                    Importante: para una mejor experiencia, abre este enlace desde una computadora o laptop.
-                </p>
-                <div style="margin:0 0 20px;">
-                    <a href="{$urlHtml}" style="display:inline-block; padding:12px 18px; background:#0f62fe; color:#ffffff; text-decoration:none; font-size:14px; font-weight:700;">
-                        Completar ficha
-                    </a>
-                </div>
-                <p style="margin:0 0 8px; font-size:13px; color:#475569;">Si el boton no funciona, copia y pega este enlace en tu navegador:</p>
-                <p style="margin:0 0 18px; font-size:13px; line-height:1.7; word-break:break-all; color:#1d4ed8;">{$urlHtml}</p>
+                <div style="margin:0 0 18px; font-size:15px; line-height:1.7;">{$bodyHtml}</div>
                 <p style="margin:0; font-size:14px; line-height:1.7;">Saludos,<br><strong>Equipo Proserge</strong></p>
             </td>
         </tr>

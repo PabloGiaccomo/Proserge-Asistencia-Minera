@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\PersonalFicha;
+use App\Modules\Personal\Services\PersonalFichaEmailTemplateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -23,10 +24,8 @@ class PersonalFichaLinkMail extends Mailable
 
     public function envelope(): Envelope
     {
-        $document = trim($this->ficha->tipo_documento . ' ' . $this->ficha->numero_documento);
-
         return new Envelope(
-            subject: ($this->isResend ? 'Reenvio' : 'Envio') . ' de link para completar ficha - ' . $document,
+            subject: app(PersonalFichaEmailTemplateService::class)->renderSubject($this->ficha, $this->isResend),
         );
     }
 
@@ -34,6 +33,9 @@ class PersonalFichaLinkMail extends Mailable
     {
         return new Content(
             view: 'emails.personal.ficha-link',
+            with: [
+                'bodyHtml' => app(PersonalFichaEmailTemplateService::class)->renderBodyHtml($this->ficha, $this->url, $this->isResend),
+            ],
         );
     }
 }

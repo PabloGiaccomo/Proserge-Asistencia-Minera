@@ -4,6 +4,15 @@
 
 @section('content')
 <div class="module-page ficha-workspace is-booting" id="temporalesPageRoot">
+    @php
+        $emailTemplate = $emailTemplate ?? [
+            'subject' => \App\Modules\Personal\Services\PersonalFichaEmailTemplateService::DEFAULT_SUBJECT,
+            'body' => \App\Modules\Personal\Services\PersonalFichaEmailTemplateService::DEFAULT_BODY,
+            'default_subject' => \App\Modules\Personal\Services\PersonalFichaEmailTemplateService::DEFAULT_SUBJECT,
+            'default_body' => \App\Modules\Personal\Services\PersonalFichaEmailTemplateService::DEFAULT_BODY,
+            'placeholders' => ['{{ nombre }}', '{{ documento }}', '{{ vence }}', '{{ link }}', '{{ tipo_envio }}'],
+        ];
+    @endphp
     <style>
         .ficha-workspace {
             position: relative;
@@ -32,6 +41,14 @@
         .temporal-icon-btn svg {
             width: 16px;
             height: 16px;
+        }
+
+        .temporal-icon-btn:disabled {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+            color: #94a3b8;
+            cursor: not-allowed;
+            opacity: 1;
         }
 
         .dg-head-cell {
@@ -120,92 +137,121 @@
             max-width: 460px;
         }
 
-        .temporales-pagination {
+        .ficha-workspace .personal-pagination-controls {
             margin-top: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .temporales-pagination-meta {
-            color: #64748b;
-            font-size: 13px;
-        }
-
-        .temporales-pagination-controls {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .temporales-page-size {
-            color: #64748b;
-            font-size: 13px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .temporales-page-size strong {
-            color: #0f172a;
-        }
-
-        .temporales-page-jump {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .temporales-page-jump input {
-            width: 76px;
         }
 
         .personal-pagination {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
+            justify-content: flex-start;
         }
 
-        .personal-pager-btn {
-            min-width: 34px;
-            height: 34px;
-            padding: 0 10px;
-            border: 1px solid #d7e0ea;
-            border-radius: 8px;
-            background: #fff;
-            color: #334155;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.15s ease;
+        .email-template-modal {
+            width: min(960px, calc(100vw - 28px));
+            border-radius: 14px;
+            padding: 24px;
         }
 
-        .personal-pager-btn:hover:not(:disabled) {
-            border-color: #19D3C5;
-            color: #0f172a;
-            background: #f8fafc;
+        .email-template-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr);
+            gap: 18px;
+            align-items: start;
         }
 
-        .personal-pager-btn.active {
-            background: #07142a;
-            border-color: #07142a;
-            color: #fff;
+        .email-template-fields {
+            display: grid;
+            gap: 14px;
         }
 
-        .personal-pager-btn:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-
-        .personal-pager-ellipsis {
-            color: #94a3b8;
+        .email-template-label {
+            display: grid;
+            gap: 7px;
+            font-size: 12px;
             font-weight: 700;
-            padding: 0 2px;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .email-template-textarea {
+            min-height: 270px;
+            resize: vertical;
+            line-height: 1.55;
+        }
+
+        .email-template-placeholders {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .email-token-btn {
+            border: 1px solid #d7e0ed;
+            background: #f8fafc;
+            color: #334155;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .email-token-btn:hover {
+            border-color: #19d3c5;
+            color: #0f766e;
+        }
+
+        .email-template-preview {
+            border: 1px solid #dbe3ef;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        .email-template-preview-head {
+            padding: 14px 16px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .email-template-preview-subject {
+            margin-top: 6px;
+            color: #0f172a;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .email-template-preview-body {
+            padding: 18px;
+            color: #0f172a;
+            font-size: 14px;
+            line-height: 1.65;
+            min-height: 220px;
+            word-break: break-word;
+        }
+
+        .email-preview-link {
+            color: #0f62fe;
+            font-weight: 800;
+            word-break: break-all;
+        }
+
+        .email-template-warning {
+            display: none;
+            color: #b45309;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .email-template-warning.is-visible {
+            display: block;
+        }
+
+        @media (max-width: 860px) {
+            .email-template-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .temporales-toast-stack {
@@ -350,6 +396,9 @@
                 <p class="page-subtitle">Trabajadores generados desde macro pendientes de completar, validar o activar.</p>
             </div>
             <div class="page-actions">
+                @allowed('personal', 'editar')
+                    <button type="button" class="btn btn-outline" id="openEmailTemplateModal">Editar correo de envio</button>
+                @endallowed
                 <a href="{{ route('personal.fichas.import') }}" class="btn btn-primary">Importar macro</a>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver a Personal</a>
             </div>
@@ -369,6 +418,57 @@
     @endif
 
     <div class="temporales-toast-stack" id="temporalesToastStack" aria-live="polite" aria-atomic="true"></div>
+
+    @allowed('personal', 'editar')
+        <div id="emailTemplateModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('emailTemplateModal')">
+            <div class="modal-backdrop" onclick="closeModal('emailTemplateModal')"></div>
+            <div class="modal-content email-template-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">Correo de envio</h2>
+                        <p class="modal-subtitle" style="margin:6px 0 0;">Usa @{{ link }} para ubicar exactamente donde aparecera el enlace.</p>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeModal('emailTemplateModal')" aria-label="Cerrar">X</button>
+                </div>
+                <form id="emailTemplateForm" action="{{ route('personal.fichas.email-template.update') }}" method="POST">
+                    @csrf
+                    <div class="email-template-grid">
+                        <div class="email-template-fields">
+                            <label class="email-template-label">
+                                Asunto
+                                <input id="emailTemplateSubject" class="ficha-input" type="text" name="subject" maxlength="180" value="{{ $emailTemplate['subject'] }}" required>
+                            </label>
+                            <label class="email-template-label">
+                                Mensaje
+                                <textarea id="emailTemplateBody" class="ficha-input email-template-textarea" name="body" required>{{ $emailTemplate['body'] }}</textarea>
+                            </label>
+                            <div>
+                                <div class="ficha-card-subtitle" style="margin-bottom:8px;">Insertar marcador</div>
+                                <div class="email-template-placeholders">
+                                    @foreach(($emailTemplate['placeholders'] ?? []) as $placeholder)
+                                        <button type="button" class="email-token-btn" data-email-token="{{ $placeholder }}">{{ $placeholder }}</button>
+                                    @endforeach
+                                </div>
+                            </div>
+                            <div id="emailTemplateWarning" class="email-template-warning">El mensaje debe incluir @{{ link }} para que el trabajador reciba el enlace.</div>
+                        </div>
+                        <div class="email-template-preview">
+                            <div class="email-template-preview-head">
+                                <div class="ficha-card-subtitle">Vista previa</div>
+                                <div id="emailTemplatePreviewSubject" class="email-template-preview-subject"></div>
+                            </div>
+                            <div id="emailTemplatePreviewBody" class="email-template-preview-body"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" id="resetEmailTemplate">Restaurar base</button>
+                        <button type="button" class="btn btn-outline" onclick="closeModal('emailTemplateModal')">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="saveEmailTemplate">Guardar correo</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endallowed
 
     <div class="ficha-card">
         <div class="ficha-card-header">
@@ -525,7 +625,12 @@
                                             @if(!empty($row['can_regularize']))
                                                 <form method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" class="js-temporal-action-form">
                                                     @csrf
-                                                    <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Habilitar link temporal" aria-label="Habilitar link temporal">
+                                                    <button
+                                                        type="submit"
+                                                        class="btn btn-outline btn-xs temporal-icon-btn"
+                                                        title="{{ $row['url'] ? 'Link temporal ya habilitado' : 'Habilitar link temporal' }}"
+                                                        aria-label="{{ $row['url'] ? 'Link temporal ya habilitado' : 'Habilitar link temporal' }}"
+                                                        @disabled($row['url'])>
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                             <circle cx="7" cy="15" r="4"/>
                                                             <path d="M7 13v4"/>
@@ -562,23 +667,17 @@
                     </tbody>
                 </table>
             </div>
-            <div class="temporales-pagination">
-                <div class="temporales-pagination-controls">
-                    <div class="temporales-page-size">Mostrar <strong>10</strong> registros</div>
-                    <div class="temporales-pagination-meta" id="temporalesPaginationMeta"></div>
+            <div class="personal-pagination-controls">
+                <div class="personal-page-size">
+                    Mostrar
+                    <select id="temporalesPageSize" class="personal-page-size-select">
+                    </select>
+                    registros
                 </div>
-                <div class="temporales-page-jump">
-                    <label for="temporalesPageInput" class="ficha-card-subtitle" style="margin:0;">Ir a pagina</label>
-                    <input
-                        id="temporalesPageInput"
-                        class="ficha-input"
-                        type="number"
-                        min="1"
-                        value="1">
-                    <button type="button" id="temporalesPageGo" class="btn btn-outline btn-sm">Ir</button>
-                </div>
-                <div class="personal-pagination" id="temporalesPaginationWrap"></div>
+                <div class="personal-pagination-info" id="temporalesPaginationMeta"></div>
             </div>
+
+            <div class="personal-pagination" id="temporalesPaginationWrap"></div>
         </div>
     </div>
 </div>
@@ -594,16 +693,32 @@ document.addEventListener('DOMContentLoaded', function () {
     const toastStack = document.getElementById('temporalesToastStack');
     const searchInput = document.getElementById('temporales-search');
     const searchClear = searchInput?.closest('.simple-search-wrapper')?.querySelector('[data-simple-search-clear]');
+    const pageSizeSelect = document.getElementById('temporalesPageSize');
     const paginationMeta = document.getElementById('temporalesPaginationMeta');
     const paginationWrap = document.getElementById('temporalesPaginationWrap');
     const countBadge = document.getElementById('temporalesCount');
-    const pageInput = document.getElementById('temporalesPageInput');
-    const pageGo = document.getElementById('temporalesPageGo');
+    const openEmailTemplateButton = document.getElementById('openEmailTemplateModal');
+    const emailTemplateForm = document.getElementById('emailTemplateForm');
+    const emailTemplateSubject = document.getElementById('emailTemplateSubject');
+    const emailTemplateBody = document.getElementById('emailTemplateBody');
+    const emailTemplatePreviewSubject = document.getElementById('emailTemplatePreviewSubject');
+    const emailTemplatePreviewBody = document.getElementById('emailTemplatePreviewBody');
+    const emailTemplateWarning = document.getElementById('emailTemplateWarning');
+    const saveEmailTemplateButton = document.getElementById('saveEmailTemplate');
+    const resetEmailTemplateButton = document.getElementById('resetEmailTemplate');
     const estadoSelect = document.getElementById('temporalesEstadoSelect');
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
-    const pageSize = 10;
+    const emailTemplateDefaultSubject = @json($emailTemplate['default_subject']);
+    const emailTemplateDefaultBody = @json($emailTemplate['default_body']);
+    const emailTokenNombre = '@{{ nombre }}';
+    const emailTokenDocumento = '@{{ documento }}';
+    const emailTokenVence = '@{{ vence }}';
+    const emailTokenLink = '@{{ link }}';
+    const emailTokenTipoEnvio = '@{{ tipo_envio }}';
+    let pageSize = Number(pageSizeSelect?.value || 10);
     let currentPage = 1;
+    let lastEmailTemplateField = emailTemplateBody;
 
     function setBootProgress(value, message) {
         if (bootProgressBar) {
@@ -657,6 +772,161 @@ document.addEventListener('DOMContentLoaded', function () {
                 toast.remove();
             }, 220);
         }, settings.duration || 2600);
+    }
+
+    function escapeHtml(value) {
+        return (value || '').toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function replaceEmailTokens(value, htmlMode) {
+        const sample = {
+            nombre: 'Juan Perez',
+            documento: 'DNI 12345678',
+            vence: '15/05/2026 18:00',
+            link: 'https://proserge.local/ficha-colaborador/ejemplo',
+            tipoEnvio: 'Envio',
+        };
+        const linkValue = htmlMode
+            ? '<span class="email-preview-link">' + escapeHtml(sample.link) + '</span>'
+            : sample.link;
+        let output = htmlMode ? escapeHtml(value || '') : (value || '').toString();
+
+        [
+            [emailTokenNombre, sample.nombre],
+            [emailTokenDocumento, sample.documento],
+            [emailTokenVence, sample.vence],
+            [emailTokenTipoEnvio, sample.tipoEnvio],
+            [emailTokenLink, linkValue],
+        ].forEach(function (item) {
+            output = output.split(item[0]).join(htmlMode && item[0] !== emailTokenLink ? escapeHtml(item[1]) : item[1]);
+        });
+
+        return output;
+    }
+
+    function renderEmailTemplatePreview() {
+        if (!emailTemplateSubject || !emailTemplateBody) {
+            return;
+        }
+
+        const subject = replaceEmailTokens(emailTemplateSubject.value, false);
+        const bodyHtml = replaceEmailTokens(emailTemplateBody.value, true).replace(/\n/g, '<br>');
+        const hasLink = emailTemplateBody.value.indexOf(emailTokenLink) !== -1;
+
+        if (emailTemplatePreviewSubject) {
+            emailTemplatePreviewSubject.textContent = subject || 'Sin asunto';
+        }
+        if (emailTemplatePreviewBody) {
+            emailTemplatePreviewBody.innerHTML = bodyHtml || '<span class="ficha-card-subtitle">Sin mensaje</span>';
+        }
+        if (emailTemplateWarning) {
+            emailTemplateWarning.classList.toggle('is-visible', !hasLink);
+        }
+        if (saveEmailTemplateButton) {
+            saveEmailTemplateButton.disabled = !hasLink;
+        }
+    }
+
+    function insertEmailToken(token) {
+        const field = lastEmailTemplateField || emailTemplateBody;
+        if (!field) {
+            return;
+        }
+
+        const start = field.selectionStart ?? field.value.length;
+        const end = field.selectionEnd ?? field.value.length;
+        const before = field.value.slice(0, start);
+        const after = field.value.slice(end);
+        field.value = before + token + after;
+        field.focus();
+        field.selectionStart = field.selectionEnd = start + token.length;
+        renderEmailTemplatePreview();
+    }
+
+    if (openEmailTemplateButton) {
+        openEmailTemplateButton.addEventListener('click', function () {
+            renderEmailTemplatePreview();
+            openModal('emailTemplateModal');
+        });
+    }
+
+    [emailTemplateSubject, emailTemplateBody].forEach(function (field) {
+        if (!field) return;
+        field.addEventListener('focus', function () {
+            lastEmailTemplateField = field;
+        });
+        field.addEventListener('input', renderEmailTemplatePreview);
+    });
+
+    document.querySelectorAll('.email-token-btn').forEach(function (button) {
+        button.addEventListener('click', function () {
+            insertEmailToken(button.dataset.emailToken || '');
+        });
+    });
+
+    if (resetEmailTemplateButton) {
+        resetEmailTemplateButton.addEventListener('click', function () {
+            if (emailTemplateSubject) {
+                emailTemplateSubject.value = emailTemplateDefaultSubject;
+            }
+            if (emailTemplateBody) {
+                emailTemplateBody.value = emailTemplateDefaultBody;
+                lastEmailTemplateField = emailTemplateBody;
+            }
+            renderEmailTemplatePreview();
+        });
+    }
+
+    if (emailTemplateForm) {
+        emailTemplateForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            if (!emailTemplateBody || emailTemplateBody.value.indexOf(emailTokenLink) === -1) {
+                renderEmailTemplatePreview();
+                return;
+            }
+
+            if (saveEmailTemplateButton) {
+                saveEmailTemplateButton.disabled = true;
+                saveEmailTemplateButton.textContent = 'Guardando...';
+            }
+
+            fetch(emailTemplateForm.action, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': @json(csrf_token()),
+                },
+                body: new FormData(emailTemplateForm),
+            })
+                .then(function (response) {
+                    return response.json().then(function (data) {
+                        if (!response.ok) {
+                            throw new Error(data.error || data.message || 'No se pudo guardar el correo');
+                        }
+
+                        return data;
+                    });
+                })
+                .then(function (data) {
+                    showToast(data.message || 'Plantilla de correo actualizada.');
+                    closeModal('emailTemplateModal');
+                })
+                .catch(function (error) {
+                    alert(error.message || 'No se pudo guardar el correo');
+                })
+                .finally(function () {
+                    if (saveEmailTemplateButton) {
+                        saveEmailTemplateButton.textContent = 'Guardar correo';
+                        renderEmailTemplatePreview();
+                    }
+                });
+        });
     }
 
     function closeAllPopovers() {
@@ -826,6 +1096,49 @@ document.addEventListener('DOMContentLoaded', function () {
         return page;
     }
 
+    function buildPageSizeOptions(totalCount) {
+        if (!pageSizeSelect) {
+            return;
+        }
+
+        const total = Math.max(1, Number(totalCount || getRows().length || 1));
+        const base = [10, 50, 100, 200, 300, total];
+        const values = Array.from(new Set(base.filter(function (value) {
+            return Number.isFinite(value) && value > 0 && value <= total;
+        }))).sort(function (a, b) {
+            return a - b;
+        });
+
+        if (values.length === 0) {
+            values.push(total || 1);
+        }
+
+        pageSizeSelect.innerHTML = values.map(function (value) {
+            return '<option value="' + value + '">' + value + '</option>';
+        }).join('');
+    }
+
+    function syncPageSizeOptions(totalCount, preferredValue) {
+        if (!pageSizeSelect) {
+            return;
+        }
+
+        buildPageSizeOptions(totalCount);
+
+        const optionValues = Array.from(pageSizeSelect.options).map(function (option) {
+            return String(option.value);
+        });
+        const preferred = String(preferredValue || pageSize || pageSizeSelect.value || '');
+
+        if (preferred && optionValues.indexOf(preferred) !== -1) {
+            pageSizeSelect.value = preferred;
+        } else if (optionValues.length > 0) {
+            pageSizeSelect.value = optionValues[optionValues.length - 1];
+        }
+
+        pageSize = Number(pageSizeSelect.value || optionValues[0] || 10);
+    }
+
     function renderGrid(resetPage) {
         if (resetPage) {
             currentPage = 1;
@@ -833,6 +1146,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const filtered = applyFilters();
         const total = filtered.length;
+        syncPageSizeOptions(total, pageSize);
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
         currentPage = clampPage(currentPage, totalPages);
 
@@ -850,16 +1164,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (paginationMeta) {
             paginationMeta.textContent = total === 0
                 ? '0 resultados'
-                : 'Mostrando ' + (start + 1) + '-' + Math.min(end, total) + ' de ' + total + ' registros';
+                : 'Mostrando ' + (start + 1) + '-' + Math.min(end, total) + ' de ' + total;
         }
 
         if (countBadge) {
             countBadge.textContent = String(total);
-        }
-
-        if (pageInput) {
-            pageInput.max = String(totalPages);
-            pageInput.value = String(currentPage);
         }
 
         renderPagination(totalPages);
@@ -903,17 +1212,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    if (pageGo && pageInput) {
-        pageGo.addEventListener('click', function () {
-            currentPage = Number(pageInput.value || 1);
-            renderGrid(false);
-        });
-        pageInput.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                currentPage = Number(pageInput.value || 1);
-                renderGrid(false);
-            }
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', function () {
+            pageSize = Number(pageSizeSelect.value || 10);
+            renderGrid(true);
         });
     }
 
