@@ -117,15 +117,15 @@ Route::middleware('web.auth')->group(function (): void {
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');
-    Route::get('/rq-mina/{id}', [RQMinaPageController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.show');
     Route::get('/rq-mina/create', [RQMinaPageController::class, 'create'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.create');
     Route::get('/rq-mina/{id}/edit', [RQMinaPageController::class, 'edit'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.edit');
+    Route::get('/rq-mina/{id}', [RQMinaPageController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.show');
 
     // RQ Proserge
     Route::get('/rq-proserge', [RQProsergePageController::class, 'index'])->middleware('web.permission:rq_proserge,ver')->name('rq-proserge.index');
-    Route::get('/rq-proserge/{id}', [RQProsergePageController::class, 'show'])->middleware('web.permission:rq_proserge,ver')->name('rq-proserge.show');
     Route::get('/rq-proserge/create', [RQProsergePageController::class, 'create'])->middleware('web.permission:rq_proserge,crear')->name('rq-proserge.create');
     Route::get('/rq-proserge/{id}/edit', [RQProsergePageController::class, 'edit'])->middleware('web.permission:rq_proserge,editar')->name('rq-proserge.edit');
+    Route::get('/rq-proserge/{id}', [RQProsergePageController::class, 'show'])->middleware('web.permission:rq_proserge,ver')->name('rq-proserge.show');
 
     // Bienestar
     Route::get('/bienestar', [BienestarPageController::class, 'index'])->middleware('web.permission:bienestar,ver')->name('bienestar.index');

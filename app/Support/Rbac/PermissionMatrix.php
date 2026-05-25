@@ -39,6 +39,14 @@ class PermissionMatrix
             ) {
                 $matrix[$module]['dashboards'] = true;
             }
+
+            if (self::hasOperationalPermission($matrix[$module])) {
+                $matrix[$module]['ver'] = true;
+
+                if (array_key_exists('dashboards', $matrix[$module])) {
+                    $matrix[$module]['dashboards'] = true;
+                }
+            }
         }
 
         return $matrix;
@@ -225,6 +233,17 @@ class PermissionMatrix
         }
 
         return true;
+    }
+
+    private static function hasOperationalPermission(array $actions): bool
+    {
+        foreach ($actions as $action => $allowed) {
+            if ($action !== 'ver' && $action !== 'dashboards' && $allowed === true) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isPrivilegedRole(?string $roleName): bool
