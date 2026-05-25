@@ -87,10 +87,16 @@ class RQMinaController extends Controller
         $rqMina = $this->service->create($usuario, $request->validated());
 
         if (!$rqMina) {
+            $validated = $request->validated();
+
             return ApiResponse::error(
-                message: 'Usuario sin acceso a la mina solicitada',
-                code: 'MINA_SCOPE_FORBIDDEN',
-                detail: ['mina_id' => $request->validated()['mina_id']],
+                message: 'Destino invalido o usuario sin acceso al contexto seleccionado',
+                code: 'RQ_MINA_DESTINO_FORBIDDEN',
+                detail: [
+                    'mina_id' => $validated['mina_id'] ?? null,
+                    'destino_tipo' => $validated['destino_tipo'] ?? null,
+                    'destino_id' => $validated['destino_id'] ?? null,
+                ],
                 status: 403,
             );
         }
@@ -138,10 +144,16 @@ class RQMinaController extends Controller
         $updated = $this->service->update($usuario, $rqMina, $request->validated());
 
         if (!$updated) {
+            $validated = $request->validated();
+
             return ApiResponse::error(
-                message: 'Usuario sin acceso a la mina solicitada',
-                code: 'MINA_SCOPE_FORBIDDEN',
-                detail: ['mina_id' => $request->validated()['mina_id']],
+                message: 'Destino invalido o usuario sin acceso al contexto seleccionado',
+                code: 'RQ_MINA_DESTINO_FORBIDDEN',
+                detail: [
+                    'mina_id' => $validated['mina_id'] ?? null,
+                    'destino_tipo' => $validated['destino_tipo'] ?? null,
+                    'destino_id' => $validated['destino_id'] ?? null,
+                ],
                 status: 403,
             );
         }
@@ -200,7 +212,7 @@ class RQMinaController extends Controller
 
     private function buildSendNotificationContext(Usuario $usuario, RQMina $rqMina): array
     {
-        $mineName = (string) ($rqMina->mina?->nombre ?? 'mina no definida');
+        $mineName = (string) ($rqMina->destino_nombre ?: ($rqMina->mina?->nombre ?? 'lugar no definido'));
         $areaName = (string) ($rqMina->area ?? 'sin area');
         $fechaInicio = $rqMina->fecha_inicio ? $rqMina->fecha_inicio->format('d/m/Y') : 'sin fecha';
         $fechaFin = $rqMina->fecha_fin ? $rqMina->fecha_fin->format('d/m/Y') : $fechaInicio;

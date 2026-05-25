@@ -3,6 +3,7 @@
 namespace App\Modules\Notificaciones\Services;
 
 use App\Models\NotificationPreference;
+use App\Models\NotificationRolePreference;
 use App\Models\NotificationType;
 use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
@@ -53,6 +54,10 @@ class NotificationRecipientResolverService
 
         $users = $query->get();
         $userIds = $users->pluck('id')->map(fn ($id) => (string) $id)->values();
+        $roleIds = $users
+            ->flatMap(fn (Usuario $user) => $this->roleIdsForUser($user))
+            ->unique()
+            ->values();
 
         $scopeUserIds = collect();
         if ($mineId !== '' && $mineId !== null && Schema::hasTable('usuario_mina_scope')) {
@@ -71,11 +76,17 @@ class NotificationRecipientResolverService
         }
 
         $preferences = $this->loadPreferencesByUser((string) $type->id, $userIds);
+        $rolePreferences = $this->loadRolePreferences((string) $type->id, $roleIds);
 
-        $users = $users->filter(function (Usuario $user) use ($actorUserId, $mineId, $requiredModule, $requiredAction, $requiredActions, $priority, $category, $requirePermission, $scopeUserIds, $preferences): bool {
+        $users = $users->filter(function (Usuario $user) use ($actorUserId, $mineId, $requiredModule, $requiredAction, $requiredActions, $priority, $category, $requirePermission, $scopeUserIds, $preferences, $rolePreferences): bool {
             $userId = (string) $user->id;
 
             if ($actorUserId && $user->id === $actorUserId) {
+                return false;
+            }
+
+            $roleDecision = $this->rolePreferenceDecision($user, $rolePreferences);
+            if ($roleDecision === false) {
                 return false;
             }
 
@@ -240,6 +251,25 @@ class NotificationRecipientResolverService
         return array_values(array_unique($names));
     }
 
+    private function roleIdsForUser(Usuario $user): array
+    {
+        $ids = [];
+
+        if ($user->rol?->id) {
+            $ids[] = (string) $user->rol->id;
+        }
+
+        if ($user->relationLoaded('rolesAdicionales')) {
+            foreach ($user->rolesAdicionales as $rol) {
+                if (!empty($rol->id)) {
+                    $ids[] = (string) $rol->id;
+                }
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
     private function loadPreferencesByUser(string $notificationTypeId, Collection $userIds): Collection
     {
         if ($userIds->isEmpty() || !Schema::hasTable('notification_preferences')) {
@@ -251,6 +281,42 @@ class NotificationRecipientResolverService
             ->whereIn('usuario_id', $userIds->all())
             ->get(['usuario_id', 'in_app_enabled', 'minimum_priority', 'mute_until'])
             ->keyBy(fn (NotificationPreference $preference) => (string) $preference->usuario_id);
+    }
+
+    private function loadRolePreferences(string $notificationTypeId, Collection $roleIds): Collection
+    {
+        if ($roleIds->isEmpty() || !Schema::hasTable('notification_role_preferences')) {
+            return collect();
+        }
+
+        return NotificationRolePreference::query()
+            ->where('notification_type_id', $notificationTypeId)
+            ->whereIn('rol_id', $roleIds->all())
+            ->get(['rol_id', 'is_enabled'])
+            ->keyBy(fn (NotificationRolePreference $pref) => (string) $pref->rol_id);
+    }
+
+    private function rolePreferenceDecision(Usuario $user, Collection $rolePreferences): ?bool
+    {
+        $roleIds = $this->roleIdsForUser($user);
+        if (empty($roleIds)) {
+            return null;
+        }
+
+        $hasExplicit = false;
+        foreach ($roleIds as $roleId) {
+            $pref = $rolePreferences->get((string) $roleId);
+            if (!$pref) {
+                continue;
+            }
+
+            $hasExplicit = true;
+            if ($pref->is_enabled) {
+                return true;
+            }
+        }
+
+        return $hasExplicit ? false : null;
     }
 
     private function matchesPreference(NotificationPreference $preference, string $priority): bool

@@ -5,6 +5,7 @@
 @php
 $items = $data['items'] ?? [];
 $minaOptions = $data['minaOptions'] ?? [];
+$lugarOptions = $data['lugarOptions'] ?? [];
 $estadoOptions = $data['estadoOptions'] ?? [];
 $creadores = $data['creadores'] ?? [];
 $activeFilters = $data['filters'] ?? [];
@@ -18,6 +19,10 @@ $calcPuestos = static function (array $detalle): int {
 
 $calcTotal = static function (array $detalle): int {
     return (int) array_sum(array_column($detalle, 'cantidad'));
+};
+
+$calcTransporteTotal = static function (array $transporte): int {
+    return (int) array_sum(array_column($transporte, 'cantidad'));
 };
 @endphp
 
@@ -56,23 +61,23 @@ $calcTotal = static function (array $detalle): int {
                                 id="rqMinaSearch"
                                 class="filter-input"
                                 value="{{ $activeFilters['q'] ?? '' }}"
-                                placeholder="Buscar por mina, área, creador o estado..."
+                                placeholder="Buscar por lugar, área, creador o estado..."
                                 autocomplete="off"
                             >
                         </div>
                         <div class="flex items-center gap-2">
                             <a href="{{ route('rq-mina.index') }}" class="btn-filter-outline whitespace-nowrap">Limpiar</a>
+                            <button type="button" id="rqMinaToggleFilters" class="btn-filter-toggle" aria-expanded="false" aria-label="Mostrar filtros" title="Mostrar filtros">
+                                <span id="rqMinaToggleArrow" aria-hidden="true">&#9660;</span>
+                            </button>
                         </div>
                     </div>
 
             <div class="filters-head">
                 <span>Filtros de búsqueda</span>
-                <button type="button" id="rqMinaToggleFilters" class="btn-filter-toggle" aria-expanded="true" aria-label="Ocultar filtros" title="Ocultar filtros">
-                    <span id="rqMinaToggleArrow" aria-hidden="true">&#9650;</span>
-                </button>
             </div>
 
-            <div id="rqMinaFiltersBody">
+            <div id="rqMinaFiltersBody" style="display:none;">
                 <div class="flex flex-col gap-3">
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div class="filter-group">
@@ -163,12 +168,13 @@ $calcTotal = static function (array $detalle): int {
                 <table class="rq-table">
                     <thead>
                         <tr>
-                            <th>Mina</th>
+                            <th>Lugar</th>
                             <th>Área</th>
                             <th>Fechas</th>
                             <th>Creador</th>
                             <th>Puestos</th>
                             <th>Total</th>
+                            <th>Transporte</th>
                             <th>Estado</th>
                             <th>Acciones</th>
                         </tr>
@@ -177,6 +183,19 @@ $calcTotal = static function (array $detalle): int {
                         @foreach($items as $rq)
                             @php
                                 $detalle = $rq['detalle'] ?? [];
+                                $transporteDetalle = $rq['transporte'] ?? [];
+                                $transporteTotal = $calcTransporteTotal($transporteDetalle);
+                                $transporteResumen = collect($transporteDetalle)
+                                    ->map(static function (array $linea): ?string {
+                                        $nombre = trim((string) ($linea['transporte'] ?? ''));
+                                        $cantidad = (int) ($linea['cantidad'] ?? 0);
+
+                                        return $nombre !== '' && $cantidad > 0 ? $cantidad.' x '.$nombre : null;
+                                    })
+                                    ->filter()
+                                    ->values();
+                                $transportePrincipal = $transporteResumen->first();
+                                $transporteRestantes = max(0, $transporteResumen->count() - 1);
                                 $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
                                 $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
                                 $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
@@ -186,9 +205,18 @@ $calcTotal = static function (array $detalle): int {
                                 $fechaFinFmt = $fechaFinRaw !== ''
                                     ? \Carbon\Carbon::parse($fechaFinRaw)->locale('es')->translatedFormat('d M Y')
                                     : '-';
+                                $semanaInicio = $fechaInicioRaw !== ''
+                                    ? \Carbon\Carbon::parse($fechaInicioRaw)->isoWeek()
+                                    : null;
+                                $semanaFin = $fechaFinRaw !== ''
+                                    ? \Carbon\Carbon::parse($fechaFinRaw)->isoWeek()
+                                    : null;
+                                $semanaLabel = $semanaInicio
+                                    ? ($semanaFin && $semanaFin !== $semanaInicio ? 'Sem. '.$semanaInicio.'-'.$semanaFin : 'Sem. '.$semanaInicio)
+                                    : '-';
                             @endphp
                             <tr>
-                                <td>{{ $rq['mina'] ?? '-' }}</td>
+                                <td>{{ $rq['lugar'] ?? $rq['mina'] ?? '-' }}</td>
                                 <td>{{ $rq['area'] ?? '-' }}</td>
                                 <td>
                                     <div class="inline-flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-[180px]">
@@ -199,6 +227,7 @@ $calcTotal = static function (array $detalle): int {
                                             <line x1="3" y1="10" x2="21" y2="10"></line>
                                         </svg>
                                         <div class="leading-tight">
+                                            <div class="rq-week-badge">{{ $semanaLabel }}</div>
                                             <div class="text-[11px] uppercase tracking-wide text-slate-500">Inicio <span class="font-semibold text-slate-700">{{ $fechaInicioFmt }}</span></div>
                                             <div class="text-[11px] uppercase tracking-wide text-slate-500 mt-1">Fin <span class="font-semibold text-slate-700">{{ $fechaFinFmt }}</span></div>
                                         </div>
@@ -207,6 +236,21 @@ $calcTotal = static function (array $detalle): int {
                                 <td>{{ $rq['creador'] ?? '-' }}</td>
                                 <td>{{ $calcPuestos($detalle) }}</td>
                                 <td>{{ $calcTotal($detalle) }}</td>
+                                <td>
+                                    @if($transporteTotal > 0)
+                                        <div class="transport-cell">
+                                            <span class="transport-total">{{ $transporteTotal }} unidad(es)</span>
+                                            <span class="transport-summary">
+                                                {{ $transportePrincipal }}
+                                                @if($transporteRestantes > 0)
+                                                    + {{ $transporteRestantes }} mas
+                                                @endif
+                                            </span>
+                                        </div>
+                                    @else
+                                        <span class="transport-empty">Sin transporte</span>
+                                    @endif
+                                </td>
                                 <td>
                                     <span class="estado-badge {{ $rq['estado'] ?? 'borrador' }}">{{ ucfirst($rq['estado'] ?? 'borrador') }}</span>
                                 </td>
@@ -307,11 +351,12 @@ $calcTotal = static function (array $detalle): int {
             <div class="form-section">
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Mina *</label>
-                        <select name="mina" id="inputMina" class="form-select" required>
-                            <option value="">Seleccionar mina</option>
-                            @foreach($minaOptions as $m)
-                            <option value="{{ $m['nombre'] ?? '' }}">{{ $m['nombre'] ?? '-' }}</option>
+                        <label class="form-label">Lugar *</label>
+                        <select name="destino_id" id="inputDestino" class="form-select" required>
+                            <option value="">Seleccionar lugar</option>
+                            @foreach($lugarOptions as $lugar)
+                            @php $value = ($lugar['tipo'] ?? '') . '|' . ($lugar['id'] ?? ''); @endphp
+                            <option value="{{ $value }}">{{ $lugar['label'] ?? (($lugar['tipo'] ?? 'Lugar') . ' - ' . ($lugar['nombre'] ?? '-')) }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -353,6 +398,24 @@ $calcTotal = static function (array $detalle): int {
                     </div>
                 </div>
             </div>
+            <div class="detalle-section detalle-section-transporte">
+                <div class="detalle-header">
+                    <h3 class="detalle-title">Detalle de transporte</h3>
+                    <button type="button" class="btn-addfila" onclick="addFilaTransporte()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                       Agregar fila
+                    </button>
+                </div>
+                <div class="detalle-lista" id="listaTransporte">
+                    <div class="fila-detalle">
+                        <input type="text" name="transporte[0][transporte]" class="input-puesto" placeholder="Transporte">
+                        <input type="number" name="transporte[0][cantidad]" class="input-cantidad" placeholder="Cantidad" min="1" value="1">
+                        <button type="button" class="btn-removefila" onclick="this.closest('.fila-detalle').remove()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </form>
         <div class="modalrq-footer">
             <button type="button" class="btn-cancelarrq" onclick="closeModalRQ()">Cancelar</button>
@@ -365,9 +428,23 @@ $calcTotal = static function (array $detalle): int {
 const rqData = @json($items);
 const rqStoreUrl = @json(route('rq-mina.store'));
 const rqUpdateUrlTemplate = @json(route('rq-mina.update', ['id' => '__ID__']));
+let transporteRowCount = 1;
 
 function createDetalleRow(puesto, cantidad) {
     return '<div class="fila-detalle"><input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" value="' + (puesto || '') + '" required><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '" required><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
+}
+
+function createTransporteRow(transporte, cantidad) {
+    const index = transporteRowCount++;
+    return '<div class="fila-detalle"><input type="text" name="transporte[' + index + '][transporte]" class="input-puesto" placeholder="Transporte" value="' + (transporte || '') + '"><input type="number" name="transporte[' + index + '][cantidad]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
+}
+
+function destinoValue(rq) {
+    if (rq && rq.destino_tipo && rq.destino_id) {
+        return String(rq.destino_tipo) + '|' + String(rq.destino_id);
+    }
+
+    return rq && rq.mina_id ? 'MINA|' + String(rq.mina_id) : '';
 }
 
 function openModalRQ(mode = 'create', rqId = null) {
@@ -377,9 +454,12 @@ function openModalRQ(mode = 'create', rqId = null) {
     const submit = document.getElementById('modalRQSubmit');
     const methodOverride = document.getElementById('formMethodOverride');
     const detalle = document.getElementById('listaDetalle');
+    const transporte = document.getElementById('listaTransporte');
 
     form.reset();
     detalle.innerHTML = createDetalleRow('', 1);
+    transporteRowCount = 0;
+    transporte.innerHTML = createTransporteRow('', 1);
 
     if (mode === 'edit' && rqId) {
         const rq = rqData.find(item => String(item.id) === String(rqId));
@@ -390,7 +470,7 @@ function openModalRQ(mode = 'create', rqId = null) {
         form.action = rqUpdateUrlTemplate.replace('__ID__', String(rq.id));
         methodOverride.value = 'PUT';
 
-        document.getElementById('inputMina').value = rq.mina || '';
+        document.getElementById('inputDestino').value = destinoValue(rq);
         document.getElementById('inputArea').value = rq.area || '';
         document.getElementById('inputFechaInicio').value = rq.fecha_inicio || '';
         document.getElementById('inputFechaFin').value = rq.fecha_fin || '';
@@ -401,6 +481,13 @@ function openModalRQ(mode = 'create', rqId = null) {
         rqDetalle.forEach(item => {
             detalle.insertAdjacentHTML('beforeend', createDetalleRow(item.puesto, item.cantidad));
         });
+
+        transporte.innerHTML = '';
+        transporteRowCount = 0;
+        const rqTransporte = Array.isArray(rq.transporte) && rq.transporte.length > 0 ? rq.transporte : [{ transporte: '', cantidad: 1 }];
+        rqTransporte.forEach(item => {
+            transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
+        });
     } else if (mode === 'copy' && rqId) {
         const rq = rqData.find(item => String(item.id) === String(rqId));
         if (!rq) return;
@@ -410,7 +497,7 @@ function openModalRQ(mode = 'create', rqId = null) {
         form.action = rqStoreUrl;
         methodOverride.value = 'POST';
 
-        document.getElementById('inputMina').value = rq.mina || '';
+        document.getElementById('inputDestino').value = destinoValue(rq);
         document.getElementById('inputArea').value = rq.area || '';
         document.getElementById('inputFechaInicio').value = rq.fecha_inicio || '';
         document.getElementById('inputFechaFin').value = rq.fecha_fin || '';
@@ -420,6 +507,13 @@ function openModalRQ(mode = 'create', rqId = null) {
         const rqDetalle = Array.isArray(rq.detalle) && rq.detalle.length > 0 ? rq.detalle : [{ puesto: '', cantidad: 1 }];
         rqDetalle.forEach(item => {
             detalle.insertAdjacentHTML('beforeend', createDetalleRow(item.puesto, item.cantidad));
+        });
+
+        transporte.innerHTML = '';
+        transporteRowCount = 0;
+        const rqTransporte = Array.isArray(rq.transporte) && rq.transporte.length > 0 ? rq.transporte : [{ transporte: '', cantidad: 1 }];
+        rqTransporte.forEach(item => {
+            transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
         });
     } else {
         title.textContent = 'Nuevo RQ Mina';
@@ -437,6 +531,11 @@ function addFila() {
     row.className = 'fila-detalle';
     row.innerHTML = '<input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" required><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1" required><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
     container.appendChild(row);
+}
+
+function addFilaTransporte() {
+    const container = document.getElementById('listaTransporte');
+    container.insertAdjacentHTML('beforeend', createTransporteRow('', 1));
 }
 function saveRQ(e) {
     // Reserved for future custom validation hooks.
@@ -588,6 +687,7 @@ document.addEventListener('DOMContentLoaded', function () {
             collapsedIcon: '\u25BC',
             expandedLabel: 'Ocultar filtros',
             collapsedLabel: 'Mostrar filtros',
+            storageKey: 'rq_mina_filters_state',
         });
     }
 });

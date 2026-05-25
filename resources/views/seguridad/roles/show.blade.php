@@ -57,10 +57,19 @@
                 </thead>
                 <tbody>
                     @foreach($modules as $module => $label)
+                        @php
+                            $availableActions = ($moduleActions[$module] ?? $actions);
+                        @endphp
                         <tr>
                             <td><strong>{{ $label }}</strong></td>
                             @foreach($actions as $action)
-                                <td style="text-align:center;">{{ (($rol->permisos[$module][$action] ?? false) === true) ? 'Si' : 'No' }}</td>
+                                <td style="text-align:center;">
+                                    @if(in_array($action, $availableActions, true))
+                                        {{ (($rol->permisos[$module][$action] ?? false) === true) ? 'Si' : 'No' }}
+                                    @else
+                                        -
+                                    @endif
+                                </td>
                             @endforeach
                         </tr>
                     @endforeach
@@ -68,5 +77,81 @@
             </table>
         </div>
     </div>
+
+    @if(!empty($notificationModules ?? []))
+        <div class="card" style="margin-top:16px;">
+            <div class="card-header"><span class="card-title">Matriz de notificaciones</span></div>
+            <div class="card-body" style="overflow:auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Módulo</th>
+                            @foreach(($notificationActions ?? []) as $action)
+                                <th>{{ \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</th>
+                            @endforeach
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach(($notificationModules ?? []) as $module => $label)
+                            @php
+                                $availableActions = ($notificationModuleActions[$module] ?? ($notificationActions ?? []));
+                            @endphp
+                            <tr>
+                                <td><strong>{{ $label }}</strong></td>
+                                @foreach(($notificationActions ?? []) as $action)
+                                    <td style="text-align:center;">
+                                        @if(in_array($action, $availableActions, true))
+                                            {{ (($rol->permisos[$module][$action] ?? false) === true) ? 'Si' : 'No' }}
+                                        @else
+                                            -
+                                        @endif
+                                    </td>
+                                @endforeach
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
+
+    @if(($notificationTypes ?? collect())->isNotEmpty())
+        <div class="card" style="margin-top:16px;">
+            <div class="card-header"><span class="card-title">Tipos de notificaciones por rol</span></div>
+            <div class="card-body" style="overflow:auto;">
+                <table class="notification-pref-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Modulo</th>
+                            <th>Categoria</th>
+                            <th>Prioridad</th>
+                            <th>Activo</th>
+                            <th>Recibe</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach(($notificationTypes ?? collect()) as $type)
+                            @php
+                                $rolePref = ($notificationRolePreferences ?? collect())->get((string) $type->id);
+                                $enabled = $rolePref ? (bool) $rolePref->is_enabled : true;
+                            @endphp
+                            <tr>
+                                <td>
+                                    <strong>{{ $type->default_title }}</strong>
+                                    <span>{{ $type->code }}</span>
+                                </td>
+                                <td>{{ $type->module }}</td>
+                                <td>{{ $type->category }}</td>
+                                <td>{{ ucfirst($type->default_priority) }}</td>
+                                <td>{{ $type->is_active ? 'Si' : 'No' }}</td>
+                                <td>{{ $enabled ? 'Si' : 'No' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
 </div>
 @endsection

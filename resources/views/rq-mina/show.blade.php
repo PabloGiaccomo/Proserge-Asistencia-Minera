@@ -5,15 +5,27 @@
 @section('content')
 @php
     $detalle = $item['detalle'] ?? [];
+    $transporte = $item['transporte'] ?? [];
     $personalParada = $item['personal_parada'] ?? [];
     $totalSolicitado = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $detalle));
     $totalAtendido = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_atendida'] ?? 0), $detalle));
     $totalPendiente = max(0, $totalSolicitado - $totalAtendido);
+    $totalTransporte = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $transporte));
     $puestosCount = count($detalle);
+    $transportesCount = count($transporte);
     $cobertura = $totalSolicitado > 0 ? round(($totalAtendido / $totalSolicitado) * 100, 1) : 0;
     $fechaInicio = !empty($item['fecha_inicio']) ? \Carbon\Carbon::parse($item['fecha_inicio']) : null;
     $fechaFin = !empty($item['fecha_fin']) ? \Carbon\Carbon::parse($item['fecha_fin']) : null;
     $diasParada = ($fechaInicio && $fechaFin) ? max(1, $fechaInicio->diffInDays($fechaFin) + 1) : null;
+    $resumenTransporte = collect($transporte)
+        ->map(static function (array $linea): ?string {
+            $nombre = trim((string) ($linea['transporte'] ?? ''));
+            $cantidad = (int) ($linea['cantidad'] ?? 0);
+
+            return $nombre !== '' && $cantidad > 0 ? $cantidad.' x '.$nombre : null;
+        })
+        ->filter()
+        ->values();
 @endphp
 
 <style>
@@ -33,6 +45,12 @@
 .rqm-meta-item { border:1px solid #f1f5f9; border-radius:10px; padding:10px; }
 .rqm-meta-label { display:block; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.4px; }
 .rqm-meta-value { font-size:14px; color:#0f172a; font-weight:600; margin-top:4px; }
+.rqm-transport-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px; }
+.rqm-transport-summary-item { border:1px solid #e2e8f0; border-radius:10px; padding:10px; background:#f8fafc; }
+.rqm-transport-summary-item strong { display:block; margin-top:4px; color:#0f172a; font-size:20px; line-height:1.1; }
+.rqm-transport-summary-wide { grid-column:1/-1; }
+.rqm-transport-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.rqm-transport-chip { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; background:#ecfeff; color:#0e7490; font-size:12px; font-weight:700; }
 </style>
 
 <div class="page-header">
@@ -80,6 +98,11 @@
         <div class="rqm-progress" style="margin-top:8px;"><span style="width: {{ min(100, max(0, $cobertura)) }}%"></span></div>
     </div>
     <div class="rqm-kpi">
+        <div class="rqm-kpi-label">Transporte requerido</div>
+        <div class="rqm-kpi-value">{{ $totalTransporte > 0 ? $totalTransporte : '-' }}</div>
+        <div class="rqm-kpi-sub">{{ $transportesCount }} tipo(s) registrados</div>
+    </div>
+    <div class="rqm-kpi">
         <div class="rqm-kpi-label">Duración</div>
         <div class="rqm-kpi-value">{{ $diasParada ?? '-' }}</div>
         <div class="rqm-kpi-sub">días programados</div>
@@ -98,8 +121,12 @@
                     <span class="rqm-meta-value">{{ $item['id'] }}</span>
                 </div>
                 <div class="rqm-meta-item">
-                    <span class="rqm-meta-label">Mina</span>
-                    <span class="rqm-meta-value">{{ $item['mina'] ?? '-' }}</span>
+                    <span class="rqm-meta-label">Lugar</span>
+                    <span class="rqm-meta-value">{{ $item['lugar'] ?? $item['mina'] ?? '-' }}</span>
+                </div>
+                <div class="rqm-meta-item">
+                    <span class="rqm-meta-label">Tipo de lugar</span>
+                    <span class="rqm-meta-value">{{ ucfirst(strtolower($item['destino_tipo'] ?? 'MINA')) }}</span>
                 </div>
                 <div class="rqm-meta-item">
                     <span class="rqm-meta-label">Área / Parada</span>
@@ -139,8 +166,62 @@
                     <span class="rqm-meta-label">Personal en parada</span>
                     <span class="rqm-meta-value">{{ count($personalParada) }} persona(s)</span>
                 </div>
+                <div class="rqm-meta-item">
+                    <span class="rqm-meta-label">Transporte solicitado</span>
+                    <span class="rqm-meta-value">
+                        {{ $totalTransporte > 0 ? $totalTransporte.' unidad(es)' : 'Sin transporte' }}
+                    </span>
+                </div>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Detalle de Transporte</h3>
+    </div>
+    <div class="card-body">
+        @if(!empty($transporte))
+            <div class="rqm-transport-summary">
+                <div class="rqm-transport-summary-item">
+                    <span class="rqm-meta-label">Unidades solicitadas</span>
+                    <strong>{{ $totalTransporte }}</strong>
+                </div>
+                <div class="rqm-transport-summary-item">
+                    <span class="rqm-meta-label">Tipos de transporte</span>
+                    <strong>{{ $transportesCount }}</strong>
+                </div>
+                <div class="rqm-transport-summary-item rqm-transport-summary-wide">
+                    <span class="rqm-meta-label">Resumen</span>
+                    <div class="rqm-transport-chips">
+                        @foreach($resumenTransporte as $resumen)
+                            <span class="rqm-transport-chip">{{ $resumen }}</span>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Transporte</th>
+                            <th>Cantidad Solicitada</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($transporte as $linea)
+                        <tr>
+                            <td>{{ $linea['transporte'] ?? '-' }}</td>
+                            <td>{{ (int) ($linea['cantidad'] ?? 0) }}</td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <p class="text-muted">No hay transporte registrado para este RQ Mina.</p>
+        @endif
     </div>
 </div>
 

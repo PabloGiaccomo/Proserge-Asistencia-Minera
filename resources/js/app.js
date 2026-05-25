@@ -231,6 +231,41 @@ window.ProsergeUI.initCollapsiblePanel = function(options) {
     const collapsedIcon = options.collapsedIcon || '▼';
     const expandedLabel = options.expandedLabel || 'Ocultar filtros';
     const collapsedLabel = options.collapsedLabel || 'Mostrar filtros';
+    const storageKey = options.storageKey || null;
+
+    const readStoredExpanded = function() {
+        if (!storageKey || !window.localStorage) {
+            return null;
+        }
+
+        try {
+            const storedValue = window.localStorage.getItem(storageKey);
+
+            if (storedValue === 'expanded' || storedValue === 'true') {
+                return true;
+            }
+
+            if (storedValue === 'collapsed' || storedValue === 'false') {
+                return false;
+            }
+        } catch (error) {
+            return null;
+        }
+
+        return null;
+    };
+
+    const writeStoredExpanded = function(isExpanded) {
+        if (!storageKey || !window.localStorage) {
+            return;
+        }
+
+        try {
+            window.localStorage.setItem(storageKey, isExpanded ? 'expanded' : 'collapsed');
+        } catch (error) {
+            // Ignore storage errors so the filter toggle keeps working normally.
+        }
+    };
 
     const setExpandedState = function(isExpanded) {
         panelBody.style.display = isExpanded ? 'block' : 'none';
@@ -244,12 +279,15 @@ window.ProsergeUI.initCollapsiblePanel = function(options) {
         toggleButton.setAttribute('title', isExpanded ? expandedLabel : collapsedLabel);
     };
 
-    const initialExpanded = panelBody.style.display !== 'none';
+    const storedExpanded = readStoredExpanded();
+    const initialExpanded = storedExpanded !== null ? storedExpanded : panelBody.style.display !== 'none';
     setExpandedState(initialExpanded);
 
     toggleButton.addEventListener('click', function() {
         const isExpanded = panelBody.style.display !== 'none';
-        setExpandedState(!isExpanded);
+        const nextExpanded = !isExpanded;
+        setExpandedState(nextExpanded);
+        writeStoredExpanded(nextExpanded);
     });
 
     return { setExpandedState };

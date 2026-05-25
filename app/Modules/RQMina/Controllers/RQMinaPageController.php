@@ -39,8 +39,8 @@ class RQMinaPageController extends WebPageController
             'fecha_fin_hasta',
         ]);
         $availableMinas = $this->service->getAvailableMinas($usuario);
-        $mineNameById = $availableMinas->pluck('nombre', 'id');
         $creatorOptions = $this->service->getCreatorOptionsForUser($usuario);
+        $lugarOptions = $this->service->getLugarOptions($usuario);
 
         $perPage = max(1, (int) ($request->input('per_page', 10)));
         $currentPage = max(1, (int) ($request->input('page', 1)));
@@ -57,7 +57,7 @@ class RQMinaPageController extends WebPageController
         ];
 
         $result = $this->service->listForUser($usuario, array_filter($serviceFilters, fn ($value) => $value !== null && $value !== ''), $perPage, $currentPage);
-        $items = $result['items']->map(fn (RQMina $rq): array => $this->toViewItem($rq, $mineNameById->get((string) $rq->mina_id, '-')))->values()->all();
+        $items = $result['items']->map(fn (RQMina $rq): array => $this->toViewItem($rq))->values()->all();
 
         $data = [
             'items' => $items,
@@ -65,6 +65,7 @@ class RQMinaPageController extends WebPageController
                 'id' => (string) $mina->id,
                 'nombre' => (string) $mina->nombre,
             ])->values()->all(),
+            'lugarOptions' => $lugarOptions->all(),
             'estadoOptions' => ['borrador', 'enviado', 'cerrado', 'cancelado'],
             'creadores' => $creatorOptions->all(),
             'filters' => [
@@ -97,8 +98,7 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
-        $mineName = (string) ($rqMina->mina?->nombre ?? '-');
-        $item = $this->toViewItem($rqMina, $mineName);
+        $item = $this->toViewItem($rqMina);
         $item['personal_parada'] = $this->getPersonalParadaForRQMina($id);
 
         return view('rq-mina.show', compact('item'));
@@ -107,14 +107,14 @@ class RQMinaPageController extends WebPageController
     public function create(Request $request): View
     {
         $usuario = $this->requireAuthenticatedUser();
-        $minas = $this->service->getAvailableMinas($usuario)->pluck('nombre')->values()->all();
+        $lugares = $this->service->getLugarOptions($usuario)->all();
         $copyFrom = (string) $request->query('copy_from', '');
         $copyData = null;
 
         if ($copyFrom !== '') {
             $rqMina = $this->service->findForUser($usuario, $copyFrom);
             if ($rqMina) {
-                $copyData = $this->toViewItem($rqMina, (string) ($rqMina->mina?->nombre ?? '-'));
+                $copyData = $this->toViewItem($rqMina);
             }
         }
 
@@ -123,7 +123,7 @@ class RQMinaPageController extends WebPageController
         $formMethod = 'POST';
         $submitLabel = 'Guardar como Borrador';
 
-        return view('rq-mina.create', compact('minas', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
     }
 
     public function edit(Request $request, string $id): View
@@ -135,14 +135,14 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
-        $minas = $this->service->getAvailableMinas($usuario)->pluck('nombre')->values()->all();
-        $copyData = $this->toViewItem($rqMina, (string) ($rqMina->mina?->nombre ?? '-'));
+        $lugares = $this->service->getLugarOptions($usuario)->all();
+        $copyData = $this->toViewItem($rqMina);
         $formMode = 'edit';
         $formAction = route('rq-mina.update', $id);
         $formMethod = 'PUT';
         $submitLabel = 'Guardar Cambios';
 
-        return view('rq-mina.create', compact('minas', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -155,6 +155,8 @@ class RQMinaPageController extends WebPageController
             'payload' => [
                 'mina' => $request->input('mina'),
                 'mina_id' => $request->input('mina_id'),
+                'destino_tipo' => $request->input('destino_tipo'),
+                'destino_id' => $request->input('destino_id'),
                 'area' => $request->input('area'),
                 'fecha_inicio' => $request->input('fecha_inicio'),
                 'fecha_fin' => $request->input('fecha_fin'),
@@ -162,6 +164,7 @@ class RQMinaPageController extends WebPageController
                 'detalle' => $request->input('detalle', []),
                 'puesto' => $request->input('puesto', []),
                 'cantidad' => $request->input('cantidad', []),
+                'transporte' => $request->input('transporte', []),
             ],
         ]);
 
@@ -182,7 +185,7 @@ class RQMinaPageController extends WebPageController
                 'mina_id' => $payload['data']['mina_id'] ?? null,
             ]);
 
-            return back()->with('error', 'No tienes acceso a la mina seleccionada.')->withInput();
+            return back()->with('error', 'No tienes acceso al lugar seleccionado o el destino no es valido.')->withInput();
         }
 
         return redirect()->route('rq-mina.index')->with('success', 'RQ creado correctamente');
@@ -205,6 +208,8 @@ class RQMinaPageController extends WebPageController
             'payload' => [
                 'mina' => $request->input('mina'),
                 'mina_id' => $request->input('mina_id'),
+                'destino_tipo' => $request->input('destino_tipo'),
+                'destino_id' => $request->input('destino_id'),
                 'area' => $request->input('area'),
                 'fecha_inicio' => $request->input('fecha_inicio'),
                 'fecha_fin' => $request->input('fecha_fin'),
@@ -212,6 +217,7 @@ class RQMinaPageController extends WebPageController
                 'detalle' => $request->input('detalle', []),
                 'puesto' => $request->input('puesto', []),
                 'cantidad' => $request->input('cantidad', []),
+                'transporte' => $request->input('transporte', []),
             ],
         ]);
 
@@ -279,7 +285,7 @@ class RQMinaPageController extends WebPageController
             'enviado_at' => optional($sent->enviado_at)->toIso8601String(),
         ]);
 
-        $mineName = (string) ($sent->mina?->nombre ?? 'mina no definida');
+        $mineName = (string) ($sent->destino_nombre ?: ($sent->mina?->nombre ?? 'lugar no definido'));
         $areaName = (string) ($sent->area ?? 'sin área');
         $fechaInicio = $sent->fecha_inicio ? \Carbon\Carbon::parse($sent->fecha_inicio)->format('d/m/Y') : 'sin fecha';
         $fechaFin = $sent->fecha_fin ? \Carbon\Carbon::parse($sent->fecha_fin)->format('d/m/Y') : '';
@@ -396,12 +402,20 @@ class RQMinaPageController extends WebPageController
         return in_array($estado, $estadosValidos, true) ? $estado : null;
     }
 
-    private function toViewItem(RQMina $rq, string $mineName): array
+    private function toViewItem(RQMina $rq): array
     {
+        $destinoTipo = strtoupper((string) ($rq->destino_tipo ?: 'MINA'));
+        $destinoId = (string) ($rq->destino_id ?: $rq->mina_id);
+        $destinoNombre = (string) ($rq->destino_nombre ?: ($rq->mina?->nombre ?? '-'));
+
         return [
             'id' => $rq->id,
             'mina_id' => $rq->mina_id,
-            'mina' => $mineName,
+            'mina' => $rq->mina?->nombre ?? '-',
+            'destino_tipo' => $destinoTipo,
+            'destino_id' => $destinoId,
+            'destino_nombre' => $destinoNombre,
+            'lugar' => $destinoNombre,
             'area' => $rq->area,
             'fecha_inicio' => $rq->fecha_inicio?->format('Y-m-d'),
             'fecha_fin' => $rq->fecha_fin?->format('Y-m-d'),
@@ -410,7 +424,8 @@ class RQMinaPageController extends WebPageController
             'creador' => $rq->creador?->personal?->nombre_completo ?? $rq->creador?->email ?? '-',
             'creado_at' => $rq->creado_at?->format('Y-m-d H:i:s'),
             'enviado_at' => $rq->enviado_at?->format('Y-m-d H:i:s'),
-            'detalle' => $rq->detalle instanceof \Illuminate\Database\Eloquent\Collection ? $rq->detalle->values()->all() : ($rq->detalle ?? []),
+            'detalle' => $this->collectionToArrayRows($rq->detalle ?? []),
+            'transporte' => $this->collectionToArrayRows($rq->transportes ?? []),
             'observaciones' => $rq->observaciones,
             'personal_parada' => $rq->personal_parada,
         ];
@@ -420,6 +435,7 @@ class RQMinaPageController extends WebPageController
     {
         $receivedMinaId = trim((string) $request->input('mina_id', ''));
         $receivedMinaName = trim((string) $request->input('mina', ''));
+        [$destinoTipo, $destinoId] = $this->extractDestinoFromRequest($request);
 
         Log::info('rqmina.mine_value_received', [
             'usuario_id' => (string) $usuario->id,
@@ -427,7 +443,14 @@ class RQMinaPageController extends WebPageController
             'mina_nombre' => $receivedMinaName,
         ]);
 
-        $resolvedMinaId = $this->resolveMinaId($receivedMinaId, $receivedMinaName, $usuario);
+        $destination = $this->service->resolveDestination(
+            usuario: $usuario,
+            destinoTipo: $destinoTipo,
+            destinoId: $destinoId,
+            legacyMinaId: $receivedMinaId,
+            legacyMinaName: $receivedMinaName,
+        );
+        $normalizedTransporte = $this->normalizeTransporteFromRequest($request);
 
         $normalizedDetalle = $this->normalizeDetalleFromRequest($request);
         $cantidadPuestos = count($normalizedDetalle);
@@ -435,7 +458,8 @@ class RQMinaPageController extends WebPageController
 
         Log::info('rqmina.mine_id_resolved', [
             'usuario_id' => (string) $usuario->id,
-            'mina_id_resuelto' => $resolvedMinaId,
+            'mina_id_resuelto' => $destination['mina_id'] ?? null,
+            'destino_resuelto' => $destination,
         ]);
 
         Log::info('rqmina.detail_received', [
@@ -451,17 +475,21 @@ class RQMinaPageController extends WebPageController
         ]);
 
         $rqData = [
-            'mina_id' => $resolvedMinaId,
+            'mina_id' => $destination['mina_id'] ?? null,
+            'destino_tipo' => $destination['tipo'] ?? null,
+            'destino_id' => $destination['id'] ?? null,
+            'destino_nombre' => $destination['nombre'] ?? null,
             'area' => $request->input('area'),
             'fecha_inicio' => $request->input('fecha_inicio'),
             'fecha_fin' => $request->input('fecha_fin'),
             'observaciones' => $request->input('observaciones'),
             'detalle' => $normalizedDetalle,
+            'transporte' => $normalizedTransporte,
         ];
 
         $errors = [];
-        if (empty($rqData['mina_id'])) {
-            $errors['mina'] = 'La mina es requerida';
+        if (empty($rqData['destino_tipo']) || empty($rqData['destino_id'])) {
+            $errors['destino_id'] = 'El lugar es requerido';
         }
         if (empty($rqData['area'])) {
             $errors['area'] = 'El área es requerida';
@@ -481,30 +509,6 @@ class RQMinaPageController extends WebPageController
             'valid' => empty($errors),
             'errors' => $errors,
         ];
-    }
-
-    private function resolveMinaId(string $receivedMinaId, string $receivedMinaName, Usuario $usuario): ?string
-    {
-        if ($receivedMinaId !== '' && Mina::query()->where('id', $receivedMinaId)->exists()) {
-            return $receivedMinaId;
-        }
-
-        if ($receivedMinaName === '') {
-            return null;
-        }
-
-        $mineFromScope = $this->service->getAvailableMinas($usuario)
-            ->first(fn ($mina): bool => mb_strtolower(trim((string) $mina->nombre)) === mb_strtolower(trim($receivedMinaName)));
-
-        if ($mineFromScope) {
-            return (string) $mineFromScope->id;
-        }
-
-        $mine = Mina::query()
-            ->whereRaw('LOWER(TRIM(nombre)) = ?', [mb_strtolower(trim($receivedMinaName))])
-            ->first(['id']);
-
-        return $mine ? (string) $mine->id : null;
     }
 
     private function normalizeDetalleFromRequest(Request $request): array
@@ -564,6 +568,65 @@ class RQMinaPageController extends WebPageController
         }
 
         return array_values($unique);
+    }
+
+    private function extractDestinoFromRequest(Request $request): array
+    {
+        $tipo = strtoupper(trim((string) $request->input('destino_tipo', '')));
+        $id = trim((string) $request->input('destino_id', ''));
+
+        if ($tipo === '' && str_contains($id, '|')) {
+            [$rawTipo, $rawId] = array_pad(explode('|', $id, 2), 2, '');
+            $tipo = strtoupper(trim($rawTipo));
+            $id = trim($rawId);
+        }
+
+        return [$tipo, $id];
+    }
+
+    private function normalizeTransporteFromRequest(Request $request): array
+    {
+        $normalized = [];
+
+        $rows = $request->input('transporte', []);
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $transporte = trim((string) ($row['transporte'] ?? ''));
+                $cantidad = (int) ($row['cantidad'] ?? 0);
+
+                if ($transporte === '' && $cantidad <= 0) {
+                    continue;
+                }
+
+                if ($transporte !== '' && $cantidad > 0) {
+                    $normalized[] = [
+                        'transporte' => $transporte,
+                        'cantidad' => $cantidad,
+                    ];
+                }
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    private function collectionToArrayRows(mixed $items): array
+    {
+        if ($items instanceof \Illuminate\Support\Collection) {
+            return $items->map(fn ($item): array => $item instanceof \Illuminate\Database\Eloquent\Model ? $item->toArray() : (array) $item)
+                ->values()
+                ->all();
+        }
+
+        if (is_array($items)) {
+            return array_map(static fn ($item): array => $item instanceof \Illuminate\Database\Eloquent\Model ? $item->toArray() : (array) $item, $items);
+        }
+
+        return [];
     }
 
     private function hasValidEstado(string $estado): bool

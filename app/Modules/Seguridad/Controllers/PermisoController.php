@@ -10,8 +10,9 @@ class PermisoController extends Controller
 {
     public function index()
     {
-        $permisos = collect(PermissionCatalog::modules())
-            ->flatMap(fn (string $label, string $module) => collect(PermissionCatalog::actions())
+        $moduleActions = PermissionCatalog::availableModuleActions();
+        $permisos = collect(PermissionCatalog::availableModules())
+            ->flatMap(fn (string $label, string $module) => collect($moduleActions[$module] ?? [])
                 ->map(fn (string $action) => $module . '.' . $action))
             ->values();
 

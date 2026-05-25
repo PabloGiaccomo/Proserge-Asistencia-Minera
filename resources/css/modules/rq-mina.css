@@ -125,15 +125,18 @@
     color: #64748b;
     text-decoration: none;
     background: #fff;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .rq-mina-page .btn-filter-toggle {
     border: 1px solid #d7e0ed;
     background: #fff;
     color: #3f556f;
-    border-radius: 10px;
-    width: 34px;
-    height: 34px;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -181,7 +184,7 @@
 .rq-mina-page .rq-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 980px;
+    min-width: 1120px;
 }
 
 .rq-mina-page .rq-table th,
@@ -204,6 +207,43 @@
 
 .rq-mina-page .rq-table tbody tr:hover {
     background: #f8fafc;
+}
+
+.rq-mina-page .transport-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 150px;
+}
+
+.rq-mina-page .transport-total {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.rq-mina-page .transport-summary {
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.25;
+}
+
+.rq-mina-page .transport-empty {
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.rq-mina-page .rq-week-badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    margin-bottom: 5px;
+    border-radius: 999px;
+    padding: 3px 9px;
+    background: #e0f2fe;
+    color: #075985;
+    font-size: 11px;
+    font-weight: 800;
 }
 
 .rq-mina-page .estado-badge {
@@ -526,6 +566,10 @@
     background: #f8fafc;
     border-radius: 12px;
     padding: 20px;
+}
+
+.modalrq-body .detalle-section + .detalle-section {
+    margin-top: 16px;
 }
 
 .modalrq-body .detalle-header {

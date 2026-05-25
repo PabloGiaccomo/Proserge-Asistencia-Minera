@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./modules/man-power.css";
+@import "./modules/parada-herramientas.css";
 @import "./modules/rq-mina.css";
 @import "./modules/rq-proserge.css";
 @import "./modules/asistencia-alertas.css";

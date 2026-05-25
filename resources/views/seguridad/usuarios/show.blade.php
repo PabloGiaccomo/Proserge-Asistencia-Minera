@@ -233,6 +233,67 @@
 
     <div class="card" style="margin-top: 16px;">
         <div class="card-header">
+            <span class="card-title">Notificaciones</span>
+            <span class="card-badge">{{ ($notificationTypes ?? collect())->count() }} tipos</span>
+        </div>
+        <div class="card-body">
+            @allowed('usuarios', 'administrar')
+                <form method="POST" action="{{ route('usuarios.notificaciones', $usuario->id) }}">
+                    @csrf
+                    <div class="notification-pref-table-wrap">
+                        <table class="notification-pref-table">
+                            <thead>
+                                <tr>
+                                    <th>Tipo</th>
+                                    <th>Modulo</th>
+                                    <th>Recibir</th>
+                                    <th>Prioridad minima</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach(($notificationTypes ?? collect()) as $type)
+                                    @php
+                                        $preference = ($notificationPreferences ?? collect())->get((string) $type->id);
+                                        $enabled = $preference ? (bool) $preference->in_app_enabled : true;
+                                        $minimumPriority = $preference?->minimum_priority ?? 'low';
+                                    @endphp
+                                    <tr>
+                                        <td>
+                                            <input type="hidden" name="notification_type_ids[]" value="{{ $type->id }}">
+                                            <strong>{{ $type->default_title }}</strong>
+                                            <span>{{ $type->code }}</span>
+                                        </td>
+                                        <td>{{ $type->module }}</td>
+                                        <td>
+                                            <label class="notification-toggle">
+                                                <input type="checkbox" name="preferences[{{ $type->id }}][in_app_enabled]" value="1" {{ $enabled ? 'checked' : '' }}>
+                                                <span>Activo</span>
+                                            </label>
+                                        </td>
+                                        <td>
+                                            <select name="preferences[{{ $type->id }}][minimum_priority]" class="form-control">
+                                                @foreach(['low' => 'Baja', 'medium' => 'Media', 'high' => 'Alta', 'critical' => 'Critica'] as $priority => $label)
+                                                    <option value="{{ $priority }}" {{ $minimumPriority === $priority ? 'selected' : '' }}>{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Guardar preferencias</button>
+                    </div>
+                </form>
+            @else
+                <p style="color: var(--color-text-secondary);">No tienes permiso para administrar notificaciones de usuario.</p>
+            @endallowed
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+        <div class="card-header">
             <span class="card-title">Roles organizados</span>
         </div>
         <div class="card-body">
@@ -276,6 +337,13 @@
 .role-chip-selected-cargo { border-color: #8b5cf6; background: #ede9fe; color: #5b21b6; }
 .role-chip-remove { font-size: 13px; line-height: 1; opacity: .85; }
 .role-chip-empty { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
+.notification-pref-table-wrap { overflow-x: auto; }
+.notification-pref-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.notification-pref-table th, .notification-pref-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: middle; }
+.notification-pref-table th { color: #64748b; font-size: 12px; text-transform: uppercase; background: #f8fafc; }
+.notification-pref-table td strong { display: block; color: #0f172a; font-size: 13px; }
+.notification-pref-table td span { color: #64748b; font-size: 12px; }
+.notification-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #334155; }
 @media (max-width: 768px) {
     .role-accesses { padding: 12px; }
     .role-pick-row { grid-template-columns: 1fr; }

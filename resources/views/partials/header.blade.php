@@ -1,3 +1,9 @@
+@php
+    $permissions = session('user.permissions', []);
+    $canNotificacionesVer = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'ver');
+    $canNotificacionesActualizar = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'actualizar');
+@endphp
+
 <header class="app-header">
     <div class="header-left">
         <button 
@@ -22,75 +28,77 @@
     </div>
     
     <div class="header-right">
-        <div class="header-notif-menu" id="headerNotifMenu">
-            <button type="button" class="header-notif-btn" id="headerNotifToggle" aria-haspopup="true" aria-expanded="false" aria-controls="headerNotifPanel" title="Notificaciones">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"/>
-                    <path d="M9 17a3 3 0 0 0 6 0"/>
-                </svg>
-                @if(($headerUnreadCount ?? 0) > 0)
-                    <span class="header-notif-count">{{ $headerUnreadCount > 99 ? '99+' : $headerUnreadCount }}</span>
-                @endif
-            </button>
-        </div>
-
-        <div class="header-notif-backdrop" id="headerNotifBackdrop" aria-hidden="true"></div>
-
-        <aside class="header-notif-panel" id="headerNotifPanel" aria-hidden="true" aria-label="Bandeja de notificaciones">
-            <div class="header-notif-top">
-                <span>Notificaciones</span>
-                @if(($headerUnreadCount ?? 0) > 0)
-                    <span class="header-notif-top-count">{{ $headerUnreadCount }} no leidas</span>
-                @endif
+        @if($canNotificacionesVer)
+            <div class="header-notif-menu" id="headerNotifMenu">
+                <button type="button" class="header-notif-btn" id="headerNotifToggle" aria-haspopup="true" aria-expanded="false" aria-controls="headerNotifPanel" title="Notificaciones">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"/>
+                        <path d="M9 17a3 3 0 0 0 6 0"/>
+                    </svg>
+                    @if(($headerUnreadCount ?? 0) > 0)
+                        <span class="header-notif-count">{{ $headerUnreadCount > 99 ? '99+' : $headerUnreadCount }}</span>
+                    @endif
+                </button>
             </div>
 
-            <div class="header-notif-panel-actions">
-                @if(($headerUnreadCount ?? 0) > 0)
-                    <form method="POST" action="{{ route('notificaciones.mark-all-read') }}">
-                        @csrf
-                        <button type="submit" class="header-user-dropdown-item">Marcar todas leidas</button>
-                    </form>
-                @endif
-            </div>
+            <div class="header-notif-backdrop" id="headerNotifBackdrop" aria-hidden="true"></div>
 
-            <div class="header-notif-list is-panel-list">
-                @forelse(($headerNotifications ?? []) as $notif)
-                    @php $event = $notif->event; @endphp
-                    <div class="header-notif-item {{ $notif->status === 'UNREAD' ? 'is-unread' : '' }}">
-                        <div class="header-notif-item-title">{{ $event->title }}</div>
-                        <div class="header-notif-item-message">{{ $event->message }}</div>
-                        <div class="header-notif-item-meta">
-                            <span>{{ strtoupper($event->module) }}</span>
-                            <span>{{ strtoupper($event->priority) }}</span>
-                            <span>{{ optional($notif->created_at)->diffForHumans() }}</span>
+            <aside class="header-notif-panel" id="headerNotifPanel" aria-hidden="true" aria-label="Bandeja de notificaciones">
+                <div class="header-notif-top">
+                    <span>Notificaciones</span>
+                    @if(($headerUnreadCount ?? 0) > 0)
+                        <span class="header-notif-top-count">{{ $headerUnreadCount }} no leidas</span>
+                    @endif
+                </div>
+
+                <div class="header-notif-panel-actions">
+                    @if($canNotificacionesActualizar && ($headerUnreadCount ?? 0) > 0)
+                        <form method="POST" action="{{ route('notificaciones.mark-all-read') }}">
+                            @csrf
+                            <button type="submit" class="header-user-dropdown-item">Marcar todas leidas</button>
+                        </form>
+                    @endif
+                </div>
+
+                <div class="header-notif-list is-panel-list">
+                    @forelse(($headerNotifications ?? []) as $notif)
+                        @php $event = $notif->event; @endphp
+                        <div class="header-notif-item {{ $notif->status === 'UNREAD' ? 'is-unread' : '' }}">
+                            <div class="header-notif-item-title">{{ $event->title }}</div>
+                            <div class="header-notif-item-message">{{ $event->message }}</div>
+                            <div class="header-notif-item-meta">
+                                <span>{{ strtoupper($event->module) }}</span>
+                                <span>{{ strtoupper($event->priority) }}</span>
+                                <span>{{ optional($notif->created_at)->diffForHumans() }}</span>
+                            </div>
+                            <div class="header-notif-item-actions">
+                                @if($canNotificacionesActualizar && $notif->status === 'UNREAD')
+                                    <form method="POST" action="{{ route('notificaciones.mark-read', $notif->id) }}">
+                                        @csrf
+                                        <button type="submit" class="header-user-dropdown-item">Leida</button>
+                                    </form>
+                                @endif
+                                @if($canNotificacionesActualizar && $notif->status !== 'ARCHIVED')
+                                    <form method="POST" action="{{ route('notificaciones.archive', $notif->id) }}">
+                                        @csrf
+                                        <button type="submit" class="header-user-dropdown-item">Archivar</button>
+                                    </form>
+                                @endif
+                                @if(!empty($event->action_route))
+                                    <a href="{{ route('notificaciones.action', $notif->id) }}" class="header-user-dropdown-item">{{ $event->action_label ?: 'Abrir' }}</a>
+                                @endif
+                            </div>
                         </div>
-                        <div class="header-notif-item-actions">
-                            @if($notif->status === 'UNREAD')
-                                <form method="POST" action="{{ route('notificaciones.mark-read', $notif->id) }}">
-                                    @csrf
-                                    <button type="submit" class="header-user-dropdown-item">Leida</button>
-                                </form>
-                            @endif
-                            @if($notif->status !== 'ARCHIVED')
-                                <form method="POST" action="{{ route('notificaciones.archive', $notif->id) }}">
-                                    @csrf
-                                    <button type="submit" class="header-user-dropdown-item">Archivar</button>
-                                </form>
-                            @endif
-                            @if(!empty($event->action_route))
-                                <a href="{{ route('notificaciones.action', $notif->id) }}" class="header-user-dropdown-item">{{ $event->action_label ?: 'Abrir' }}</a>
-                            @endif
-                        </div>
-                    </div>
-                @empty
-                    <div class="header-notif-empty">No tienes notificaciones.</div>
-                @endforelse
-            </div>
+                    @empty
+                        <div class="header-notif-empty">No tienes notificaciones.</div>
+                    @endforelse
+                </div>
 
-            <div class="header-notif-footer">
-                <button type="button" class="header-user-dropdown-item" id="headerNotifClose">Cerrar</button>
-            </div>
-        </aside>
+                <div class="header-notif-footer">
+                    <button type="button" class="header-user-dropdown-item" id="headerNotifClose">Cerrar</button>
+                </div>
+            </aside>
+        @endif
 
         <div class="header-user-menu" id="headerUserMenu">
             <button type="button" class="header-avatar" id="headerUserMenuToggle" aria-haspopup="true" aria-expanded="false" aria-controls="headerUserMenuDropdown" title="Opciones de usuario - {{ session('user.name') ?? session('user.email') ?? 'Usuario' }}">
@@ -114,6 +122,7 @@
         </div>
     </div>
 </header>
+@if($canNotificacionesVer)
 <script>
 (function() {
     const pollUrl = '{{ route("notificaciones.poll") }}';
@@ -392,3 +401,4 @@
     setInterval(poll, 5000);
 })();
 </script>
+@endif

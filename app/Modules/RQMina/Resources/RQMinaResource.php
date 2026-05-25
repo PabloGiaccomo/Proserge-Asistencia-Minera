@@ -12,6 +12,9 @@ class RQMinaResource extends JsonResource
         return [
             'id' => $this->id,
             'mina_id' => $this->mina_id,
+            'destino_tipo' => $this->destino_tipo ?? 'MINA',
+            'destino_id' => $this->destino_id ?? $this->mina_id,
+            'destino_nombre' => $this->destino_nombre ?? $this->mina?->nombre,
             'area' => $this->area,
             'fecha_inicio' => optional($this->fecha_inicio)->toDateString(),
             'fecha_fin' => optional($this->fecha_fin)->toDateString(),
@@ -36,6 +39,13 @@ class RQMinaResource extends JsonResource
                     'puesto' => $item->puesto,
                     'cantidad' => (int) $item->cantidad,
                     'cantidad_atendida' => (int) $item->cantidad_atendida,
+                ])->values()->all();
+            }),
+            'transporte' => $this->whenLoaded('transportes', function (): array {
+                return $this->transportes->map(fn ($item): array => [
+                    'id' => $item->id,
+                    'transporte' => $item->transporte,
+                    'cantidad' => (int) $item->cantidad,
                 ])->values()->all();
             }),
         ];

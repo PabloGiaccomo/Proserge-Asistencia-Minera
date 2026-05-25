@@ -2,6 +2,8 @@
 
 namespace App\Support\Rbac;
 
+use Illuminate\Support\Facades\Route;
+
 class PermissionCatalog
 {
     /** @var array<string, string> */
@@ -11,7 +13,9 @@ class PermissionCatalog
         'personal' => 'Personal',
         'rq_mina' => 'RQ Mina',
         'rq_proserge' => 'RQ Proserge',
+        'notificaciones' => 'Notificaciones',
         'man_power' => 'Man Power',
+        'herramientas' => 'Herramientas',
         'mi_asistencia' => 'Mi Asistencia',
         'bienestar' => 'Bienestar',
         'evaluaciones' => 'Evaluaciones',
@@ -48,9 +52,73 @@ class PermissionCatalog
         return self::MODULES;
     }
 
+    public static function availableModules(array $exclude = []): array
+    {
+        $available = self::availableModuleActions($exclude);
+        $labels = [];
+
+        foreach (self::MODULES as $module => $label) {
+            if (in_array($module, $exclude, true)) {
+                continue;
+            }
+            if (isset($available[$module])) {
+                $labels[$module] = $label;
+            }
+        }
+
+        $extraModules = array_diff_key($available, $labels);
+        if (!empty($extraModules)) {
+            ksort($extraModules);
+            foreach ($extraModules as $module => $_) {
+                $labels[$module] = self::moduleLabel($module);
+            }
+        }
+
+        return $labels;
+    }
+
     public static function actions(): array
     {
         return self::ACTIONS;
+    }
+
+    public static function availableActions(array $exclude = []): array
+    {
+        $moduleActions = self::availableModuleActions($exclude);
+        $actions = [];
+
+        foreach ($moduleActions as $items) {
+            $actions = array_merge($actions, $items);
+        }
+
+        return self::sortActions(array_values(array_unique($actions)));
+    }
+
+    public static function availableModuleActions(array $exclude = []): array
+    {
+        $available = [];
+
+        foreach (Route::getRoutes() as $route) {
+            foreach ($route->middleware() as $middleware) {
+                if (!is_string($middleware) || !str_starts_with($middleware, 'web.permission:')) {
+                    continue;
+                }
+
+                $payload = substr($middleware, strlen('web.permission:'));
+                [$module, $action] = array_pad(array_map('trim', explode(',', $payload, 2)), 2, 'ver');
+
+                if ($module === '' || in_array($module, $exclude, true)) {
+                    continue;
+                }
+
+                $action = $action !== '' ? $action : 'ver';
+                $available[$module][$action] = true;
+            }
+        }
+
+        return collect($available)
+            ->map(fn (array $actions) => self::sortActions(array_keys($actions)))
+            ->all();
     }
 
     public static function actionLabel(string $action): string
@@ -177,5 +245,25 @@ class PermissionCatalog
         }
 
         return $matrix;
+    }
+
+    private static function sortActions(array $actions): array
+    {
+        $base = self::ACTIONS;
+        $sorted = [];
+
+        foreach ($base as $action) {
+            if (in_array($action, $actions, true)) {
+                $sorted[] = $action;
+            }
+        }
+
+        $extras = array_values(array_diff($actions, $base));
+        if (!empty($extras)) {
+            sort($extras);
+            $sorted = array_merge($sorted, $extras);
+        }
+
+        return $sorted;
     }
 }

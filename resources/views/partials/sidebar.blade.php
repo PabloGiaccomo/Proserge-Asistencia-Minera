@@ -36,6 +36,7 @@
             $canRQMina = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'rq_mina', 'ver');
             $canRQProserge = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'rq_proserge', 'ver');
             $canManPower = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'man_power', 'ver');
+            $canHerramientas = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'herramientas', 'ver');
             $canMiAsistencia = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'mi_asistencia', 'ver');
             $canEvaluaciones = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'evaluaciones', 'ver');
             $canAsistencias = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'asistencias', 'ver');
@@ -76,7 +77,7 @@
             </div>
             @endif
 
-            @if($canRQMina || $canRQProserge || $canManPower || $canMiAsistencia)
+            @if($canRQMina || $canRQProserge || $canManPower || $canHerramientas || $canMiAsistencia)
             <div class="nav-group">
                 <div class="nav-group-title">Operación</div>
                 <div class="nav-subgroup">
@@ -96,6 +97,12 @@
                     <a href="{{ route('man-power.index') }}" class="nav-item {{ request()->is('man-power*') ? 'active' : '' }}">
                         <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                         <span class="nav-label">Man Power</span>
+                    </a>
+                    @endif
+                    @if($canHerramientas)
+                    <a href="{{ route('herramientas-parada.index') }}" class="nav-item {{ request()->is('herramientas-parada*') ? 'active' : '' }}">
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a4 4 0 0 1-5.1 5.1l-8.4 8.4a2 2 0 0 1-2.8-2.8l8.4-8.4a4 4 0 0 1 5.1-5.1l-3.3 3z"/><path d="M5 11l3 3"/></svg></span>
+                        <span class="nav-label">Herramientas</span>
                     </a>
                     @endif
                     @if($canMiAsistencia)

@@ -2,8 +2,11 @@
 
 namespace App\Modules\Seguridad\Services;
 
+use App\Models\NotificationRolePreference;
+use App\Models\NotificationType;
 use App\Models\Rol;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use App\Support\Rbac\PermissionCatalog;
@@ -118,12 +121,119 @@ class RoleManagementService
 
     public function modules(): array
     {
-        return PermissionCatalog::modules();
+        return PermissionCatalog::availableModules(['notificaciones']);
     }
 
     public function actions(): array
     {
-        return PermissionCatalog::actions();
+        return PermissionCatalog::availableActions(['notificaciones']);
+    }
+
+    public function moduleActions(): array
+    {
+        return PermissionCatalog::availableModuleActions(['notificaciones']);
+    }
+
+    public function notificationModules(): array
+    {
+        return array_filter(
+            PermissionCatalog::availableModules(),
+            static fn (string $label, string $module) => $module === 'notificaciones',
+            ARRAY_FILTER_USE_BOTH
+        );
+    }
+
+    public function notificationActions(): array
+    {
+        $moduleActions = PermissionCatalog::availableModuleActions();
+
+        return $moduleActions['notificaciones'] ?? [];
+    }
+
+    public function notificationModuleActions(): array
+    {
+        $moduleActions = PermissionCatalog::availableModuleActions();
+
+        return isset($moduleActions['notificaciones'])
+            ? ['notificaciones' => $moduleActions['notificaciones']]
+            : [];
+    }
+
+    public function notificationTypes(): Collection
+    {
+        if (!Schema::hasTable('notification_types')) {
+            return collect();
+        }
+
+        return NotificationType::query()
+            ->orderBy('module')
+            ->orderBy('default_title')
+            ->get();
+    }
+
+    public function notificationRolePreferences(?Rol $rol): Collection
+    {
+        if (!$rol || !Schema::hasTable('notification_role_preferences')) {
+            return collect();
+        }
+
+        return NotificationRolePreference::query()
+            ->where('rol_id', $rol->id)
+            ->get()
+            ->keyBy(fn (NotificationRolePreference $pref) => (string) $pref->notification_type_id);
+    }
+
+    public function syncNotificationRolePreferences(Rol $rol, array $typeIds, array $enabledMap): void
+    {
+        if (!Schema::hasTable('notification_role_preferences') || !Schema::hasTable('notification_types')) {
+            return;
+        }
+
+        $ids = collect($typeIds)
+            ->map(fn ($id) => trim((string) $id))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return;
+        }
+
+        $existing = NotificationType::query()
+            ->whereIn('id', $ids->all())
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->flip();
+
+        $enabledIds = collect(array_keys($enabledMap))
+            ->map(fn ($id) => trim((string) $id))
+            ->filter()
+            ->unique()
+            ->values();
+
+        DB::transaction(function () use ($rol, $ids, $enabledIds, $existing): void {
+            foreach ($ids as $typeId) {
+                if (!$existing->has($typeId)) {
+                    continue;
+                }
+
+                $isEnabled = $enabledIds->contains($typeId);
+
+                NotificationRolePreference::query()->updateOrCreate(
+                    [
+                        'rol_id' => $rol->id,
+                        'notification_type_id' => $typeId,
+                    ],
+                    [
+                        'id' => NotificationRolePreference::query()
+                                ->where('rol_id', $rol->id)
+                                ->where('notification_type_id', $typeId)
+                                ->value('id') ?? (string) Str::uuid(),
+                        'is_enabled' => $isEnabled,
+                    ]
+                );
+            }
+        });
     }
 
     private function buildCreatePayload(array $payload): array

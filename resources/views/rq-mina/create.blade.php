@@ -5,6 +5,9 @@
 @php
 $copyData = $copyData ?? null;
 $detalle = $copyData['detalle'] ?? [['puesto' => '', 'cantidad' => 1]];
+$transporte = $copyData['transporte'] ?? [['transporte' => '', 'cantidad' => 1]];
+$lugares = $lugares ?? [];
+$selectedDestino = (($copyData['destino_tipo'] ?? 'MINA') . '|' . ($copyData['destino_id'] ?? $copyData['mina_id'] ?? ''));
 $formMode = $formMode ?? 'create';
 $formAction = $formAction ?? route('rq-mina.store');
 $formMethod = $formMethod ?? 'POST';
@@ -43,11 +46,14 @@ $isEdit = $formMode === 'edit';
             </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="mina">Mina</label>
-                    <select name="mina" id="mina" class="form-control" required>
-                        <option value="">Seleccionar mina</option>
-                        @foreach($minas as $mina)
-                        <option value="{{ $mina }}" {{ ($copyData['mina'] ?? '') === $mina ? 'selected' : '' }}>{{ $mina }}</option>
+                    <label for="destino_id">Lugar</label>
+                    <select name="destino_id" id="destino_id" class="form-control" required>
+                        <option value="">Seleccionar lugar</option>
+                        @foreach($lugares as $lugar)
+                        @php $value = ($lugar['tipo'] ?? '') . '|' . ($lugar['id'] ?? ''); @endphp
+                        <option value="{{ $value }}" {{ $selectedDestino === $value ? 'selected' : '' }}>
+                            {{ $lugar['label'] ?? (($lugar['tipo'] ?? 'Lugar') . ' - ' . ($lugar['nombre'] ?? '-')) }}
+                        </option>
                         @endforeach
                     </select>
                 </div>
@@ -101,12 +107,45 @@ $isEdit = $formMode === 'edit';
                                 <label>Cantidad</label>
                                 <input type="number" name="detalle[{{ $idx }}][cantidad]" class="form-control" value="{{ $line['cantidad'] ?? 1 }}" min="1" required>
                             </div>
+                            <div class="form-group" style="align-self:end;">
+                                <button type="button" class="btn btn-outline btn-sm" onclick="this.closest('.trabajo-item').remove()">Quitar</button>
+                            </div>
                         </div>
                     </div>
                 @endforeach
             </div>
             <button type="button" class="btn btn-outline btn-sm" onclick="agregarTrabajo()">
                 + Agregar Puesto
+            </button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+        <div class="card-header">
+            <h3 class="card-title">Detalle de transporte</h3>
+        </div>
+        <div class="card-body">
+            <div id="transportes-container">
+                @foreach($transporte as $idx => $line)
+                    <div class="transporte-item">
+                        <div class="form-row">
+                            <div class="form-group flex-2">
+                                <label>Transporte</label>
+                                <input type="text" name="transporte[{{ $idx }}][transporte]" class="form-control" value="{{ $line['transporte'] ?? '' }}" placeholder="Ej: Camioneta, bus, camión">
+                            </div>
+                            <div class="form-group">
+                                <label>Cantidad</label>
+                                <input type="number" name="transporte[{{ $idx }}][cantidad]" class="form-control" value="{{ $line['cantidad'] ?? 1 }}" min="1">
+                            </div>
+                            <div class="form-group" style="align-self:end;">
+                                <button type="button" class="btn btn-outline btn-sm" onclick="this.closest('.transporte-item').remove()">Quitar</button>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="agregarTransporte()">
+                + Agregar Transporte
             </button>
         </div>
     </div>
@@ -120,6 +159,7 @@ $isEdit = $formMode === 'edit';
 @push('scripts')
 <script>
 let trabajoCount = {{ count($detalle) }};
+let transporteCount = {{ count($transporte) }};
 
 function agregarTrabajo() {
     const container = document.getElementById('trabajos-container');
@@ -134,11 +174,37 @@ function agregarTrabajo() {
                     <label>Cantidad</label>
                     <input type="number" name="detalle[${trabajoCount}][cantidad]" class="form-control" value="1" min="1" required>
                 </div>
+                <div class="form-group" style="align-self:end;">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="this.closest('.trabajo-item').remove()">Quitar</button>
+                </div>
             </div>
         </div>
     `;
     container.insertAdjacentHTML('beforeend', html);
     trabajoCount++;
+}
+
+function agregarTransporte() {
+    const container = document.getElementById('transportes-container');
+    const html = `
+        <div class="transporte-item">
+            <div class="form-row">
+                <div class="form-group flex-2">
+                    <label>Transporte</label>
+                    <input type="text" name="transporte[${transporteCount}][transporte]" class="form-control" placeholder="Ej: Camioneta, bus, camión">
+                </div>
+                <div class="form-group">
+                    <label>Cantidad</label>
+                    <input type="number" name="transporte[${transporteCount}][cantidad]" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group" style="align-self:end;">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="this.closest('.transporte-item').remove()">Quitar</button>
+                </div>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    transporteCount++;
 }
 </script>
 @endpush

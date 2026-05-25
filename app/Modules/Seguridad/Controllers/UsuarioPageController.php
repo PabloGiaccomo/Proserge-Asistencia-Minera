@@ -4,6 +4,8 @@ namespace App\Modules\Seguridad\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Mina;
+use App\Models\NotificationPreference;
+use App\Models\NotificationType;
 use App\Models\Personal;
 use App\Models\Rol;
 use App\Models\Usuario;
@@ -191,12 +193,23 @@ class UsuarioPageController extends Controller
 
         $roles = $this->roleService->active();
         $roleBuckets = $this->roleBuckets($roles);
+        $notificationTypes = NotificationType::query()
+            ->where('is_active', true)
+            ->orderBy('module')
+            ->orderBy('default_title')
+            ->get();
+        $notificationPreferences = NotificationPreference::query()
+            ->where('usuario_id', $usuario->id)
+            ->get()
+            ->keyBy(fn (NotificationPreference $preference) => (string) $preference->notification_type_id);
 
         return view('seguridad.usuarios.show', [
             'usuario' => $usuario,
             'roles' => $roles,
             'roleBuckets' => $roleBuckets,
             'hasEstadoColumn' => $this->hasEstadoColumn(),
+            'notificationTypes' => $notificationTypes,
+            'notificationPreferences' => $notificationPreferences,
         ]);
     }
 
@@ -250,6 +263,52 @@ class UsuarioPageController extends Controller
         $usuario->save();
 
         return redirect()->route('usuarios.show', $usuario->id)->with('success', 'Contraseña actualizada correctamente.');
+    }
+
+    public function updateNotificationPreferences(Request $request, string $id): RedirectResponse
+    {
+        $usuario = $this->findUsuarioOrFail($id);
+
+        $validated = $request->validate([
+            'notification_type_ids' => ['nullable', 'array'],
+            'notification_type_ids.*' => ['string', 'size:36', 'exists:notification_types,id'],
+            'preferences' => ['nullable', 'array'],
+            'preferences.*.minimum_priority' => ['nullable', 'string', Rule::in(['low', 'medium', 'high', 'critical'])],
+        ]);
+
+        $typeIds = collect($validated['notification_type_ids'] ?? [])
+            ->map(fn ($typeId) => (string) $typeId)
+            ->filter()
+            ->unique()
+            ->values();
+        $preferences = $request->input('preferences', []);
+
+        DB::transaction(function () use ($usuario, $typeIds, $preferences): void {
+            foreach ($typeIds as $typeId) {
+                $preferenceId = NotificationPreference::query()
+                    ->where('usuario_id', $usuario->id)
+                    ->where('notification_type_id', $typeId)
+                    ->value('id') ?? (string) Str::uuid();
+
+                NotificationPreference::query()->updateOrCreate(
+                    [
+                        'usuario_id' => $usuario->id,
+                        'notification_type_id' => $typeId,
+                    ],
+                    [
+                        'id' => $preferenceId,
+                        'in_app_enabled' => (bool) data_get($preferences, $typeId . '.in_app_enabled', false),
+                        'email_enabled' => false,
+                        'minimum_priority' => (string) data_get($preferences, $typeId . '.minimum_priority', 'low'),
+                        'mute_until' => null,
+                    ]
+                );
+            }
+        });
+
+        return redirect()
+            ->route('usuarios.show', $usuario->id)
+            ->with('success', 'Preferencias de notificaciones actualizadas correctamente.');
     }
 
     public function toggleEstado(string $id): RedirectResponse

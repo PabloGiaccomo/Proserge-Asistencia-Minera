@@ -11,6 +11,7 @@ use App\Modules\Personal\Controllers\PublicPersonalFichaController;
 use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
 use App\Modules\ManPower\Controllers\ManPowerPageController;
+use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
 use App\Modules\RQMina\Controllers\RQMinaPageController;
 use App\Modules\RQProserge\Controllers\RQProsergePageController;
 use App\Modules\Asistencia\Controllers\AsistenciaPageController;
@@ -49,13 +50,13 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/perfil', [PerfilPageController::class, 'index'])->middleware('web.permission:perfil,ver')->name('perfil.index');
 
     // Notificaciones
-    Route::get('/notificaciones', [NotificacionPageController::class, 'index'])->name('notificaciones.index');
-    Route::get('/notificaciones/count', [NotificacionPageController::class, 'count'])->name('notificaciones.count');
-    Route::get('/notificaciones/poll', [NotificacionPageController::class, 'poll'])->name('notificaciones.poll');
-    Route::post('/notificaciones/marcar-todas-leidas', [NotificacionPageController::class, 'markAllRead'])->name('notificaciones.mark-all-read');
-    Route::post('/notificaciones/{recipientId}/leer', [NotificacionPageController::class, 'markRead'])->name('notificaciones.mark-read');
-    Route::post('/notificaciones/{recipientId}/archivar', [NotificacionPageController::class, 'archive'])->name('notificaciones.archive');
-    Route::get('/notificaciones/{recipientId}/accion', [NotificacionPageController::class, 'openAction'])->name('notificaciones.action');
+    Route::get('/notificaciones', [NotificacionPageController::class, 'index'])->middleware('web.permission:notificaciones,ver')->name('notificaciones.index');
+    Route::get('/notificaciones/count', [NotificacionPageController::class, 'count'])->middleware('web.permission:notificaciones,ver')->name('notificaciones.count');
+    Route::get('/notificaciones/poll', [NotificacionPageController::class, 'poll'])->middleware('web.permission:notificaciones,ver')->name('notificaciones.poll');
+    Route::post('/notificaciones/marcar-todas-leidas', [NotificacionPageController::class, 'markAllRead'])->middleware('web.permission:notificaciones,actualizar')->name('notificaciones.mark-all-read');
+    Route::post('/notificaciones/{recipientId}/leer', [NotificacionPageController::class, 'markRead'])->middleware('web.permission:notificaciones,actualizar')->name('notificaciones.mark-read');
+    Route::post('/notificaciones/{recipientId}/archivar', [NotificacionPageController::class, 'archive'])->middleware('web.permission:notificaciones,actualizar')->name('notificaciones.archive');
+    Route::get('/notificaciones/{recipientId}/accion', [NotificacionPageController::class, 'openAction'])->middleware('web.permission:notificaciones,ver')->name('notificaciones.action');
     
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.index');
@@ -106,6 +107,13 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/man-power/grupos/crear', [ManPowerPageController::class, 'crearGrupo'])->middleware('web.permission:man_power,crear')->name('man-power.grupo-crear');
     Route::get('/man-power/grupos', [ManPowerPageController::class, 'grupos'])->middleware('web.permission:man_power,ver')->name('man-power.grupos');
     Route::get('/man-power/grupos/{id}', [ManPowerPageController::class, 'grupoDetalle'])->middleware('web.permission:man_power,ver')->name('man-power.grupo-detalle');
+
+    // Herramientas por parada
+    Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
+    Route::get('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'show'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.show');
+    Route::post('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'save'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.save');
+    Route::post('/herramientas-parada/{rqMinaId}/pedido', [ParadaHerramientaPageController::class, 'updatePedido'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.pedido');
+    Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.enviar');
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');
@@ -166,6 +174,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/usuarios/{id}', [UsuarioPageController::class, 'update'])->middleware('web.permission:usuarios,actualizar')->name('usuarios.update');
     Route::post('/usuarios/{id}/estado', [UsuarioPageController::class, 'toggleEstado'])->middleware('web.permission:usuarios,administrar')->name('usuarios.toggle-estado');
     Route::post('/usuarios/{id}/password', [UsuarioPageController::class, 'updatePassword'])->middleware('web.permission:usuarios,administrar')->name('usuarios.password');
+    Route::post('/usuarios/{id}/notificaciones', [UsuarioPageController::class, 'updateNotificationPreferences'])->middleware('web.permission:usuarios,administrar')->name('usuarios.notificaciones');
     Route::get('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'editarScope'])->middleware('web.permission:usuarios,administrar')->name('usuarios.scope');
 
     // Catálogos - Hub

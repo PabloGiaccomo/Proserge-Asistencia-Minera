@@ -9,9 +9,12 @@ class PermisoPageController extends Controller
 {
     public function index()
     {
-        $data = collect(PermissionCatalog::modules())
-            ->flatMap(function (string $label, string $module): array {
-                return collect(PermissionCatalog::actions())
+        $moduleActions = PermissionCatalog::availableModuleActions();
+        $data = collect(PermissionCatalog::availableModules())
+            ->flatMap(function (string $label, string $module) use ($moduleActions): array {
+                $actions = $moduleActions[$module] ?? [];
+
+                return collect($actions)
                     ->map(fn (string $action): array => [
                         'id' => $module . '.' . $action,
                         'nombre' => $action,

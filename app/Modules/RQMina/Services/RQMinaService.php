@@ -2,7 +2,10 @@
 
 namespace App\Modules\RQMina\Services;
 
+use App\Models\Mina;
+use App\Models\Oficina;
 use App\Models\RQMina;
+use App\Models\Taller;
 use App\Models\Usuario;
 use App\Modules\RQMina\Policies\RQMinaPolicy;
 use App\Support\Rbac\PermissionMatrix;
@@ -24,6 +27,7 @@ class RQMinaService
             'creador:id,email,personal_id',
             'creador.personal:id,nombre_completo',
             'detalle:id,rq_mina_id,puesto,cantidad,cantidad_atendida',
+            'transportes:id,rq_mina_id,transporte,cantidad',
         ]);
 
         $this->applyMineScope($query, $usuario);
@@ -37,7 +41,10 @@ class RQMinaService
                     ->where('area', 'like', $like)
                     ->orWhere('estado', 'like', $like)
                     ->orWhere('observaciones', 'like', $like)
+                    ->orWhere('destino_nombre', 'like', $like)
+                    ->orWhere('destino_tipo', 'like', $like)
                     ->orWhereHas('mina', fn ($mineQuery) => $mineQuery->where('nombre', 'like', $like))
+                    ->orWhereHas('transportes', fn ($transportQuery) => $transportQuery->where('transporte', 'like', $like))
                     ->orWhereHas('creador', function ($creatorQuery) use ($like) {
                         $creatorQuery
                             ->where('email', 'like', $like)
@@ -112,7 +119,7 @@ class RQMinaService
     public function findForUser(Usuario $usuario, string $id): ?RQMina
     {
         $rqMina = RQMina::query()
-            ->with(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle'])
+            ->with(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle', 'transportes'])
             ->find($id);
 
         if (!$rqMina) {
@@ -131,18 +138,32 @@ class RQMinaService
         Log::info('rqmina.create_payload_received', [
             'usuario_id' => (string) $usuario->id,
             'mina_id' => (string) ($payload['mina_id'] ?? ''),
+            'destino_tipo' => (string) ($payload['destino_tipo'] ?? ''),
+            'destino_id' => (string) ($payload['destino_id'] ?? ''),
             'detalle_count' => count($payload['detalle'] ?? []),
             'detalle_total_cantidad' => collect($payload['detalle'] ?? [])->sum(fn (array $item) => (int) ($item['cantidad'] ?? 0)),
+            'transporte_count' => count($payload['transporte'] ?? []),
         ]);
 
-        if (!PermissionMatrix::userCan($usuario, 'rq_mina', 'crear') || !$this->policy->canAccessMina($usuario, $payload['mina_id'])) {
+        $destination = $this->resolveDestination(
+            usuario: $usuario,
+            destinoTipo: $payload['destino_tipo'] ?? null,
+            destinoId: $payload['destino_id'] ?? null,
+            legacyMinaId: $payload['mina_id'] ?? null,
+            legacyMinaName: $payload['mina'] ?? null,
+        );
+
+        if (!$destination || !PermissionMatrix::userCan($usuario, 'rq_mina', 'crear') || !$this->policy->canAccessMina($usuario, $destination['mina_id'])) {
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $payload): RQMina {
+        return DB::transaction(function () use ($usuario, $payload, $destination): RQMina {
             $rqMina = RQMina::query()->create([
                 'id' => (string) Str::uuid(),
-                'mina_id' => $payload['mina_id'],
+                'mina_id' => $destination['mina_id'],
+                'destino_tipo' => $destination['tipo'],
+                'destino_id' => $destination['id'],
+                'destino_nombre' => $destination['nombre'],
                 'area' => $payload['area'],
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
@@ -163,6 +184,11 @@ class RQMinaService
 
             $rqMina->detalle()->insert($rows);
 
+            $transportRows = $this->buildTransporteRows((string) $rqMina->id, $payload['transporte'] ?? []);
+            if (!empty($transportRows)) {
+                $rqMina->transportes()->insert($transportRows);
+            }
+
             Log::info('rqmina.detail_persisted', [
                 'rq_mina_id' => (string) $rqMina->id,
                 'detalle_guardado' => array_map(static fn (array $row): array => [
@@ -171,9 +197,13 @@ class RQMinaService
                 ], $rows),
                 'cantidad_puestos' => count($rows),
                 'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad'] ?? 0)),
+                'transporte_guardado' => array_map(static fn (array $row): array => [
+                    'transporte' => (string) ($row['transporte'] ?? ''),
+                    'cantidad' => (int) ($row['cantidad'] ?? 0),
+                ], $transportRows),
             ]);
 
-            return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle']);
+            return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle', 'transportes']);
         });
     }
 
@@ -183,21 +213,35 @@ class RQMinaService
             'usuario_id' => (string) $usuario->id,
             'rq_mina_id' => (string) $rqMina->id,
             'mina_id' => (string) ($payload['mina_id'] ?? ''),
+            'destino_tipo' => (string) ($payload['destino_tipo'] ?? ''),
+            'destino_id' => (string) ($payload['destino_id'] ?? ''),
             'detalle_count' => count($payload['detalle'] ?? []),
             'detalle_total_cantidad' => collect($payload['detalle'] ?? [])->sum(fn (array $item) => (int) ($item['cantidad'] ?? 0)),
+            'transporte_count' => count($payload['transporte'] ?? []),
         ]);
 
         if (!$this->policy->update($usuario, $rqMina)) {
             return null;
         }
 
-        if (!$this->policy->canAccessMina($usuario, $payload['mina_id'])) {
+        $destination = $this->resolveDestination(
+            usuario: $usuario,
+            destinoTipo: $payload['destino_tipo'] ?? null,
+            destinoId: $payload['destino_id'] ?? null,
+            legacyMinaId: $payload['mina_id'] ?? $rqMina->mina_id,
+            legacyMinaName: $payload['mina'] ?? null,
+        );
+
+        if (!$destination || !$this->policy->canAccessMina($usuario, $destination['mina_id'])) {
             return null;
         }
 
-        return DB::transaction(function () use ($rqMina, $payload): RQMina {
+        return DB::transaction(function () use ($rqMina, $payload, $destination): RQMina {
             $rqMina->fill([
-                'mina_id' => $payload['mina_id'],
+                'mina_id' => $destination['mina_id'],
+                'destino_tipo' => $destination['tipo'],
+                'destino_id' => $destination['id'],
+                'destino_nombre' => $destination['nombre'],
                 'area' => $payload['area'],
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
@@ -206,6 +250,7 @@ class RQMinaService
             $rqMina->save();
 
             $rqMina->detalle()->delete();
+            $rqMina->transportes()->delete();
 
             $rows = collect($payload['detalle'])->map(fn (array $item): array => [
                 'id' => (string) Str::uuid(),
@@ -219,6 +264,11 @@ class RQMinaService
 
             $rqMina->detalle()->insert($rows);
 
+            $transportRows = $this->buildTransporteRows((string) $rqMina->id, $payload['transporte'] ?? []);
+            if (!empty($transportRows)) {
+                $rqMina->transportes()->insert($transportRows);
+            }
+
             Log::info('rqmina.detail_persisted', [
                 'rq_mina_id' => (string) $rqMina->id,
                 'detalle_guardado' => array_map(static fn (array $row): array => [
@@ -227,9 +277,13 @@ class RQMinaService
                 ], $rows),
                 'cantidad_puestos' => count($rows),
                 'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad'] ?? 0)),
+                'transporte_guardado' => array_map(static fn (array $row): array => [
+                    'transporte' => (string) ($row['transporte'] ?? ''),
+                    'cantidad' => (int) ($row['cantidad'] ?? 0),
+                ], $transportRows),
             ]);
 
-            return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle']);
+            return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle', 'transportes']);
         });
     }
 
@@ -245,7 +299,7 @@ class RQMinaService
         ]);
         $rqMina->save();
 
-        return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle']);
+        return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'detalle', 'transportes']);
     }
 
     public function delete(Usuario $usuario, RQMina $rqMina): bool
@@ -298,7 +352,7 @@ class RQMinaService
     public function getAvailableMinas(Usuario $usuario): Collection
     {
         if ($this->isPrivileged($usuario)) {
-            return \App\Models\Mina::query()->where('estado', 'ACTIVO')->orderBy('nombre')->get(['id', 'nombre']);
+            return Mina::query()->where('estado', 'ACTIVO')->orderBy('nombre')->get(['id', 'nombre']);
         }
 
         $minaIds = DB::table('usuario_mina_scope')->where('usuario_id', $usuario->id)->pluck('mina_id');
@@ -308,11 +362,165 @@ class RQMinaService
             'scope_minas' => $minaIds->map(fn ($id) => (string) $id)->values()->all(),
         ]);
 
-        return \App\Models\Mina::query()
+        return Mina::query()
             ->whereIn('id', $minaIds)
             ->where('estado', 'ACTIVO')
             ->orderBy('nombre')
             ->get(['id', 'nombre']);
+    }
+
+    public function getLugarOptions(Usuario $usuario): Collection
+    {
+        $minas = $this->getAvailableMinas($usuario)
+            ->map(fn (Mina $mina): array => [
+                'tipo' => 'MINA',
+                'id' => (string) $mina->id,
+                'nombre' => (string) $mina->nombre,
+                'label' => 'Mina - '.$mina->nombre,
+            ]);
+
+        $talleres = Taller::query()
+            ->where('estado', 'ACTIVO')
+            ->orderBy('nombre')
+            ->get(['id', 'nombre'])
+            ->map(fn (Taller $taller): array => [
+                'tipo' => 'TALLER',
+                'id' => (string) $taller->id,
+                'nombre' => (string) $taller->nombre,
+                'label' => 'Taller - '.$taller->nombre,
+            ]);
+
+        $oficinas = Oficina::query()
+            ->where('estado', 'ACTIVO')
+            ->orderBy('nombre')
+            ->get(['id', 'nombre'])
+            ->map(fn (Oficina $oficina): array => [
+                'tipo' => 'OFICINA',
+                'id' => (string) $oficina->id,
+                'nombre' => (string) $oficina->nombre,
+                'label' => 'Oficina - '.$oficina->nombre,
+            ]);
+
+        return $minas->concat($talleres)->concat($oficinas)->values();
+    }
+
+    public function resolveDestination(
+        Usuario $usuario,
+        mixed $destinoTipo = null,
+        mixed $destinoId = null,
+        mixed $legacyMinaId = null,
+        mixed $legacyMinaName = null,
+    ): ?array {
+        $tipo = strtoupper(trim((string) $destinoTipo));
+        $id = trim((string) $destinoId);
+        $legacyId = trim((string) $legacyMinaId);
+        $legacyName = trim((string) $legacyMinaName);
+
+        if ($tipo === '' && $id === '') {
+            if ($legacyId !== '') {
+                $tipo = 'MINA';
+                $id = $legacyId;
+            } elseif ($legacyName !== '') {
+                $mina = $this->findAvailableMinaByName($usuario, $legacyName);
+                if (!$mina) {
+                    return null;
+                }
+
+                return [
+                    'tipo' => 'MINA',
+                    'id' => (string) $mina->id,
+                    'nombre' => (string) $mina->nombre,
+                    'mina_id' => (string) $mina->id,
+                ];
+            }
+        }
+
+        if (!in_array($tipo, ['MINA', 'TALLER', 'OFICINA'], true) || $id === '') {
+            return null;
+        }
+
+        if ($tipo === 'MINA') {
+            $mina = Mina::query()
+                ->where('id', $id)
+                ->where('estado', 'ACTIVO')
+                ->first(['id', 'nombre']);
+
+            return $mina ? [
+                'tipo' => 'MINA',
+                'id' => (string) $mina->id,
+                'nombre' => (string) $mina->nombre,
+                'mina_id' => (string) $mina->id,
+            ] : null;
+        }
+
+        $item = $tipo === 'TALLER'
+            ? Taller::query()->where('id', $id)->where('estado', 'ACTIVO')->first(['id', 'nombre'])
+            : Oficina::query()->where('id', $id)->where('estado', 'ACTIVO')->first(['id', 'nombre']);
+
+        if (!$item) {
+            return null;
+        }
+
+        $anchorMinaId = $this->resolveAnchorMinaId($usuario, $legacyId);
+        if (!$anchorMinaId) {
+            return null;
+        }
+
+        return [
+            'tipo' => $tipo,
+            'id' => (string) $item->id,
+            'nombre' => (string) $item->nombre,
+            'mina_id' => $anchorMinaId,
+        ];
+    }
+
+    private function buildTransporteRows(string $rqMinaId, array $items): array
+    {
+        return collect($items)
+            ->filter(fn ($item): bool => is_array($item))
+            ->map(function (array $item) use ($rqMinaId): ?array {
+                $transporte = trim((string) ($item['transporte'] ?? ''));
+                $cantidad = (int) ($item['cantidad'] ?? 0);
+
+                if ($transporte === '' || $cantidad <= 0) {
+                    return null;
+                }
+
+                return [
+                    'id' => (string) Str::uuid(),
+                    'rq_mina_id' => $rqMinaId,
+                    'transporte' => $transporte,
+                    'cantidad' => $cantidad,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function findAvailableMinaByName(Usuario $usuario, string $name): ?Mina
+    {
+        $normalized = mb_strtolower(trim($name));
+
+        return $this->getAvailableMinas($usuario)
+            ->first(fn (Mina $mina): bool => mb_strtolower(trim((string) $mina->nombre)) === $normalized);
+    }
+
+    private function resolveAnchorMinaId(Usuario $usuario, string $preferredMinaId = ''): ?string
+    {
+        if (
+            $preferredMinaId !== ''
+            && Mina::query()->where('id', $preferredMinaId)->where('estado', 'ACTIVO')->exists()
+            && $this->policy->canAccessMina($usuario, $preferredMinaId)
+        ) {
+            return $preferredMinaId;
+        }
+
+        $available = $this->getAvailableMinas($usuario)->first();
+
+        return $available ? (string) $available->id : null;
     }
 
     public function createForUser(Usuario $usuario, array $payload): array

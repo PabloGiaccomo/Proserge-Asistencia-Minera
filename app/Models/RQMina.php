@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RQMina extends Model
 {
@@ -17,6 +18,9 @@ class RQMina extends Model
     protected $fillable = [
         'id',
         'mina_id',
+        'destino_tipo',
+        'destino_id',
+        'destino_nombre',
         'area',
         'fecha_inicio',
         'fecha_fin',
@@ -47,6 +51,11 @@ class RQMina extends Model
         return $this->hasMany(RQMinaDetalle::class, 'rq_mina_id');
     }
 
+    public function transportes(): HasMany
+    {
+        return $this->hasMany(RQMinaTransporte::class, 'rq_mina_id');
+    }
+
     public function rqProserge(): HasMany
     {
         return $this->hasMany(RQProserge::class, 'rq_mina_id');
@@ -55,5 +64,10 @@ class RQMina extends Model
     public function gruposTrabajo(): HasMany
     {
         return $this->hasMany(GrupoTrabajo::class, 'rq_mina_id');
+    }
+
+    public function listaHerramientas(): HasOne
+    {
+        return $this->hasOne(ParadaHerramientaLista::class, 'rq_mina_id');
     }
 }

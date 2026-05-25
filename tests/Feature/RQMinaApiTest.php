@@ -61,6 +61,71 @@ class RQMinaApiTest extends TestCase
             ->assertJsonPath('data.estado', 'BORRADOR');
     }
 
+    public function test_crea_rq_mina_con_destino_taller_y_transporte(): void
+    {
+        $minaId = $this->createMina();
+        $tallerId = $this->createTaller();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'destino_tipo' => 'TALLER',
+            'destino_id' => $tallerId,
+            'area' => 'Mantenimiento',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'observaciones' => 'Solicitud con transporte',
+            'detalle' => [
+                ['puesto' => 'Tecnico', 'cantidad' => 2],
+            ],
+            'transporte' => [
+                ['transporte' => 'Camioneta', 'cantidad' => 1],
+                ['transporte' => 'Camion', 'cantidad' => 2],
+            ],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.destino_tipo', 'TALLER')
+            ->assertJsonPath('data.destino_id', $tallerId)
+            ->assertJsonFragment(['transporte' => 'Camioneta', 'cantidad' => 1])
+            ->assertJsonFragment(['transporte' => 'Camion', 'cantidad' => 2]);
+
+        $this->assertDatabaseHas('rq_mina', [
+            'destino_tipo' => 'TALLER',
+            'destino_id' => $tallerId,
+            'mina_id' => $minaId,
+        ]);
+        $this->assertDatabaseHas('rq_mina_transporte_detalle', [
+            'transporte' => 'Camion',
+            'cantidad' => 2,
+        ]);
+    }
+
+    public function test_crea_rq_mina_con_destino_oficina(): void
+    {
+        $minaId = $this->createMina();
+        $oficinaId = $this->createOficina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'destino_tipo' => 'OFICINA',
+            'destino_id' => $oficinaId,
+            'area' => 'Administracion',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'detalle' => [
+                ['puesto' => 'Asistente', 'cantidad' => 1],
+            ],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.destino_tipo', 'OFICINA')
+            ->assertJsonPath('data.destino_id', $oficinaId);
+    }
+
     public function test_no_deja_editar_rq_mina_cerrado(): void
     {
         $minaId = $this->createMina();
@@ -174,6 +239,38 @@ class RQMinaApiTest extends TestCase
             'nombre' => 'Mina '.Str::upper(Str::random(4)),
             'unidad_minera' => 'UM '.Str::upper(Str::random(3)),
             'estado' => 'ACTIVO',
+        ]);
+
+        return $id;
+    }
+
+    private function createTaller(): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('talleres')->insert([
+            'id' => $id,
+            'nombre' => 'Taller '.Str::upper(Str::random(4)),
+            'ubicacion' => 'Ubicacion taller',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function createOficina(): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('oficinas')->insert([
+            'id' => $id,
+            'nombre' => 'Oficina '.Str::upper(Str::random(4)),
+            'ubicacion' => 'Ubicacion oficina',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
 
         return $id;

@@ -9,6 +9,7 @@ use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -41,6 +42,12 @@ class RolPageController extends Controller
         $validated = $this->validatePayload($request);
         $rol = $this->service->create($validated);
 
+        $this->service->syncNotificationRolePreferences(
+            $rol,
+            $request->input('notification_type_ids', []),
+            $request->input('notificaciones', [])
+        );
+
         return redirect()->route('seguridad.roles.show', $rol->id)->with('success', 'Rol creado correctamente.');
     }
 
@@ -53,7 +60,13 @@ class RolPageController extends Controller
             'rol' => $rol,
             'modules' => $this->service->modules(),
             'actions' => $this->service->actions(),
-        ]);
+            'moduleActions' => $this->service->moduleActions(),
+            'notificationModules' => $this->service->notificationModules(),
+            'notificationActions' => $this->service->notificationActions(),
+            'notificationModuleActions' => $this->service->notificationModuleActions(),
+                'notificationTypes' => $this->service->notificationTypes(),
+                'notificationRolePreferences' => $this->service->notificationRolePreferences($rol),
+            ]);
     }
 
     public function edit(string $id): View
@@ -70,6 +83,12 @@ class RolPageController extends Controller
         $beforePermissions = $rol->permisos;
         $validated = $this->validatePayload($request, $rol);
         $this->service->update($rol, $validated);
+
+        $this->service->syncNotificationRolePreferences(
+            $rol,
+            $request->input('notification_type_ids', []),
+            $request->input('notificaciones', [])
+        );
 
         $this->notificationService->emit('rol_modificado', [
             'actor_user_id' => session('user.id'),
@@ -118,14 +137,22 @@ class RolPageController extends Controller
 
     private function validatePayload(Request $request, ?Rol $rol = null): array
     {
-        return $request->validate([
+        $rules = [
             'nombre' => ['required', 'string', 'max:100', Rule::unique('roles', 'nombre')->ignore($rol?->id, 'id')],
             'descripcion' => ['nullable', 'string', 'max:255'],
             'estado' => ['required', 'string', Rule::in(['ACTIVO', 'INACTIVO'])],
             'permisos' => ['nullable', 'array'],
             'permisos.*' => ['nullable', 'array'],
             'permisos.*.*' => ['nullable'],
-        ]);
+        ];
+
+        if (Schema::hasTable('notification_types')) {
+            $rules['notification_type_ids'] = ['nullable', 'array'];
+            $rules['notification_type_ids.*'] = ['string', 'size:36', 'exists:notification_types,id'];
+            $rules['notificaciones'] = ['nullable', 'array'];
+        }
+
+        return $request->validate($rules);
     }
 
     private function formData(Rol $rol, string $mode): array
@@ -135,6 +162,12 @@ class RolPageController extends Controller
             'mode' => $mode,
             'modules' => $this->service->modules(),
             'actions' => $this->service->actions(),
+            'moduleActions' => $this->service->moduleActions(),
+            'notificationModules' => $this->service->notificationModules(),
+            'notificationActions' => $this->service->notificationActions(),
+            'notificationModuleActions' => $this->service->notificationModuleActions(),
+            'notificationTypes' => $this->service->notificationTypes(),
+            'notificationRolePreferences' => $this->service->notificationRolePreferences($rol),
         ];
     }
 
