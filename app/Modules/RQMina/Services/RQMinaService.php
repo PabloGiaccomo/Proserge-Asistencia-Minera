@@ -119,7 +119,7 @@ class RQMinaService
         $this->applyMineScope($query, $usuario);
 
         return $query
-            ->orderByRaw("COALESCE(personal.nombre_completo, usuarios.email) asc")
+            ->orderBy('nombre')
             ->get()
             ->map(fn ($row): array => [
                 'id' => (string) ($row->id ?? ''),

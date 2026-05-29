@@ -61,16 +61,24 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 14px;
-            height: 14px;
-            border-radius: 4px;
+            flex: 0 0 auto;
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
             background: #e2e8f0;
             color: #475569;
-            font-size: 10px;
             margin-left: 4px;
-            line-height: 1;
             border: 0;
             cursor: pointer;
+            padding: 0;
+            vertical-align: middle;
+        }
+
+        .dg-filter-icon svg {
+            width: 12px;
+            height: 12px;
+            display: block;
+            pointer-events: none;
         }
 
         .dg-filter-icon.is-active {
@@ -782,7 +790,13 @@
                                         class="dg-filter-icon js-dg-filter-trigger {{ filled($estadoFilter ?? '') ? 'is-active' : '' }}"
                                         data-target="temporalesEstadoPopover"
                                         title="Filtrar Estado"
-                                        aria-label="Filtrar Estado">≡</button>
+                                        aria-label="Filtrar Estado">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <line x1="4" y1="6" x2="20" y2="6"/>
+                                            <line x1="7" y1="12" x2="17" y2="12"/>
+                                            <line x1="10" y1="18" x2="14" y2="18"/>
+                                        </svg>
+                                    </button>
                                     <div id="temporalesEstadoPopover" class="dg-filter-popover" onclick="event.stopPropagation()">
                                         <label class="dg-popover-label" for="temporalesEstadoSelect">Estado</label>
                                         <select id="temporalesEstadoSelect" class="filter-compact-select">
@@ -804,7 +818,13 @@
                                         class="dg-filter-icon js-dg-filter-trigger"
                                         data-target="temporalesLinkPopover"
                                         title="Filtrar Link"
-                                        aria-label="Filtrar Link">â‰¡</button>
+                                        aria-label="Filtrar Link">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <line x1="4" y1="6" x2="20" y2="6"/>
+                                            <line x1="7" y1="12" x2="17" y2="12"/>
+                                            <line x1="10" y1="18" x2="14" y2="18"/>
+                                        </svg>
+                                    </button>
                                     <div id="temporalesLinkPopover" class="dg-filter-popover" onclick="event.stopPropagation()">
                                         <label class="dg-popover-label" for="temporalesLinkSelect">Link</label>
                                         <select id="temporalesLinkSelect" class="filter-compact-select">

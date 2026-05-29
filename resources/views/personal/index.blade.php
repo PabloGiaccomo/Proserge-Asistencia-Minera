@@ -249,16 +249,24 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
     background: #e2e8f0;
     color: #475569;
-    font-size: 10px;
     margin-left: 4px;
-    line-height: 1;
     border: 0;
     cursor: pointer;
+    padding: 0;
+    vertical-align: middle;
+}
+
+.dg-filter-icon svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+    pointer-events: none;
 }
 
 .dg-head-cell {
@@ -1502,7 +1510,9 @@
                                 <th data-column="trabajador">
                                     <div class="dg-head-cell">
                                         <span>Trabajador</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterNombre" title="Filtrar Trabajador">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterNombre" title="Filtrar Trabajador" aria-label="Filtrar Trabajador">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterNombre" class="dg-filter-popover dg-pop-left" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Orden</label>
                                             <select id="dgSortNombre" class="filter-compact-select">
@@ -1516,7 +1526,9 @@
                                 <th data-column="documento">
                                     <div class="dg-head-cell">
                                         <span>Documento</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterDni" title="Filtrar documento">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterDni" title="Filtrar documento" aria-label="Filtrar documento">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterDni" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Orden</label>
                                             <select id="dgSortDni" class="filter-compact-select">
@@ -1532,7 +1544,9 @@
                                 <th data-column="puesto">
                                     <div class="dg-head-cell">
                                         <span>Puesto</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterPuesto" title="Filtrar Puesto">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterPuesto" title="Filtrar Puesto" aria-label="Filtrar Puesto">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterPuesto" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Puesto</label>
                                             <select id="dgPuesto" class="filter-compact-select"><option value="">Todos</option></select>
@@ -1542,7 +1556,9 @@
                                 <th data-column="contrato">
                                     <div class="dg-head-cell">
                                         <span>Contrato</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterContrato" title="Filtrar Contrato">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterContrato" title="Filtrar Contrato" aria-label="Filtrar Contrato">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterContrato" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Contrato</label>
                                             <select id="dgContrato" class="filter-compact-select"><option value="">Todos</option></select>
@@ -1552,7 +1568,9 @@
                                 <th data-column="estado">
                                     <div class="dg-head-cell">
                                         <span>Estado</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterEstado" title="Filtrar Estado">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterEstado" title="Filtrar Estado" aria-label="Filtrar Estado">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterEstado" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Estado</label>
                                             <select id="dgEstado" class="filter-compact-select">
@@ -1567,7 +1585,9 @@
                                 <th data-column="situacion">
                                     <div class="dg-head-cell">
                                         <span>Situación</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterBienestar" title="Filtrar Bienestar">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterBienestar" title="Filtrar Bienestar" aria-label="Filtrar Bienestar">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterBienestar" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Situación</label>
                                             <select id="dgBienestar" class="filter-compact-select">
@@ -1589,7 +1609,9 @@
                                 <th data-column="ocupacion">
                                     <div class="dg-head-cell">
                                         <span>Ocupación</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterOcupacion" title="Filtrar Ocupación">≡</button>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterOcupacion" title="Filtrar Ocupación" aria-label="Filtrar Ocupación">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+                                        </button>
                                         <div id="dgFilterOcupacion" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
                                             <label class="personal-column-option" style="margin-bottom:8px;">
                                                 <input type="checkbox" id="dgOcupGrouped" checked>
