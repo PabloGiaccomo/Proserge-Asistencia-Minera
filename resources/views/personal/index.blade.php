@@ -2400,9 +2400,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!topScrollbar || !topScrollbarInner || !tableWrap || !dataGrid) return;
         const tableMaxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
         const needsHorizontalScroll = tableMaxScrollLeft > 2;
+        const currentScrollLeft = Math.max(0, Math.min(tableWrap.scrollLeft, tableMaxScrollLeft));
         topScrollbar.classList.toggle('is-visible', needsHorizontalScroll);
         topScrollbar.style.width = tableWrap.getBoundingClientRect().width + 'px';
         topScrollbarInner.style.width = (topScrollbar.clientWidth + tableMaxScrollLeft) + 'px';
+        tableWrap.scrollLeft = currentScrollLeft;
+        topScrollbar.scrollLeft = currentScrollLeft;
     };
 
     const syncHorizontalScrollPosition = function (preferredScrollLeft) {
@@ -2426,9 +2429,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const sourceMax = Math.max(0, source.scrollWidth - source.clientWidth);
         const targetMax = Math.max(0, target.scrollWidth - target.clientWidth);
         const sourceAtEnd = sourceMax > 0 && Math.abs(source.scrollLeft - sourceMax) <= 2;
-        const ratio = sourceMax > 0 ? source.scrollLeft / sourceMax : 0;
 
-        target.scrollLeft = sourceAtEnd ? targetMax : ratio * targetMax;
+        target.scrollLeft = sourceAtEnd ? targetMax : Math.max(0, Math.min(source.scrollLeft, targetMax));
     };
 
     const closeAllPopovers = function () {
