@@ -28,6 +28,31 @@ use App\Modules\Perfil\Controllers\PerfilPageController;
 use App\Modules\Notificaciones\Controllers\NotificacionPageController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/favicon.ico', function () {
+    foreach ([public_path('favicon.ico'), public_path('img/LogoProserge.png'), base_path('img/LogoProserge.png')] as $path) {
+        if (is_file($path) && filesize($path) > 0) {
+            return response()->file($path, [
+                'Cache-Control' => 'public, max-age=604800',
+            ]);
+        }
+    }
+
+    abort(404);
+})->name('favicon');
+
+Route::get('/img/LogoProserge.png', function () {
+    foreach ([public_path('img/LogoProserge.png'), base_path('img/LogoProserge.png')] as $path) {
+        if (is_file($path) && filesize($path) > 0) {
+            return response()->file($path, [
+                'Content-Type' => 'image/png',
+                'Cache-Control' => 'public, max-age=604800',
+            ]);
+        }
+    }
+
+    abort(404);
+})->name('logo-proserge');
+
 Route::get('/', function () {
     if (session('auth_token')) {
         return redirect()->route('inicio');
