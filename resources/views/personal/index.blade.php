@@ -494,6 +494,7 @@
     display: none;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable both-edges;
 }
 
 .personal-page .personal-grid-scroll-top.is-visible {
@@ -2397,11 +2398,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const syncTopScrollbar = function () {
         if (!topScrollbar || !topScrollbarInner || !tableWrap || !dataGrid) return;
-        const scrollWidth = Math.max(dataGrid.scrollWidth, tableWrap.scrollWidth);
-        const needsHorizontalScroll = scrollWidth > tableWrap.clientWidth + 2;
+        const tableMaxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
+        const needsHorizontalScroll = tableMaxScrollLeft > 2;
         topScrollbar.classList.toggle('is-visible', needsHorizontalScroll);
         topScrollbar.style.width = tableWrap.getBoundingClientRect().width + 'px';
-        topScrollbarInner.style.width = scrollWidth + 'px';
+        topScrollbarInner.style.width = (topScrollbar.clientWidth + tableMaxScrollLeft) + 'px';
     };
 
     const syncHorizontalScrollPosition = function (preferredScrollLeft) {
@@ -2415,9 +2416,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         tableWrap.scrollLeft = nextScrollLeft;
         if (topScrollbar) {
-            const topMaxScrollLeft = Math.max(0, topScrollbar.scrollWidth - topScrollbar.clientWidth);
-            const ratio = maxScrollLeft > 0 ? nextScrollLeft / maxScrollLeft : 0;
-            topScrollbar.scrollLeft = ratio * topMaxScrollLeft;
+            topScrollbar.scrollLeft = nextScrollLeft;
         }
     };
 
@@ -2426,9 +2425,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const sourceMax = Math.max(0, source.scrollWidth - source.clientWidth);
         const targetMax = Math.max(0, target.scrollWidth - target.clientWidth);
+        const sourceAtEnd = sourceMax > 0 && Math.abs(source.scrollLeft - sourceMax) <= 2;
         const ratio = sourceMax > 0 ? source.scrollLeft / sourceMax : 0;
 
-        target.scrollLeft = ratio * targetMax;
+        target.scrollLeft = sourceAtEnd ? targetMax : ratio * targetMax;
     };
 
     const closeAllPopovers = function () {
