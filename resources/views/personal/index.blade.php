@@ -2397,16 +2397,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const syncTopScrollbar = function () {
         if (!topScrollbar || !topScrollbarInner || !tableWrap || !dataGrid) return;
-        const needsHorizontalScroll = dataGrid.scrollWidth > tableWrap.clientWidth + 2;
+        const scrollWidth = Math.max(dataGrid.scrollWidth, tableWrap.scrollWidth);
+        const needsHorizontalScroll = scrollWidth > tableWrap.clientWidth + 2;
         topScrollbar.classList.toggle('is-visible', needsHorizontalScroll);
-        topScrollbar.style.width = tableWrap.clientWidth + 'px';
-        topScrollbarInner.style.width = dataGrid.scrollWidth + 'px';
+        topScrollbar.style.width = tableWrap.getBoundingClientRect().width + 'px';
+        topScrollbarInner.style.width = scrollWidth + 'px';
     };
 
     const syncHorizontalScrollPosition = function (preferredScrollLeft) {
         if (!tableWrap || !dataGrid) return;
 
-        const maxScrollLeft = Math.max(0, dataGrid.scrollWidth - tableWrap.clientWidth);
+        const maxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
         const requested = Number.isFinite(preferredScrollLeft)
             ? preferredScrollLeft
             : tableWrap.scrollLeft;
@@ -2414,8 +2415,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
         tableWrap.scrollLeft = nextScrollLeft;
         if (topScrollbar) {
-            topScrollbar.scrollLeft = nextScrollLeft;
+            const topMaxScrollLeft = Math.max(0, topScrollbar.scrollWidth - topScrollbar.clientWidth);
+            const ratio = maxScrollLeft > 0 ? nextScrollLeft / maxScrollLeft : 0;
+            topScrollbar.scrollLeft = ratio * topMaxScrollLeft;
         }
+    };
+
+    const syncScrollPair = function (source, target) {
+        if (!source || !target) return;
+
+        const sourceMax = Math.max(0, source.scrollWidth - source.clientWidth);
+        const targetMax = Math.max(0, target.scrollWidth - target.clientWidth);
+        const ratio = sourceMax > 0 ? source.scrollLeft / sourceMax : 0;
+
+        target.scrollLeft = ratio * targetMax;
     };
 
     const closeAllPopovers = function () {
@@ -2948,8 +2961,10 @@ document.addEventListener('DOMContentLoaded', function () {
         tableWrap.addEventListener('scroll', function () {
             if (topScrollbar && !syncingScroll) {
                 syncingScroll = true;
-                topScrollbar.scrollLeft = tableWrap.scrollLeft;
-                syncingScroll = false;
+                syncScrollPair(tableWrap, topScrollbar);
+                window.requestAnimationFrame(function () {
+                    syncingScroll = false;
+                });
             }
             saveViewState({
                 tableScrollLeft: tableWrap.scrollLeft,
@@ -2962,8 +2977,10 @@ document.addEventListener('DOMContentLoaded', function () {
         topScrollbar.addEventListener('scroll', function () {
             if (tableWrap && !syncingScroll) {
                 syncingScroll = true;
-                tableWrap.scrollLeft = topScrollbar.scrollLeft;
-                syncingScroll = false;
+                syncScrollPair(topScrollbar, tableWrap);
+                window.requestAnimationFrame(function () {
+                    syncingScroll = false;
+                });
             }
         }, { passive: true });
     }

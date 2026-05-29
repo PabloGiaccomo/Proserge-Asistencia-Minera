@@ -13,6 +13,7 @@ use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -27,6 +28,7 @@ class ParadaHerramientaService
         $query = RQMina::query()
             ->with([
                 'mina:id,nombre',
+                'supervisor:id,nombre_completo,correo',
                 'listaHerramientas:id,rq_mina_id,anio_iso,semana_iso,fecha_limite_envio,estado,enviado_at',
                 'gruposTrabajo:id,rq_mina_id,servicio,turno,fecha',
             ])
@@ -66,6 +68,8 @@ class ParadaHerramientaService
         $rq = RQMina::query()
             ->with([
                 'mina:id,nombre',
+                'supervisor:id,nombre_completo,correo',
+                'supervisor.usuario:id,personal_id,email',
                 'gruposTrabajo:id,rq_mina_id,servicio,turno,fecha',
                 'listaHerramientas.grupos.items',
             ])
@@ -206,6 +210,47 @@ class ParadaHerramientaService
         ];
     }
 
+    public function enviarRecordatorioSupervisor(Usuario $usuario, RQMina $rq, string $grupoId): array
+    {
+        $lista = $this->ensureLista($rq, $usuario)->load(['grupos.items', 'rqMina.supervisor.usuario']);
+        $grupo = $lista->grupos->firstWhere('id', $grupoId);
+
+        if (!$grupo) {
+            return ['ok' => false, 'message' => 'Grupo de herramientas no encontrado.'];
+        }
+
+        $supervisor = $lista->rqMina?->supervisor;
+        $email = trim((string) ($supervisor?->correo ?: $supervisor?->usuario?->email));
+
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return ['ok' => false, 'message' => 'El supervisor a cargo no tiene un correo valido registrado.'];
+        }
+
+        $url = route('herramientas-parada.show', $rq->id);
+        $subject = 'Recordatorio lista de herramientas - ' . ($grupo->nombre ?: 'Grupo');
+        $message = implode("\n", [
+            'Hola ' . ($supervisor?->nombre_completo ?: 'supervisor') . ',',
+            '',
+            'Por favor revisa y envia la lista de herramientas del grupo: ' . ($grupo->nombre ?: 'Grupo'),
+            'Parada: ' . ($rq->area ?: '-'),
+            'Lugar: ' . ($rq->destino_nombre ?: ($rq->mina?->nombre ?? '-')),
+            'Semana: ' . Carbon::parse($rq->fecha_inicio)->isoWeek(),
+            'Limite de envio: ' . Carbon::parse($lista->fecha_limite_envio)->format('d/m/Y'),
+            '',
+            'Link: ' . $url,
+        ]);
+
+        try {
+            Mail::raw($message, function ($mail) use ($email, $subject): void {
+                $mail->to($email)->subject($subject);
+            });
+        } catch (\Throwable $exception) {
+            return ['ok' => false, 'message' => 'No se pudo enviar el correo: ' . $exception->getMessage()];
+        }
+
+        return ['ok' => true, 'message' => 'Correo enviado al supervisor responsable: ' . $email];
+    }
+
     public function emitDeadlineReminders(): int
     {
         if (!Schema::hasTable('notification_types') || !Schema::hasTable('parada_herramienta_listas')) {
@@ -286,6 +331,10 @@ class ParadaHerramientaService
             'estado_lista' => $lista->estado,
             'enviado_at' => $lista->enviado_at?->format('Y-m-d H:i:s'),
             'observaciones' => $lista->observaciones,
+            'supervisor_responsable' => [
+                'nombre' => $rq->supervisor?->nombre_completo,
+                'correo' => $rq->supervisor?->correo ?: $rq->supervisor?->usuario?->email,
+            ],
             'puede_editar' => $this->canEditLista($usuario, $rq, $lista),
             'puede_actualizar_pedido' => $this->canUpdatePedido($usuario),
             'grupos' => $lista->grupos->map(fn (ParadaHerramientaGrupo $grupo): array => [

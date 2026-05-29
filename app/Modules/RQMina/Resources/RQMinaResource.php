@@ -20,6 +20,7 @@ class RQMinaResource extends JsonResource
             'fecha_fin' => optional($this->fecha_fin)->toDateString(),
             'observaciones' => $this->observaciones,
             'estado' => $this->estado,
+            'supervisor_id' => $this->supervisor_id,
             'created_by_usuario_id' => $this->created_by_usuario_id,
             'enviado_at' => optional($this->enviado_at)->toIso8601String(),
             'created_at' => optional($this->created_at)->toIso8601String(),
@@ -33,6 +34,13 @@ class RQMinaResource extends JsonResource
                 'email' => $this->creador?->email,
                 'nombre' => $this->creador?->personal?->nombre_completo ?? $this->creador?->name ?? $this->creador?->email,
             ]),
+            'supervisor' => $this->whenLoaded('supervisor', fn (): ?array => $this->supervisor ? [
+                'id' => $this->supervisor->id,
+                'nombre' => $this->supervisor->nombre_completo,
+                'dni' => $this->supervisor->dni,
+                'puesto' => $this->supervisor->puesto,
+                'es_supervisor' => (bool) $this->supervisor->es_supervisor,
+            ] : null),
             'detalle' => $this->whenLoaded('detalle', function (): array {
                 return $this->detalle->map(fn ($item): array => [
                     'id' => $item->id,
@@ -46,6 +54,42 @@ class RQMinaResource extends JsonResource
                     'id' => $item->id,
                     'transporte' => $item->transporte,
                     'cantidad' => (int) $item->cantidad,
+                ])->values()->all();
+            }),
+            'plan_operativo' => $this->whenLoaded('actividadGrupos', function (): array {
+                return $this->actividadGrupos->map(fn ($group): array => [
+                    'id' => $group->id,
+                    'area_operativa' => $group->area_operativa,
+                    'modulo' => $group->modulo,
+                    'nombre' => $group->nombre,
+                    'observaciones' => $group->observaciones,
+                    'actividades' => $group->actividades->map(fn ($activity): array => [
+                        'id' => $activity->id,
+                        'sait' => $activity->sait,
+                        'sector' => $activity->sector,
+                        'area' => $activity->area,
+                        'ait_trabajo' => $activity->ait_trabajo,
+                        'detalle_trabajos_relevantes' => $activity->detalle_trabajos_relevantes,
+                        'supervisor_campo_dia' => $activity->supervisor_campo_dia,
+                        'supervisor_campo_noche' => $activity->supervisor_campo_noche,
+                        'supervisor_seguridad_dia' => $activity->supervisor_seguridad_dia,
+                        'supervisor_seguridad_noche' => $activity->supervisor_seguridad_noche,
+                        'turnos' => $activity->turnos->map(fn ($turno): array => [
+                            'fecha' => optional($turno->fecha)->toDateString(),
+                            'dia_label' => $turno->dia_label,
+                            'turno_a' => $turno->turno_a,
+                            'turno_b' => $turno->turno_b,
+                            'real' => $turno->real,
+                        ])->values()->all(),
+                    ])->values()->all(),
+                    'transportes' => $group->transportes->map(fn ($transport): array => [
+                        'id' => $transport->id,
+                        'actividad_id' => $transport->actividad_id,
+                        'alcance' => $transport->alcance,
+                        'unidad_carga' => $transport->unidad_carga,
+                        'unidades_transporte' => $transport->unidades_transporte,
+                        'indicaciones' => $transport->indicaciones,
+                    ])->values()->all(),
                 ])->values()->all();
             }),
         ];

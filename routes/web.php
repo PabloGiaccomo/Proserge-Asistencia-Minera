@@ -114,11 +114,18 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'save'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.save');
     Route::post('/herramientas-parada/{rqMinaId}/pedido', [ParadaHerramientaPageController::class, 'updatePedido'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.pedido');
     Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.enviar');
+    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/recordatorio-supervisor', [ParadaHerramientaPageController::class, 'recordarSupervisor'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.recordar-supervisor');
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');
+    Route::get('/rq-mina/personal/buscar', [RQMinaPageController::class, 'buscarPersonal'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.personal.buscar');
+    Route::get('/rq-mina/opciones-campo', [RQMinaPageController::class, 'opcionesCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.index');
+    Route::post('/rq-mina/opciones-campo', [RQMinaPageController::class, 'guardarOpcionCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.store');
+    Route::delete('/rq-mina/opciones-campo/{optionId}', [RQMinaPageController::class, 'eliminarOpcionCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.destroy');
     Route::get('/rq-mina/create', [RQMinaPageController::class, 'create'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.create');
     Route::get('/rq-mina/{id}/edit', [RQMinaPageController::class, 'edit'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.edit');
+    Route::get('/rq-mina/{id}/plan/importar', [RQMinaPageController::class, 'importarPlan'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.plan.importar');
+    Route::get('/rq-mina/{id}/plan', [RQMinaPageController::class, 'plan'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.plan');
     Route::get('/rq-mina/{id}', [RQMinaPageController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.show');
 
     // RQ Proserge
@@ -217,6 +224,7 @@ Route::middleware('web.auth')->group(function (): void {
     // POST Routes
     Route::post('/rq-mina', [RQMinaPageController::class, 'store'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.store');
     Route::put('/rq-mina/{id}', [RQMinaPageController::class, 'update'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.update');
+    Route::put('/rq-mina/{id}/plan', [RQMinaPageController::class, 'updatePlan'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.plan.update');
     Route::post('/rq-mina/{id}/enviar', [RQMinaPageController::class, 'enviar'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.enviar');
     Route::post('/rq-mina/{id}/eliminar', [RQMinaPageController::class, 'destroy'])->middleware('web.permission:rq_mina,eliminar')->name('rq-mina.destroy');
 

@@ -33,10 +33,10 @@ $calcTransporteTotal = static function (array $transporte): int {
             <h1 class="page-title">RQ Mina</h1>
             <p class="page-subtitle">Requerimientos de personal de mina</p>
         </div>
-        <button type="button" class="btn-nuevoRQ" onclick="openModalRQ('create')">
+        <a href="{{ route('rq-mina.create') }}" class="btn-nuevoRQ">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Nuevo RQ
-        </button>
+            Nueva Parada
+        </a>
     </div>
 
     @if(session('success'))
@@ -172,6 +172,8 @@ $calcTransporteTotal = static function (array $transporte): int {
                             <th>Área</th>
                             <th>Fechas</th>
                             <th>Creador</th>
+                            <th>Supervisor</th>
+                            <th>Plan</th>
                             <th>Puestos</th>
                             <th>Total</th>
                             <th>Transporte</th>
@@ -183,6 +185,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                         @foreach($items as $rq)
                             @php
                                 $detalle = $rq['detalle'] ?? [];
+                                $planOperativo = $rq['plan_operativo'] ?? [];
+                                $planGrupos = count($planOperativo);
+                                $planActividades = collect($planOperativo)->sum(fn ($g) => count($g['actividades'] ?? []));
                                 $transporteDetalle = $rq['transporte'] ?? [];
                                 $transporteTotal = $calcTransporteTotal($transporteDetalle);
                                 $transporteResumen = collect($transporteDetalle)
@@ -234,6 +239,17 @@ $calcTransporteTotal = static function (array $transporte): int {
                                     </div>
                                 </td>
                                 <td>{{ $rq['creador'] ?? '-' }}</td>
+                                <td>{{ $rq['supervisor']['nombre'] ?? '-' }}</td>
+                                <td>
+                                    @if($planGrupos > 0)
+                                        <div class="transport-cell">
+                                            <span class="transport-total">{{ $planGrupos }} grupo(s)</span>
+                                            <span class="transport-summary">{{ $planActividades }} actividad(es)</span>
+                                        </div>
+                                    @else
+                                        <span class="transport-empty">Sin plan</span>
+                                    @endif
+                                </td>
                                 <td>{{ $calcPuestos($detalle) }}</td>
                                 <td>{{ $calcTotal($detalle) }}</td>
                                 <td>
@@ -257,8 +273,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                                 <td>
                                     <div class="row-actions">
                                         <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
-                                        <button type="button" class="btn-row btn-row-outline" onclick="openModalRQ('edit', '{{ $rq['id'] }}')">Editar</button>
-                                        <button type="button" class="btn-row btn-copy" onclick="openModalRQ('copy', '{{ $rq['id'] }}')">Copiar RQ</button>
+                                        <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-row-outline">Plan</a>
+                                        <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
+                                        <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="btn-row btn-copy">Copiar</a>
 
                                         @if($isBorrador)
                                             <form method="POST" action="{{ route('rq-mina.enviar', $rq['id']) }}" onsubmit="return confirm('¿Enviar este RQ?');">
@@ -380,6 +397,18 @@ $calcTransporteTotal = static function (array $transporte): int {
                     <textarea name="observaciones" id="inputObs" class="form-textarea" rows="3" placeholder="Descripción del requerimiento..."></textarea>
                 </div>
             </div>
+            <div class="form-section">
+                @include('rq-mina.partials.supervisor-selector', [
+                    'selectorId' => 'rqModalSupervisorSelector',
+                    'selectedSupervisor' => null,
+                ])
+            </div>
+            <div class="form-section">
+                @include('rq-mina.partials.plan-operativo-editor', [
+                    'editorId' => 'rqModalPlanOperativoEditor',
+                    'planOperativo' => [],
+                ])
+            </div>
             <div class="detalle-section">
                 <div class="detalle-header">
                     <h3 class="detalle-title">Detalle por puesto / cantidad</h3>
@@ -390,8 +419,8 @@ $calcTransporteTotal = static function (array $transporte): int {
                 </div>
                 <div class="detalle-lista" id="listaDetalle">
                     <div class="fila-detalle">
-                        <input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" required>
-                        <input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1" required>
+                        <input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto">
+                        <input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1">
                         <button type="button" class="btn-removefila" onclick="this.closest('.fila-detalle').remove()">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                         </button>
@@ -431,7 +460,7 @@ const rqUpdateUrlTemplate = @json(route('rq-mina.update', ['id' => '__ID__']));
 let transporteRowCount = 1;
 
 function createDetalleRow(puesto, cantidad) {
-    return '<div class="fila-detalle"><input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" value="' + (puesto || '') + '" required><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '" required><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
+    return '<div class="fila-detalle"><input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" value="' + (puesto || '') + '"><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
 }
 
 function createTransporteRow(transporte, cantidad) {
@@ -460,6 +489,12 @@ function openModalRQ(mode = 'create', rqId = null) {
     detalle.innerHTML = createDetalleRow('', 1);
     transporteRowCount = 0;
     transporte.innerHTML = createTransporteRow('', 1);
+    if (window.rqMinaSupervisorSelectorSet) {
+        window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', null);
+    }
+    if (window.rqMinaPlanEditorSet) {
+        window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', []);
+    }
 
     if (mode === 'edit' && rqId) {
         const rq = rqData.find(item => String(item.id) === String(rqId));
@@ -488,6 +523,12 @@ function openModalRQ(mode = 'create', rqId = null) {
         rqTransporte.forEach(item => {
             transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
         });
+        if (window.rqMinaSupervisorSelectorSet) {
+            window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
+        }
+        if (window.rqMinaPlanEditorSet) {
+            window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);
+        }
     } else if (mode === 'copy' && rqId) {
         const rq = rqData.find(item => String(item.id) === String(rqId));
         if (!rq) return;
@@ -515,6 +556,12 @@ function openModalRQ(mode = 'create', rqId = null) {
         rqTransporte.forEach(item => {
             transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
         });
+        if (window.rqMinaSupervisorSelectorSet) {
+            window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
+        }
+        if (window.rqMinaPlanEditorSet) {
+            window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);
+        }
     } else {
         title.textContent = 'Nuevo RQ Mina';
         submit.textContent = 'Crear BORRADOR';
@@ -529,7 +576,7 @@ function addFila() {
     const container = document.getElementById('listaDetalle');
     const row = document.createElement('div');
     row.className = 'fila-detalle';
-    row.innerHTML = '<input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" required><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1" required><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+    row.innerHTML = '<input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto"><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
     container.appendChild(row);
 }
 

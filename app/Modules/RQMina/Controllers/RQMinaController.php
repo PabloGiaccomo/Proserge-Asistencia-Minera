@@ -170,7 +170,9 @@ class RQMinaController extends Controller
         /** @var Usuario $usuario */
         $usuario = $request->user();
 
-        $rqMina = RQMina::query()->with(['mina:id,nombre', 'creador:id,email', 'detalle'])->find($id);
+        $rqMina = RQMina::query()
+            ->with(['mina:id,nombre', 'creador:id,email', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'detalle'])
+            ->find($id);
 
         if (!$rqMina) {
             return ApiResponse::error(

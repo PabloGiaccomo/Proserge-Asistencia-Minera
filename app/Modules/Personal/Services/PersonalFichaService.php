@@ -323,6 +323,14 @@ class PersonalFichaService
 
             $this->syncFichaDocuments($ficha, $documentPaths, $user);
 
+            if (strtoupper((string) ($attributes['estado'] ?? '')) === 'CESADO' && $ficha->link) {
+                $ficha->link->forceFill([
+                    'estado' => PersonalFichaLink::ESTADO_INHABILITADO,
+                    'disabled_at' => now(),
+                    'enabled_manually_at' => null,
+                ])->save();
+            }
+
             return [
                 'personal' => $updatedPersonal->fresh(['fichaColaborador.link']),
                 'ficha' => $ficha->fresh(['personal', 'link', 'familiares', 'archivos']),
@@ -756,6 +764,24 @@ class PersonalFichaService
     {
         $summary = $this->regularizationSummary($ficha);
         $displayState = $this->temporaryDisplayState($ficha);
+        $personalState = strtoupper((string) ($ficha->personal?->estado ?? ''));
+
+        if ($personalState === 'CESADO') {
+            return null;
+        }
+
+        $isComplete = empty($summary['missing_fields'])
+            && empty($summary['missing_documents'])
+            && empty($summary['can_regularize']);
+        $hasSubmittedFicha = $ficha->submitted_at !== null
+            || $ficha->estado === PersonalFicha::ESTADO_ENVIADA
+            || $ficha->estado === PersonalFicha::ESTADO_APROBADO
+            || $summary['link']?->submitted_at !== null
+            || $summary['link']?->estado === PersonalFichaLink::ESTADO_ENVIADO;
+
+        if ($isComplete && $hasSubmittedFicha) {
+            return null;
+        }
 
         $row = [
             'ficha' => $ficha,

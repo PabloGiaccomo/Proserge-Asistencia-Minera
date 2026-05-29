@@ -62,24 +62,31 @@ class PersonalService
 
         $search = trim((string) ($filters['search'] ?? $filters['q'] ?? ''));
         if ($search !== '') {
-            $needle = '%' . mb_strtolower($search) . '%';
+            $this->applySearch($query, $search);
+        }
 
-            $query->where(function (Builder $sub) use ($needle): void {
-                $sub->whereRaw('LOWER(personal.nombre_completo) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.dni) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.puesto) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.contrato) LIKE ?', [$needle])
-                    ->orWhereExists(function ($q) use ($needle): void {
-                        $q->selectRaw('1')
-                            ->from('personal_mina as pm')
-                            ->join('minas as m', 'm.id', '=', 'pm.mina_id')
-                            ->whereColumn('pm.personal_id', 'personal.id')
-                            ->where(function ($mineMatch) use ($needle): void {
-                                $mineMatch->whereRaw('LOWER(m.nombre) LIKE ?', [$needle])
-                                    ->orWhereRaw('LOWER(m.unidad_minera) LIKE ?', [$needle]);
-                            });
-                    });
-            });
+        if (!empty($filters['ids']) && is_array($filters['ids'])) {
+            $query->whereIn('personal.id', collect($filters['ids'])->map(fn ($id) => (string) $id)->filter()->values()->all());
+        }
+
+        if (!empty($filters['exclude_ids']) && is_array($filters['exclude_ids'])) {
+            $query->whereNotIn('personal.id', collect($filters['exclude_ids'])->map(fn ($id) => (string) $id)->filter()->values()->all());
+        }
+
+        if (array_key_exists('es_supervisor', $filters)) {
+            $query->where('personal.es_supervisor', filter_var($filters['es_supervisor'], FILTER_VALIDATE_BOOLEAN));
+        }
+
+        if (!empty($filters['solo_activos'])) {
+            $query->whereIn('personal.estado', ['ACTIVO', 'APROBADO']);
+        }
+
+        if (!empty($filters['with_minas'])) {
+            $query->with('minas');
+        }
+
+        if (!empty($filters['limit'])) {
+            $query->limit(max(1, min(50, (int) $filters['limit'])));
         }
 
         $stateFilter = strtoupper((string) ($filters['estado'] ?? ''));
@@ -172,6 +179,21 @@ class PersonalService
         }
 
         return $query->find($id);
+    }
+
+    public function searchSelector(string $search, bool $supervisorsOnly = false, int $limit = 12): Collection
+    {
+        $filters = [
+            'search' => $search,
+            'with_minas' => true,
+            'limit' => $limit,
+        ];
+
+        if ($supervisorsOnly) {
+            $filters['es_supervisor'] = true;
+        }
+
+        return $this->buildFilteredQuery($filters)->get();
     }
 
     public function create(array $payload): Personal
@@ -463,6 +485,35 @@ class PersonalService
         }
 
         return in_array($state, ['1', 'ACTIVE'], true) ? 'ACTIVO' : 'INACTIVO';
+    }
+
+    private function applySearch(Builder $query, string $search): void
+    {
+        $tokens = collect(preg_split('/\s+/u', mb_strtolower(trim($search))) ?: [])
+            ->map(fn (string $token): string => trim($token))
+            ->filter()
+            ->values();
+
+        foreach ($tokens as $token) {
+            $needle = '%' . $token . '%';
+
+            $query->where(function (Builder $sub) use ($needle): void {
+                $sub->whereRaw('LOWER(personal.nombre_completo) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(personal.dni) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(personal.puesto) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(personal.contrato) LIKE ?', [$needle])
+                    ->orWhereExists(function ($q) use ($needle): void {
+                        $q->selectRaw('1')
+                            ->from('personal_mina as pm')
+                            ->join('minas as m', 'm.id', '=', 'pm.mina_id')
+                            ->whereColumn('pm.personal_id', 'personal.id')
+                            ->where(function ($mineMatch) use ($needle): void {
+                                $mineMatch->whereRaw('LOWER(m.nombre) LIKE ?', [$needle])
+                                    ->orWhereRaw('LOWER(m.unidad_minera) LIKE ?', [$needle]);
+                            });
+                    });
+            });
+        }
     }
 
     private function resolveMineIds(string $mineFilter): array

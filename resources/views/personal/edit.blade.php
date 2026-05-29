@@ -46,6 +46,11 @@
             @csrf
         </form>
     @endif
+    @if(!empty($trabajador['puede_cesar']))
+        <form id="ceaseWorkerForm" method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? request('id')) }}" style="display:none;">
+            @csrf
+        </form>
+    @endif
 
     <form method="POST" action="{{ route('personal.update', $trabajador['id'] ?? request('id')) }}" enctype="multipart/form-data" class="ficha-workspace" style="display:flex; flex-direction:column; gap:16px;">
         @csrf
@@ -354,10 +359,7 @@
                                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                                     <button type="button" class="btn btn-outline btn-sm" id="set-indet-cese-today">Marcar cese hoy</button>
                                     @if(!empty($trabajador['puede_cesar']))
-                                        <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? request('id')) }}" onsubmit="return confirm('Se marcara a este trabajador como cesado.');">
-                                            @csrf
-                                            <button type="submit" class="btn btn-outline btn-sm">Cesar ahora</button>
-                                        </form>
+                                        <button type="submit" form="ceaseWorkerForm" class="btn btn-outline btn-sm" onclick="return confirm('Se marcara a este trabajador como cesado.');">Cesar ahora</button>
                                     @endif
                                 </div>
                             </div>
@@ -459,6 +461,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         const ceseTodayButton = document.getElementById('set-indet-cese-today');
         const fechaCeseInput = document.getElementById('field_fecha_cese');
+        const estadoSelect = document.getElementById('estado');
         const familyTableBody = document.getElementById('familyTableBody');
         const addFamilyBtn = document.getElementById('addFamilyBtn');
         const employerBody = document.getElementById('quintaEmployersBody');
@@ -518,6 +521,21 @@
 
         if (ceseTodayButton && fechaCeseInput) {
             ceseTodayButton.addEventListener('click', function () {
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                fechaCeseInput.value = `${yyyy}-${mm}-${dd}`;
+                fechaCeseInput.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        }
+
+        if (estadoSelect && fechaCeseInput) {
+            estadoSelect.addEventListener('change', function () {
+                if (estadoSelect.value !== 'CESADO' || fechaCeseInput.value) {
+                    return;
+                }
+
                 const today = new Date();
                 const yyyy = today.getFullYear();
                 const mm = String(today.getMonth() + 1).padStart(2, '0');

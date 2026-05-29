@@ -102,6 +102,141 @@ class RQMinaApiTest extends TestCase
         ]);
     }
 
+    public function test_crea_rq_mina_con_supervisor_a_cargo(): void
+    {
+        $minaId = $this->createMina();
+        $supervisorId = $this->createPersonal($minaId, true, 'Supervisor Prueba Uno', 'Supervisor');
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Mantenimiento',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'detalle' => [
+                ['puesto' => 'Tecnico', 'cantidad' => 1],
+            ],
+            'supervisor_id' => $supervisorId,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.supervisor_id', $supervisorId)
+            ->assertJsonPath('data.supervisor.nombre', 'Supervisor Prueba Uno');
+
+        $this->assertDatabaseHas('rq_mina', [
+            'supervisor_id' => $supervisorId,
+        ]);
+    }
+
+    public function test_crea_rq_mina_con_plan_operativo_semanal(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Parada Planta',
+            'fecha_inicio' => '2026-04-13',
+            'fecha_fin' => '2026-04-19',
+            'plan_operativo' => [
+                [
+                    'area_operativa' => 'C1',
+                    'modulo' => 'Seca',
+                    'nombre' => 'Grupo Seca C1',
+                    'actividades' => [
+                        [
+                            'client_key' => 'act-1',
+                            'sait' => 'SAIT-100',
+                            'sector' => 'Chancado',
+                            'area' => 'C1 Seca',
+                            'ait_trabajo' => 'AIT-01 / AIT-02',
+                            'detalle_trabajos_relevantes' => 'Cambio de liners',
+                            'supervisor_campo_dia' => 'Supervisor Dia',
+                            'turnos' => [
+                                ['fecha' => '2026-04-13', 'dia_label' => 'Lun 13/04', 'turno_a' => 'X', 'turno_b' => '', 'real' => ''],
+                                ['fecha' => '2026-04-14', 'dia_label' => 'Mar 14/04', 'turno_a' => '', 'turno_b' => 'X', 'real' => 'OK'],
+                            ],
+                        ],
+                    ],
+                    'transportes' => [
+                        [
+                            'alcance' => 'SAIT-100',
+                            'unidad_carga' => 'Grua 80T',
+                            'unidades_transporte' => 'Van 15 y minibus 35 asientos',
+                            'indicaciones' => 'Desde miercoles turno A',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.plan_operativo.0.area_operativa', 'C1')
+            ->assertJsonPath('data.plan_operativo.0.actividades.0.sait', 'SAIT-100')
+            ->assertJsonPath('data.detalle.0.cantidad', 1);
+
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', [
+            'area_operativa' => 'C1',
+            'modulo' => 'Seca',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividades', [
+            'sait' => 'SAIT-100',
+            'sector' => 'Chancado',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividad_turnos', [
+            'fecha' => '2026-04-14',
+            'turno_b' => 'X',
+            'real' => 'OK',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividad_transportes', [
+            'unidad_carga' => 'Grua 80T',
+        ]);
+    }
+
+    public function test_opciones_de_campos_rq_mina_se_guardan_y_eliminan(): void
+    {
+        $usuarioId = $this->createUsuario($this->userRoleId);
+
+        $session = [
+            'auth_token' => 'test-token',
+            'user_id' => $usuarioId,
+            'user' => [
+                'id' => $usuarioId,
+                'email' => 'planner@test.local',
+                'permissions' => ['*'],
+            ],
+        ];
+
+        $storeResponse = $this->withSession($session)->postJson('/rq-mina/opciones-campo', [
+            'field' => 'rq_mina.plan.modulo',
+            'value' => 'Seca C1',
+        ]);
+
+        $storeResponse->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('data.value', 'Seca C1');
+
+        $optionId = $storeResponse->json('data.id');
+
+        $this->withSession($session)
+            ->getJson('/rq-mina/opciones-campo?field=rq_mina.plan.modulo&q=seca')
+            ->assertOk()
+            ->assertJsonPath('data.0.value', 'Seca C1');
+
+        $this->withSession($session)
+            ->deleteJson('/rq-mina/opciones-campo/' . $optionId)
+            ->assertOk()
+            ->assertJsonPath('deleted', true);
+
+        $this->assertDatabaseMissing('rq_mina_field_options', [
+            'id' => $optionId,
+        ]);
+    }
+
     public function test_crea_rq_mina_con_destino_oficina(): void
     {
         $minaId = $this->createMina();
@@ -269,6 +404,34 @@ class RQMinaApiTest extends TestCase
             'nombre' => 'Oficina '.Str::upper(Str::random(4)),
             'ubicacion' => 'Ubicacion oficina',
             'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function createPersonal(string $minaId, bool $esSupervisor, string $nombre, string $puesto): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('personal')->insert([
+            'id' => $id,
+            'dni' => (string) random_int(10000000, 99999999),
+            'nombre_completo' => $nombre,
+            'puesto' => $puesto,
+            'ocupacion' => $esSupervisor ? 'E' : 'O',
+            'contrato' => 'REG',
+            'es_supervisor' => $esSupervisor ? 1 : 0,
+            'qr_code' => 'QR-' . Str::upper(Str::random(8)),
+            'estado' => 'ACTIVO',
+        ]);
+
+        DB::table('personal_mina')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $id,
+            'mina_id' => $minaId,
+            'estado' => 'HABILITADO',
             'created_at' => now(),
             'updated_at' => now(),
         ]);

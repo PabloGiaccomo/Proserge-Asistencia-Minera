@@ -100,6 +100,20 @@ class ParadaHerramientaPageController extends WebPageController
             ->with('success', $result['message'] ?? 'Lista enviada correctamente.');
     }
 
+    public function recordarSupervisor(string $rqMinaId, string $grupoId): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
+
+        if (!$rq) {
+            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+        }
+
+        $result = $this->service->enviarRecordatorioSupervisor($usuario, $rq, $grupoId);
+
+        return back()->with(($result['ok'] ?? false) ? 'success' : 'error', $result['message'] ?? 'No se pudo enviar el correo.');
+    }
+
     public function updatePedido(Request $request, string $rqMinaId): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();

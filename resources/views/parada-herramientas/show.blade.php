@@ -82,6 +82,11 @@
             <span>Pedido completado</span>
             <strong>{{ $pedidoCompleto }} / {{ $pedidoTotal }}</strong>
         </div>
+        <div class="summary-item">
+            <span>Supervisor responsable</span>
+            <strong>{{ $item['supervisor_responsable']['nombre'] ?? '-' }}</strong>
+            <small>{{ $item['supervisor_responsable']['correo'] ?? 'Sin correo' }}</small>
+        </div>
     </div>
 
     @unless($puedeEditar || $puedeActualizarPedido)
@@ -105,8 +110,8 @@
             <div class="tools-groups" id="toolsGroups">
                 @foreach(($item['grupos'] ?? []) as $groupIndex => $group)
                     <div class="tool-group" data-group-index="{{ $groupIndex }}">
-                        <div class="tool-group-head">
-                            <div class="group-name-fields">
+                            <div class="tool-group-head">
+                                <div class="group-name-fields">
                                 <input type="hidden" name="grupos[{{ $groupIndex }}][grupo_trabajo_id]" value="{{ $group['grupo_trabajo_id'] ?? '' }}">
                                 <div class="form-group">
                                     <label class="form-label">Grupo</label>
@@ -116,10 +121,18 @@
                                     <label class="form-label">Observaciones grupo</label>
                                     <input type="text" name="grupos[{{ $groupIndex }}][observaciones]" class="form-control" value="{{ $group['observaciones'] ?? '' }}" @readonly(!$puedeEditar)>
                                 </div>
-                            </div>
-                            @if($puedeEditar)
-                                <button type="button" class="btn-row btn-danger" onclick="this.closest('.tool-group').remove()">Quitar grupo</button>
-                            @endif
+                                </div>
+                                <button
+                                    type="submit"
+                                    form="toolReminderForm-{{ $group['id'] }}"
+                                    class="btn-row btn-row-outline"
+                                    onclick="return confirm('Enviar correo al supervisor responsable para este grupo?');"
+                                >
+                                    Correo supervisor
+                                </button>
+                                @if($puedeEditar)
+                                    <button type="button" class="btn-row btn-danger" onclick="this.closest('.tool-group').remove()">Quitar grupo</button>
+                                @endif
                         </div>
 
                         <div class="tool-list-block">
@@ -192,6 +205,12 @@
             <button type="submit" class="btn btn-primary">Enviar lista</button>
         </form>
     @endif
+
+    @foreach(($item['grupos'] ?? []) as $group)
+        <form id="toolReminderForm-{{ $group['id'] }}" method="POST" action="{{ route('herramientas-parada.recordar-supervisor', [$item['rq_mina_id'], $group['id']]) }}" style="display:none;">
+            @csrf
+        </form>
+    @endforeach
 </div>
 
 @if($puedeEditar)

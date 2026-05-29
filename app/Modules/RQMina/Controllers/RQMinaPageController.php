@@ -4,15 +4,20 @@ namespace App\Modules\RQMina\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
+use App\Models\Personal;
 use App\Models\RQMina;
+use App\Models\RQMinaFieldOption;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
+use App\Modules\Personal\Services\PersonalService;
 use App\Modules\RQMina\Services\RQMinaService;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
 
@@ -21,6 +26,7 @@ class RQMinaPageController extends WebPageController
     public function __construct(
         private readonly RQMinaService $service,
         private readonly NotificationService $notificationService,
+        private readonly PersonalService $personalService,
     ) {
     }
 
@@ -121,9 +127,127 @@ class RQMinaPageController extends WebPageController
         $formMode = 'create';
         $formAction = route('rq-mina.store');
         $formMethod = 'POST';
-        $submitLabel = 'Guardar como Borrador';
+        $submitLabel = 'Guardar Parada';
 
         return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+    }
+
+    public function buscarPersonal(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:191'],
+            'tipo' => ['nullable', 'string', 'in:personal,supervisor'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:20'],
+        ]);
+
+        $search = trim((string) ($validated['q'] ?? ''));
+        if (mb_strlen($search) < 2) {
+            return response()->json(['ok' => true, 'data' => []]);
+        }
+
+        $items = $this->personalService
+            ->searchSelector(
+                $search,
+                ($validated['tipo'] ?? 'personal') === 'supervisor',
+                (int) ($validated['limit'] ?? 10)
+            )
+            ->map(fn ($personal): array => [
+                'id' => (string) $personal->id,
+                'nombre' => (string) $personal->nombre_completo,
+                'dni' => (string) $personal->dni,
+                'puesto' => (string) $personal->puesto,
+                'es_supervisor' => (bool) $personal->es_supervisor,
+                'minas' => $personal->relationLoaded('minas')
+                    ? $personal->minas->pluck('nombre')->filter()->values()->all()
+                    : [],
+            ])
+            ->values()
+            ->all();
+
+        return response()->json(['ok' => true, 'data' => $items]);
+    }
+
+    public function opcionesCampo(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'field' => ['required', 'string', 'max:120', 'regex:/^[a-z0-9_.-]+$/i'],
+            'q' => ['nullable', 'string', 'max:191'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:30'],
+        ]);
+
+        $query = trim((string) ($validated['q'] ?? ''));
+        $normalizedQuery = $this->normalizeFieldOptionValue($query);
+        $limit = (int) ($validated['limit'] ?? 12);
+
+        $options = RQMinaFieldOption::query()
+            ->where('field_key', $validated['field'])
+            ->when($normalizedQuery !== '', function ($optionQuery) use ($normalizedQuery): void {
+                $optionQuery->where('value_normalized', 'like', '%' . $normalizedQuery . '%');
+            })
+            ->orderByDesc('usage_count')
+            ->orderBy('value')
+            ->limit($limit)
+            ->get(['id', 'value', 'usage_count'])
+            ->map(fn (RQMinaFieldOption $option): array => [
+                'id' => (string) $option->id,
+                'value' => (string) $option->value,
+                'usage_count' => (int) $option->usage_count,
+            ])
+            ->values()
+            ->all();
+
+        return response()->json(['ok' => true, 'data' => $options]);
+    }
+
+    public function guardarOpcionCampo(Request $request): JsonResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $validated = $request->validate([
+            'field' => ['required', 'string', 'max:120', 'regex:/^[a-z0-9_.-]+$/i'],
+            'value' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $value = preg_replace('/\s+/u', ' ', trim((string) $validated['value']));
+        $normalized = $this->normalizeFieldOptionValue($value);
+
+        if ($value === '' || $normalized === '') {
+            return response()->json(['ok' => false, 'message' => 'Valor vacio.'], 422);
+        }
+
+        $option = RQMinaFieldOption::query()
+            ->where('field_key', $validated['field'])
+            ->where('value_normalized', $normalized)
+            ->first();
+
+        if (!$option) {
+            $option = new RQMinaFieldOption([
+                'id' => (string) Str::uuid(),
+                'field_key' => $validated['field'],
+                'value_normalized' => $normalized,
+                'usage_count' => 0,
+                'created_by_usuario_id' => $usuario->id,
+            ]);
+        }
+
+        $option->value = mb_substr($value, 0, 1000);
+        $option->usage_count = ((int) $option->usage_count) + 1;
+        $option->save();
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'id' => (string) $option->id,
+                'value' => (string) $option->value,
+                'usage_count' => (int) $option->usage_count,
+            ],
+        ]);
+    }
+
+    public function eliminarOpcionCampo(Request $request, string $optionId): JsonResponse
+    {
+        $deleted = RQMinaFieldOption::query()->where('id', $optionId)->delete();
+
+        return response()->json(['ok' => true, 'deleted' => $deleted > 0]);
     }
 
     public function edit(Request $request, string $id): View
@@ -143,6 +267,55 @@ class RQMinaPageController extends WebPageController
         $submitLabel = 'Guardar Cambios';
 
         return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+    }
+
+    public function plan(Request $request, string $id): View|RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rqMina = $this->service->findForUser($usuario, $id);
+
+        if (!$rqMina) {
+            return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
+        }
+
+        $item = $this->toViewItem($rqMina);
+
+        return view('rq-mina.plan', compact('item'));
+    }
+
+    public function importarPlan(Request $request, string $id): View|RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rqMina = $this->service->findForUser($usuario, $id);
+
+        if (!$rqMina) {
+            return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
+        }
+
+        $item = $this->toViewItem($rqMina);
+
+        return view('rq-mina.import-plan', compact('item'));
+    }
+
+    public function updatePlan(Request $request, string $id): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rqMina = $this->service->findForUser($usuario, $id);
+
+        if (!$rqMina) {
+            return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
+        }
+
+        $planOperativo = $this->normalizePlanOperativoFromRequest($request);
+        $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo);
+
+        if (!$updated) {
+            return back()->with('error', 'No tienes permiso para actualizar el plan operativo.')->withInput();
+        }
+
+        return redirect()
+            ->route('rq-mina.show', $id)
+            ->with('success', 'Plan operativo semanal actualizado correctamente.');
     }
 
     public function store(Request $request): RedirectResponse
@@ -165,6 +338,8 @@ class RQMinaPageController extends WebPageController
                 'puesto' => $request->input('puesto', []),
                 'cantidad' => $request->input('cantidad', []),
                 'transporte' => $request->input('transporte', []),
+                'supervisor_id' => $request->input('supervisor_id'),
+                'plan_operativo_count' => count((array) $request->input('plan_operativo', [])),
             ],
         ]);
 
@@ -188,7 +363,9 @@ class RQMinaPageController extends WebPageController
             return back()->with('error', 'No tienes acceso al lugar seleccionado o el destino no es valido.')->withInput();
         }
 
-        return redirect()->route('rq-mina.index')->with('success', 'RQ creado correctamente');
+        return redirect()
+            ->route('rq-mina.plan', $rqMina->id)
+            ->with('success', 'Parada registrada. Ahora agrega las areas y el plan operativo semanal.');
     }
 
     public function update(Request $request, string $id): RedirectResponse
@@ -218,6 +395,8 @@ class RQMinaPageController extends WebPageController
                 'puesto' => $request->input('puesto', []),
                 'cantidad' => $request->input('cantidad', []),
                 'transporte' => $request->input('transporte', []),
+                'supervisor_id' => $request->input('supervisor_id'),
+                'plan_operativo_count' => count((array) $request->input('plan_operativo', [])),
             ],
         ]);
 
@@ -225,13 +404,13 @@ class RQMinaPageController extends WebPageController
             return back()->withErrors($payload['errors'])->withInput();
         }
 
-        $updated = $this->service->update($usuario, $rqMina, $payload['data']);
+        $updated = $this->service->updateGeneral($usuario, $rqMina, $payload['data']);
 
         if (!$updated) {
             return back()->with('error', 'No tienes permiso para actualizar este RQ.')->withInput();
         }
 
-        return redirect()->route('rq-mina.show', $id)->with('success', 'RQ actualizado correctamente');
+        return redirect()->route('rq-mina.show', $id)->with('success', 'Parada actualizada correctamente');
     }
 
     public function destroy(Request $request, string $id): RedirectResponse
@@ -415,6 +594,8 @@ class RQMinaPageController extends WebPageController
             'destino_tipo' => $destinoTipo,
             'destino_id' => $destinoId,
             'destino_nombre' => $destinoNombre,
+            'supervisor_id' => $rq->supervisor_id,
+            'supervisor' => $this->compactPersonal($rq->supervisor ?? null),
             'lugar' => $destinoNombre,
             'area' => $rq->area,
             'fecha_inicio' => $rq->fecha_inicio?->format('Y-m-d'),
@@ -426,6 +607,7 @@ class RQMinaPageController extends WebPageController
             'enviado_at' => $rq->enviado_at?->format('Y-m-d H:i:s'),
             'detalle' => $this->collectionToArrayRows($rq->detalle ?? []),
             'transporte' => $this->collectionToArrayRows($rq->transportes ?? []),
+            'plan_operativo' => $this->planOperativoToArray($rq->actividadGrupos ?? []),
             'observaciones' => $rq->observaciones,
             'personal_parada' => $rq->personal_parada,
         ];
@@ -451,8 +633,13 @@ class RQMinaPageController extends WebPageController
             legacyMinaName: $receivedMinaName,
         );
         $normalizedTransporte = $this->normalizeTransporteFromRequest($request);
+        $supervisorId = trim((string) $request->input('supervisor_id', ''));
+        $planOperativo = $this->normalizePlanOperativoFromRequest($request);
 
         $normalizedDetalle = $this->normalizeDetalleFromRequest($request);
+        if (empty($normalizedDetalle) && !empty($planOperativo)) {
+            $normalizedDetalle = $this->buildDetalleFromPlanOperativo($planOperativo);
+        }
         $cantidadPuestos = count($normalizedDetalle);
         $cantidadTotal = array_sum(array_map(static fn (array $line): int => (int) $line['cantidad'], $normalizedDetalle));
 
@@ -483,8 +670,10 @@ class RQMinaPageController extends WebPageController
             'fecha_inicio' => $request->input('fecha_inicio'),
             'fecha_fin' => $request->input('fecha_fin'),
             'observaciones' => $request->input('observaciones'),
+            'supervisor_id' => $supervisorId !== '' ? $supervisorId : null,
             'detalle' => $normalizedDetalle,
             'transporte' => $normalizedTransporte,
+            'plan_operativo' => $planOperativo,
         ];
 
         $errors = [];
@@ -500,8 +689,8 @@ class RQMinaPageController extends WebPageController
         if (empty($rqData['fecha_fin'])) {
             $errors['fecha_fin'] = 'La fecha fin es requerida';
         }
-        if (count($rqData['detalle']) === 0) {
-            $errors['detalle'] = 'Debes registrar al menos un puesto con cantidad válida';
+        if ($supervisorId !== '' && !Personal::query()->where('id', $supervisorId)->where('es_supervisor', true)->exists()) {
+            $errors['supervisor_id'] = 'Selecciona un supervisor válido.';
         }
 
         return [
@@ -627,6 +816,230 @@ class RQMinaPageController extends WebPageController
         }
 
         return [];
+    }
+
+    private function normalizeFieldOptionValue(string $value): string
+    {
+        $normalized = Str::ascii(Str::lower(preg_replace('/\s+/u', ' ', trim($value))));
+
+        return mb_substr($normalized, 0, 191);
+    }
+
+    private function planOperativoToArray(mixed $groups): array
+    {
+        if (!$groups instanceof \Illuminate\Support\Collection) {
+            return [];
+        }
+
+        return $groups
+            ->map(fn ($group): array => [
+                'id' => (string) ($group->id ?? ''),
+                'area_operativa' => (string) ($group->area_operativa ?? ''),
+                'modulo' => (string) ($group->modulo ?? ''),
+                'nombre' => (string) ($group->nombre ?? ''),
+                'observaciones' => (string) ($group->observaciones ?? ''),
+                'actividades' => ($group->actividades ?? collect())->map(fn ($activity): array => [
+                    'id' => (string) ($activity->id ?? ''),
+                    'client_key' => (string) ($activity->id ?? ''),
+                    'sait' => (string) ($activity->sait ?? ''),
+                    'sector' => (string) ($activity->sector ?? ''),
+                    'area' => (string) ($activity->area ?? ''),
+                    'ait_trabajo' => (string) ($activity->ait_trabajo ?? ''),
+                    'detalle_trabajos_relevantes' => (string) ($activity->detalle_trabajos_relevantes ?? ''),
+                    'supervisor_campo_dia' => (string) ($activity->supervisor_campo_dia ?? ''),
+                    'supervisor_campo_noche' => (string) ($activity->supervisor_campo_noche ?? ''),
+                    'supervisor_seguridad_dia' => (string) ($activity->supervisor_seguridad_dia ?? ''),
+                    'supervisor_seguridad_noche' => (string) ($activity->supervisor_seguridad_noche ?? ''),
+                    'turnos' => ($activity->turnos ?? collect())->map(fn ($turno): array => [
+                        'fecha' => $turno->fecha?->toDateString(),
+                        'dia_label' => (string) ($turno->dia_label ?? ''),
+                        'turno_a' => (string) ($turno->turno_a ?? ''),
+                        'turno_b' => (string) ($turno->turno_b ?? ''),
+                        'real' => (string) ($turno->real ?? ''),
+                    ])->values()->all(),
+                ])->values()->all(),
+                'transportes' => ($group->transportes ?? collect())->map(fn ($transporte): array => [
+                    'id' => (string) ($transporte->id ?? ''),
+                    'actividad_id' => (string) ($transporte->actividad_id ?? ''),
+                    'actividad_key' => (string) ($transporte->actividad_id ?? ''),
+                    'alcance' => (string) ($transporte->alcance ?? ''),
+                    'unidad_carga' => (string) ($transporte->unidad_carga ?? ''),
+                    'unidades_transporte' => (string) ($transporte->unidades_transporte ?? ''),
+                    'indicaciones' => (string) ($transporte->indicaciones ?? ''),
+                ])->values()->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function normalizePlanOperativoFromRequest(Request $request): array
+    {
+        $groups = $request->input('plan_operativo', []);
+        if (!is_array($groups)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($groups as $groupIndex => $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+
+            $areaOperativa = trim((string) ($group['area_operativa'] ?? ''));
+            $modulo = trim((string) ($group['modulo'] ?? ''));
+            $nombre = trim((string) ($group['nombre'] ?? ''));
+            $observaciones = trim((string) ($group['observaciones'] ?? ''));
+            $actividades = $this->normalizePlanActivities((array) ($group['actividades'] ?? []));
+            $transportes = $this->normalizePlanTransportes((array) ($group['transportes'] ?? []));
+
+            if ($areaOperativa === '' && $modulo === '' && $nombre === '' && empty($actividades) && empty($transportes)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'area_operativa' => $areaOperativa,
+                'modulo' => $modulo,
+                'nombre' => $nombre !== '' ? $nombre : 'Grupo ' . ((int) $groupIndex + 1),
+                'observaciones' => $observaciones,
+                'actividades' => $actividades,
+                'transportes' => $transportes,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    private function normalizePlanActivities(array $activities): array
+    {
+        $normalized = [];
+        foreach ($activities as $activityIndex => $activity) {
+            if (!is_array($activity)) {
+                continue;
+            }
+
+            $row = [
+                'client_key' => trim((string) ($activity['client_key'] ?? $activityIndex)),
+                'sait' => trim((string) ($activity['sait'] ?? '')),
+                'sector' => trim((string) ($activity['sector'] ?? '')),
+                'area' => trim((string) ($activity['area'] ?? '')),
+                'ait_trabajo' => trim((string) ($activity['ait_trabajo'] ?? '')),
+                'detalle_trabajos_relevantes' => trim((string) ($activity['detalle_trabajos_relevantes'] ?? '')),
+                'supervisor_campo_dia' => trim((string) ($activity['supervisor_campo_dia'] ?? '')),
+                'supervisor_campo_noche' => trim((string) ($activity['supervisor_campo_noche'] ?? '')),
+                'supervisor_seguridad_dia' => trim((string) ($activity['supervisor_seguridad_dia'] ?? '')),
+                'supervisor_seguridad_noche' => trim((string) ($activity['supervisor_seguridad_noche'] ?? '')),
+                'turnos' => $this->normalizePlanTurnos((array) ($activity['turnos'] ?? [])),
+            ];
+
+            $hasContent = collect($row)
+                ->except(['client_key', 'turnos'])
+                ->filter(fn ($value): bool => trim((string) $value) !== '')
+                ->isNotEmpty();
+
+            if (!$hasContent && empty($row['turnos'])) {
+                continue;
+            }
+
+            $normalized[] = $row;
+        }
+
+        return $normalized;
+    }
+
+    private function normalizePlanTurnos(array $turnos): array
+    {
+        $normalized = [];
+        foreach ($turnos as $turno) {
+            if (!is_array($turno)) {
+                continue;
+            }
+
+            $fecha = trim((string) ($turno['fecha'] ?? ''));
+            $diaLabel = trim((string) ($turno['dia_label'] ?? ''));
+            $turnoA = trim((string) ($turno['turno_a'] ?? ''));
+            $turnoB = trim((string) ($turno['turno_b'] ?? ''));
+            $real = trim((string) ($turno['real'] ?? ''));
+
+            if ($fecha === '' && $diaLabel === '' && $turnoA === '' && $turnoB === '' && $real === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'fecha' => $fecha,
+                'dia_label' => $diaLabel,
+                'turno_a' => $turnoA,
+                'turno_b' => $turnoB,
+                'real' => $real,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    private function normalizePlanTransportes(array $transportes): array
+    {
+        $normalized = [];
+        foreach ($transportes as $transporte) {
+            if (!is_array($transporte)) {
+                continue;
+            }
+
+            $row = [
+                'actividad_key' => trim((string) ($transporte['actividad_key'] ?? '')),
+                'alcance' => trim((string) ($transporte['alcance'] ?? '')),
+                'unidad_carga' => trim((string) ($transporte['unidad_carga'] ?? '')),
+                'unidades_transporte' => trim((string) ($transporte['unidades_transporte'] ?? '')),
+                'indicaciones' => trim((string) ($transporte['indicaciones'] ?? '')),
+            ];
+
+            if ($row['alcance'] === '' && $row['unidad_carga'] === '' && $row['unidades_transporte'] === '' && $row['indicaciones'] === '') {
+                continue;
+            }
+
+            $normalized[] = $row;
+        }
+
+        return $normalized;
+    }
+
+    private function buildDetalleFromPlanOperativo(array $planOperativo): array
+    {
+        return collect($planOperativo)
+            ->map(function (array $group): ?array {
+                $count = count($group['actividades'] ?? []);
+                if ($count <= 0) {
+                    return null;
+                }
+
+                $label = trim(implode(' / ', array_filter([
+                    $group['area_operativa'] ?? '',
+                    $group['modulo'] ?? '',
+                    $group['nombre'] ?? '',
+                ])));
+
+                return [
+                    'puesto' => $label !== '' ? 'Plan operativo - ' . $label : 'Plan operativo',
+                    'cantidad' => $count,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function compactPersonal(mixed $personal): ?array
+    {
+        if (!$personal) {
+            return null;
+        }
+
+        return [
+            'id' => (string) ($personal->id ?? ''),
+            'nombre' => (string) ($personal->nombre_completo ?? ''),
+            'dni' => (string) ($personal->dni ?? ''),
+            'puesto' => (string) ($personal->puesto ?? ''),
+            'es_supervisor' => (bool) ($personal->es_supervisor ?? false),
+        ];
     }
 
     private function hasValidEstado(string $estado): bool

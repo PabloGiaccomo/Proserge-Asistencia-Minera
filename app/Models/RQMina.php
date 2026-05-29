@@ -21,6 +21,7 @@ class RQMina extends Model
         'destino_tipo',
         'destino_id',
         'destino_nombre',
+        'supervisor_id',
         'area',
         'fecha_inicio',
         'fecha_fin',
@@ -46,6 +47,11 @@ class RQMina extends Model
         return $this->belongsTo(Usuario::class, 'created_by_usuario_id');
     }
 
+    public function supervisor(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'supervisor_id');
+    }
+
     public function detalle(): HasMany
     {
         return $this->hasMany(RQMinaDetalle::class, 'rq_mina_id');
@@ -54,6 +60,11 @@ class RQMina extends Model
     public function transportes(): HasMany
     {
         return $this->hasMany(RQMinaTransporte::class, 'rq_mina_id');
+    }
+
+    public function actividadGrupos(): HasMany
+    {
+        return $this->hasMany(RQMinaActividadGrupo::class, 'rq_mina_id')->orderBy('orden');
     }
 
     public function rqProserge(): HasMany

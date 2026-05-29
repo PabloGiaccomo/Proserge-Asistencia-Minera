@@ -6,6 +6,8 @@
 @php
     $detalle = $item['detalle'] ?? [];
     $transporte = $item['transporte'] ?? [];
+    $supervisor = $item['supervisor'] ?? null;
+    $planOperativo = $item['plan_operativo'] ?? [];
     $personalParada = $item['personal_parada'] ?? [];
     $totalSolicitado = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $detalle));
     $totalAtendido = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_atendida'] ?? 0), $detalle));
@@ -51,6 +53,17 @@
 .rqm-transport-summary-wide { grid-column:1/-1; }
 .rqm-transport-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .rqm-transport-chip { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; background:#ecfeff; color:#0e7490; font-size:12px; font-weight:700; }
+.rqm-plan-group { border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; margin-bottom:14px; }
+.rqm-plan-group-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+.rqm-plan-group-head strong { color:#0f172a; }
+.rqm-plan-group-head span { color:#64748b; font-size:12px; }
+.rqm-plan-table { width:100%; border-collapse:collapse; min-width:980px; }
+.rqm-plan-table th, .rqm-plan-table td { border-bottom:1px solid #eef2f7; padding:8px; font-size:12px; vertical-align:top; text-align:left; }
+.rqm-plan-table th { background:#fff; color:#475569; font-size:11px; text-transform:uppercase; }
+.rqm-plan-turnos { display:flex; flex-direction:column; gap:3px; min-width:150px; }
+.rqm-plan-turnos span { border-radius:6px; background:#f8fafc; padding:3px 5px; color:#475569; }
+.rqm-plan-transport { margin:12px; padding:10px; border:1px solid #e2e8f0; border-radius:10px; background:#fcfdff; }
+.rqm-plan-transport h4 { margin:0 0 8px; font-size:13px; color:#0f172a; }
 </style>
 
 <div class="page-header">
@@ -67,6 +80,9 @@
                     <polyline points="12 19 5 12 12 5"></polyline>
                 </svg>
                 Volver
+            </a>
+            <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
+                Plan operativo
             </a>
             <a href="{{ route('rq-mina.edit', $item['id']) }}" class="btn btn-primary">
                 Editar
@@ -137,6 +153,10 @@
                     <span class="rqm-meta-value">{{ $item['creador'] ?? '-' }}</span>
                 </div>
                 <div class="rqm-meta-item">
+                    <span class="rqm-meta-label">Supervisor a cargo</span>
+                    <span class="rqm-meta-value">{{ $supervisor['nombre'] ?? '-' }}</span>
+                </div>
+                <div class="rqm-meta-item">
                     <span class="rqm-meta-label">Fecha Inicio</span>
                     <span class="rqm-meta-value">{{ $item['fecha_inicio'] ?? '-' }}</span>
                 </div>
@@ -174,6 +194,109 @@
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Plan Operativo Semanal</h3>
+    </div>
+    <div class="card-body">
+        @if(!empty($planOperativo))
+            @foreach($planOperativo as $grupo)
+                <div class="rqm-plan-group">
+                    <div class="rqm-plan-group-head">
+                        <div>
+                            <strong>{{ $grupo['nombre'] ?? 'Grupo' }}</strong>
+                            <span>
+                                {{ $grupo['area_operativa'] ?? '-' }}
+                                @if(!empty($grupo['modulo'])) / {{ $grupo['modulo'] }} @endif
+                            </span>
+                        </div>
+                        <span>{{ count($grupo['actividades'] ?? []) }} actividad(es)</span>
+                    </div>
+                    @if(!empty($grupo['actividades']))
+                        <div class="table-responsive">
+                            <table class="rqm-plan-table">
+                                <thead>
+                                    <tr>
+                                        <th>SAIT</th>
+                                        <th>Sector / Area</th>
+                                        <th>AIT trabajo</th>
+                                        <th>Trabajos relevantes</th>
+                                        <th>Supervisores</th>
+                                        <th>Semana / turnos</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($grupo['actividades'] as $actividad)
+                                        <tr>
+                                            <td>{{ $actividad['sait'] ?? '-' }}</td>
+                                            <td>{{ trim(($actividad['sector'] ?? '').' / '.($actividad['area'] ?? ''), ' /') ?: '-' }}</td>
+                                            <td>{{ $actividad['ait_trabajo'] ?? '-' }}</td>
+                                            <td>{{ $actividad['detalle_trabajos_relevantes'] ?? '-' }}</td>
+                                            <td>
+                                                <div class="rqm-plan-turnos">
+                                                    <span>Campo dia: {{ $actividad['supervisor_campo_dia'] ?? '-' }}</span>
+                                                    <span>Campo noche: {{ $actividad['supervisor_campo_noche'] ?? '-' }}</span>
+                                                    <span>Seg. dia: {{ $actividad['supervisor_seguridad_dia'] ?? '-' }}</span>
+                                                    <span>Seg. noche: {{ $actividad['supervisor_seguridad_noche'] ?? '-' }}</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="rqm-plan-turnos">
+                                                    @forelse(($actividad['turnos'] ?? []) as $turno)
+                                                        @php
+                                                            $parts = array_filter([
+                                                                !empty($turno['turno_a']) ? 'A: '.$turno['turno_a'] : null,
+                                                                !empty($turno['turno_b']) ? 'B: '.$turno['turno_b'] : null,
+                                                                !empty($turno['real']) ? 'Real: '.$turno['real'] : null,
+                                                            ]);
+                                                        @endphp
+                                                        <span>{{ $turno['dia_label'] ?: ($turno['fecha'] ?? '-') }} {{ $parts ? '- '.implode(' | ', $parts) : '' }}</span>
+                                                    @empty
+                                                        <span>Sin turnos</span>
+                                                    @endforelse
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
+                    @if(!empty($grupo['transportes']))
+                        <div class="rqm-plan-transport">
+                            <h4>Unidades de carga y transporte</h4>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Alcance</th>
+                                            <th>Unidad de carga</th>
+                                            <th>Unidades de transporte</th>
+                                            <th>Indicaciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach($grupo['transportes'] as $row)
+                                            <tr>
+                                                <td>{{ $row['alcance'] ?? '-' }}</td>
+                                                <td>{{ $row['unidad_carga'] ?? '-' }}</td>
+                                                <td>{{ $row['unidades_transporte'] ?? '-' }}</td>
+                                                <td>{{ $row['indicaciones'] ?? '-' }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    @endif
+                </div>
+            @endforeach
+        @else
+            <p class="text-muted">No hay plan operativo semanal registrado para este RQ Mina.</p>
+        @endif
     </div>
 </div>
 

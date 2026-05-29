@@ -244,7 +244,7 @@ class PersonalResource extends JsonResource
         $trabajadorNoIntermitenteActivo = $contrato !== 'INTER';
 
         $estadoVisible = match (true) {
-            $contratoVencido || $ceseVigente || ($contrato === 'INDET' && $estadoPersonal === 'CESADO') => 'CESADO',
+            $estadoPersonal === 'CESADO' || $contratoVencido || $ceseVigente => 'CESADO',
             $terminarFicha => 'INACTIVO',
             $bienestarInactivo || ($primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion') => 'INACTIVO',
             $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
