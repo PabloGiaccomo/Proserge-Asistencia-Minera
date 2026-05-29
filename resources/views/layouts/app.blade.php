@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" href="{{ asset('img/LogoProserge.png') }}?v=2">
     <link rel="apple-touch-icon" href="{{ asset('img/LogoProserge.png') }}?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @include('partials.vite-assets')
 </head>
 <body>
     <div class="app-layout with-sidebar">
