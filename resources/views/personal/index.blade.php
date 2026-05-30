@@ -12,7 +12,6 @@
         request('contrato'),
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
-    $canDeletePersonal = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'eliminar');
     $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
 @endphp
 <style>
@@ -1087,6 +1086,86 @@
     white-space: normal;
 }
 
+.personal-cease-modal {
+    width: min(440px, calc(100vw - 32px));
+    border-radius: 14px;
+    padding: 18px;
+}
+
+.personal-cease-modal .modal-header {
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+}
+
+.personal-cease-textarea {
+    width: 100%;
+    min-height: 108px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.personal-cease-error {
+    display: none;
+    margin-top: 8px;
+    color: #dc2626;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.personal-cease-view {
+    display: grid;
+    gap: 12px;
+}
+
+.personal-cease-view-name {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.personal-cease-view-reason {
+    margin: 0;
+    padding: 12px;
+    min-height: 88px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #0f172a;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.personal-cease-view-meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #ffffff;
+    font-size: 12px;
+}
+
+.personal-cease-view-meta span:nth-child(odd) {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.personal-cease-view-meta span:nth-child(even) {
+    color: #0f172a;
+}
+
+.dg-pill-button {
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.dg-pill-button:hover {
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.12);
+}
+
 @media (max-width: 768px) {
     .filter-panel-compact-row {
         flex-direction: column;
@@ -1699,7 +1778,7 @@
                                         'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
-                                        'revisar_ficha' => 'dg-pill-situacion-revision',
+                                        'revisar_ficha', 'ficha_observada' => 'dg-pill-situacion-revision',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
                                         'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',
@@ -1745,7 +1824,18 @@
                                     <td data-column="correo">{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '-') }}</td>
                                     <td data-column="puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
                                     <td data-column="contrato"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
-                                    <td data-column="estado"><span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span></td>
+                                    <td data-column="estado">
+                                        @if($estadoRaw === 'CESADO')
+                                            <button
+                                                type="button"
+                                                class="dg-pill dg-pill-button {{ $estadoClass }}"
+                                                onclick="event.stopPropagation(); showCeaseReasonFromRow(this.closest('tr'))">
+                                                {{ $estadoText }}
+                                            </button>
+                                        @else
+                                            <span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span>
+                                        @endif
+                                    </td>
                                     <td data-column="situacion">
                                         <span class="dg-pill {{ $situacionClass }}">{{ $situacionLabel }}</span>
                                     </td>
@@ -1929,8 +2019,21 @@
                                                     <path d="M8 15h5"/>
                                                 </svg>
                                             </a>
-                                            @if($canCeasePersonal && !empty($trabajador['puede_cesar']))
-                                                <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? '') }}" onsubmit="return confirm('Se marcara a este trabajador como cesado.');">
+                                            @if($estadoRaw === 'CESADO')
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Ver motivo de cese"
+                                                    aria-label="Ver motivo de cese"
+                                                    onclick="event.stopPropagation(); showCeaseReasonFromRow(this.closest('tr'))">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <circle cx="12" cy="12" r="10"/>
+                                                        <path d="M12 16v-4"/>
+                                                        <path d="M12 8h.01"/>
+                                                    </svg>
+                                                </button>
+                                            @elseif($canCeasePersonal && !empty($trabajador['puede_cesar']))
+                                                <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? '') }}" data-worker-name="{{ $trabajador['nombre'] ?? 'este trabajador' }}" onsubmit="return requestCeaseReason(this);">
                                                     @csrf
                                                     <button
                                                         type="submit"
@@ -1940,24 +2043,6 @@
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                             <circle cx="12" cy="12" r="9"/>
                                                             <path d="M8 8l8 8"/>
-                                                        </svg>
-                                                    </button>
-                                                </form>
-                                            @endif
-                                            @if($canDeletePersonal)
-                                                <form method="POST" action="{{ route('personal.destroy', $trabajador['id'] ?? '') }}" onsubmit="return confirm('Se eliminara por completo este trabajador.');">
-                                                    @csrf
-                                                    <button
-                                                        type="submit"
-                                                        class="btn btn-danger btn-xs personal-icon-btn"
-                                                        title="Eliminar trabajador"
-                                                        aria-label="Eliminar trabajador">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                            <path d="M3 6h18"/>
-                                                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                                                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                                                            <path d="M10 11v6"/>
-                                                            <path d="M14 11v6"/>
                                                         </svg>
                                                     </button>
                                                 </form>
@@ -2001,12 +2086,179 @@
         <div class="modal-backdrop" onclick="closeWorkerDetailModal()"></div>
         <div class="modal-content"></div>
     </div>
+
+    <div id="ceaseReasonModal" class="modal" style="display:none;" onclick="if (event.target === this) closeCeaseReasonModal()">
+        <div class="modal-backdrop" onclick="closeCeaseReasonModal()"></div>
+        <div class="modal-content personal-cease-modal">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Cesar trabajador</h2>
+                    <p class="modal-subtitle" id="ceaseReasonSubtitle">Indica el motivo de cese.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeCeaseReasonModal()" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <label class="ficha-label" for="ceaseReasonTextarea">Motivo de cese <span class="ficha-required">*</span></label>
+                <textarea id="ceaseReasonTextarea" class="ficha-input personal-cease-textarea" maxlength="2000" placeholder="Escribe el motivo de cese"></textarea>
+                <div id="ceaseReasonError" class="personal-cease-error">El motivo de cese es obligatorio.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeCeaseReasonModal()">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="submitCeaseReason()">Cesar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ceaseReasonViewModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('ceaseReasonViewModal')">
+        <div class="modal-backdrop" onclick="closeModal('ceaseReasonViewModal')"></div>
+        <div class="modal-content personal-cease-modal">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Motivo de cese</h2>
+                    <p class="modal-subtitle" id="ceaseReasonViewSubtitle">Detalle registrado.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('ceaseReasonViewModal')" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <div class="personal-cease-view">
+                    <p class="personal-cease-view-name" id="ceaseReasonViewName"></p>
+                    <div class="personal-cease-view-meta">
+                        <span>Cesado por</span>
+                        <span id="ceaseReasonViewUser">-</span>
+                    </div>
+                    <p class="personal-cease-view-reason" id="ceaseReasonViewText">Motivo no registrado</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="closeModal('ceaseReasonViewModal')">Cerrar</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 @endsection
 
 @push('scripts')
 <script>
+let pendingCeaseForm = null;
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, function (char) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[char];
+    });
+}
+
+function requestCeaseReason(form) {
+    const existingInput = form.querySelector('input[name="motivo_cese"]');
+    if (existingInput && existingInput.value.trim() !== '') {
+        return true;
+    }
+
+    pendingCeaseForm = form;
+    const row = form.closest('tr');
+    let worker = {};
+    try {
+        worker = row ? JSON.parse(row.dataset.worker || '{}') : {};
+    } catch (error) {
+        worker = {};
+    }
+
+    const subtitle = document.getElementById('ceaseReasonSubtitle');
+    const textarea = document.getElementById('ceaseReasonTextarea');
+    const error = document.getElementById('ceaseReasonError');
+    const workerName = worker.nombre || worker.nombre_completo || form.dataset.workerName || 'este trabajador';
+
+    if (subtitle) {
+        subtitle.textContent = 'Indica el motivo por el que se cesara a ' + workerName + '.';
+    }
+    if (textarea) {
+        textarea.value = '';
+    }
+    if (error) {
+        error.style.display = 'none';
+    }
+
+    openModal('ceaseReasonModal');
+    window.setTimeout(function () {
+        textarea?.focus();
+    }, 50);
+
+    return false;
+}
+
+function closeCeaseReasonModal() {
+    pendingCeaseForm = null;
+    closeModal('ceaseReasonModal');
+}
+
+function submitCeaseReason() {
+    const textarea = document.getElementById('ceaseReasonTextarea');
+    const error = document.getElementById('ceaseReasonError');
+    const trimmedReason = String(textarea?.value || '').trim();
+
+    if (trimmedReason === '') {
+        if (error) {
+            error.style.display = 'block';
+        }
+        textarea?.focus();
+        return;
+    }
+
+    if (!pendingCeaseForm) {
+        closeCeaseReasonModal();
+        return;
+    }
+
+    const existingInput = pendingCeaseForm.querySelector('input[name="motivo_cese"]');
+    const input = existingInput || document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'motivo_cese';
+    input.value = trimmedReason;
+    if (!existingInput) {
+        pendingCeaseForm.appendChild(input);
+    }
+
+    const form = pendingCeaseForm;
+    pendingCeaseForm = null;
+    closeModal('ceaseReasonModal');
+    form.requestSubmit();
+}
+
+function showCeaseReason(worker) {
+    const reason = String(worker?.motivo_cese || '').trim() || 'Motivo no registrado';
+    const name = String(worker?.nombre || worker?.nombre_completo || 'Trabajador').trim();
+    const nameNode = document.getElementById('ceaseReasonViewName');
+    const textNode = document.getElementById('ceaseReasonViewText');
+    const subtitleNode = document.getElementById('ceaseReasonViewSubtitle');
+    const userNode = document.getElementById('ceaseReasonViewUser');
+    const userName = String(worker?.cesado_por_nombre || worker?.cesado_por?.nombre || '').trim()
+        || (worker?.cese_automatico ? 'Sistema - termino de contrato' : 'No registrado');
+
+    if (nameNode) {
+        nameNode.textContent = name;
+    }
+    if (textNode) {
+        textNode.textContent = reason;
+    }
+    if (subtitleNode) {
+        subtitleNode.textContent = worker?.cese_automatico ? 'Cese automatico por contrato.' : 'Detalle registrado.';
+    }
+    if (userNode) {
+        userNode.textContent = userName;
+    }
+
+    openModal('ceaseReasonViewModal');
+}
+
+function showCeaseReasonFromRow(row) {
+    if (!row) return;
+    try {
+        showCeaseReason(JSON.parse(row.dataset.worker || '{}'));
+    } catch (error) {
+        showCeaseReason({motivo_cese: 'Motivo de cese no disponible.'});
+    }
+}
+
 function showWorkerDetail(card) {
     document.querySelectorAll('.js-person-row.is-selected').forEach(function (node) {
         node.classList.remove('is-selected');
@@ -2015,7 +2267,6 @@ function showWorkerDetail(card) {
 
     const worker = JSON.parse(card.dataset.worker || '{}');
     const modal = document.getElementById('workerDetailModal');
-    const canDeletePersonal = @json($canDeletePersonal);
     const canCeasePersonal = @json($canCeasePersonal);
     const csrfToken = @json(csrf_token());
     if (!modal || !worker.nombre) return;
@@ -2161,13 +2412,16 @@ function showWorkerDetail(card) {
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
                 <a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>
                 <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
-                ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" onsubmit="return confirm('Se marcara a este trabajador como cesado.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
-                ${canDeletePersonal ? `<form method="POST" action="/personal/${worker.id}/eliminar" onsubmit="return confirm('Se eliminara por completo este trabajador.');"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-danger">Eliminar</button></form>` : ''}
+                ${worker.estado_actual === 'cesado' ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
+                ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" data-worker-name="${escapeHtml(worker.nombre || worker.nombre_completo || 'este trabajador')}" onsubmit="return requestCeaseReason(this);"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
             </div>
         </div>
     `;
 
     modal.querySelector('.modal-content').innerHTML = detailContent;
+    modal.querySelector('[data-cease-reason-btn]')?.addEventListener('click', function () {
+        showCeaseReason(worker);
+    });
 
     openModal('workerDetailModal');
 }

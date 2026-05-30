@@ -18,7 +18,7 @@ class PersonalFichaCatalog
         'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente completar ficha',
         'FICHA_ENVIADA' => 'Ficha enviada',
         'APROBADO' => 'Aprobado',
-        'OBSERVADO' => 'Observado',
+        'OBSERVADO' => 'Ficha observada',
         'RECHAZADO' => 'Rechazado',
         'LINK_VENCIDO' => 'Link vencido',
     ];

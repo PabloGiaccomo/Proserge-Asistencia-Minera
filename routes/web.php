@@ -65,6 +65,7 @@ Route::post('/login', [LoginPageController::class, 'login'])->name('login.post')
 Route::post('/logout', [LoginPageController::class, 'logout'])->name('logout');
 
 Route::get('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'show'])->name('ficha-colaborador.show');
+Route::post('/ficha-colaborador/{token}/archivo-borrador', [PublicPersonalFichaController::class, 'storeDraftArchivo'])->name('ficha-colaborador.archivo-borrador');
 Route::post('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'submit'])->name('ficha-colaborador.submit');
 
 Route::middleware('web.auth')->group(function (): void {
@@ -94,6 +95,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/fichas/generar-link', [PersonalFichaController::class, 'generateLink'])->middleware('web.permission:personal,crear')->name('personal.fichas.generate-link');
     Route::post('/personal/fichas/cancelar-importacion', [PersonalFichaController::class, 'cancelImport'])->middleware('web.permission:personal,importar')->name('personal.fichas.cancel-import');
     Route::get('/personal/fichas/temporales', [PersonalFichaController::class, 'temporales'])->middleware('web.permission:personal,ver')->name('personal.fichas.temporales');
+    Route::get('/personal/fichas/activar-link/buscar', [PersonalFichaController::class, 'searchActivateLinkWorkers'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link.search');
+    Route::post('/personal/fichas/activar-link', [PersonalFichaController::class, 'activateLinkForWorker'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link');
     Route::post('/personal/fichas/correo-envio', [PersonalFichaController::class, 'updateEmailTemplate'])->middleware('web.permission:personal,editar')->name('personal.fichas.email-template.update');
     Route::post('/personal/fichas/enviar-correos-masivo', [PersonalFichaController::class, 'sendBulkTemporalEmails'])->middleware('web.permission:personal,editar')->name('personal.fichas.send-bulk-email');
     Route::post('/personal/fichas/ampliar-links-activos', [PersonalFichaController::class, 'extendBulkActiveLinks'])->middleware('web.permission:personal,editar')->name('personal.fichas.extend-bulk-active');
@@ -105,6 +108,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/fichas/archivos/{id}/descargar', [PersonalFichaController::class, 'downloadArchivo'])->middleware('web.permission:personal,ver')->name('personal.fichas.archivos.download');
     Route::post('/personal/fichas/{id}/aprobar', [PersonalFichaController::class, 'approve'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.approve');
     Route::post('/personal/fichas/{id}/observar', [PersonalFichaController::class, 'observe'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.observe');
+    Route::post('/personal/fichas/{id}/reenviar-observacion', [PersonalFichaController::class, 'resendObservationEmail'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.resend-observation');
     Route::get('/personal/fichas/{id}/pdf', [PersonalFichaController::class, 'pdf'])->middleware('web.permission:personal,exportar')->name('personal.fichas.pdf');
     Route::post('/personal/fichas/exportar/excel', [PersonalFichaController::class, 'exportExcel'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.excel');
     Route::post('/personal/fichas/exportar/pdf/iniciar', [PersonalFichaController::class, 'startPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.start');

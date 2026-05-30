@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -27,6 +28,10 @@ class Personal extends Model
         'es_supervisor',
         'qr_code',
         'fecha_ingreso',
+        'fecha_cese',
+        'motivo_cese',
+        'cesado_at',
+        'cesado_by_usuario_id',
         'estado',
         'telefono',
         'telefono_1',
@@ -37,6 +42,8 @@ class Personal extends Model
     protected $casts = [
         'es_supervisor' => 'boolean',
         'fecha_ingreso' => 'date',
+        'fecha_cese' => 'date',
+        'cesado_at' => 'datetime',
     ];
 
     public function setNombreCompletoAttribute(mixed $value): void
@@ -59,6 +66,11 @@ class Personal extends Model
     public function usuario(): HasOne
     {
         return $this->hasOne(Usuario::class, 'personal_id');
+    }
+
+    public function cesadoPor(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'cesado_by_usuario_id');
     }
 
     public function bloqueos(): HasMany

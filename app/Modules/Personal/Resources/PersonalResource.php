@@ -46,13 +46,14 @@ class PersonalResource extends JsonResource
 
         $estadoPersonal = strtoupper((string) $this->estado);
         $ficha = $this->whenLoaded('fichaColaborador', fn () => $this->fichaColaborador, null);
+        $cesadoPor = $this->whenLoaded('cesadoPor', fn () => $this->cesadoPor, null);
         $estadoFicha = $ficha?->estado;
         $contrato = PersonalNormalizer::contract($this->contrato);
         $fichaData = is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : [];
         $fichaData['tipo_documento'] = $fichaData['tipo_documento'] ?? $ficha?->tipo_documento ?? $this->tipo_documento ?? 'DNI';
         $fichaData['numero_documento'] = $fichaData['numero_documento'] ?? $ficha?->numero_documento ?? $this->numero_documento ?? $this->dni;
         $fechaFinContrato = PersonalNormalizer::isoDate($fichaData['fecha_fin_contrato'] ?? null);
-        $fechaCese = PersonalNormalizer::isoDate($fichaData['fecha_cese'] ?? null);
+        $fechaCese = PersonalNormalizer::isoDate($fichaData['fecha_cese'] ?? $this->fecha_cese ?? null);
         $missingRequiredFichaFields = collect(PersonalFichaCatalog::requiredKeys())
             ->filter(function (string $key) use ($fichaData): bool {
                 $value = $fichaData[$key] ?? null;
@@ -235,8 +236,10 @@ class PersonalResource extends JsonResource
 
         $contratoVencido = $fechaFinContrato !== null && $fechaFinContrato !== '' && $fechaFinContrato < $todayString;
         $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
+        $motivoCese = trim((string) ($this->motivo_cese ?? ''));
         $revisarFicha = $estadoPersonal === 'FICHA_ENVIADA';
-        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO', 'OBSERVADO'], true)
+        $fichaObservada = $estadoPersonal === 'OBSERVADO';
+        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
             || $ficha === null
             || count($missingRequiredFichaFields) > 0;
         $bienestarInactivo = $primaryBloqueo && in_array((string) $primaryBloqueo->tipo, ['vacaciones', 'descanso_medico'], true);
@@ -255,6 +258,7 @@ class PersonalResource extends JsonResource
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
             $revisarFicha => 'revisar_ficha',
+            $fichaObservada => 'ficha_observada',
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'descanso_medico' => 'descanso_medico',
@@ -270,6 +274,7 @@ class PersonalResource extends JsonResource
 
         $situacionLabel = match ($situacionKey) {
             'revisar_ficha' => 'Revisar ficha',
+            'ficha_observada' => 'Ficha observada',
             'terminar_ficha' => 'Terminar ficha',
             'vacaciones' => 'Vacaciones',
             'descanso_medico' => 'Descanso medico',
@@ -281,6 +286,14 @@ class PersonalResource extends JsonResource
             'no_habilitado' => 'No habilitado',
             default => 'Habilitado',
         };
+        $motivoCeseVisible = match (true) {
+            $estadoVisible !== 'CESADO' => '',
+            $motivoCese !== '' => $motivoCese,
+            $contratoVencido => 'Termino de contrato',
+            $ceseVigente => 'Cese programado',
+            default => 'Motivo no registrado',
+        };
+        $cesadoPorNombre = trim((string) ($cesadoPor?->personal?->nombre_completo ?: $cesadoPor?->email ?: ''));
 
         return [
             'id' => $this->id,
@@ -298,6 +311,14 @@ class PersonalResource extends JsonResource
             'fecha_ingreso' => optional($this->fecha_ingreso)->toDateString(),
             'fecha_fin_contrato' => $fechaFinContrato,
             'fecha_cese' => $fechaCese,
+            'motivo_cese' => $motivoCeseVisible,
+            'cese_automatico' => $estadoVisible === 'CESADO' && $motivoCese === '' && $contratoVencido,
+            'cesado_por' => $cesadoPor ? [
+                'id' => (string) $cesadoPor->id,
+                'nombre' => $cesadoPorNombre,
+                'email' => (string) ($cesadoPor->email ?? ''),
+            ] : null,
+            'cesado_por_nombre' => $cesadoPorNombre,
             'telefono' => PersonalNormalizer::combinePhones($telefono1, $telefono2),
             'telefono_1' => $telefono1,
             'telefono_2' => $telefono2,
@@ -315,7 +336,7 @@ class PersonalResource extends JsonResource
             'situacion_label' => $situacionLabel,
             'missing_required_ficha_fields' => $missingRequiredFichaFields,
             'bloqueado_bienestar' => $primaryBloqueo !== null,
-            'puede_cesar' => $contrato === 'INDET' && !$ceseVigente && $estadoVisible !== 'CESADO',
+            'puede_cesar' => $estadoVisible !== 'CESADO',
             'bloqueo_bienestar' => $primaryBloqueo ? [
                 'tipo' => (string) $primaryBloqueo->tipo,
                 'tipo_label' => method_exists($primaryBloqueo, 'tipoLabel') ? $primaryBloqueo->tipoLabel() : ucfirst(str_replace('_', ' ', (string) $primaryBloqueo->tipo)),

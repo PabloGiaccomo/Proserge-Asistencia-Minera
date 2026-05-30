@@ -20,6 +20,9 @@
     @if(session('success'))
         <div class="ficha-alert">{{ session('success') }}</div>
     @endif
+    @if(session('error'))
+        <div class="ficha-alert ficha-alert-warning">{{ session('error') }}</div>
+    @endif
 
     <div class="ficha-card">
         <div class="ficha-card-header">
@@ -187,6 +190,19 @@
             </div>
         </div>
         <div class="ficha-card-body">
+            @if($ficha->estado === \App\Models\PersonalFicha::ESTADO_OBSERVADO)
+                <div class="ficha-alert ficha-alert-warning">
+                    <strong>Ficha observada.</strong>
+                    El trabajador debe revisar sus datos. Puedes reenviar el correo con la observacion registrada.
+                    @if($ficha->observaciones_revision)
+                        <div style="margin-top:8px;">{{ $ficha->observaciones_revision }}</div>
+                    @endif
+                </div>
+                <form method="POST" action="{{ route('personal.fichas.resend-observation', $ficha->id) }}" style="margin-bottom:16px;">
+                    @csrf
+                    <button type="submit" class="btn btn-primary">Reenviar correo</button>
+                </form>
+            @endif
             <form method="POST" action="{{ route('personal.fichas.approve', $ficha->id) }}" class="ficha-workspace">
                 @csrf
                 <div class="ficha-field">

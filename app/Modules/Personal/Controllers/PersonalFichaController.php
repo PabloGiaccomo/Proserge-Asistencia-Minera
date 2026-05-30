@@ -3,6 +3,7 @@
 namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
 use App\Models\PersonalFichaLink;
@@ -11,6 +12,7 @@ use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaEmailTemplateService;
 use App\Modules\Personal\Services\PersonalFichaService;
+use App\Modules\Personal\Services\PersonalService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
@@ -31,6 +33,7 @@ class PersonalFichaController extends WebPageController
         private readonly PersonalFichaPdfService $pdfService,
         private readonly PersonalFichaExportService $exportService,
         private readonly PersonalFichaEmailTemplateService $emailTemplateService,
+        private readonly PersonalService $personalService,
     ) {
     }
 
@@ -275,6 +278,38 @@ class PersonalFichaController extends WebPageController
             ->with('success', 'La ficha quedo observada.');
     }
 
+    public function resendObservationEmail(Request $request, string $id): JsonResponse|RedirectResponse
+    {
+        $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
+
+        try {
+            $result = $this->fichaService->sendObservedFichaEmail($ficha);
+        } catch (ValidationException $exception) {
+            $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo reenviar el correo de observacion.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['error' => $error], 422);
+            }
+
+            return redirect()
+                ->route('personal.fichas.review', $ficha->id)
+                ->with('error', $error);
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'email' => $result['email'],
+                'resent' => $result['resent'],
+                'url' => $result['url'] ?? null,
+            ]);
+        }
+
+        return redirect()
+            ->route('personal.fichas.review', $ficha->id)
+            ->with('success', 'Correo de observacion reenviado a ' . $result['email'] . '.');
+    }
+
     public function pdf(string $id): Response
     {
         $ficha = PersonalFicha::query()
@@ -360,6 +395,71 @@ class PersonalFichaController extends WebPageController
             ->with('regularization_link', $result['url'] ?? null);
     }
 
+    public function searchActivateLinkWorkers(Request $request): JsonResponse
+    {
+        $search = trim((string) $request->query('q', ''));
+
+        if (mb_strlen($search) < 2) {
+            return response()->json(['items' => []]);
+        }
+
+        $items = $this->personalService
+            ->searchSelector($search, false, 12)
+            ->filter(fn (Personal $personal): bool => strtoupper((string) $personal->estado) !== 'CESADO')
+            ->map(function (Personal $personal): array {
+                return [
+                    'id' => (string) $personal->id,
+                    'nombre' => (string) $personal->nombre_completo,
+                    'documento' => trim((string) (($personal->tipo_documento ?? 'DNI') . ' ' . ($personal->numero_documento ?? $personal->dni ?? ''))),
+                    'puesto' => (string) ($personal->puesto ?? 'Puesto pendiente'),
+                    'correo' => (string) ($personal->correo ?? ''),
+                    'estado' => (string) ($personal->estado ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return response()->json(['items' => $items]);
+    }
+
+    public function activateLinkForWorker(Request $request): JsonResponse|RedirectResponse
+    {
+        $validated = $request->validate([
+            'personal_id' => ['required', 'string', 'exists:personal,id'],
+        ]);
+
+        $personal = Personal::query()->findOrFail($validated['personal_id']);
+
+        try {
+            $result = $this->fichaService->activateTemporaryLinkForPersonal($personal, $this->requireAuthenticatedUser(), 24);
+        } catch (ValidationException $exception) {
+            $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo activar el link temporal.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['error' => $error], 422);
+            }
+
+            return redirect()
+                ->route('personal.fichas.temporales')
+                ->with('error', $error);
+        }
+
+        $ficha = $result['ficha'];
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Link temporal activado para ' . ($ficha->personal?->nombre_completo ?: 'trabajador') . '.',
+                'url' => $result['url'] ?? null,
+                ...$this->temporaryRowResponse($ficha),
+            ]);
+        }
+
+        return redirect()
+            ->route('personal.fichas.temporales')
+            ->with('success', 'Link temporal activado.');
+    }
+
     public function sendTemporalEmail(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
@@ -383,6 +483,7 @@ class PersonalFichaController extends WebPageController
                 'success' => true,
                 'email' => $result['email'],
                 'resent' => $result['resent'],
+                ...$this->temporaryRowResponse($ficha->fresh(['personal', 'link', 'archivos'])),
             ]);
         }
 

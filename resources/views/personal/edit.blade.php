@@ -329,30 +329,16 @@
                             <span data-toggle-arrow="configuracion-interna">▼</span>
                         </button>
                     </div>
-                    <p class="ficha-card-subtitle">Controla el estado, el perfil y las ubicaciones del trabajador.</p>
+                    <p class="ficha-card-subtitle">Controla el perfil y las ubicaciones del trabajador.</p>
                 </div>
             </div>
             <div class="ficha-card-body" id="configuracion-interna-panel-body">
                 <section class="ficha-section">
                     <div class="ficha-section-header">
-                        <h3 class="ficha-section-title">Estado y perfil</h3>
+                        <h3 class="ficha-section-title">Perfil interno</h3>
                     </div>
+                    <input type="hidden" name="estado" value="{{ old('estado', $trabajador['estado_interno'] ?? $trabajador['estado'] ?? 'ACTIVO') }}">
                     <div class="ficha-fields">
-                        <div class="ficha-field">
-                            <label class="ficha-label" for="estado">Estado <span class="ficha-required">*</span></label>
-                            <select class="ficha-select" id="estado" name="estado">
-                                @foreach([
-                                    'ACTIVO' => 'Activo',
-                                    'INACTIVO' => 'Inactivo',
-                                    'CESADO' => 'Cesado',
-                                ] as $value => $label)
-                                    <option value="{{ $value }}" @selected(old('estado', $trabajador['estado'] ?? 'ACTIVO') === $value)>{{ $label }}</option>
-                                @endforeach
-                            </select>
-                            @error('estado')
-                                <span class="ficha-error">{{ $message }}</span>
-                            @enderror
-                        </div>
                         @if(($initialFields['contrato'] ?? '') === 'INDET' || old('fields.contrato') === 'INDET')
                             <div class="ficha-field">
                                 <label class="ficha-label">Cese rapido</label>

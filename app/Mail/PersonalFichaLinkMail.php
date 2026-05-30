@@ -19,13 +19,16 @@ class PersonalFichaLinkMail extends Mailable
         public readonly PersonalFicha $ficha,
         public readonly string $url,
         public readonly bool $isResend = false,
+        public readonly ?string $subjectOverride = null,
+        public readonly ?string $bodyHtmlOverride = null,
     ) {
     }
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: app(PersonalFichaEmailTemplateService::class)->renderSubject($this->ficha, $this->isResend),
+            subject: $this->subjectOverride
+                ?: app(PersonalFichaEmailTemplateService::class)->renderSubject($this->ficha, $this->isResend),
         );
     }
 
@@ -34,7 +37,8 @@ class PersonalFichaLinkMail extends Mailable
         return new Content(
             view: 'emails.personal.ficha-link',
             with: [
-                'bodyHtml' => app(PersonalFichaEmailTemplateService::class)->renderBodyHtml($this->ficha, $this->url, $this->isResend),
+                'bodyHtml' => $this->bodyHtmlOverride
+                    ?: app(PersonalFichaEmailTemplateService::class)->renderBodyHtml($this->ficha, $this->url, $this->isResend),
             ],
         );
     }

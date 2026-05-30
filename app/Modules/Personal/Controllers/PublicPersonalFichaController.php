@@ -3,12 +3,15 @@
 namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\PersonalFicha;
 use App\Models\PersonalFichaLink;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Illuminate\Validation\Rule;
 
 class PublicPersonalFichaController extends Controller
 {
@@ -53,10 +56,10 @@ class PublicPersonalFichaController extends Controller
             'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
         ]);
 
-        $validated = $request->validate($this->rules(), $this->messages());
+        $ficha = $resolved['ficha']->loadMissing('archivos');
+        $validated = $request->validate($this->rules($ficha), $this->messages());
         $fields = $validated['fields'];
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
-        $ficha = $resolved['ficha'];
         $fields['tipo_documento'] = $ficha->tipo_documento;
         $fields['numero_documento'] = $ficha->numero_documento;
 
@@ -76,8 +79,55 @@ class PublicPersonalFichaController extends Controller
             ->with('success', 'Ficha enviada correctamente. RRHH revisara tu informacion. El link queda en solo lectura durante 24 horas.');
     }
 
-    private function rules(): array
+    public function storeDraftArchivo(Request $request, string $token): JsonResponse
     {
+        $resolved = $this->fichaService->resolveToken($token);
+
+        if (($resolved['mode'] ?? '') !== 'edit' || !($resolved['link'] instanceof PersonalFichaLink)) {
+            return response()->json([
+                'message' => 'Este link ya no permite guardar archivos.',
+            ], 403);
+        }
+
+        $allowedTypes = array_keys(PersonalFichaCatalog::documentRequirements());
+        $allowedTypes[] = 'huella';
+        $tipo = (string) $request->input('tipo');
+
+        $rules = [
+            'tipo' => ['required', 'string', Rule::in($allowedTypes)],
+            'archivo' => ['required', 'file', 'max:10240', 'mimes:pdf,doc,docx,jpg,jpeg,png,webp'],
+        ];
+
+        if ($tipo === 'huella') {
+            $rules['archivo'] = ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'];
+        }
+
+        $validated = $request->validate($rules, [
+            'archivo.required' => 'Selecciona un archivo para guardarlo.',
+            'archivo.image' => 'La huella debe ser una imagen nitida.',
+            'archivo.mimes' => 'El archivo debe ser PDF, Word o imagen.',
+            'archivo.max' => 'El archivo supera el tamano permitido.',
+        ]);
+
+        $archivo = $this->fichaService->storePublicDraftArchivo(
+            $resolved['link'],
+            $validated['tipo'],
+            $request->file('archivo'),
+        );
+
+        return response()->json([
+            'message' => 'Archivo guardado como borrador.',
+            'tipo' => $archivo->tipo,
+            'nombre_original' => $archivo->nombre_original,
+            'size' => $archivo->size,
+        ]);
+    }
+
+    private function rules(PersonalFicha $ficha): array
+    {
+        $ficha->loadMissing('archivos');
+        $hasHuella = filled($ficha->huella_path) || $ficha->archivos->contains('tipo', 'huella');
+
         $rules = [
             'fields' => ['required', 'array'],
             'familiares' => ['nullable', 'array'],
@@ -90,14 +140,15 @@ class PublicPersonalFichaController extends Controller
             'familiares.*.vive_con_trabajador' => ['nullable'],
             'familiares.*.contacto_emergencia' => ['nullable'],
             'firma_base64' => ['required', 'string'],
-            'huella' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
-            'documentos' => ['required', 'array'],
+            'huella' => [$hasHuella ? 'nullable' : 'required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'documentos' => ['nullable', 'array'],
             'declaraciones' => ['required', 'array'],
         ];
 
         foreach (PersonalFichaCatalog::documentRequirements() as $key => $requirement) {
+            $hasStoredDocument = $ficha->archivos->contains('tipo', $key);
             $rules['documentos.' . $key] = [
-                ($requirement['required'] ?? false) ? 'required' : 'nullable',
+                (($requirement['required'] ?? false) && !$hasStoredDocument) ? 'required' : 'nullable',
                 'file',
                 'max:10240',
                 'mimes:pdf,doc,docx,jpg,jpeg,png,webp',

@@ -214,6 +214,49 @@
             padding: 24px;
         }
 
+        .activate-link-modal {
+            width: min(640px, calc(100vw - 28px));
+            border-radius: 14px;
+            padding: 24px;
+        }
+
+        .activate-link-results {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+            max-height: 320px;
+            overflow: auto;
+        }
+
+        .activate-link-result {
+            width: 100%;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #fff;
+            color: #0f172a;
+            padding: 10px 12px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .activate-link-result:hover,
+        .activate-link-result.is-selected {
+            border-color: #19d3c5;
+            box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
+        }
+
+        .activate-link-result strong {
+            display: block;
+            font-size: 13px;
+        }
+
+        .activate-link-result span {
+            display: block;
+            margin-top: 2px;
+            color: #64748b;
+            font-size: 12px;
+        }
+
         .bulk-email-toolbar {
             display: flex;
             align-items: center;
@@ -615,6 +658,7 @@
                             <a href="{{ route('personal.fichas.import') }}" class="temporales-action-item">Importar macro</a>
                         @endallowed
                         @allowed('personal', 'editar')
+                            <button type="button" class="temporales-action-item" id="openActivateLinkModal">Activar link</button>
                             <button type="button" class="temporales-action-item" id="openEmailTemplateModal">Editar correo de envio</button>
                             <button type="button" class="temporales-action-item" id="openBulkEmailModal">Enviar comunicaciones</button>
                             <button type="button" class="temporales-action-item" id="openBulkExtendModal">Ampliar links activos</button>
@@ -649,6 +693,36 @@
         </div>
         <div class="bulk-email-progress-detail" id="bulkEmailProgressDetail">Preparando envio...</div>
     </div>
+
+    @allowed('personal', 'editar')
+        <div id="activateLinkModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('activateLinkModal')">
+            <div class="modal-backdrop" onclick="closeModal('activateLinkModal')"></div>
+            <div class="modal-content activate-link-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">Activar link temporal</h2>
+                        <p class="modal-subtitle" style="margin:6px 0 0;">Busca el trabajador que debe aparecer en Temporales y links.</p>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeModal('activateLinkModal')" aria-label="Cerrar">X</button>
+                </div>
+                <form id="activateLinkForm" action="{{ route('personal.fichas.activate-link') }}" method="POST">
+                    @csrf
+                    <input type="hidden" name="personal_id" id="activateLinkPersonalId">
+                    <label class="email-template-label">
+                        Buscar trabajador
+                        <input id="activateLinkSearch" class="ficha-input" type="search" autocomplete="off" placeholder="Nombre, DNI o puesto" data-search-url="{{ route('personal.fichas.activate-link.search') }}">
+                    </label>
+                    <div id="activateLinkResults" class="activate-link-results">
+                        <div class="bulk-email-empty">Escribe al menos 2 caracteres para buscar.</div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('activateLinkModal')">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="activateLinkSubmit" disabled>Activar link</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endallowed
 
     @allowed('personal', 'editar')
         <div id="emailTemplateModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('emailTemplateModal')">
@@ -838,7 +912,7 @@
                             <th>Acciones</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="temporalesRowsBody">
                         @forelse($rows as $index => $row)
                             @php
                                 $ficha = $row['ficha'];
@@ -1024,6 +1098,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const countBadge = document.getElementById('temporalesCount');
     const temporalesActionsButton = document.getElementById('temporalesActionsButton');
     const temporalesActionsMenu = document.getElementById('temporalesActionsMenu');
+    const temporalesRowsBody = document.getElementById('temporalesRowsBody');
+    const openActivateLinkButton = document.getElementById('openActivateLinkModal');
+    const activateLinkForm = document.getElementById('activateLinkForm');
+    const activateLinkSearch = document.getElementById('activateLinkSearch');
+    const activateLinkResults = document.getElementById('activateLinkResults');
+    const activateLinkPersonalId = document.getElementById('activateLinkPersonalId');
+    const activateLinkSubmit = document.getElementById('activateLinkSubmit');
     const openEmailTemplateButton = document.getElementById('openEmailTemplateModal');
     const openBulkEmailButton = document.getElementById('openBulkEmailModal');
     const openBulkExtendButton = document.getElementById('openBulkExtendModal');
@@ -1431,6 +1512,162 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             renderBulkExtendList();
             openModal('bulkExtendModal');
+        });
+    }
+
+    function resetActivateLinkModal() {
+        if (activateLinkSearch) {
+            activateLinkSearch.value = '';
+        }
+        if (activateLinkPersonalId) {
+            activateLinkPersonalId.value = '';
+        }
+        if (activateLinkSubmit) {
+            activateLinkSubmit.disabled = true;
+        }
+        if (activateLinkResults) {
+            activateLinkResults.innerHTML = '<div class="bulk-email-empty">Escribe al menos 2 caracteres para buscar.</div>';
+        }
+    }
+
+    function renderActivateLinkResults(items) {
+        if (!activateLinkResults) {
+            return;
+        }
+
+        if (!items || items.length === 0) {
+            activateLinkResults.innerHTML = '<div class="bulk-email-empty">No se encontraron trabajadores disponibles.</div>';
+            return;
+        }
+
+        activateLinkResults.innerHTML = items.map(function (item) {
+            return '<button type="button" class="activate-link-result" data-personal-id="' + escapeHtml(item.id || '') + '">' +
+                '<strong>' + escapeHtml(item.nombre || 'Trabajador') + '</strong>' +
+                '<span>' + escapeHtml(item.documento || '-') + ' - ' + escapeHtml(item.puesto || '-') + '</span>' +
+                '<span>' + escapeHtml(item.correo || 'Sin correo registrado') + '</span>' +
+            '</button>';
+        }).join('');
+    }
+
+    let activateLinkSearchTimer = null;
+    function searchActivateLinkWorkers() {
+        if (!activateLinkSearch || !activateLinkResults) {
+            return;
+        }
+
+        const query = activateLinkSearch.value.trim();
+        if (activateLinkPersonalId) {
+            activateLinkPersonalId.value = '';
+        }
+        if (activateLinkSubmit) {
+            activateLinkSubmit.disabled = true;
+        }
+
+        if (query.length < 2) {
+            activateLinkResults.innerHTML = '<div class="bulk-email-empty">Escribe al menos 2 caracteres para buscar.</div>';
+            return;
+        }
+
+        activateLinkResults.innerHTML = '<div class="bulk-email-empty">Buscando...</div>';
+        fetch(activateLinkSearch.dataset.searchUrl + '?q=' + encodeURIComponent(query), {
+            headers: {
+                'Accept': 'application/json',
+            },
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error('No se pudo buscar trabajadores.');
+            }
+
+            return response.json();
+        }).then(function (data) {
+            renderActivateLinkResults(data.items || []);
+        }).catch(function (error) {
+            activateLinkResults.innerHTML = '<div class="bulk-email-empty">' + escapeHtml(error.message || 'No se pudo buscar trabajadores.') + '</div>';
+        });
+    }
+
+    if (openActivateLinkButton) {
+        openActivateLinkButton.addEventListener('click', function () {
+            closeActionsMenu();
+            resetActivateLinkModal();
+            openModal('activateLinkModal');
+            window.setTimeout(function () {
+                activateLinkSearch?.focus();
+            }, 60);
+        });
+    }
+
+    if (activateLinkSearch) {
+        activateLinkSearch.addEventListener('input', function () {
+            window.clearTimeout(activateLinkSearchTimer);
+            activateLinkSearchTimer = window.setTimeout(searchActivateLinkWorkers, 220);
+        });
+    }
+
+    if (activateLinkResults) {
+        activateLinkResults.addEventListener('click', function (event) {
+            const button = event.target.closest('.activate-link-result');
+            if (!button) {
+                return;
+            }
+
+            activateLinkResults.querySelectorAll('.activate-link-result').forEach(function (node) {
+                node.classList.remove('is-selected');
+            });
+            button.classList.add('is-selected');
+            if (activateLinkPersonalId) {
+                activateLinkPersonalId.value = button.dataset.personalId || '';
+            }
+            if (activateLinkSubmit) {
+                activateLinkSubmit.disabled = !button.dataset.personalId;
+            }
+        });
+    }
+
+    if (activateLinkForm) {
+        activateLinkForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            if (!activateLinkPersonalId?.value) {
+                showToast('Selecciona un trabajador.');
+                return;
+            }
+
+            if (activateLinkSubmit) {
+                activateLinkSubmit.disabled = true;
+                activateLinkSubmit.textContent = 'Activando...';
+            }
+
+            fetch(activateLinkForm.action, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': @json(csrf_token()),
+                    'Accept': 'application/json',
+                },
+                body: new FormData(activateLinkForm),
+            }).then(function (response) {
+                if (response.ok) {
+                    return response.json();
+                }
+
+                return response.json().then(function (data) {
+                    throw new Error(data.error || 'No se pudo activar el link.');
+                });
+            }).then(function (data) {
+                if (data.row_html) {
+                    upsertRowFromHtml(data.row_html);
+                    renderGrid(true);
+                }
+                closeModal('activateLinkModal');
+                showToast(data.message || 'Link temporal activado.');
+            }).catch(function (error) {
+                alert(error.message || 'No se pudo activar el link.');
+            }).finally(function () {
+                if (activateLinkSubmit) {
+                    activateLinkSubmit.textContent = 'Activar link';
+                    activateLinkSubmit.disabled = !activateLinkPersonalId?.value;
+                }
+            });
         });
     }
 
@@ -2004,6 +2241,38 @@ document.addEventListener('DOMContentLoaded', function () {
         return nextRow;
     }
 
+    function upsertRowFromHtml(html) {
+        if (!html || !temporalesRowsBody) {
+            return null;
+        }
+
+        const template = document.createElement('tbody');
+        template.innerHTML = html.trim();
+        const nextRow = template.querySelector('.js-person-card');
+
+        if (!nextRow) {
+            return null;
+        }
+
+        const currentRow = nextRow.dataset.rowId
+            ? document.querySelector('.js-person-card[data-row-id="' + nextRow.dataset.rowId + '"]')
+            : null;
+
+        const emptyRow = temporalesRowsBody.querySelector('td[colspan="6"]')?.closest('tr');
+        if (emptyRow) {
+            emptyRow.remove();
+        }
+
+        if (currentRow) {
+            currentRow.replaceWith(nextRow);
+        } else {
+            temporalesRowsBody.prepend(nextRow);
+        }
+
+        rebindRow(nextRow);
+        return nextRow;
+    }
+
     function bindCopyButtons(scope) {
         (scope || document).querySelectorAll('.js-copy-ficha-link').forEach(function (button) {
             if (button.dataset.boundCopy === '1') return;
@@ -2049,10 +2318,14 @@ document.addEventListener('DOMContentLoaded', function () {
                     },
                 }).then(function (response) {
                     if (response.ok) {
-                        return response.json().then(function () {
+                        return response.json().then(function (data) {
                             button.dataset.idleTitle = 'Volver a enviar correo';
                             button.setAttribute('title', 'Volver a enviar correo');
                             button.setAttribute('aria-label', 'Volver a enviar correo');
+                            if (data.row_html && row) {
+                                replaceRowFromHtml(row, data.row_html);
+                                renderGrid(false);
+                            }
                             showToast((resend ? 'Correo reenviado a ' : 'Correo enviado a ') + workerName);
                         });
                     }

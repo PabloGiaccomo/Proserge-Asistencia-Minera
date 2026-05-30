@@ -8,7 +8,7 @@
         <div class="page-header-top">
             <div>
                 <h1 class="page-title">Nuevo trabajador</h1>
-                <p class="page-subtitle">Registra al trabajador con la ficha completa y su configuracion interna.</p>
+                <p class="page-subtitle">Registra los datos basicos y genera la ficha para que el trabajador complete lo faltante.</p>
             </div>
             <div class="page-actions">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
@@ -20,98 +20,68 @@
         @csrf
         @php
             $currentFieldValue = fn (string $key): string => (string) old('fields.' . $key, $initialFields[$key] ?? '');
+            $manualFields = [
+                ['key' => 'nombres', 'label' => 'Nombres', 'type' => 'text', 'required' => true],
+                ['key' => 'apellido_paterno', 'label' => 'Apellido paterno', 'type' => 'text', 'required' => true],
+                ['key' => 'apellido_materno', 'label' => 'Apellido materno', 'type' => 'text', 'required' => true],
+                ['key' => 'tipo_documento', 'label' => 'Tipo de documento', 'type' => 'select', 'required' => true, 'options' => \App\Modules\Personal\Support\PersonalFichaCatalog::DOCUMENT_TYPES],
+                ['key' => 'numero_documento', 'label' => 'Numero de documento', 'type' => 'text', 'required' => true],
+                ['key' => 'telefono', 'label' => 'Telefono celular', 'type' => 'tel', 'required' => true],
+                ['key' => 'correo', 'label' => 'Correo electronico', 'type' => 'email', 'required' => true],
+            ];
         @endphp
 
         <div class="ficha-card">
             <div class="ficha-card-header">
                 <div>
-                    <h2 class="ficha-card-title">Ficha del trabajador</h2>
-                    <p class="ficha-card-subtitle">Completa los datos obligatorios de la ficha antes de registrar al trabajador.</p>
+                    <h2 class="ficha-card-title">Datos basicos</h2>
+                    <p class="ficha-card-subtitle">Solo se piden los datos necesarios para crear el registro y enviar la ficha.</p>
                 </div>
                 <span class="ficha-status ficha-status-pending">Alta manual</span>
             </div>
             <div class="ficha-card-body">
-                @foreach($sections as $section)
-                    <section class="ficha-section">
-                        <div class="ficha-section-header">
-                            <h3 class="ficha-section-title">{{ $section['title'] }}</h3>
-                        </div>
-                        <div class="ficha-fields">
-                            @foreach($section['fields'] as $field)
-                                @php
-                                    $key = $field['key'];
-                                    $type = $field['type'];
-                                    $value = $currentFieldValue($key);
-                                    $isTextarea = $type === 'textarea';
-                                    $fieldClass = $isTextarea ? 'ficha-field ficha-field-wide' : 'ficha-field';
-                                    $paisNacimientoActual = $currentFieldValue('pais_nacimiento') ?: 'Peru';
-                                    $domicilioPaisActual = $currentFieldValue('domicilio_tipo') ?: 'Peru';
-                                    $bancoActual = $currentFieldValue('banco');
-                                    $conditionalHidden = match ($key) {
-                                        'estado_civil_otro' => $currentFieldValue('estado_civil') !== 'Otro',
-                                        'nacionalidad_otra' => $currentFieldValue('nacionalidad') !== 'Otra',
-                                        'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual !== 'Otro',
-                                        'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual === 'Otro',
-                                        'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual !== 'Extranjero',
-                                        'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual === 'Extranjero',
-                                        'numero_cuenta' => !in_array($bancoActual, ['BCP', 'Interbank'], true),
-                                        'banco_otro', 'cci' => $bancoActual !== 'Otro',
-                                        'tipo_comision', 'tipo_afp', 'cuspp' => $currentFieldValue('sistema_pensionario') !== 'Sistema Privado de Pensiones',
-                                        'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $currentFieldValue('quinta_empleador_principal') !== 'Otra empresa',
-                                        'fecha_fin_contrato' => !in_array($currentFieldValue('contrato'), ['FIJO', 'INTER', 'REG'], true),
-                                        'fecha_cese' => $currentFieldValue('contrato') !== 'INDET',
-                                        default => false,
-                                    };
-                                @endphp
+                <section class="ficha-section">
+                    <div class="ficha-section-header">
+                        <h3 class="ficha-section-title">Identificacion y contacto</h3>
+                    </div>
+                    <div class="ficha-fields">
+                        @foreach($manualFields as $field)
+                            @php
+                                $key = $field['key'];
+                                $value = $currentFieldValue($key);
+                                if ($key === 'tipo_documento' && $value === '') {
+                                    $value = 'DNI';
+                                }
+                            @endphp
+                            <div class="ficha-field" data-ficha-field="{{ $key }}">
+                                <label class="ficha-label" for="field_{{ $key }}">
+                                    {{ $field['label'] }}
+                                    @if($field['required'])
+                                        <span class="ficha-required">*</span>
+                                    @endif
+                                </label>
 
-                                @if($type === 'hidden')
-                                    <input type="hidden" id="field_{{ $key }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}">
-                                    @continue
+                                @if($field['type'] === 'select')
+                                    <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}">
+                                        <option value="">Seleccionar</option>
+                                        @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)
+                                            <option value="{{ $optionValue }}" @selected((string) $value === (string) $optionValue)>{{ $optionLabel }}</option>
+                                        @endforeach
+                                    </select>
+                                @else
+                                    <input class="ficha-input" id="field_{{ $key }}" type="{{ $field['type'] }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}">
                                 @endif
 
-                                <div class="{{ $fieldClass }}" data-ficha-field="{{ $key }}" style="{{ $conditionalHidden ? 'display:none;' : '' }}">
-                                    <label class="ficha-label" for="field_{{ $key }}">
-                                        {{ $field['label'] }}
-                                        @if($field['required'])
-                                            <span class="ficha-required">*</span>
-                                        @endif
-                                    </label>
+                                @error('fields.' . $key)
+                                    <span class="ficha-error">{{ $message }}</span>
+                                @enderror
+                            </div>
+                        @endforeach
+                    </div>
+                </section>
 
-                                    @if($type === 'select')
-                                        <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $conditionalHidden ? 'disabled' : '' }}>
-                                            <option value="">Seleccionar</option>
-                                            @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)
-                                                <option value="{{ $optionValue }}" @selected((string) $value === (string) $optionValue)>{{ $optionLabel }}</option>
-                                            @endforeach
-                                        </select>
-                                    @elseif($isTextarea)
-                                        <textarea class="ficha-textarea" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" {{ $conditionalHidden ? 'disabled' : '' }}>{{ $value }}</textarea>
-                                    @else
-                                        <input class="ficha-input" id="field_{{ $key }}" type="{{ $type }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}" {{ $conditionalHidden ? 'disabled' : '' }}>
-                                    @endif
-
-                                    @error('fields.' . $key)
-                                        <span class="ficha-error">{{ $message }}</span>
-                                    @enderror
-                                    @if($key === 'contrato')
-                                        <span class="ficha-help" style="display:block; margin-top:6px; color:#64748b; font-size:12px;">
-                                            Regimen, fijo e intermitente pueden usar fin de contrato. Indeterminado usa fecha de cese o cese manual.
-                                        </span>
-                                    @endif
-                                    @if($key === 'fecha_fin_contrato')
-                                        <span class="ficha-help" style="display:block; margin-top:6px; color:#64748b; font-size:12px;">
-                                            Cuando esta fecha vence, el trabajador pasa a cesado.
-                                        </span>
-                                    @endif
-                                    @if($key === 'fecha_cese')
-                                        <span class="ficha-help" style="display:block; margin-top:6px; color:#64748b; font-size:12px;">
-                                            Para indeterminado, desde esta fecha el trabajador aparecera como cesado.
-                                        </span>
-                                    @endif
-                                </div>
-                            @endforeach
-                        </div>
-                    </section>
+                @foreach(['contrato' => 'REG', 'pais_nacimiento' => 'Peru', 'domicilio_tipo' => 'Peru', 'banco' => 'BCP'] as $key => $value)
+                    <input type="hidden" id="field_{{ $key }}" name="fields[{{ $key }}]" value="{{ $currentFieldValue($key) ?: $value }}" data-ficha-key="{{ $key }}">
                 @endforeach
             </div>
         </div>
@@ -221,7 +191,6 @@
 @endsection
 
 @push('scripts')
-    @include('personal.fichas.partials.conditional-fields-script', ['scope' => 'rrhh'])
     <script>
     document.querySelectorAll('input[name="minas[]"]').forEach(function (checkbox) {
         const statusSelect = checkbox.closest('.mine-selection-item')?.querySelector('select');

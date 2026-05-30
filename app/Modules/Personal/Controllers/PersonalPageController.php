@@ -450,15 +450,23 @@ class PersonalPageController extends WebPageController
             ->with('success', 'Trabajador eliminado por completo.');
     }
 
-    public function cease(string $id): RedirectResponse
+    public function cease(Request $request, string $id): RedirectResponse
     {
-        abort_unless(PermissionMatrix::userCanAny($this->requireAuthenticatedUser(), 'personal', ['editar', 'actualizar', 'administrar']), 403);
+        $usuario = $this->requireAuthenticatedUser();
+        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
+        $validated = $request->validate([
+            'motivo_cese' => ['required', 'string', 'max:2000'],
+        ], [
+            'motivo_cese.required' => 'El motivo de cese es obligatorio.',
+            'motivo_cese.max' => 'El motivo de cese no debe superar 2000 caracteres.',
+        ]);
+
         try {
-            $this->service->markIndeterminateContractCeased($personal);
+            $this->service->markCeased($personal, $validated['motivo_cese'], $usuario);
         } catch (ValidationException $exception) {
             return redirect()
                 ->route('personal.index')
@@ -467,7 +475,7 @@ class PersonalPageController extends WebPageController
 
         return redirect()
             ->route('personal.index')
-            ->with('success', 'El trabajador indeterminado fue marcado como cesado.');
+            ->with('success', 'El trabajador fue marcado como cesado.');
     }
 
     private function buildPayloadFromWeb(array $validated, array $existing = []): array
@@ -520,6 +528,11 @@ class PersonalPageController extends WebPageController
 
         $rules['fields.tipo_documento'] = ['required', 'string', 'in:' . implode(',', array_map('strval', array_keys(PersonalFichaCatalog::DOCUMENT_TYPES)))];
         $rules['fields.numero_documento'] = ['required', 'string', 'max:40'];
+        $rules['fields.nombres'] = ['required', 'string', 'max:191'];
+        $rules['fields.apellido_paterno'] = ['required', 'string', 'max:191'];
+        $rules['fields.apellido_materno'] = ['required', 'string', 'max:191'];
+        $rules['fields.telefono'] = ['required', 'string', 'max:30'];
+        $rules['fields.correo'] = ['required', 'email', 'max:191'];
         $rules['familiares'] = ['nullable', 'array'];
         $rules['familiares.*.nombres_apellidos'] = ['nullable', 'string', 'max:191'];
         $rules['familiares.*.parentesco'] = ['nullable', 'string', 'max:80'];

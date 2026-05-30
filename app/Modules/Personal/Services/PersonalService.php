@@ -29,6 +29,10 @@ class PersonalService
             $query->with('fichaColaborador.link');
         }
 
+        if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
+            $query->with('cesadoPor.personal');
+        }
+
         if (Schema::hasTable('personal_bloqueo')) {
             $query->with([
                 'bloqueos' => function ($q): void {
@@ -152,6 +156,10 @@ class PersonalService
 
         if (Schema::hasTable('personal_fichas')) {
             $query->with('fichaColaborador.link');
+        }
+
+        if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
+            $query->with('cesadoPor.personal');
         }
 
         if (Schema::hasTable('personal_bloqueo')) {
@@ -380,15 +388,35 @@ class PersonalService
         return $this->resolveState($value);
     }
 
-    public function markIndeterminateContractCeased(Personal $personal): Personal
+    public function markCeased(Personal $personal, string $motivo, ?Usuario $usuario = null): Personal
     {
-        if (PersonalNormalizer::contract($personal->contrato) !== 'INDET') {
+        $motivo = trim($motivo);
+
+        if ($motivo === '') {
             throw ValidationException::withMessages([
-                'personal' => 'Solo el personal con contrato indeterminado puede cesarse manualmente desde acciones.',
+                'motivo_cese' => 'El motivo de cese es obligatorio.',
             ]);
         }
 
-        $personal->forceFill(['estado' => 'CESADO'])->save();
+        $data = ['estado' => 'CESADO'];
+
+        if (Schema::hasColumn('personal', 'motivo_cese')) {
+            $data['motivo_cese'] = $motivo;
+        }
+
+        if (Schema::hasColumn('personal', 'fecha_cese')) {
+            $data['fecha_cese'] = Carbon::today()->toDateString();
+        }
+
+        if (Schema::hasColumn('personal', 'cesado_at')) {
+            $data['cesado_at'] = now();
+        }
+
+        if (Schema::hasColumn('personal', 'cesado_by_usuario_id') && $usuario?->id && Usuario::query()->whereKey($usuario->id)->exists()) {
+            $data['cesado_by_usuario_id'] = $usuario->id;
+        }
+
+        $personal->forceFill($data)->save();
 
         return $personal->fresh(['minas', 'fichaColaborador.link']);
     }

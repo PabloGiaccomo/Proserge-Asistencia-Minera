@@ -261,6 +261,7 @@
                                         $storedDoc = ($archivos ?? collect())->firstWhere('tipo', $docKey);
                                         $docLabel = $requirement['label'] ?? $requirement;
                                         $docRequired = (bool) ($requirement['required'] ?? true);
+                                        $docInputRequired = $docRequired && !$storedDoc;
                                     @endphp
                                     <div class="ficha-field ficha-field-wide">
                                         <label class="ficha-label" for="documento_{{ $docKey }}">
@@ -276,8 +277,12 @@
                                                 {{ $storedDoc?->nombre_original ?: 'Documento registrado' }}
                                             </div>
                                         @else
-                                            <input id="documento_{{ $docKey }}" class="ficha-input js-draft-file-input" type="file" name="documentos[{{ $docKey }}]" data-file-draft-key="documentos.{{ $docKey }}" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" {{ $docRequired ? 'required' : '' }}>
-                                            <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="documento_{{ $docKey }}" style="margin-top:6px; display:none;"></div>
+                                            <input id="documento_{{ $docKey }}" class="ficha-input js-draft-file-input" type="file" name="documentos[{{ $docKey }}]" data-file-draft-key="documentos.{{ $docKey }}" data-server-draft-url="{{ route('ficha-colaborador.archivo-borrador', ['token' => $token]) }}" data-server-draft-tipo="{{ $docKey }}" data-has-server-file="{{ $storedDoc ? '1' : '0' }}" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" {{ $docInputRequired ? 'required' : '' }}>
+                                            <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="documento_{{ $docKey }}" style="margin-top:6px; display:{{ $storedDoc ? 'block' : 'none' }};">
+                                                @if($storedDoc)
+                                                    Ya cargado: {{ $storedDoc->nombre_original }}. Puedes reemplazarlo seleccionando otro archivo.
+                                                @endif
+                                            </div>
                                             @error('documentos.' . $docKey) <span class="ficha-error">{{ $message }}</span> @enderror
                                         @endif
                                     </div>
@@ -338,12 +343,16 @@
                                 <div class="ficha-fields" style="padding:0;">
                                     <div class="ficha-field ficha-field-wide">
                                         <label class="ficha-label" for="huella">Foto de huella <span class="ficha-required">*</span></label>
-                                        <input id="huella" class="ficha-input js-draft-file-input" type="file" name="huella" data-file-draft-key="huella" accept="image/*" capture="environment">
-                                        <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="huella" style="margin-top:6px; display:none;"></div>
+                                        <input id="huella" class="ficha-input js-draft-file-input" type="file" name="huella" data-file-draft-key="huella" data-server-draft-url="{{ route('ficha-colaborador.archivo-borrador', ['token' => $token]) }}" data-server-draft-tipo="huella" data-has-server-file="{{ $huellaDataUrl ? '1' : '0' }}" accept="image/*" capture="environment" {{ $huellaDataUrl ? '' : 'required' }}>
+                                        <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="huella" style="margin-top:6px; display:{{ $huellaDataUrl ? 'block' : 'none' }};">
+                                            @if($huellaDataUrl)
+                                                Huella ya cargada. Puedes reemplazarla seleccionando otra imagen.
+                                            @endif
+                                        </div>
                                         @error('huella') <span class="ficha-error">{{ $message }}</span> @enderror
                                     </div>
                                     <div class="ficha-field">
-                                        <img id="huellaPreview" class="ficha-preview-image" style="display:none;" alt="Previsualizacion de huella">
+                                        <img id="huellaPreview" class="ficha-preview-image" src="{{ $huellaDataUrl ?: '' }}" style="display:{{ $huellaDataUrl ? 'block' : 'none' }};" alt="Previsualizacion de huella">
                                     </div>
                                 </div>
                             @endif
@@ -376,6 +385,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftFileDbName = 'proserge-ficha-drafts';
     const draftFileStoreName = 'files';
     const draftFileInputs = Array.from(document.querySelectorAll('.js-draft-file-input'));
+    const csrfToken = form?.querySelector('input[name="_token"]')?.value || '';
     let drawing = false;
     let hasSignature = Boolean(hidden && hidden.value);
 
@@ -462,8 +472,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     draftFileInputs.forEach(function (input) {
-        input.addEventListener('change', function () {
-            saveDraftFile(input);
+        input.addEventListener('change', async function () {
+            await saveDraftFile(input);
+            await uploadDraftFile(input);
         });
     });
 
@@ -523,6 +534,45 @@ document.addEventListener('DOMContentLoaded', function () {
         statusNode.style.display = 'block';
     };
 
+    const uploadDraftFile = async function (input) {
+        if (isReadonly || !input || !input.dataset.serverDraftUrl || !input.dataset.serverDraftTipo) return false;
+
+        const file = input.files && input.files[0] ? input.files[0] : null;
+        if (!file) return false;
+
+        const payload = new FormData();
+        payload.append('_token', csrfToken);
+        payload.append('tipo', input.dataset.serverDraftTipo);
+        payload.append('archivo', file);
+
+        setFileStatus(input, 'Guardando archivo en la ficha...');
+
+        try {
+            const response = await fetch(input.dataset.serverDraftUrl, {
+                method: 'POST',
+                body: payload,
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(data.message || 'No se pudo guardar el archivo.');
+            }
+
+            input.required = false;
+            input.dataset.hasServerFile = '1';
+            setFileStatus(input, 'Guardado en la ficha: ' + (data.nombre_original || file.name));
+
+            return true;
+        } catch (error) {
+            setFileStatus(input, (error && error.message ? error.message : 'No se pudo guardar el archivo.') + ' Vuelve a intentarlo o mantenlo seleccionado antes de enviar.');
+            return false;
+        }
+    };
+
     const saveDraftFile = async function (input) {
         if (isReadonly || !input || !input.dataset.fileDraftKey) return;
 
@@ -555,6 +605,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const loadDraftFile = async function (input) {
         if (isReadonly || !input || !input.dataset.fileDraftKey) return false;
+        if (input.dataset.hasServerFile === '1') return false;
 
         const db = await openDraftFileDb();
         if (!db) return false;
