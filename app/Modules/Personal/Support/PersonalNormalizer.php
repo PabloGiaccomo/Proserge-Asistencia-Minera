@@ -226,6 +226,13 @@ class PersonalNormalizer
             return null;
         }
 
+        $zeroDatePrefixes = ['0000-00-00', '0000/00/00', '00/00/0000', '00-00-0000'];
+        foreach ($zeroDatePrefixes as $prefix) {
+            if (str_starts_with($text, $prefix)) {
+                return null;
+            }
+        }
+
         $dateFormats = [
             'd/m/Y',
             'd-m-Y',
@@ -239,6 +246,10 @@ class PersonalNormalizer
             $date = DateTime::createFromFormat($format, $text);
             $errors = DateTime::getLastErrors();
             if ($date instanceof DateTime && ($errors === false || (($errors['warning_count'] ?? 0) === 0 && ($errors['error_count'] ?? 0) === 0))) {
+                if ((int) $date->format('Y') < 1900) {
+                    return null;
+                }
+
                 return $date->format('Y-m-d');
             }
         }
@@ -249,7 +260,12 @@ class PersonalNormalizer
         }
 
         try {
-            return (new DateTime($text))->format('Y-m-d');
+            $date = new DateTime($text);
+            if ((int) $date->format('Y') < 1900) {
+                return null;
+            }
+
+            return $date->format('Y-m-d');
         } catch (\Throwable) {
             return null;
         }
