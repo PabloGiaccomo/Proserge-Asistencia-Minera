@@ -121,6 +121,25 @@
                                         $paisNacimientoActual = $currentFieldValue('pais_nacimiento') ?: 'Peru';
                                         $domicilioPaisActual = $currentFieldValue('domicilio_tipo') ?: 'Peru';
                                         $bancoActual = $currentFieldValue('banco');
+                                        $contratoActual = $currentFieldValue('contrato');
+                                        $sistemaPensionarioActual = $currentFieldValue('sistema_pensionario');
+                                        $quintaEmpleadorActual = $currentFieldValue('quinta_empleador_principal');
+                                        $isConditionallyRequired = match ($key) {
+                                            'estado_civil_otro' => $currentFieldValue('estado_civil') === 'Otro',
+                                            'nacionalidad_otra' => $currentFieldValue('nacionalidad') === 'Otra',
+                                            'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual === 'Otro',
+                                            'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual !== 'Otro',
+                                            'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual === 'Extranjero',
+                                            'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual !== 'Extranjero',
+                                            'numero_cuenta' => in_array($bancoActual, ['BCP', 'Interbank'], true),
+                                            'banco_otro', 'cci' => $bancoActual === 'Otro',
+                                            'tipo_comision', 'tipo_afp', 'cuspp' => $sistemaPensionarioActual === 'Sistema Privado de Pensiones',
+                                            'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual === 'Otra empresa',
+                                            'fecha_fin_contrato' => in_array($contratoActual, ['REG', 'FIJO', 'INTER'], true),
+                                            'fecha_ingreso' => $contratoActual === 'INDET',
+                                            default => false,
+                                        };
+                                        $isRequired = (bool) ($field['required'] ?? false) || $isConditionallyRequired;
                                         $conditionalHidden = match ($key) {
                                             'estado_civil_otro' => $currentFieldValue('estado_civil') !== 'Otro',
                                             'nacionalidad_otra' => $currentFieldValue('nacionalidad') !== 'Otra',
@@ -143,7 +162,7 @@
                                     <div class="{{ $fieldClass }}" data-ficha-field="{{ $key }}" style="{{ $conditionalHidden ? 'display:none;' : '' }}">
                                         <label class="ficha-label" for="field_{{ $key }}">
                                             {{ $field['label'] }}
-                                            @if($field['required'])
+                                            @if($isRequired)
                                                 <span class="ficha-required">*</span>
                                             @endif
                                             @if($isVerify && !$locked)
@@ -156,7 +175,7 @@
                                         @endif
 
                                         @if($type === 'select')
-                                            <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $fieldDisabled ? 'disabled' : '' }} {{ (!$fieldDisabled && $field['required'] && !$locked) ? 'required' : '' }}>
+                                            <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $fieldDisabled ? 'disabled' : '' }} {{ (!$fieldDisabled && $isRequired && !$locked) ? 'required' : '' }}>
                                                 <option value="">Seleccionar</option>
                                                 @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)
                                                     <option value="{{ $optionValue }}" @selected((string) $value === (string) $optionValue)>{{ $optionLabel }}</option>
@@ -166,9 +185,9 @@
                                                 <input type="hidden" name="fields[{{ $key }}]" value="{{ $value }}">
                                             @endif
                                         @elseif($isTextarea)
-                                            <textarea class="ficha-textarea" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $field['required']) ? 'required' : '' }}>{{ $value }}</textarea>
+                                            <textarea class="ficha-textarea" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $isRequired) ? 'required' : '' }}>{{ $value }}</textarea>
                                         @else
-                                            <input class="ficha-input" id="field_{{ $key }}" type="{{ $type }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $field['required']) ? 'required' : '' }}>
+                                            <input class="ficha-input" id="field_{{ $key }}" type="{{ $type }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}" {{ $fieldReadonly ? 'readonly' : '' }} {{ (!$fieldReadonly && $conditionalHidden) ? 'disabled' : '' }} {{ (!$fieldReadonly && !$conditionalHidden && $isRequired) ? 'required' : '' }}>
                                         @endif
 
                                         @error('fields.' . $key)

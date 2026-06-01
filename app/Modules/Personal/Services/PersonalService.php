@@ -29,6 +29,10 @@ class PersonalService
             $query->with('fichaColaborador.link');
         }
 
+        if (Schema::hasTable('personal_contratos')) {
+            $query->with(['contratosLaborales.activadoPor.personal', 'contratosLaborales.cerradoPor.personal']);
+        }
+
         if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
             $query->with('cesadoPor.personal');
         }
@@ -158,6 +162,10 @@ class PersonalService
             $query->with('fichaColaborador.link');
         }
 
+        if (Schema::hasTable('personal_contratos')) {
+            $query->with(['contratosLaborales.activadoPor.personal', 'contratosLaborales.cerradoPor.personal']);
+        }
+
         if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
             $query->with('cesadoPor.personal');
         }
@@ -187,6 +195,31 @@ class PersonalService
         }
 
         return $query->find($id);
+    }
+
+    public function syncExpiredContractClosures(?Usuario $usuario = null): void
+    {
+        if (!Schema::hasTable('personal_contratos') || !Schema::hasTable('personal_fichas')) {
+            return;
+        }
+
+        $today = Carbon::today()->toDateString();
+
+        Personal::query()
+            ->where('estado', '!=', 'CESADO')
+            ->with('fichaColaborador')
+            ->chunk(100, function (Collection $workers) use ($today, $usuario): void {
+                foreach ($workers as $worker) {
+                    $data = is_array($worker->fichaColaborador?->datos_json ?? null)
+                        ? $worker->fichaColaborador->datos_json
+                        : [];
+                    $fechaFin = PersonalNormalizer::isoDate($data['fecha_fin_contrato'] ?? null);
+
+                    if ($fechaFin && $fechaFin < $today) {
+                        $this->markCeased($worker, 'Termino de contrato', $usuario, $fechaFin);
+                    }
+                }
+            });
     }
 
     public function searchSelector(string $search, bool $supervisorsOnly = false, int $limit = 12): Collection
@@ -388,9 +421,10 @@ class PersonalService
         return $this->resolveState($value);
     }
 
-    public function markCeased(Personal $personal, string $motivo, ?Usuario $usuario = null): Personal
+    public function markCeased(Personal $personal, string $motivo, ?Usuario $usuario = null, ?string $fechaCese = null): Personal
     {
         $motivo = trim($motivo);
+        $fechaCese = PersonalNormalizer::isoDate($fechaCese) ?: Carbon::today()->toDateString();
 
         if ($motivo === '') {
             throw ValidationException::withMessages([
@@ -405,7 +439,7 @@ class PersonalService
         }
 
         if (Schema::hasColumn('personal', 'fecha_cese')) {
-            $data['fecha_cese'] = Carbon::today()->toDateString();
+            $data['fecha_cese'] = $fechaCese;
         }
 
         if (Schema::hasColumn('personal', 'cesado_at')) {
@@ -416,9 +450,24 @@ class PersonalService
             $data['cesado_by_usuario_id'] = $usuario->id;
         }
 
-        $personal->forceFill($data)->save();
+        DB::transaction(function () use ($personal, $data, $motivo, $usuario, $fechaCese): void {
+            $personal->forceFill($data)->save();
 
-        return $personal->fresh(['minas', 'fichaColaborador.link']);
+            app(PersonalContratoService::class)->closeCurrentContract(
+                $personal->fresh(['fichaColaborador', 'minas', 'cesadoPor.personal']) ?: $personal,
+                $motivo,
+                $usuario,
+                $fechaCese
+            );
+        });
+
+        $relations = ['minas', 'fichaColaborador.link'];
+        if (Schema::hasTable('personal_contratos')) {
+            $relations[] = 'contratosLaborales.activadoPor.personal';
+            $relations[] = 'contratosLaborales.cerradoPor.personal';
+        }
+
+        return $personal->fresh($relations);
     }
 
     public function deleteCompletely(Personal $personal): void

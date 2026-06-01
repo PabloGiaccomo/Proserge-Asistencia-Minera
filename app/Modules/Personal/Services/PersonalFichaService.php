@@ -16,6 +16,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -478,6 +479,19 @@ class PersonalFichaService
             'tipo_documento' => $ficha->tipo_documento,
             'numero_documento' => $ficha->numero_documento,
         ]);
+
+        $missingRequired = $this->missingRequiredFieldKeysFromData($data);
+        if (!empty($missingRequired)) {
+            Log::warning('Ficha publica con campos obligatorios faltantes.', [
+                'ficha_id' => $ficha->id,
+                'personal_id' => $ficha->personal_id,
+                'missing_required' => $missingRequired,
+            ]);
+
+            throw ValidationException::withMessages([
+                'ficha' => 'Faltan completar campos obligatorios antes de enviar la ficha. Revisa y vuelve a intentar.',
+            ]);
+        }
 
         $huellaPath = $ficha->huella_path;
         if ($huella instanceof UploadedFile) {
@@ -1487,6 +1501,68 @@ class PersonalFichaService
             return PersonalFichaCatalog::requiredKeys();
         }
 
+        $requiredKeys = collect(PersonalFichaCatalog::requiredKeys());
+
+        if (($data['estado_civil'] ?? null) === 'Otro') {
+            $requiredKeys->push('estado_civil_otro');
+        }
+
+        if (($data['nacionalidad'] ?? null) === 'Otra') {
+            $requiredKeys->push('nacionalidad_otra');
+        }
+
+        if (($data['pais_nacimiento'] ?? null) === 'Otro') {
+            $requiredKeys = $requiredKeys->merge(['pais_nacimiento_otro', 'lugar_nacimiento_extranjero']);
+        } else {
+            $requiredKeys = $requiredKeys->merge(['departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento']);
+        }
+
+        if (($data['domicilio_tipo'] ?? 'Peru') === 'Extranjero') {
+            $requiredKeys = $requiredKeys->merge(['domicilio_pais_otro', 'domicilio_extranjero']);
+        } else {
+            $requiredKeys = $requiredKeys->merge(['domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion']);
+        }
+
+        $banco = (string) ($data['banco'] ?? '');
+        if (in_array($banco, ['BCP', 'Interbank'], true)) {
+            $requiredKeys->push('numero_cuenta');
+        } elseif ($banco === 'Otro') {
+            $requiredKeys = $requiredKeys->merge(['banco_otro', 'cci']);
+        }
+
+        if (($data['sistema_pensionario'] ?? null) === 'Sistema Privado de Pensiones') {
+            $requiredKeys = $requiredKeys->merge(['tipo_comision', 'tipo_afp', 'cuspp']);
+        }
+
+        if (($data['quinta_empleador_principal'] ?? null) === 'Otra empresa') {
+            $requiredKeys = $requiredKeys->merge(['quinta_otra_empresa', 'quinta_otra_empresa_ruc']);
+        }
+
+        if (in_array((string) ($data['contrato'] ?? ''), ['REG', 'FIJO', 'INTER'], true)) {
+            $requiredKeys->push('fecha_fin_contrato');
+        }
+
+        if ((string) ($data['contrato'] ?? '') === 'INDET') {
+            $requiredKeys->push('fecha_ingreso');
+        }
+
+        return $requiredKeys
+            ->unique()
+            ->filter(function (string $key) use ($data): bool {
+                $value = $data[$key] ?? null;
+
+                if (is_array($value)) {
+                    return count(array_filter($value, static fn ($item) => filled($item))) === 0;
+                }
+
+                return !filled($value);
+            })
+            ->values()
+            ->all();
+    }
+
+    private function missingRequiredFieldKeysFromData(array $data): array
+    {
         $requiredKeys = collect(PersonalFichaCatalog::requiredKeys());
 
         if (($data['estado_civil'] ?? null) === 'Otro') {

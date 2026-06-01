@@ -29,9 +29,19 @@
                 <p class="page-subtitle">Actualiza la ficha completa del trabajador y su configuracion interna.</p>
             </div>
             <div class="page-actions" style="gap:8px;">
+                <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
             </div>
         </div>
+        @if(!empty($trabajador['ultimo_contrato_cerrado']))
+            <div class="page-header-top" style="margin-top:10px;">
+                <div class="ficha-alert" style="width:100%; margin:0;">
+                    Este trabajador ya fue cesado antes en el contrato {{ $trabajador['ultimo_contrato_cerrado']['numero'] ?? '-' }}.
+                    Motivo: {{ $trabajador['ultimo_contrato_cerrado']['motivo_cese'] ?? 'Motivo no registrado' }}.
+                    <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}">Ver contratos</a>
+                </div>
+            </div>
+        @endif
         @if(!empty($ficha) && (($regularizationSummary['can_regularize'] ?? false) || count($missingRequiredDocuments ?? []) > 0))
             <div class="page-header-top" style="margin-top:10px;">
                 <div class="ficha-alert ficha-alert-warning" style="width:100%; margin:0;">

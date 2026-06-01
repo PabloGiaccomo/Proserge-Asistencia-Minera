@@ -12,6 +12,7 @@ use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -176,7 +177,7 @@ class UsuarioPageController extends Controller
             'entity_id' => $usuario->id,
             'title' => 'Nuevo usuario creado',
             'message' => sprintf('Se creo el usuario %s con rol asignado.', $usuario->email),
-            'target_user_ids' => $this->securityAudience(),
+            'target_user_ids' => $this->securityAudience('usuarios', ['crear', 'administrar']),
             'dedupe_key' => 'usuario_creado:' . $usuario->id,
             'priority' => 'high',
             'category' => 'seguridad',
@@ -329,7 +330,7 @@ class UsuarioPageController extends Controller
                 'entity_id' => $usuario->id,
                 'title' => 'Usuario desactivado',
                 'message' => sprintf('El usuario %s fue desactivado.', $usuario->email),
-                'target_user_ids' => $this->securityAudience(),
+                'target_user_ids' => $this->securityAudience('usuarios', ['administrar']),
                 'dedupe_key' => 'usuario_desactivado:' . $usuario->id . ':' . now()->format('YmdHi'),
                 'priority' => 'high',
                 'category' => 'seguridad',
@@ -499,14 +500,20 @@ class UsuarioPageController extends Controller
         return Schema::hasTable('usuarios') && Schema::hasColumn('usuarios', 'estado');
     }
 
-    private function securityAudience(): array
+    private function securityAudience(string $module, array $actions): array
     {
-        $query = Usuario::query()->whereHas('rol', fn ($roleQuery) => $roleQuery->whereIn('nombre', ['ADMIN', 'GERENTE']));
+        $query = Usuario::query()
+            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos']);
 
         if ($this->hasEstadoColumn()) {
             $query->where('estado', 'ACTIVO');
         }
 
-        return $query->pluck('id')->all();
+        return $query->get()
+            ->filter(fn (Usuario $usuario) => PermissionMatrix::userCanAny($usuario, $module, $actions))
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->values()
+            ->all();
     }
 }

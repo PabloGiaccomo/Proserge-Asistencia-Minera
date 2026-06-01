@@ -10,6 +10,7 @@ use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
 use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaService;
+use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalExportConfig;
@@ -29,6 +30,7 @@ class PersonalPageController extends WebPageController
         private readonly ExportPersonalService $exportService,
         private readonly PersonalFichaExportService $fichaExportService,
         private readonly PersonalFichaService $fichaService,
+        private readonly PersonalContratoService $contratoService,
     ) {
     }
 
@@ -108,6 +110,7 @@ class PersonalPageController extends WebPageController
     public function index(Request $request)
     {
         $this->fichaService->expireStaleLinks();
+        $this->service->syncExpiredContractClosures($this->requireAuthenticatedUser());
 
         if (strtolower((string) $request->query('export')) === 'excel') {
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
@@ -476,6 +479,47 @@ class PersonalPageController extends WebPageController
         return redirect()
             ->route('personal.index')
             ->with('success', 'El trabajador fue marcado como cesado.');
+    }
+
+    public function activate(Request $request, string $id): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        $estadoVisible = strtoupper((string) (PersonalResource::make($personal)->resolve()['estado'] ?? $personal->estado));
+        if ($estadoVisible !== 'CESADO') {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', 'Solo se puede activar a un trabajador cesado.');
+        }
+
+        $validated = $request->validate([
+            'fecha_inicio' => ['required', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+        ], [
+            'fecha_inicio.required' => 'La fecha de inicio es obligatoria.',
+            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+        ]);
+
+        try {
+            $this->contratoService->activateNextContract(
+                $personal,
+                $validated['fecha_inicio'],
+                $validated['fecha_fin'] ?? null,
+                $usuario,
+            );
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo activar el trabajador.');
+        }
+
+        return redirect()
+            ->route('personal.edit', $id)
+            ->with('success', 'Trabajador activado con un nuevo contrato.');
     }
 
     private function buildPayloadFromWeb(array $validated, array $existing = []): array

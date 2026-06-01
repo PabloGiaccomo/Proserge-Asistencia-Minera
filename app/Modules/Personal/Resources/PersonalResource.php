@@ -47,6 +47,17 @@ class PersonalResource extends JsonResource
         $estadoPersonal = strtoupper((string) $this->estado);
         $ficha = $this->whenLoaded('fichaColaborador', fn () => $this->fichaColaborador, null);
         $cesadoPor = $this->whenLoaded('cesadoPor', fn () => $this->cesadoPor, null);
+        $contratosLaborales = collect($this->whenLoaded('contratosLaborales', fn () => $this->contratosLaborales, collect()))->values();
+        $contratosCerrados = $contratosLaborales
+            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'CERRADO')
+            ->values();
+        $contratoActual = $contratosLaborales
+            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'ACTIVO')
+            ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
+            ->first();
+        $ultimoContratoCerrado = $contratosCerrados
+            ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
+            ->first();
         $estadoFicha = $ficha?->estado;
         $contrato = PersonalNormalizer::contract($this->contrato);
         $fichaData = is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : [];
@@ -289,11 +300,35 @@ class PersonalResource extends JsonResource
         $motivoCeseVisible = match (true) {
             $estadoVisible !== 'CESADO' => '',
             $motivoCese !== '' => $motivoCese,
+            $ultimoContratoCerrado && trim((string) ($ultimoContratoCerrado->motivo_cese ?? '')) !== '' => trim((string) $ultimoContratoCerrado->motivo_cese),
             $contratoVencido => 'Termino de contrato',
             $ceseVigente => 'Cese programado',
             default => 'Motivo no registrado',
         };
         $cesadoPorNombre = trim((string) ($cesadoPor?->personal?->nombre_completo ?: $cesadoPor?->email ?: ''));
+        $ultimoCerradoPor = $ultimoContratoCerrado?->cerradoPor;
+        $ultimoCerradoPorNombre = trim((string) ($ultimoCerradoPor?->personal?->nombre_completo ?: $ultimoCerradoPor?->email ?: ''));
+        $formatContract = function ($contract) use ($formatDate): ?array {
+            if (!$contract) {
+                return null;
+            }
+
+            return [
+                'id' => (string) $contract->id,
+                'numero' => (int) $contract->contrato_numero,
+                'estado' => (string) $contract->estado,
+                'fecha_inicio' => optional($contract->fecha_inicio)->toDateString(),
+                'fecha_fin' => optional($contract->fecha_fin)->toDateString(),
+                'fecha_inicio_label' => $formatDate(optional($contract->fecha_inicio)->toDateString()),
+                'fecha_fin_label' => optional($contract->fecha_fin)->toDateString()
+                    ? $formatDate(optional($contract->fecha_fin)->toDateString())
+                    : 'Vigente',
+                'motivo_cese' => (string) ($contract->motivo_cese ?? ''),
+                'activado_at' => optional($contract->activado_at)->toIso8601String(),
+                'cerrado_at' => optional($contract->cerrado_at)->toIso8601String(),
+                'cerrado_por_nombre' => trim((string) ($contract->cerradoPor?->personal?->nombre_completo ?: $contract->cerradoPor?->email ?: '')),
+            ];
+        };
 
         return [
             'id' => $this->id,
@@ -319,6 +354,15 @@ class PersonalResource extends JsonResource
                 'email' => (string) ($cesadoPor->email ?? ''),
             ] : null,
             'cesado_por_nombre' => $cesadoPorNombre,
+            'puede_activar' => $estadoVisible === 'CESADO',
+            'contratos_count' => $contratosLaborales->count(),
+            'contratos_cerrados_count' => $contratosCerrados->count(),
+            'tuvo_contratos_previos' => $contratosCerrados->isNotEmpty() || $contratosLaborales->count() > 1,
+            'contrato_actual' => $formatContract($contratoActual),
+            'ultimo_contrato_cerrado' => $ultimoContratoCerrado ? array_merge($formatContract($ultimoContratoCerrado) ?? [], [
+                'motivo_cese' => trim((string) ($ultimoContratoCerrado->motivo_cese ?? '')),
+                'cerrado_por_nombre' => $ultimoCerradoPorNombre,
+            ]) : null,
             'telefono' => PersonalNormalizer::combinePhones($telefono1, $telefono2),
             'telefono_1' => $telefono1,
             'telefono_2' => $telefono2,

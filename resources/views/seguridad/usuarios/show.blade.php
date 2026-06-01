@@ -240,47 +240,52 @@
             @allowed('usuarios', 'administrar')
                 <form method="POST" action="{{ route('usuarios.notificaciones', $usuario->id) }}">
                     @csrf
-                    <div class="notification-pref-table-wrap">
-                        <table class="notification-pref-table">
-                            <thead>
-                                <tr>
-                                    <th>Tipo</th>
-                                    <th>Modulo</th>
-                                    <th>Recibir</th>
-                                    <th>Prioridad minima</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach(($notificationTypes ?? collect()) as $type)
-                                    @php
-                                        $preference = ($notificationPreferences ?? collect())->get((string) $type->id);
-                                        $enabled = $preference ? (bool) $preference->in_app_enabled : true;
-                                        $minimumPriority = $preference?->minimum_priority ?? 'low';
-                                    @endphp
-                                    <tr>
-                                        <td>
-                                            <input type="hidden" name="notification_type_ids[]" value="{{ $type->id }}">
-                                            <strong>{{ $type->default_title }}</strong>
-                                            <span>{{ $type->code }}</span>
-                                        </td>
-                                        <td>{{ $type->module }}</td>
-                                        <td>
-                                            <label class="notification-toggle">
-                                                <input type="checkbox" name="preferences[{{ $type->id }}][in_app_enabled]" value="1" {{ $enabled ? 'checked' : '' }}>
-                                                <span>Activo</span>
-                                            </label>
-                                        </td>
-                                        <td>
-                                            <select name="preferences[{{ $type->id }}][minimum_priority]" class="form-control">
-                                                @foreach(['low' => 'Baja', 'medium' => 'Media', 'high' => 'Alta', 'critical' => 'Critica'] as $priority => $label)
-                                                    <option value="{{ $priority }}" {{ $minimumPriority === $priority ? 'selected' : '' }}>{{ $label }}</option>
-                                                @endforeach
-                                            </select>
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
+                    <div class="notification-screen-grid">
+                        @foreach(($notificationTypes ?? collect())->groupBy('module') as $module => $types)
+                            <section class="notification-screen-card">
+                                <div class="notification-screen-head">
+                                    <div>
+                                        <h3 class="notification-screen-title">{{ \App\Support\Rbac\PermissionCatalog::moduleLabel((string) $module) }}</h3>
+                                        <div class="notification-screen-key">{{ $module }}</div>
+                                    </div>
+                                    <span class="notification-screen-count">{{ $types->count() }} tipo{{ $types->count() === 1 ? '' : 's' }}</span>
+                                </div>
+                                <div class="notification-type-list">
+                                    @foreach($types as $type)
+                                        @php
+                                            $preference = ($notificationPreferences ?? collect())->get((string) $type->id);
+                                            $enabled = $preference ? (bool) $preference->in_app_enabled : true;
+                                            $minimumPriority = $preference?->minimum_priority ?? 'low';
+                                        @endphp
+                                        <div class="notification-type-item">
+                                            <div class="notification-type-main">
+                                                <div>
+                                                    <input type="hidden" name="notification_type_ids[]" value="{{ $type->id }}">
+                                                    <strong class="notification-type-title">{{ $type->default_title }}</strong>
+                                                    <span class="notification-type-code">{{ $type->code }}</span>
+                                                </div>
+                                                <label class="notification-toggle">
+                                                    <input type="checkbox" name="preferences[{{ $type->id }}][in_app_enabled]" value="1" {{ $enabled ? 'checked' : '' }}>
+                                                    <span>Activo</span>
+                                                </label>
+                                            </div>
+                                            <div class="notification-type-meta">
+                                                <span class="notification-type-pill">{{ $type->category }}</span>
+                                                <span class="notification-type-pill {{ $type->is_active ? 'is-active' : 'is-inactive' }}">{{ $type->is_active ? 'Activo' : 'Inactivo' }}</span>
+                                            </div>
+                                            <div class="form-group" style="margin:0;">
+                                                <label class="form-label">Prioridad minima</label>
+                                                <select name="preferences[{{ $type->id }}][minimum_priority]" class="form-control">
+                                                    @foreach(['low' => 'Baja', 'medium' => 'Media', 'high' => 'Alta', 'critical' => 'Critica'] as $priority => $label)
+                                                        <option value="{{ $priority }}" {{ $minimumPriority === $priority ? 'selected' : '' }}>{{ $label }}</option>
+                                                    @endforeach
+                                                </select>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </section>
+                        @endforeach
                     </div>
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">Guardar preferencias</button>
@@ -337,13 +342,22 @@
 .role-chip-selected-cargo { border-color: #8b5cf6; background: #ede9fe; color: #5b21b6; }
 .role-chip-remove { font-size: 13px; line-height: 1; opacity: .85; }
 .role-chip-empty { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
-.notification-pref-table-wrap { overflow-x: auto; }
-.notification-pref-table { width: 100%; min-width: 760px; border-collapse: collapse; }
-.notification-pref-table th, .notification-pref-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: middle; }
-.notification-pref-table th { color: #64748b; font-size: 12px; text-transform: uppercase; background: #f8fafc; }
-.notification-pref-table td strong { display: block; color: #0f172a; font-size: 13px; }
-.notification-pref-table td span { color: #64748b; font-size: 12px; }
 .notification-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #334155; }
+.notification-screen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.notification-screen-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
+.notification-screen-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.notification-screen-title { margin: 0; color: #0f172a; font-size: 14px; font-weight: 700; }
+.notification-screen-key { margin-top: 2px; color: #64748b; font-size: 11px; }
+.notification-screen-count { flex: 0 0 auto; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; padding: 4px 8px; }
+.notification-type-list { display: grid; gap: 10px; }
+.notification-type-item { display: grid; gap: 8px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; }
+.notification-type-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.notification-type-title { display: block; color: #0f172a; font-size: 13px; font-weight: 700; }
+.notification-type-code { display: block; margin-top: 2px; color: #64748b; font-size: 11px; }
+.notification-type-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.notification-type-pill { border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; padding: 3px 8px; }
+.notification-type-pill.is-active { background: #dcfce7; color: #166534; }
+.notification-type-pill.is-inactive { background: #fee2e2; color: #991b1b; }
 @media (max-width: 768px) {
     .role-accesses { padding: 12px; }
     .role-pick-row { grid-template-columns: 1fr; }

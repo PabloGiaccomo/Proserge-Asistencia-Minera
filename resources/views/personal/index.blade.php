@@ -259,6 +259,25 @@
     cursor: pointer;
     padding: 0;
     vertical-align: middle;
+    position: relative;
+}
+
+.dg-filter-icon.is-active {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.dg-filter-icon.is-active::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: #ef4444;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25);
 }
 
 .dg-filter-icon svg {
@@ -2032,6 +2051,18 @@
                                                         <path d="M12 8h.01"/>
                                                     </svg>
                                                 </button>
+                                                @if($canCeasePersonal && !empty($trabajador['puede_activar']))
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-outline btn-xs personal-icon-btn"
+                                                        title="Activar trabajador"
+                                                        aria-label="Activar trabajador"
+                                                        onclick="event.stopPropagation(); openActivateWorkerFromRow(this.closest('tr'))">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <path d="M20 6L9 17l-5-5"/>
+                                                        </svg>
+                                                    </button>
+                                                @endif
                                             @elseif($canCeasePersonal && !empty($trabajador['puede_cesar']))
                                                 <form method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? '') }}" data-worker-name="{{ $trabajador['nombre'] ?? 'este trabajador' }}" onsubmit="return requestCeaseReason(this);">
                                                     @csrf
@@ -2134,6 +2165,40 @@
             </div>
         </div>
     </div>
+
+    <div id="activateWorkerModal" class="modal" style="display:none;" onclick="if (event.target === this) closeActivateWorkerModal()">
+        <div class="modal-backdrop" onclick="closeActivateWorkerModal()"></div>
+        <form id="activateWorkerForm" method="POST" action="" class="modal-content personal-cease-modal">
+            @csrf
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Activar trabajador</h2>
+                    <p class="modal-subtitle" id="activateWorkerSubtitle">Se creara un nuevo contrato para el trabajador.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeActivateWorkerModal()" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <div class="personal-cease-view" style="margin-bottom:12px;">
+                    <p class="personal-cease-view-name" id="activateWorkerName"></p>
+                    <p class="personal-cease-view-reason" id="activateWorkerReason">Los datos actuales se usaran como base para el siguiente contrato y podran editarse despues.</p>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px;">
+                    <div>
+                        <label class="ficha-label" for="activateFechaInicio">Fecha de inicio <span class="ficha-required">*</span></label>
+                        <input id="activateFechaInicio" class="ficha-input" type="date" name="fecha_inicio" value="{{ now()->toDateString() }}" required>
+                    </div>
+                    <div>
+                        <label class="ficha-label" for="activateFechaFin">Fecha de fin</label>
+                        <input id="activateFechaFin" class="ficha-input" type="date" name="fecha_fin">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeActivateWorkerModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary" style="white-space:nowrap; min-width:160px;">Activar trabajador</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 @endsection
@@ -2141,6 +2206,7 @@
 @push('scripts')
 <script>
 let pendingCeaseForm = null;
+const todayForActivation = @json(now()->toDateString());
 
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, function (char) {
@@ -2259,6 +2325,60 @@ function showCeaseReasonFromRow(row) {
     }
 }
 
+function openActivateWorker(worker) {
+    if (!worker || !worker.id) {
+        return;
+    }
+
+    const form = document.getElementById('activateWorkerForm');
+    const nameNode = document.getElementById('activateWorkerName');
+    const subtitleNode = document.getElementById('activateWorkerSubtitle');
+    const reasonNode = document.getElementById('activateWorkerReason');
+    const inicioInput = document.getElementById('activateFechaInicio');
+    const finInput = document.getElementById('activateFechaFin');
+    const workerName = String(worker.nombre || worker.nombre_completo || 'Trabajador').trim();
+    const lastClosed = worker.ultimo_contrato_cerrado || null;
+
+    if (form) {
+        form.action = '/personal/' + encodeURIComponent(worker.id) + '/activar';
+    }
+    if (nameNode) {
+        nameNode.textContent = workerName;
+    }
+    if (subtitleNode) {
+        subtitleNode.textContent = 'Se creara el siguiente contrato laboral para ' + workerName + '.';
+    }
+    if (reasonNode) {
+        const reason = String(lastClosed?.motivo_cese || worker.motivo_cese || '').trim();
+        const previous = lastClosed?.numero ? 'Contrato anterior: ' + lastClosed.numero + '. ' : '';
+        reasonNode.textContent = previous + (reason ? 'Ultimo cese: ' + reason : 'Los datos actuales se usaran como base para el siguiente contrato.');
+    }
+    if (inicioInput) {
+        inicioInput.value = todayForActivation;
+    }
+    if (finInput) {
+        finInput.value = '';
+    }
+
+    openModal('activateWorkerModal');
+    window.setTimeout(function () {
+        inicioInput?.focus();
+    }, 50);
+}
+
+function openActivateWorkerFromRow(row) {
+    if (!row) return;
+    try {
+        openActivateWorker(JSON.parse(row.dataset.worker || '{}'));
+    } catch (error) {
+        openActivateWorker({});
+    }
+}
+
+function closeActivateWorkerModal() {
+    closeModal('activateWorkerModal');
+}
+
 function showWorkerDetail(card) {
     document.querySelectorAll('.js-person-row.is-selected').forEach(function (node) {
         node.classList.remove('is-selected');
@@ -2308,6 +2428,26 @@ function showWorkerDetail(card) {
     const parStr = resumenBienestar.parada || 'Sin parada vigente en este momento.';
     const telefono = telefonoRaw;
     const documento = [worker.tipo_documento || 'DNI', worker.numero_documento || worker.dni || '-'].join(' ').trim();
+    const lastClosedContract = worker.ultimo_contrato_cerrado || null;
+    const contractHistoryHtml = lastClosedContract ? `
+                <div class="detail-section">
+                    <h3 class="detail-section-title">Historial laboral</h3>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">Ultimo contrato cerrado</span>
+                            <span class="detail-value">Contrato ${escapeHtml(lastClosedContract.numero || '-')} - ${escapeHtml(lastClosedContract.fecha_inicio_label || '-')} al ${escapeHtml(lastClosedContract.fecha_fin_label || '-')}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Motivo anterior</span>
+                            <span class="detail-value">${escapeHtml(lastClosedContract.motivo_cese || 'Motivo no registrado')}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Cesado por</span>
+                            <span class="detail-value">${escapeHtml(lastClosedContract.cerrado_por_nombre || worker.cesado_por_nombre || 'No registrado')}</span>
+                        </div>
+                    </div>
+                </div>
+    ` : '';
 
     let minasHtml = '';
     let centrosHtml = '';
@@ -2406,13 +2546,16 @@ function showWorkerDetail(card) {
                         </div>
                     </div>
                 </div>
+                ${contractHistoryHtml}
             </div>
             <div class="detail-footer">
                 ${worker.ficha_id ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
                 <a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>
+                <a href="/personal/${worker.id}/contratos" class="btn btn-outline">Contratos</a>
                 <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
                 ${worker.estado_actual === 'cesado' ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
+                ${worker.estado_actual === 'cesado' && canCeasePersonal ? `<button type="button" class="btn btn-primary" data-activate-worker-btn>Activar trabajador</button>` : ''}
                 ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" data-worker-name="${escapeHtml(worker.nombre || worker.nombre_completo || 'este trabajador')}" onsubmit="return requestCeaseReason(this);"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
             </div>
         </div>
@@ -2421,6 +2564,9 @@ function showWorkerDetail(card) {
     modal.querySelector('.modal-content').innerHTML = detailContent;
     modal.querySelector('[data-cease-reason-btn]')?.addEventListener('click', function () {
         showCeaseReason(worker);
+    });
+    modal.querySelector('[data-activate-worker-btn]')?.addEventListener('click', function () {
+        openActivateWorker(worker);
     });
 
     openModal('workerDetailModal');
@@ -2479,6 +2625,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
+    const filterTriggerByTarget = filterTriggers.reduce(function (map, trigger) {
+        if (trigger.dataset.target) {
+            map[trigger.dataset.target] = trigger;
+        }
+        return map;
+    }, {});
 
     const setBootProgress = function (value, message) {
         if (bootProgressBar) {
@@ -2572,6 +2724,41 @@ document.addEventListener('DOMContentLoaded', function () {
             .map(function (input) { return input.value; });
     };
 
+    const syncFilterIndicators = function () {
+        const allMinesSelected = ocupMineCheckboxes.every(function (input) {
+            return input.checked;
+        });
+        const noOfficeSelected = ocupOfficeCheckboxes.every(function (input) {
+            return !input.checked;
+        });
+        const noWorkshopSelected = ocupWorkshopCheckboxes.every(function (input) {
+            return !input.checked;
+        });
+        const occupationFilterActive =
+            !allMinesSelected ||
+            !noOfficeSelected ||
+            !noWorkshopSelected ||
+            ocupShowHabilitadoToggle?.checked === false ||
+            ocupShowProcesoToggle?.checked === false;
+
+        const states = {
+            dgFilterNombre: !!(sortNombre?.value || ''),
+            dgFilterDni: !!(sortDni?.value || ''),
+            dgFilterPuesto: !!(puestoFilter?.value || ''),
+            dgFilterContrato: !!(contratoFilter?.value || ''),
+            dgFilterEstado: !!(estadoFilter?.value || ''),
+            dgFilterBienestar: !!(bienestarFilter?.value || ''),
+            dgFilterOcupacion: occupationFilterActive,
+        };
+
+        Object.keys(states).forEach(function (targetId) {
+            const trigger = filterTriggerByTarget[targetId];
+            if (!trigger) return;
+            trigger.classList.toggle('is-active', !!states[targetId]);
+            trigger.setAttribute('aria-pressed', states[targetId] ? 'true' : 'false');
+        });
+    };
+
     const applyOccupationVisibility = function () {
         const visibleMinas = new Set(collectSelectedOcupMinas());
         const visibleOffices = new Set(collectSelectedOcupOffices());
@@ -2615,6 +2802,8 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             row.classList.toggle('is-ocup-row-hidden', visibleChildren.length === 0);
         });
+
+        syncFilterIndicators();
     };
 
     const applyGroupedOccupation = function (grouped) {
@@ -3074,6 +3263,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (countBadge) {
             countBadge.textContent = total + ' trabajadores';
         }
+        syncFilterIndicators();
         renderPagination(totalPages);
         syncTopScrollbar();
 

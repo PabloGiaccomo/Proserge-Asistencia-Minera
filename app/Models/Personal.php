@@ -92,4 +92,17 @@ class Personal extends Model
     {
         return $this->hasOne(PersonalFicha::class, 'personal_id')->latestOfMany();
     }
+
+    public function contratosLaborales(): HasMany
+    {
+        return $this->hasMany(PersonalContrato::class, 'personal_id')
+            ->orderBy('contrato_numero');
+    }
+
+    public function contratoLaboralActual(): HasOne
+    {
+        return $this->hasOne(PersonalContrato::class, 'personal_id')
+            ->where('estado', 'ACTIVO')
+            ->latestOfMany('contrato_numero');
+    }
 }

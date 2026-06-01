@@ -65,7 +65,7 @@
             <div class="info-card-body">
                 <div class="user-role-display">
                     <div class="role-badge">{{ session('user.rol') ?? 'Usuario' }}</div>
-                    <p class="role-desc">Los dashboards de Inicio y los modulos del sidebar cambian segun la matriz de permisos.</p>
+                    <p class="role-desc">Los dashboards de Inicio y los modulos del sidebar cambian segun los permisos por pantalla.</p>
                 </div>
             </div>
         </div>

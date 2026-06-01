@@ -7,6 +7,7 @@ use App\Models\Rol;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -96,7 +97,7 @@ class RolPageController extends Controller
             'entity_id' => $rol->id,
             'title' => 'Rol actualizado',
             'message' => sprintf('El rol %s fue actualizado.', $rol->nombre),
-            'target_user_ids' => $this->securityAudience(),
+            'target_user_ids' => $this->securityAudience('roles', ['administrar']),
             'priority' => 'critical',
             'category' => 'seguridad',
             'dedupe_key' => 'rol_modificado:' . $rol->id . ':' . now()->format('YmdHi'),
@@ -109,7 +110,7 @@ class RolPageController extends Controller
                 'entity_id' => $rol->id,
                 'title' => 'Permisos de rol modificados',
                 'message' => sprintf('Se modificaron permisos del rol %s.', $rol->nombre),
-                'target_user_ids' => $this->securityAudience(),
+                'target_user_ids' => $this->securityAudience('roles', ['administrar']),
                 'priority' => 'critical',
                 'category' => 'seguridad',
                 'dedupe_key' => 'permisos_modificados:' . $rol->id . ':' . now()->format('YmdHi'),
@@ -171,11 +172,20 @@ class RolPageController extends Controller
         ];
     }
 
-    private function securityAudience(): array
+    private function securityAudience(string $module, array $actions): array
     {
-        return Usuario::query()
-            ->whereHas('rol', fn ($query) => $query->whereIn('nombre', ['ADMIN', 'GERENTE']))
+        $query = Usuario::query()
+            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos'])
+            ->when(
+                Schema::hasTable('usuarios') && Schema::hasColumn('usuarios', 'estado'),
+                fn ($query) => $query->where('estado', 'ACTIVO')
+            );
+
+        return $query->get()
+            ->filter(fn (Usuario $usuario) => PermissionMatrix::userCanAny($usuario, $module, $actions))
             ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->values()
             ->all();
     }
 }

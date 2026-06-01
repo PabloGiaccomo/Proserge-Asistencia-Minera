@@ -126,6 +126,7 @@
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">Volver</a>
+                <a href="{{ route('personal.contratos.index', $trabajador->id) }}" class="btn btn-outline btn-sm">Contratos</a>
                 <a href="{{ route('personal.edit', $trabajador->id) }}" class="btn btn-primary btn-sm">Editar trabajador</a>
             </div>
         </div>

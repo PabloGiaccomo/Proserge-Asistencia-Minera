@@ -124,7 +124,18 @@ class PermissionCatalog
     public static function actionLabel(string $action): string
     {
         return match ($action) {
-            'dashboards' => 'Dashboards',
+            'ver' => 'Ver',
+            'dashboards' => 'Dashboard',
+            'crear' => 'Crear',
+            'editar' => 'Editar',
+            'actualizar' => 'Actualizar',
+            'eliminar' => 'Eliminar',
+            'exportar' => 'Exportar',
+            'importar' => 'Importar',
+            'aprobar' => 'Aprobar',
+            'asignar' => 'Asignar',
+            'cerrar' => 'Cerrar',
+            'administrar' => 'Administrar',
             default => ucfirst($action),
         };
     }
@@ -147,7 +158,7 @@ class PermissionCatalog
             ],
             [
                 'nombre' => 'GERENTE',
-                'descripcion' => 'Rol gerencial con acceso amplio editable desde la matriz.',
+                'descripcion' => 'Rol gerencial con acceso amplio editable por pantalla.',
                 'estado' => 'ACTIVO',
                 'permisos' => $full,
             ],
@@ -207,11 +218,27 @@ class PermissionCatalog
     public static function emptyMatrix(): array
     {
         $matrix = [];
+        $availableModuleActions = self::availableModuleActions();
 
         foreach (array_keys(self::MODULES) as $module) {
             $matrix[$module] = [];
 
             foreach (self::ACTIONS as $action) {
+                $matrix[$module][$action] = false;
+            }
+
+            foreach ($availableModuleActions[$module] ?? [] as $action) {
+                $matrix[$module][$action] = false;
+            }
+        }
+
+        foreach ($availableModuleActions as $module => $actions) {
+            if (isset($matrix[$module])) {
+                continue;
+            }
+
+            $matrix[$module] = [];
+            foreach (self::sortActions($actions) as $action) {
                 $matrix[$module][$action] = false;
             }
         }
