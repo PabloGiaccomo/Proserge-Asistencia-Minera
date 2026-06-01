@@ -392,6 +392,13 @@
 
 @push('scripts')
 @if(in_array($mode, ['edit', 'readonly'], true))
+@php
+    $draftRevisionKey = implode(':', [
+        $ficha?->estado ?? '',
+        optional($ficha?->observed_at)->timestamp ?? 0,
+        optional($ficha?->submitted_at)->timestamp ?? 0,
+    ]);
+@endphp
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const isReadonly = @json($mode !== 'edit');
@@ -400,13 +407,21 @@ document.addEventListener('DOMContentLoaded', function () {
     const hidden = document.getElementById('firmaBase64');
     const clearBtn = document.getElementById('clearSignature');
     const draftNotice = document.getElementById('localDraftNotice');
-    const draftStorageKey = 'proserge:ficha-borrador:' + @json($token);
+    const draftStorageBaseKey = 'proserge:ficha-borrador:' + @json($token);
+    const draftRevisionKey = @json($draftRevisionKey);
+    const draftStorageKey = draftStorageBaseKey + ':' + draftRevisionKey;
     const draftFileDbName = 'proserge-ficha-drafts';
     const draftFileStoreName = 'files';
     const draftFileInputs = Array.from(document.querySelectorAll('.js-draft-file-input'));
     const csrfToken = form?.querySelector('input[name="_token"]')?.value || '';
     let drawing = false;
     let hasSignature = Boolean(hidden && hidden.value);
+
+    try {
+        window.localStorage.removeItem(draftStorageBaseKey);
+    } catch (error) {
+        // noop
+    }
 
     if (canvas && hidden) {
         const ctx = canvas.getContext('2d');
@@ -501,7 +516,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isReadonly) return null;
         try {
             const raw = window.localStorage.getItem(draftStorageKey);
-            return raw ? JSON.parse(raw) : null;
+            const draft = raw ? JSON.parse(raw) : null;
+            if (draft && draft.revision_key && draft.revision_key !== draftRevisionKey) {
+                window.localStorage.removeItem(draftStorageKey);
+                return null;
+            }
+
+            return draft;
         } catch (error) {
             return null;
         }
@@ -683,6 +704,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isReadonly || !form) return;
 
         const draft = {
+            revision_key: draftRevisionKey,
             fields: {},
             familiares: [],
             declaraciones: {},

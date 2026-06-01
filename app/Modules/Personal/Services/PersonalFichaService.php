@@ -474,7 +474,6 @@ class PersonalFichaService
         }
 
         $data = $this->normalizeFichaData([
-            ...($ficha->datos_json ?? []),
             ...$fields,
             'tipo_documento' => $ficha->tipo_documento,
             'numero_documento' => $ficha->numero_documento,
@@ -523,6 +522,7 @@ class PersonalFichaService
             $ficha->forceFill([
                 'estado' => $wasApproved ? PersonalFicha::ESTADO_APROBADO : PersonalFicha::ESTADO_ENVIADA,
                 'datos_json' => $data,
+                'datos_detectados_json' => $data,
                 'firma_base64' => $firmaBase64,
                 'huella_path' => $huellaPath,
                 'submitted_at' => now(),

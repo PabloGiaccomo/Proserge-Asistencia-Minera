@@ -327,6 +327,30 @@
                         @endforeach
                     </div>
                 </section>
+
+                <section class="ficha-section">
+                    <div class="ficha-section-header">
+                        <h3 class="ficha-section-title">Firma y huella</h3>
+                    </div>
+                    <div class="ficha-fields">
+                        <div class="ficha-field">
+                            <label class="ficha-label">Firma digital</label>
+                            @if($ficha?->firma_base64)
+                                <img class="ficha-preview-image" src="{{ $ficha->firma_base64 }}" alt="Firma digital">
+                            @else
+                                <div class="ficha-alert ficha-alert-warning">Sin firma registrada.</div>
+                            @endif
+                        </div>
+                        <div class="ficha-field">
+                            <label class="ficha-label">Huella digital</label>
+                            @if($huellaDataUrl)
+                                <img class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
+                            @else
+                                <div class="ficha-alert ficha-alert-warning">Sin huella registrada.</div>
+                            @endif
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
 

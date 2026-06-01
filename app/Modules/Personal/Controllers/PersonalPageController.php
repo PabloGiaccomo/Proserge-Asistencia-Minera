@@ -296,6 +296,7 @@ class PersonalPageController extends WebPageController
             'ficha' => $ficha,
             'sections' => PersonalFichaCatalog::sections(),
             'initialFields' => $this->initialFichaFieldsForEdit($trabajador, $ficha),
+            'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha?->huella_path),
             'missingRequiredDocuments' => $this->fichaService->missingRequiredDocumentKeys($ficha),
             'missingRequiredFichaFields' => $regularizationSummary['missing_fields'],
             'regularizationSummary' => $regularizationSummary,
