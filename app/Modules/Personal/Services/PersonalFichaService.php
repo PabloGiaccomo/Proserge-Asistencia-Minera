@@ -624,16 +624,22 @@ class PersonalFichaService
         ]);
     }
 
-    public function approve(PersonalFicha $ficha, Usuario $user, ?string $observaciones = null): PersonalFicha
+    public function approve(PersonalFicha $ficha, Usuario $user, ?string $observaciones = null, array $contractDates = []): PersonalFicha
     {
-        return DB::transaction(function () use ($ficha, $user, $observaciones): PersonalFicha {
+        return DB::transaction(function () use ($ficha, $user, $observaciones, $contractDates): PersonalFicha {
             $data = $this->normalizeFichaData($ficha->datos_json ?? []);
+            $data['fecha_ingreso'] = PersonalNormalizer::isoDate($contractDates['fecha_ingreso'] ?? $data['fecha_ingreso'] ?? null) ?? '';
+            $data['fecha_fin_contrato'] = PersonalNormalizer::isoDate($contractDates['fecha_fin_contrato'] ?? $data['fecha_fin_contrato'] ?? null) ?? '';
+            $data['periodo_prueba_inicio'] = PersonalNormalizer::isoDate($contractDates['periodo_prueba_inicio'] ?? $data['periodo_prueba_inicio'] ?? null) ?? '';
+            $data['periodo_prueba_fin'] = PersonalNormalizer::isoDate($contractDates['periodo_prueba_fin'] ?? $data['periodo_prueba_fin'] ?? null) ?? '';
             $personal = $ficha->personal()->firstOrFail();
 
             $this->personalService->update($personal, $this->personalPayloadFromFicha($data, 'ACTIVO'));
 
             $ficha->forceFill([
                 'estado' => PersonalFicha::ESTADO_APROBADO,
+                'datos_json' => $data,
+                'datos_detectados_json' => $data,
                 'approved_at' => now(),
                 'approved_by_usuario_id' => $user->id,
                 'observaciones_revision' => $observaciones,
