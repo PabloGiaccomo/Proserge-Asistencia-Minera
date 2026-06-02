@@ -1183,11 +1183,21 @@
 }
 
 .personal-contract-modal {
-    width: min(1080px, calc(100vw - 32px));
+    width: min(760px, calc(100vw - 32px));
+    height: auto;
     max-height: calc(100vh - 32px);
     overflow: hidden;
     border-radius: 14px;
-    padding: 18px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.18s ease, height 0.18s ease;
+}
+
+.personal-contract-modal.is-preview {
+    width: calc(100vw - 32px);
+    height: min(90vh, 900px);
+    max-width: none;
 }
 
 .personal-contract-modal .modal-body {
@@ -1195,22 +1205,93 @@
     gap: 14px;
     overflow: auto;
     padding-right: 4px;
+    flex: 1;
+    min-height: 0;
+}
+
+.contract-step {
+    display: none;
+}
+
+.contract-step.is-active {
+    display: grid;
+    gap: 14px;
+    min-height: 0;
+}
+
+#contractFormatStepWorkers.is-active {
+    grid-template-rows: auto auto minmax(0, 1fr);
+    flex: 1;
+}
+
+.contract-step-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.contract-selected-template {
+    display: grid;
+    gap: 3px;
+    min-width: min(360px, 100%);
+    padding: 10px 12px;
+    border: 1px solid #ccfbf1;
+    border-radius: 10px;
+    background: #f0fdfa;
+    color: #0f766e;
+}
+
+.contract-selected-template strong {
+    color: #0f172a;
+    font-size: 13px;
+}
+
+.contract-selected-template span {
+    color: #0f766e;
+    font-size: 12px;
 }
 
 .contract-format-template-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
 }
 
 .contract-format-template {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 94px;
     border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 10px;
+    border-radius: 12px;
+    padding: 14px 14px 14px 18px;
     background: #ffffff;
     color: #0f172a;
     text-align: left;
     cursor: pointer;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.contract-format-template::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 4px;
+    border-radius: 0 999px 999px 0;
+    background: #0d9488;
+}
+
+.contract-format-template:hover {
+    border-color: #99f6e4;
+    box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
+    transform: translateY(-1px);
 }
 
 .contract-format-template.is-selected {
@@ -1220,21 +1301,48 @@
 
 .contract-format-template strong {
     display: block;
-    font-size: 13px;
+    font-size: 14px;
 }
 
-.contract-format-template span {
+.contract-format-template > span:first-child {
+    display: block;
+    margin-top: 0;
+}
+
+.contract-format-template > span:first-child span {
     display: block;
     margin-top: 3px;
     color: #64748b;
     font-size: 12px;
 }
 
+.contract-format-template-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 74px;
+    margin-top: 0;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .contract-worker-picker {
     display: grid;
-    grid-template-columns: minmax(220px, 360px) 1fr;
+    grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
     gap: 12px;
     align-items: start;
+}
+
+.contract-preview-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
 }
 
 .contract-search-results {
@@ -1303,11 +1411,14 @@
 }
 
 .contract-preview-wrap {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
     overflow: auto;
     border: 1px solid #e2e8f0;
     border-radius: 10px;
     background: #ffffff;
-    max-height: 360px;
 }
 
 .contract-preview-table {
@@ -1322,7 +1433,7 @@
     border-bottom: 1px solid #e2e8f0;
     border-right: 1px solid #f1f5f9;
     padding: 8px 10px;
-    max-width: 260px;
+    max-width: 360px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1472,7 +1583,18 @@
     }
 
     .personal-contract-modal {
+        width: calc(100vw - 16px);
+        height: auto;
+        max-height: calc(100vh - 16px);
         padding: 14px;
+    }
+
+    .personal-contract-modal.is-preview {
+        height: calc(100vh - 16px);
+    }
+
+    .contract-preview-wrap {
+        min-height: 0;
     }
 }
 </style>
@@ -2396,36 +2518,48 @@
 @if($canDownloadContractFormats)
 <div id="contractFormatModal" class="modal" style="display:none;" onclick="if (event.target === this) closeContractFormatModal()">
     <div class="modal-backdrop" onclick="closeContractFormatModal()"></div>
-    <div class="modal-content personal-contract-modal">
+    <div id="contractFormatContent" class="modal-content personal-contract-modal">
         <div class="modal-header">
             <div>
                 <h2 class="modal-title">Descargar formato de contrato</h2>
-                <p class="modal-subtitle">Escoge el formato, selecciona trabajadores y revisa la vista previa antes de descargar.</p>
+                <p class="modal-subtitle" id="contractFormatSubtitle">Primero escoge el formato que quieres descargar.</p>
             </div>
             <button type="button" class="modal-close" onclick="closeContractFormatModal()" aria-label="Cerrar">X</button>
         </div>
         <div class="modal-body">
-            <section>
-                <label class="ficha-label">Formato</label>
+            <section id="contractFormatStepTemplates" class="contract-step is-active">
+                <div>
+                    <label class="ficha-label">Escoge un formato</label>
+                    <p class="ficha-card-subtitle" style="margin:4px 0 0;">Selecciona una plantilla para continuar.</p>
+                </div>
                 <div id="contractFormatTemplateList" class="contract-format-template-grid">
                     <div class="contract-preview-empty">Cargando formatos...</div>
                 </div>
             </section>
-            <section class="contract-worker-picker">
-                <div>
-                    <label class="ficha-label" for="contractWorkerSearch">Seleccionar personal</label>
-                    <input id="contractWorkerSearch" class="ficha-input" type="search" autocomplete="off" placeholder="Nombre, DNI o puesto">
-                    <div id="contractWorkerSearchResults" class="contract-search-results"></div>
+            <section id="contractFormatStepWorkers" class="contract-step">
+                <div class="contract-step-header">
+                    <div>
+                        <label class="ficha-label">Formato seleccionado</label>
+                        <div id="contractSelectedTemplateLabel" class="contract-selected-template">-</div>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="showContractFormatStep('templates')">Cambiar formato</button>
                 </div>
-                <div>
-                    <label class="ficha-label">Personal seleccionado</label>
-                    <div id="contractSelectedWorkers" class="contract-selected-workers"></div>
+                <div class="contract-worker-picker">
+                    <div>
+                        <label class="ficha-label" for="contractWorkerSearch">Seleccionar personal</label>
+                        <input id="contractWorkerSearch" class="ficha-input" type="search" autocomplete="off" placeholder="Nombre, DNI o puesto">
+                        <div id="contractWorkerSearchResults" class="contract-search-results"></div>
+                    </div>
+                    <div>
+                        <label class="ficha-label">Personal seleccionado</label>
+                        <div id="contractSelectedWorkers" class="contract-selected-workers"></div>
+                    </div>
                 </div>
-            </section>
-            <section>
-                <label class="ficha-label">Vista previa del Excel</label>
-                <div id="contractPreviewWrap" class="contract-preview-wrap">
-                    <div class="contract-preview-empty">Selecciona un formato y al menos un trabajador.</div>
+                <div class="contract-preview-section">
+                    <label class="ficha-label">Vista previa del Excel</label>
+                    <div id="contractPreviewWrap" class="contract-preview-wrap">
+                        <div class="contract-preview-empty">Selecciona al menos un trabajador.</div>
+                    </div>
                 </div>
             </section>
         </div>
@@ -2436,7 +2570,8 @@
         </form>
         <div class="modal-footer">
             <button type="button" class="btn btn-outline" onclick="closeContractFormatModal()">Cancelar</button>
-            <button type="submit" form="contractFormatDownloadForm" class="btn btn-primary" id="contractFormatDownloadButton" disabled>Descargar Excel</button>
+            <button type="button" class="btn btn-outline" id="contractFormatBackButton" onclick="showContractFormatStep('templates')" style="display:none;">Volver</button>
+            <button type="submit" form="contractFormatDownloadForm" class="btn btn-primary" id="contractFormatDownloadButton" style="display:none;" disabled>Descargar Excel</button>
         </div>
     </div>
 </div>
@@ -2457,6 +2592,7 @@ const contractFormatEndpoints = {
 };
 let contractFormatTemplates = [];
 let contractFormatTemplateId = '';
+let contractFormatCurrentStep = 'templates';
 let contractFormatSelectedWorkers = new Map();
 let contractFormatSearchTimer = null;
 
@@ -2480,6 +2616,7 @@ async function openContractFormatModal(worker) {
     if (!canDownloadContractFormats) return;
 
     contractFormatSelectedWorkers = new Map();
+    contractFormatTemplateId = '';
     const initialWorker = contractWorkerSummary(worker || {});
     if (initialWorker.id) {
         contractFormatSelectedWorkers.set(initialWorker.id, initialWorker);
@@ -2491,18 +2628,43 @@ async function openContractFormatModal(worker) {
     }
     renderContractWorkerResults([]);
     renderContractSelectedWorkers();
+    showContractFormatStep('templates');
+    updateContractDownloadForm();
     openModal('contractFormatModal');
     await loadContractFormatTemplates();
-    if (!contractFormatTemplateId && contractFormatTemplates.length > 0) {
-        selectContractFormatTemplate(contractFormatTemplates[0].id);
-    } else {
-        renderContractFormatTemplates();
-        refreshContractPreview();
-    }
+    renderContractFormatTemplates();
 }
 
 function closeContractFormatModal() {
     closeModal('contractFormatModal');
+}
+
+function showContractFormatStep(step) {
+    contractFormatCurrentStep = step === 'workers' ? 'workers' : 'templates';
+    const templatesStep = document.getElementById('contractFormatStepTemplates');
+    const workersStep = document.getElementById('contractFormatStepWorkers');
+    const subtitle = document.getElementById('contractFormatSubtitle');
+    const backButton = document.getElementById('contractFormatBackButton');
+    const downloadButton = document.getElementById('contractFormatDownloadButton');
+    const content = document.getElementById('contractFormatContent');
+
+    templatesStep?.classList.toggle('is-active', contractFormatCurrentStep === 'templates');
+    workersStep?.classList.toggle('is-active', contractFormatCurrentStep === 'workers');
+    content?.classList.toggle('is-preview', contractFormatCurrentStep === 'workers');
+
+    if (subtitle) {
+        subtitle.textContent = contractFormatCurrentStep === 'templates'
+            ? 'Primero escoge el formato que quieres descargar.'
+            : 'Selecciona el personal y revisa la vista previa antes de descargar.';
+    }
+    if (backButton) {
+        backButton.style.display = contractFormatCurrentStep === 'workers' ? 'inline-flex' : 'none';
+    }
+    if (downloadButton) {
+        downloadButton.style.display = contractFormatCurrentStep === 'workers' ? 'inline-flex' : 'none';
+    }
+
+    updateContractDownloadForm();
 }
 
 async function loadContractFormatTemplates() {
@@ -2542,9 +2704,11 @@ function renderContractFormatTemplates() {
         const selectedClass = template.id === contractFormatTemplateId ? ' is-selected' : '';
         return `
             <button type="button" class="contract-format-template${selectedClass}" data-contract-template-id="${escapeHtml(template.id)}">
-                <strong>${escapeHtml(template.title || template.label || 'Formato')}</strong>
-                <span>${escapeHtml(template.date || '')}</span>
-                <span>${escapeHtml((template.columns || []).length)} columnas</span>
+                <span>
+                    <strong>${escapeHtml(template.title || template.label || 'Formato')}</strong>
+                    <span>${escapeHtml(template.date || '')}</span>
+                </span>
+                <span class="contract-format-template-pill">${escapeHtml((template.columns || []).length)} col.</span>
             </button>
         `;
     }).join('');
@@ -2559,10 +2723,20 @@ function renderContractFormatTemplates() {
 function selectContractFormatTemplate(templateId) {
     contractFormatTemplateId = templateId;
     const hidden = document.getElementById('contractDownloadTemplateId');
+    const label = document.getElementById('contractSelectedTemplateLabel');
+    const template = contractFormatTemplates.find(function (item) {
+        return item.id === templateId;
+    });
     if (hidden) {
         hidden.value = templateId;
     }
+    if (label) {
+        label.innerHTML = template
+            ? '<strong>' + escapeHtml(template.title || template.label || 'Formato') + '</strong><span>' + escapeHtml((template.date || '') + ' · ' + ((template.columns || []).length) + ' columnas') + '</span>'
+            : '<strong>Formato seleccionado</strong>';
+    }
     renderContractFormatTemplates();
+    showContractFormatStep('workers');
     refreshContractPreview();
 }
 
@@ -2751,7 +2925,8 @@ function updateContractDownloadForm() {
         }).join('');
     }
     if (button) {
-        button.disabled = !contractFormatTemplateId || workerIds.length === 0;
+        button.disabled = contractFormatCurrentStep !== 'workers' || !contractFormatTemplateId || workerIds.length === 0;
+        button.style.display = contractFormatCurrentStep === 'workers' ? 'inline-flex' : 'none';
     }
 }
 
