@@ -122,6 +122,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/fichas/exportar/pdf/{jobId}/descargar', [PersonalFichaController::class, 'downloadPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.download');
     Route::get('/personal/{id}/contratos', [PersonalContratoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.contratos.index');
     Route::get('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'show'])->middleware('web.permission:personal,ver')->name('personal.contratos.show');
+    Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
     Route::get('/personal/{id}/documentos', [PersonalDocumentoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.documentos.index');
     Route::post('/personal/{id}/documentos', [PersonalDocumentoController::class, 'store'])->middleware('web.permission:personal,actualizar')->name('personal.documentos.store');
     Route::get('/personal/{id}/gestacion/{bloqueoId}/pdf', [PersonalDocumentoController::class, 'gestacionPdf'])->middleware('web.permission:personal,ver')->name('personal.documentos.gestacion.pdf');

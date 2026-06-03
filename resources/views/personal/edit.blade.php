@@ -14,6 +14,33 @@
     $stateByLocation = old('mina_estado', $trabajador['minas_estado'] ?? []);
     $familyRows = old('familiares', app(\App\Modules\Personal\Services\PersonalFichaService::class)->familyRowsForEdit($ficha));
 @endphp
+<style>
+    .personal-edit-action-bar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .personal-edit-action-bar .btn {
+        min-width: 128px;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    @media (max-width: 760px) {
+        .personal-edit-action-bar {
+            width: 100%;
+            justify-content: stretch;
+        }
+
+        .personal-edit-action-bar .btn {
+            flex: 1 1 calc(50% - 8px);
+            min-width: 0;
+        }
+    }
+</style>
 <div class="module-page ficha-workspace">
     @if(session('regularization_link'))
         <div class="ficha-alert" style="margin-bottom:12px;">
@@ -28,9 +55,11 @@
                 <h1 class="page-title" style="margin:0;">Editar trabajador</h1>
                 <p class="page-subtitle">Actualiza la ficha completa del trabajador y su configuracion interna.</p>
             </div>
-            <div class="page-actions" style="gap:8px;">
+            <div class="page-actions personal-edit-action-bar">
                 <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
+                <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
+                <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
             </div>
         </div>
         @if(!empty($trabajador['ultimo_contrato_cerrado']))
@@ -62,7 +91,7 @@
         </form>
     @endif
 
-    <form method="POST" action="{{ route('personal.update', $trabajador['id'] ?? request('id')) }}" enctype="multipart/form-data" class="ficha-workspace" style="display:flex; flex-direction:column; gap:16px;">
+    <form id="personalEditForm" method="POST" action="{{ route('personal.update', $trabajador['id'] ?? request('id')) }}" enctype="multipart/form-data" class="ficha-workspace" style="display:flex; flex-direction:column; gap:16px;">
         @csrf
         @method('PUT')
         @php
@@ -465,11 +494,6 @@
                     @endforeach
                 </section>
             </div>
-        </div>
-
-        <div class="ficha-actions-bar">
-            <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
-            <button type="submit" class="btn btn-primary">Guardar cambios</button>
         </div>
     </form>
 </div>

@@ -41,6 +41,23 @@ class PersonalContratoService
             ->find($contractId);
     }
 
+    public function deleteHistoricalContract(Personal $personal, string $contractId): bool
+    {
+        if (!Schema::hasTable('personal_contratos')) {
+            return false;
+        }
+
+        $contract = PersonalContrato::query()
+            ->where('personal_id', $personal->id)
+            ->find($contractId);
+
+        if (!$contract || strtoupper((string) $contract->estado) === 'ACTIVO') {
+            return false;
+        }
+
+        return (bool) $contract->delete();
+    }
+
     public function ensureHistoricalContractForCeased(Personal $personal, ?Usuario $user = null): ?PersonalContrato
     {
         if (!Schema::hasTable('personal_contratos')) {

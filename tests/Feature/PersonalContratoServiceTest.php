@@ -100,6 +100,50 @@ class PersonalContratoServiceTest extends TestCase
 
     }
 
+    public function test_delete_historical_contract_removes_only_closed_contracts(): void
+    {
+        $personalId = $this->createPersonal();
+        $closedId = (string) Str::uuid();
+        $activeId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            [
+                'id' => $closedId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 1,
+                'estado' => 'CERRADO',
+                'fecha_inicio' => '2026-01-01',
+                'fecha_fin' => '2026-05-31',
+                'motivo_cese' => 'Termino de contrato',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => $activeId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 2,
+                'estado' => 'ACTIVO',
+                'fecha_inicio' => '2026-06-01',
+                'fecha_fin' => null,
+                'motivo_cese' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $service = app(PersonalContratoService::class);
+        $personal = Personal::query()->findOrFail($personalId);
+
+        $this->assertTrue($service->deleteHistoricalContract($personal, $closedId));
+        $this->assertDatabaseMissing('personal_contratos', ['id' => $closedId]);
+
+        $this->assertFalse($service->deleteHistoricalContract($personal, $activeId));
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $activeId,
+            'estado' => 'ACTIVO',
+        ]);
+    }
+
     private function createRole(string $name): string
     {
         $id = (string) Str::uuid();
