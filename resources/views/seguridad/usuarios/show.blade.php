@@ -7,6 +7,7 @@
     $estado = $hasEstadoColumn ? strtoupper((string) $usuario->estado) : 'ACTIVO';
     $areaRoleIds = $usuario->rolesAdicionales->filter(fn ($rol) => ($rol->pivot->tipo ?? null) === 'area')->pluck('id')->values()->all();
     $cargoRoleIds = $usuario->rolesAdicionales->filter(fn ($rol) => ($rol->pivot->tipo ?? null) === 'cargo')->pluck('id')->values()->all();
+    $notificationsAllowed = !isset($notificationUserSetting) || $notificationUserSetting === null || (bool) $notificationUserSetting->in_app_enabled;
 @endphp
 <div class="module-page">
     <div class="page-header">
@@ -240,6 +241,27 @@
             @allowed('usuarios', 'administrar')
                 <form method="POST" action="{{ route('usuarios.notificaciones', $usuario->id) }}">
                     @csrf
+                    <div class="notification-screen-card" style="margin-bottom:14px;">
+                        <div class="notification-screen-head">
+                            <div>
+                                <h3 class="notification-screen-title">Permiso general</h3>
+                                <div class="notification-screen-key">Control de entrega para este usuario</div>
+                            </div>
+                            <span class="notification-screen-count {{ $notificationsAllowed ? 'is-active' : 'is-inactive' }}">
+                                {{ $notificationsAllowed ? 'Permitidas' : 'Denegadas' }}
+                            </span>
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <label class="notification-toggle" style="min-width:160px; justify-content:center;">
+                                <input type="radio" name="notifications_allowed" value="1" {{ $notificationsAllowed ? 'checked' : '' }}>
+                                <span>Permitir</span>
+                            </label>
+                            <label class="notification-toggle" style="min-width:160px; justify-content:center;">
+                                <input type="radio" name="notifications_allowed" value="0" {{ !$notificationsAllowed ? 'checked' : '' }}>
+                                <span>Denegar</span>
+                            </label>
+                        </div>
+                    </div>
                     <div class="notification-screen-grid">
                         @foreach(($notificationTypes ?? collect())->groupBy('module') as $module => $types)
                             <section class="notification-screen-card">
@@ -349,6 +371,8 @@
 .notification-screen-title { margin: 0; color: #0f172a; font-size: 14px; font-weight: 700; }
 .notification-screen-key { margin-top: 2px; color: #64748b; font-size: 11px; }
 .notification-screen-count { flex: 0 0 auto; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; padding: 4px 8px; }
+.notification-screen-count.is-active { background: #dcfce7; color: #166534; }
+.notification-screen-count.is-inactive { background: #fee2e2; color: #991b1b; }
 .notification-type-list { display: grid; gap: 10px; }
 .notification-type-item { display: grid; gap: 8px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; }
 .notification-type-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

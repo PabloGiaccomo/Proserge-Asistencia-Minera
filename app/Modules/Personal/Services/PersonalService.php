@@ -32,6 +32,9 @@ class PersonalService
         if (Schema::hasTable('personal_contratos')) {
             $query->with(['contratosLaborales.activadoPor.personal', 'contratosLaborales.cerradoPor.personal']);
         }
+        if (Schema::hasTable('personal_contrato_datos')) {
+            $query->with('contratoDatos');
+        }
 
         if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
             $query->with('cesadoPor.personal');
@@ -86,7 +89,7 @@ class PersonalService
         }
 
         if (!empty($filters['solo_activos'])) {
-            $query->whereIn('personal.estado', ['ACTIVO', 'APROBADO']);
+            $query->whereIn('personal.estado', ['ACTIVO', 'APROBADO', 'FALTA_CONTRATO']);
         }
 
         if (!empty($filters['with_minas'])) {
@@ -98,7 +101,7 @@ class PersonalService
         }
 
         $stateFilter = strtoupper((string) ($filters['estado'] ?? ''));
-        $allowedStates = ['ACTIVO', 'INACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'APROBADO', 'OBSERVADO', 'RECHAZADO'];
+        $allowedStates = ['ACTIVO', 'FALTA_CONTRATO', 'INACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'APROBADO', 'OBSERVADO', 'RECHAZADO'];
         if (in_array($stateFilter, $allowedStates, true)) {
             $query->where('personal.estado', $stateFilter);
         }
@@ -164,6 +167,9 @@ class PersonalService
 
         if (Schema::hasTable('personal_contratos')) {
             $query->with(['contratosLaborales.activadoPor.personal', 'contratosLaborales.cerradoPor.personal']);
+        }
+        if (Schema::hasTable('personal_contrato_datos')) {
+            $query->with('contratoDatos');
         }
 
         if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
@@ -466,6 +472,9 @@ class PersonalService
             $relations[] = 'contratosLaborales.activadoPor.personal';
             $relations[] = 'contratosLaborales.cerradoPor.personal';
         }
+        if (Schema::hasTable('personal_contrato_datos')) {
+            $relations[] = 'contratoDatos';
+        }
 
         return $personal->fresh($relations);
     }
@@ -547,6 +556,7 @@ class PersonalService
 
         $allowed = [
             'ACTIVO',
+            'FALTA_CONTRATO',
             'INACTIVO',
             'CESADO',
             'PENDIENTE_COMPLETAR_FICHA',

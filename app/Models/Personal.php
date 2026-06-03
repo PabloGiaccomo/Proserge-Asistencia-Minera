@@ -105,4 +105,9 @@ class Personal extends Model
             ->where('estado', 'ACTIVO')
             ->latestOfMany('contrato_numero');
     }
+
+    public function contratoDatos(): HasOne
+    {
+        return $this->hasOne(PersonalContratoDato::class, 'personal_id');
+    }
 }

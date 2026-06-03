@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Mina;
 use App\Models\NotificationPreference;
 use App\Models\NotificationType;
+use App\Models\NotificationUserSetting;
 use App\Models\Personal;
 use App\Models\Rol;
 use App\Models\Usuario;
@@ -203,6 +204,9 @@ class UsuarioPageController extends Controller
             ->where('usuario_id', $usuario->id)
             ->get()
             ->keyBy(fn (NotificationPreference $preference) => (string) $preference->notification_type_id);
+        $notificationUserSetting = Schema::hasTable('notification_user_settings')
+            ? NotificationUserSetting::query()->where('usuario_id', $usuario->id)->first()
+            : null;
 
         return view('seguridad.usuarios.show', [
             'usuario' => $usuario,
@@ -211,6 +215,7 @@ class UsuarioPageController extends Controller
             'hasEstadoColumn' => $this->hasEstadoColumn(),
             'notificationTypes' => $notificationTypes,
             'notificationPreferences' => $notificationPreferences,
+            'notificationUserSetting' => $notificationUserSetting,
         ]);
     }
 
@@ -271,6 +276,7 @@ class UsuarioPageController extends Controller
         $usuario = $this->findUsuarioOrFail($id);
 
         $validated = $request->validate([
+            'notifications_allowed' => ['nullable', 'string', Rule::in(['1', '0'])],
             'notification_type_ids' => ['nullable', 'array'],
             'notification_type_ids.*' => ['string', 'size:36', 'exists:notification_types,id'],
             'preferences' => ['nullable', 'array'],
@@ -283,8 +289,26 @@ class UsuarioPageController extends Controller
             ->unique()
             ->values();
         $preferences = $request->input('preferences', []);
+        $notificationsAllowed = (string) ($validated['notifications_allowed'] ?? '1') === '1';
 
-        DB::transaction(function () use ($usuario, $typeIds, $preferences): void {
+        DB::transaction(function () use ($usuario, $typeIds, $preferences, $notificationsAllowed): void {
+            if (Schema::hasTable('notification_user_settings')) {
+                $settingId = NotificationUserSetting::query()
+                    ->where('usuario_id', $usuario->id)
+                    ->value('id') ?? (string) Str::uuid();
+
+                NotificationUserSetting::query()->updateOrCreate(
+                    ['usuario_id' => $usuario->id],
+                    [
+                        'id' => $settingId,
+                        'in_app_enabled' => $notificationsAllowed,
+                        'email_enabled' => false,
+                        'muted_until' => null,
+                        'updated_by_usuario_id' => session('user.id') ?: session('user_id'),
+                    ],
+                );
+            }
+
             foreach ($typeIds as $typeId) {
                 $preferenceId = NotificationPreference::query()
                     ->where('usuario_id', $usuario->id)

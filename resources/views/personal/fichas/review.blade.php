@@ -3,23 +3,6 @@
 @section('title', 'Revision de ficha - Proserge')
 
 @section('content')
-@php
-    $fechaInicioContrato = old('fecha_inicio_contrato', $data['fecha_ingreso'] ?? '');
-    $fechaFinContrato = old('fecha_fin_contrato', $data['fecha_fin_contrato'] ?? '');
-    $periodoPruebaInicio = old('periodo_prueba_inicio', $data['periodo_prueba_inicio'] ?? $fechaInicioContrato);
-    $periodoPruebaFin = old('periodo_prueba_fin', $data['periodo_prueba_fin'] ?? '');
-
-    if ($periodoPruebaFin === '' && $periodoPruebaInicio !== '') {
-        try {
-            $periodoPruebaFin = \Illuminate\Support\Carbon::parse($periodoPruebaInicio)->addMonthsNoOverflow(3)->subDay()->toDateString();
-            if ($fechaFinContrato !== '' && $fechaFinContrato < $periodoPruebaFin) {
-                $periodoPruebaFin = $fechaFinContrato;
-            }
-        } catch (\Throwable) {
-            $periodoPruebaFin = '';
-        }
-    }
-@endphp
 <div class="module-page ficha-workspace">
     <div class="page-header">
         <div class="page-header-top">
@@ -226,126 +209,13 @@
                     <label class="ficha-label" for="observaciones_revision">Observaciones</label>
                     <textarea class="ficha-textarea" id="observaciones_revision" name="observaciones_revision">{{ old('observaciones_revision', $ficha->observaciones_revision) }}</textarea>
                     @error('observaciones_revision') <span class="ficha-error">{{ $message }}</span> @enderror
-                    @error('fecha_inicio_contrato') <span class="ficha-error">{{ $message }}</span> @enderror
-                    @error('fecha_fin_contrato') <span class="ficha-error">{{ $message }}</span> @enderror
-                    @error('periodo_prueba_inicio') <span class="ficha-error">{{ $message }}</span> @enderror
-                    @error('periodo_prueba_fin') <span class="ficha-error">{{ $message }}</span> @enderror
                 </div>
                 <div class="ficha-actions-bar">
                     <button type="submit" formaction="{{ route('personal.fichas.observe', $ficha->id) }}" class="btn btn-outline">Marcar observado</button>
-                    <button type="button" class="btn btn-primary" onclick="openApproveFichaModal()">Aprobar trabajador</button>
+                    <button type="submit" class="btn btn-primary">Aprobar trabajador</button>
                 </div>
             </form>
         </div>
     </div>
-
-    <div id="approveFichaModal" class="modal" style="display:none;" onclick="if (event.target === this) closeApproveFichaModal()">
-        <div class="modal-backdrop" onclick="closeApproveFichaModal()"></div>
-        <div class="modal-content" style="width:min(560px, calc(100vw - 32px)); border-radius:14px;">
-            <div class="modal-header">
-                <div>
-                    <h2 class="modal-title">Verificar fecha de contrato</h2>
-                    <p class="modal-subtitle">Confirma las fechas antes de aprobar al trabajador.</p>
-                </div>
-                <button type="button" class="modal-close" onclick="closeApproveFichaModal()" aria-label="Cerrar">X</button>
-            </div>
-            <div class="modal-body" style="display:grid; gap:14px;">
-                <div class="ficha-fields" style="padding:0;">
-                    <div class="ficha-field">
-                        <label class="ficha-label" for="fecha_inicio_contrato">Inicio de contrato <span class="ficha-required">*</span></label>
-                        <input form="approveFichaForm" id="fecha_inicio_contrato" class="ficha-input" type="date" name="fecha_inicio_contrato" value="{{ $fechaInicioContrato }}">
-                    </div>
-                    <div class="ficha-field">
-                        <label class="ficha-label" for="fecha_fin_contrato">Fin de contrato</label>
-                        <input form="approveFichaForm" id="fecha_fin_contrato" class="ficha-input" type="date" name="fecha_fin_contrato" value="{{ $fechaFinContrato }}">
-                    </div>
-                </div>
-                <section class="ficha-section" style="margin:0;">
-                    <div class="ficha-section-header">
-                        <h3 class="ficha-section-title">Periodo de prueba</h3>
-                    </div>
-                    <div class="ficha-fields" style="padding:0;">
-                        <div class="ficha-field">
-                            <label class="ficha-label" for="periodo_prueba_inicio">Inicio <span class="ficha-required">*</span></label>
-                            <input form="approveFichaForm" id="periodo_prueba_inicio" class="ficha-input" type="date" name="periodo_prueba_inicio" value="{{ $periodoPruebaInicio }}">
-                        </div>
-                        <div class="ficha-field">
-                            <label class="ficha-label" for="periodo_prueba_fin">Fin <span class="ficha-required">*</span></label>
-                            <input form="approveFichaForm" id="periodo_prueba_fin" class="ficha-input" type="date" name="periodo_prueba_fin" value="{{ $periodoPruebaFin }}">
-                        </div>
-                    </div>
-                </section>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline" onclick="closeApproveFichaModal()">Cancelar</button>
-                <button type="submit" form="approveFichaForm" class="btn btn-primary">Confirmar trabajador</button>
-            </div>
-        </div>
-    </div>
 </div>
 @endsection
-
-@push('scripts')
-<script>
-function openApproveFichaModal() {
-    openModal('approveFichaModal');
-}
-
-function closeApproveFichaModal() {
-    closeModal('approveFichaModal');
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    const startInput = document.getElementById('fecha_inicio_contrato');
-    const endInput = document.getElementById('fecha_fin_contrato');
-    const trialStartInput = document.getElementById('periodo_prueba_inicio');
-    const trialEndInput = document.getElementById('periodo_prueba_fin');
-
-    const isoDate = function (date) {
-        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
-        return date.toISOString().slice(0, 10);
-    };
-
-    const suggestedTrialEnd = function (value) {
-        if (!value) return '';
-        const date = new Date(value + 'T00:00:00');
-        if (Number.isNaN(date.getTime())) return '';
-        date.setMonth(date.getMonth() + 3);
-        date.setDate(date.getDate() - 1);
-        const contractEnd = endInput?.value ? new Date(endInput.value + 'T00:00:00') : null;
-        if (contractEnd && !Number.isNaN(contractEnd.getTime()) && contractEnd < date) {
-            return isoDate(contractEnd);
-        }
-        return isoDate(date);
-    };
-
-    startInput?.addEventListener('change', function () {
-        if (trialStartInput && (!trialStartInput.value || trialStartInput.value === trialStartInput.dataset.autoValue)) {
-            trialStartInput.value = startInput.value;
-        }
-        if (trialEndInput && (!trialEndInput.value || trialEndInput.value === trialEndInput.dataset.autoValue)) {
-            trialEndInput.value = suggestedTrialEnd(trialStartInput?.value || startInput.value);
-            trialEndInput.dataset.autoValue = trialEndInput.value;
-        }
-    });
-
-    trialStartInput?.addEventListener('change', function () {
-        if (trialEndInput) {
-            trialEndInput.value = suggestedTrialEnd(trialStartInput.value);
-            trialEndInput.dataset.autoValue = trialEndInput.value;
-        }
-    });
-
-    endInput?.addEventListener('change', function () {
-        if (trialEndInput) {
-            trialEndInput.value = suggestedTrialEnd(trialStartInput?.value || startInput?.value);
-            trialEndInput.dataset.autoValue = trialEndInput.value;
-        }
-    });
-
-    if (trialEndInput && trialEndInput.value) {
-        trialEndInput.dataset.autoValue = trialEndInput.value;
-    }
-});
-</script>
-@endpush

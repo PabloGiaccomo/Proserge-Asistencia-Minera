@@ -121,7 +121,6 @@
                                         $paisNacimientoActual = $currentFieldValue('pais_nacimiento') ?: 'Peru';
                                         $domicilioPaisActual = $currentFieldValue('domicilio_tipo') ?: 'Peru';
                                         $bancoActual = $currentFieldValue('banco');
-                                        $contratoActual = $currentFieldValue('contrato');
                                         $sistemaPensionarioActual = $currentFieldValue('sistema_pensionario');
                                         $quintaEmpleadorActual = $currentFieldValue('quinta_empleador_principal');
                                         $isConditionallyRequired = match ($key) {
@@ -135,8 +134,6 @@
                                             'banco_otro', 'cci' => $bancoActual === 'Otro',
                                             'tipo_comision', 'tipo_afp', 'cuspp' => $sistemaPensionarioActual === 'Sistema Privado de Pensiones',
                                             'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual === 'Otra empresa',
-                                            'fecha_fin_contrato' => in_array($contratoActual, ['REG', 'FIJO', 'INTER'], true),
-                                            'fecha_ingreso' => $contratoActual === 'INDET',
                                             default => false,
                                         };
                                         $isRequired = (bool) ($field['required'] ?? false) || $isConditionallyRequired;
@@ -931,16 +928,6 @@ document.addEventListener('DOMContentLoaded', function () {
     };
     ['estado_civil', 'nacionalidad', 'pais_nacimiento', 'domicilio_tipo', 'banco', 'quinta_empleador_principal', 'sistema_pensionario'].forEach(key => byKey(key)?.addEventListener('change', applyConditionals));
     applyConditionals();
-
-    const syncLaborDate = function () {
-        const value = byKey('fecha_ingreso')?.value || '';
-        if (!value) return;
-        if (byKey('quinta_fecha_anio')) byKey('quinta_fecha_anio').value = String(new Date().getFullYear());
-        if (byKey('quinta_fecha_mes')) byKey('quinta_fecha_mes').value = new Date().toLocaleString('es-PE', { month: 'long' });
-        if (byKey('quinta_fecha_dia')) byKey('quinta_fecha_dia').value = String(new Date().getDate()).padStart(2, '0');
-    };
-    byKey('fecha_ingreso')?.addEventListener('change', syncLaborDate);
-    syncLaborDate();
 
     const updateQuintaDefaults = function () {
         const now = new Date();

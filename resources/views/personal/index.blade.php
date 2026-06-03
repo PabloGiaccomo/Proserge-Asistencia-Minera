@@ -13,6 +13,8 @@
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
     $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
+    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
+    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['actualizar', 'administrar']);
     $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'exportar');
 @endphp
 <style>
@@ -375,6 +377,12 @@
     background: #dcfce7;
     color: #166534;
     border-color: #86efac;
+}
+
+.dg-pill-estado-contrato {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #fcd34d;
 }
 
 .dg-pill-estado-inactivo,
@@ -2100,12 +2108,14 @@
                                     $estadoText = match ($estadoRaw) {
                                         'CESADO' => 'Cesado',
                                         'INACTIVO' => 'Inactivo',
+                                        'FALTA_CONTRATO' => 'Falta contrato',
                                         default => 'Activo',
                                     };
                                     $situacionKey = (string) ($trabajador['situacion'] ?? 'habilitado');
                                     $situacionLabel = (string) ($trabajador['situacion_label'] ?? 'Habilitado');
                                     $estadoClass = match (mb_strtolower($estadoText)) {
                                         'activo' => 'dg-pill-estado-activo',
+                                        'falta contrato' => 'dg-pill-estado-contrato',
                                         'inactivo' => 'dg-pill-estado-inactivo',
                                         'cesado' => 'dg-pill-estado-cesado',
                                         default => 'dg-pill-neutral',
@@ -2162,7 +2172,7 @@
                                     data-fecha-ingreso="{{ $trabajador['fecha_ingreso'] ?? '' }}"
                                     data-contrato="{{ $trabajador['tipo_contrato'] ?? '' }}"
                                     data-minas="{{ implode(' ', $trabajador['minas'] ?? []) }}"
-                                    data-estado="{{ mb_strtolower($estadoText) }}"
+                                    data-estado="{{ $trabajador['estado_actual'] ?? mb_strtolower($estadoText) }}"
                                     data-bienestar="{{ $situacionKey }}"
                                     data-ocup-minas="{{ implode(' ', $ocupMinas) }}"
                                     data-ocup-minas-list="{{ implode('||', $ocupMinas) }}"
@@ -2178,7 +2188,15 @@
                                     <td data-column="puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
                                     <td data-column="contrato"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
                                     <td data-column="estado">
-                                        @if($estadoRaw === 'CESADO')
+                                        @if($canEditContractData && $estadoRaw === 'FALTA_CONTRATO')
+                                            <a
+                                                href="{{ route('personal.contrato-datos.edit', $trabajador['id'] ?? '') }}"
+                                                class="dg-pill dg-pill-button {{ $estadoClass }}"
+                                                title="Editar datos de contrato"
+                                                onclick="event.stopPropagation();">
+                                                {{ $estadoText }}
+                                            </a>
+                                        @elseif($estadoRaw === 'CESADO')
                                             <button
                                                 type="button"
                                                 class="dg-pill dg-pill-button {{ $estadoClass }}"
@@ -2372,6 +2390,32 @@
                                                     <path d="M8 15h5"/>
                                                 </svg>
                                             </a>
+                                            @if($canEditContractData && $estadoRaw === 'FALTA_CONTRATO')
+                                                <a
+                                                    href="{{ route('personal.contrato-datos.edit', $trabajador['id'] ?? '') }}"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Datos de contrato"
+                                                    aria-label="Datos de contrato">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                        <path d="M14 2v6h6"/>
+                                                        <path d="M8 13h8"/>
+                                                        <path d="M8 17h5"/>
+                                                    </svg>
+                                                </a>
+                                                @if($canUpdatePersonal && !empty($trabajador['contrato_datos_downloaded']) && empty($trabajador['contrato_firmado']))
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-outline btn-xs personal-icon-btn"
+                                                        title="Subir contrato firmado"
+                                                        aria-label="Subir contrato firmado"
+                                                        onclick="event.stopPropagation(); openSignedContractModal(this.closest('tr'))">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <path d="M20 6 9 17l-5-5"/>
+                                                        </svg>
+                                                    </button>
+                                                @endif
+                                            @endif
                                             @if($estadoRaw === 'CESADO')
                                                 <button
                                                     type="button"
@@ -2536,6 +2580,28 @@
             </div>
         </form>
     </div>
+
+    <div id="signedContractModal" class="modal" style="display:none;" onclick="if (event.target === this) closeSignedContractModal()">
+        <div class="modal-backdrop" onclick="closeSignedContractModal()"></div>
+        <form id="signedContractForm" method="POST" action="" enctype="multipart/form-data" class="modal-content personal-cease-modal">
+            @csrf
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Contrato firmado</h2>
+                    <p class="modal-subtitle" id="signedContractSubtitle">Sube el contrato firmado en PDF.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeSignedContractModal()" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <label class="ficha-label" for="signedContractPdf">Contrato PDF <span class="ficha-required">*</span></label>
+                <input id="signedContractPdf" class="ficha-input" type="file" name="contrato_pdf" accept="application/pdf,.pdf" required>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeSignedContractModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Subir contrato</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 @if($canDownloadContractFormats)
@@ -2607,6 +2673,7 @@
 let pendingCeaseForm = null;
 const todayForActivation = @json(now()->toDateString());
 const personalCsrfToken = @json(csrf_token());
+const signedContractRouteTemplate = @json(route('personal.contrato-datos.signed', '__ID__'));
 const canDownloadContractFormats = @json($canDownloadContractFormats);
 const contractFormatEndpoints = {
     templates: @json(route('personal.contrato-formatos.templates')),
@@ -2951,6 +3018,52 @@ function updateContractDownloadForm() {
         button.disabled = contractFormatCurrentStep !== 'workers' || !contractFormatTemplateId || workerIds.length === 0;
         button.style.display = contractFormatCurrentStep === 'workers' ? 'inline-flex' : 'none';
     }
+}
+
+function openSignedContractModal(row) {
+    if (!row) return;
+
+    let worker = {};
+    try {
+        worker = JSON.parse(row.dataset.worker || '{}');
+    } catch (error) {
+        worker = {};
+    }
+
+    const workerId = String(worker.id || row.dataset.id || '').trim();
+    if (!workerId) return;
+
+    const form = document.getElementById('signedContractForm');
+    const subtitle = document.getElementById('signedContractSubtitle');
+    const input = document.getElementById('signedContractPdf');
+    const workerName = worker.nombre || worker.nombre_completo || 'este trabajador';
+
+    if (form) {
+        form.action = signedContractRouteTemplate.replace('__ID__', encodeURIComponent(workerId));
+    }
+    if (subtitle) {
+        subtitle.textContent = 'Sube el contrato firmado en PDF para ' + workerName + '.';
+    }
+    if (input) {
+        input.value = '';
+    }
+
+    openModal('signedContractModal');
+    window.setTimeout(function () {
+        input?.focus();
+    }, 50);
+}
+
+function closeSignedContractModal() {
+    const form = document.getElementById('signedContractForm');
+    const input = document.getElementById('signedContractPdf');
+    if (form) {
+        form.action = '';
+    }
+    if (input) {
+        input.value = '';
+    }
+    closeModal('signedContractModal');
 }
 
 function requestCeaseReason(form) {

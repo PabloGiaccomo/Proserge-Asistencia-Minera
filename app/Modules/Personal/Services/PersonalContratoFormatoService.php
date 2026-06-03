@@ -47,7 +47,10 @@ class PersonalContratoFormatoService
         ],
     ];
 
-    public function __construct(private readonly PersonalService $personalService)
+    public function __construct(
+        private readonly PersonalService $personalService,
+        private readonly PersonalContratoDatoService $contratoDatoService,
+    )
     {
     }
 
@@ -92,7 +95,7 @@ class PersonalContratoFormatoService
                 'limit' => $limit,
                 'with_minas' => true,
             ])
-            ->with(['fichaColaborador', 'contratoLaboralActual'])
+            ->with(['fichaColaborador', 'contratoLaboralActual', 'contratoDatos'])
             ->limit(max(1, min(20, $limit)))
             ->get()
             ->map(fn (Personal $personal): array => $this->workerSummary($personal))
@@ -127,6 +130,7 @@ class PersonalContratoFormatoService
         $spreadsheet = $this->buildWorkbook($template, $workers);
         $writer = new Xlsx($spreadsheet);
         $downloadName = $this->downloadName($template);
+        $this->contratoDatoService->markDownloaded($workers->pluck('id')->all());
 
         return response()->streamDownload(function () use ($writer): void {
             $writer->save('php://output');
@@ -183,21 +187,23 @@ class PersonalContratoFormatoService
     private function rowForWorker(array $columns, array $sample, Personal $personal): array
     {
         $ficha = $personal->fichaColaborador;
+        $contractData = $personal->contratoDatos;
         $data = is_array($ficha?->datos_detectados_json ?? null) ? $ficha->datos_detectados_json : [];
         $data = array_merge($data, is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : []);
 
-        $fechaInicio = $this->dateValue($data['fecha_ingreso'] ?? $personal->fecha_ingreso ?? $personal->contratoLaboralActual?->fecha_inicio ?? null);
-        $fechaFin = $this->dateValue($data['fecha_fin_contrato'] ?? $personal->contratoLaboralActual?->fecha_fin ?? null);
-        $pruebaFin = $this->trialEndDate($fechaInicio, $fechaFin);
+        $fechaInicio = $this->dateValue($contractData?->fecha_inicio_contrato ?? $data['fecha_ingreso'] ?? $personal->fecha_ingreso ?? $personal->contratoLaboralActual?->fecha_inicio ?? null);
+        $fechaFin = $this->dateValue($contractData?->fecha_fin_contrato ?? $data['fecha_fin_contrato'] ?? $personal->contratoLaboralActual?->fecha_fin ?? null);
+        $pruebaInicio = $this->dateValue($contractData?->periodo_prueba_inicio ?? $data['periodo_prueba_inicio'] ?? $fechaInicio);
+        $pruebaFin = $this->dateValue($contractData?->periodo_prueba_fin ?? $data['periodo_prueba_fin'] ?? null) ?: $this->trialEndDate($fechaInicio, $fechaFin);
         $domicilio = trim((string) ($data['domicilio_direccion'] ?? ''));
         $distrito = $this->districtValue($data);
         $correo = trim((string) ($data['correo'] ?? $personal->correo ?? ''));
         $documento = trim((string) ($data['numero_documento'] ?? $ficha?->numero_documento ?? $personal->numero_documento ?? $personal->dni ?? ''));
-        $puesto = trim((string) ($data['puesto'] ?? $personal->puesto ?? ''));
+        $puesto = trim((string) ($contractData?->puesto ?? $data['puesto'] ?? $personal->puesto ?? ''));
         $nombre = trim((string) ($personal->nombre_completo ?? ''));
 
         return collect($columns)
-            ->map(function (string $column, int $index) use ($sample, $documento, $nombre, $domicilio, $distrito, $correo, $fechaInicio, $fechaFin, $pruebaFin, $puesto): string {
+            ->map(function (string $column, int $index) use ($sample, $documento, $nombre, $domicilio, $distrito, $correo, $fechaInicio, $fechaFin, $pruebaInicio, $pruebaFin, $puesto, $contractData): string {
                 $fallback = (string) ($sample[$index] ?? '');
                 $normalized = mb_strtoupper(trim($column), 'UTF-8');
 
@@ -207,10 +213,19 @@ class PersonalContratoFormatoService
                     'DOMICILIO', 'DOMICILIO_COLABORADOR' => $domicilio !== '' ? $domicilio : $fallback,
                     'DISTRITO', 'DISTRITO_COLABORADOR' => $distrito !== '' ? $distrito : $fallback,
                     'CORREO', 'CORREO_ELECTRONICO' => $correo !== '' ? $correo : $fallback,
-                    'FECHA_INICIO', 'FECHA_INICIO_CONTRATO', 'FECHA_INICIO_PRUEBA', 'INICIO_PERIODO_PRUEBA' => $this->templateKeepsDash($fallback) ? '-' : ($this->formatSpanishDate($fechaInicio) ?: $fallback),
+                    'FECHA_INICIO', 'FECHA_INICIO_CONTRATO' => $this->templateKeepsDash($fallback) ? '-' : ($this->formatSpanishDate($fechaInicio) ?: $fallback),
+                    'FECHA_INICIO_PRUEBA', 'INICIO_PERIODO_PRUEBA' => $this->templateKeepsDash($fallback) ? '-' : ($this->formatSpanishDate($pruebaInicio) ?: $fallback),
                     'FECHA_FIN_CONTRATO' => $this->formatSpanishDate($fechaFin) ?: $fallback,
                     'FECHA_FIN_PRUEBA', 'FIN_PERIODO_PRUEBA' => $this->templateKeepsDash($fallback) ? '-' : ($this->formatSpanishDate($pruebaFin) ?: $fallback),
                     'PUESTO' => $puesto !== '' ? $puesto : $fallback,
+                    'SUELDO_HORA_PARADAS' => $this->contractText($contractData?->sueldo_hora_paradas, $fallback),
+                    'SUELDO_HORA_PARADAS_TEXTO' => $this->contractText($contractData?->sueldo_hora_paradas_texto, $fallback),
+                    'SUELDO_DIA_TALLER' => $this->contractText($contractData?->sueldo_dia_taller, $fallback),
+                    'SUELDO_DIA_TALLER_TEXTO' => $this->contractText($contractData?->sueldo_dia_taller_texto, $fallback),
+                    'FUNCIONES' => $this->contractText($contractData?->funciones, $fallback),
+                    'SUELDO_NUM' => $this->contractText($contractData?->sueldo_num, $fallback),
+                    'SUELDO_TEXTO' => $this->contractText($contractData?->sueldo_texto, $fallback),
+                    'FECHA_FIRMA', 'FECHA_DE_FIRMA' => $this->formatSpanishDate($this->dateValue($contractData?->fecha_firma ?? null)) ?: $fallback,
                     default => $fallback,
                 };
             })
@@ -221,6 +236,7 @@ class PersonalContratoFormatoService
     private function workerSummary(Personal $personal): array
     {
         $ficha = $personal->fichaColaborador;
+        $contractData = $personal->contratoDatos;
         $data = is_array($ficha?->datos_detectados_json ?? null) ? $ficha->datos_detectados_json : [];
         $data = array_merge($data, is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : []);
 
@@ -228,7 +244,7 @@ class PersonalContratoFormatoService
             'id' => (string) $personal->id,
             'nombre' => (string) $personal->nombre_completo,
             'documento' => (string) ($data['numero_documento'] ?? $ficha?->numero_documento ?? $personal->numero_documento ?? $personal->dni ?? ''),
-            'puesto' => (string) ($data['puesto'] ?? $personal->puesto ?? ''),
+            'puesto' => (string) ($contractData?->puesto ?? $data['puesto'] ?? $personal->puesto ?? ''),
             'correo' => (string) ($data['correo'] ?? $personal->correo ?? ''),
         ];
     }
@@ -246,7 +262,7 @@ class PersonalContratoFormatoService
         }
 
         $records = Personal::query()
-            ->with(['fichaColaborador', 'contratoLaboralActual'])
+            ->with(['fichaColaborador', 'contratoLaboralActual', 'contratoDatos'])
             ->whereIn('id', $ids)
             ->get()
             ->keyBy(fn (Personal $personal): string => (string) $personal->id);
@@ -358,6 +374,13 @@ class PersonalContratoFormatoService
         ];
 
         return $date->format('d') . ' DE ' . $months[(int) $date->format('n')] . ' DEL ' . $date->format('Y');
+    }
+
+    private function contractText(mixed $value, string $fallback): string
+    {
+        $text = trim((string) $value);
+
+        return $text !== '' ? $text : $fallback;
     }
 
     private function templateKeepsDash(string $value): bool

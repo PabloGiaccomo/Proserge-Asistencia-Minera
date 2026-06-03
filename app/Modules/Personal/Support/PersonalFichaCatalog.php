@@ -13,6 +13,7 @@ class PersonalFichaCatalog
 
     public const STATES = [
         'ACTIVO' => 'Activo',
+        'FALTA_CONTRATO' => 'Falta contrato',
         'INACTIVO' => 'Inactivo',
         'CESADO' => 'Cesado',
         'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente completar ficha',
@@ -91,18 +92,12 @@ class PersonalFichaCatalog
                 'title' => 'Datos laborales',
                 'fields' => [
                     self::field('puesto', 'Cargo / puesto', 'text', true),
-                    self::field('ocupacion', 'Ocupacion', 'text', false),
                     self::field('contrato', 'Tipo de contrato', 'select', true, [
                         'REG' => 'Regimen',
                         'FIJO' => 'Personal fijo / servicio especifico',
                         'INTER' => 'Intermitente',
                         'INDET' => 'Indeterminado',
                     ]),
-                    self::field('fecha_ingreso', 'Inicio relacion laboral', 'date', false),
-                    self::field('fecha_fin_contrato', 'Fin de contrato', 'date', false),
-                    self::field('fecha_cese', 'Fecha de cese', 'date', false),
-                    self::field('tipo_trabajador', 'Tipo de trabajador', 'text', false),
-                    self::field('categoria_trabajador', 'Categoria', 'text', false),
                 ],
             ],
             [
@@ -211,7 +206,6 @@ class PersonalFichaCatalog
             'domicilio_direccion',
             'puesto',
             'contrato',
-            'fecha_ingreso',
             'banco',
             'numero_cuenta',
             'cci',

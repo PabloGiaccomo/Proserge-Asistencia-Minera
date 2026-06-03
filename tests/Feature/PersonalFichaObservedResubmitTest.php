@@ -219,6 +219,68 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertSame('Revisar ficha', $row['situacion_label']);
     }
 
+    public function test_pending_contract_worker_is_not_shown_as_inactive_for_intermitente(): void
+    {
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $data = $this->fichaData([
+            'contrato' => 'INTER',
+            'puesto' => 'Operario intermitente',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '76543211',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '76543211',
+            'nombre_completo' => 'Trabajador Falta Contrato',
+            'puesto' => 'Operario intermitente',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INTER',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'fecha_ingreso' => null,
+            'estado' => 'FALTA_CONTRATO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_APROBADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '76543211',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'submitted_at' => now(),
+            'approved_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_contrato_datos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'puesto' => 'Operario intermitente',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $personal = Personal::query()
+            ->with(['fichaColaborador', 'contratoDatos'])
+            ->findOrFail($personalId);
+        $row = (new PersonalResource($personal))->resolve();
+
+        $this->assertSame('FALTA_CONTRATO', $row['estado']);
+        $this->assertSame('ACTIVO', $row['estado_operativo']);
+        $this->assertTrue($row['activo']);
+        $this->assertSame('habilitado', $row['situacion']);
+        $this->assertSame('Habilitado', $row['situacion_label']);
+        $this->assertFalse($row['contrato_datos_downloaded']);
+        $this->assertFalse($row['contrato_firmado']);
+    }
+
     private function fichaData(array $overrides = []): array
     {
         return [

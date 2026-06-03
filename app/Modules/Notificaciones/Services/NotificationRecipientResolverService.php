@@ -5,6 +5,7 @@ namespace App\Modules\Notificaciones\Services;
 use App\Models\NotificationPreference;
 use App\Models\NotificationRolePreference;
 use App\Models\NotificationType;
+use App\Models\NotificationUserSetting;
 use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
@@ -76,12 +77,18 @@ class NotificationRecipientResolverService
         }
 
         $preferences = $this->loadPreferencesByUser((string) $type->id, $userIds);
+        $userSettings = $this->loadSettingsByUser($userIds);
         $rolePreferences = $this->loadRolePreferences((string) $type->id, $roleIds);
 
-        $users = $users->filter(function (Usuario $user) use ($actorUserId, $mineId, $requiredModule, $requiredAction, $requiredActions, $priority, $category, $requirePermission, $scopeUserIds, $preferences, $rolePreferences): bool {
+        $users = $users->filter(function (Usuario $user) use ($actorUserId, $mineId, $requiredModule, $requiredAction, $requiredActions, $priority, $category, $requirePermission, $scopeUserIds, $preferences, $userSettings, $rolePreferences): bool {
             $userId = (string) $user->id;
 
             if ($actorUserId && $user->id === $actorUserId) {
+                return false;
+            }
+
+            $userSetting = $userSettings->get($userId);
+            if ($userSetting instanceof NotificationUserSetting && !$this->matchesUserSetting($userSetting)) {
                 return false;
             }
 
@@ -283,6 +290,18 @@ class NotificationRecipientResolverService
             ->keyBy(fn (NotificationPreference $preference) => (string) $preference->usuario_id);
     }
 
+    private function loadSettingsByUser(Collection $userIds): Collection
+    {
+        if ($userIds->isEmpty() || !Schema::hasTable('notification_user_settings')) {
+            return collect();
+        }
+
+        return NotificationUserSetting::query()
+            ->whereIn('usuario_id', $userIds->all())
+            ->get(['usuario_id', 'in_app_enabled', 'muted_until'])
+            ->keyBy(fn (NotificationUserSetting $setting) => (string) $setting->usuario_id);
+    }
+
     private function loadRolePreferences(string $notificationTypeId, Collection $roleIds): Collection
     {
         if ($roleIds->isEmpty() || !Schema::hasTable('notification_role_preferences')) {
@@ -332,6 +351,15 @@ class NotificationRecipientResolverService
         $minimumPriority = strtolower((string) ($preference->minimum_priority ?? 'low'));
 
         return $this->priorityRank($priority) >= $this->priorityRank($minimumPriority);
+    }
+
+    private function matchesUserSetting(NotificationUserSetting $setting): bool
+    {
+        if (!$setting->in_app_enabled) {
+            return false;
+        }
+
+        return !$setting->muted_until || now()->gte($setting->muted_until);
     }
 
     private function priorityRank(string $priority): int

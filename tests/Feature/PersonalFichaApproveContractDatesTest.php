@@ -43,8 +43,17 @@ class PersonalFichaApproveContractDatesTest extends TestCase
         $this->assertSame('2026-09-01', $approved->datos_detectados_json['periodo_prueba_fin']);
         $this->assertDatabaseHas('personal', [
             'id' => $personalId,
-            'estado' => 'ACTIVO',
+            'estado' => 'FALTA_CONTRATO',
             'fecha_ingreso' => '2026-06-02',
+        ]);
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personalId,
+            'fecha_inicio_contrato' => '2026-06-02',
+            'fecha_fin_contrato' => '2026-12-31',
+            'periodo_prueba_inicio' => '2026-06-02',
+            'periodo_prueba_fin' => '2026-09-01',
+            'puesto' => 'Operario',
+            'updated_by_usuario_id' => $user->id,
         ]);
     }
 

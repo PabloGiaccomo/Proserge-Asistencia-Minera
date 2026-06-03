@@ -254,19 +254,10 @@ class PersonalFichaController extends WebPageController
     {
         $validated = $request->validate([
             'observaciones_revision' => ['nullable', 'string', 'max:2000'],
-            'fecha_inicio_contrato' => ['required', 'date'],
-            'fecha_fin_contrato' => ['nullable', 'date', 'after_or_equal:fecha_inicio_contrato'],
-            'periodo_prueba_inicio' => ['required', 'date'],
-            'periodo_prueba_fin' => ['required', 'date', 'after_or_equal:periodo_prueba_inicio'],
         ]);
 
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
-        $this->fichaService->approve($ficha, $this->requireAuthenticatedUser(), $validated['observaciones_revision'] ?? null, [
-            'fecha_ingreso' => $validated['fecha_inicio_contrato'],
-            'fecha_fin_contrato' => $validated['fecha_fin_contrato'] ?? null,
-            'periodo_prueba_inicio' => $validated['periodo_prueba_inicio'],
-            'periodo_prueba_fin' => $validated['periodo_prueba_fin'],
-        ]);
+        $this->fichaService->approve($ficha, $this->requireAuthenticatedUser(), $validated['observaciones_revision'] ?? null);
 
         return redirect()
             ->route('personal.show', $ficha->personal_id)

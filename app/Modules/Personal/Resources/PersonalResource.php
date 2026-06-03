@@ -46,6 +46,7 @@ class PersonalResource extends JsonResource
 
         $estadoPersonal = strtoupper((string) $this->estado);
         $ficha = $this->whenLoaded('fichaColaborador', fn () => $this->fichaColaborador, null);
+        $contratoDatos = $this->whenLoaded('contratoDatos', fn () => $this->contratoDatos, null);
         $cesadoPor = $this->whenLoaded('cesadoPor', fn () => $this->cesadoPor, null);
         $contratosLaborales = collect($this->whenLoaded('contratosLaborales', fn () => $this->contratosLaborales, collect()))->values();
         $contratosCerrados = $contratosLaborales
@@ -258,12 +259,14 @@ class PersonalResource extends JsonResource
 
         $estadoVisible = match (true) {
             $estadoPersonal === 'CESADO' || $contratoVencido || $ceseVigente => 'CESADO',
+            $estadoPersonal === 'FALTA_CONTRATO' => 'ACTIVO',
             $terminarFicha => 'INACTIVO',
             $bienestarInactivo || ($primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion') => 'INACTIVO',
             $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
             $trabajadorNoIntermitenteActivo || $intermitenteActivo => 'ACTIVO',
             default => 'INACTIVO',
         };
+        $estadoDisplay = $estadoPersonal === 'FALTA_CONTRATO' ? 'FALTA_CONTRATO' : $estadoVisible;
 
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
@@ -365,9 +368,10 @@ class PersonalResource extends JsonResource
             'telefono_1' => $telefono1,
             'telefono_2' => $telefono2,
             'correo' => $this->correo,
-            'estado' => $estadoVisible,
+            'estado' => $estadoDisplay,
+            'estado_operativo' => $estadoVisible,
             'estado_interno' => $estadoPersonal,
-            'estado_label' => PersonalFichaCatalog::stateLabel($estadoVisible),
+            'estado_label' => PersonalFichaCatalog::stateLabel($estadoDisplay),
             'estado_ficha' => $estadoFicha,
             'ficha_id' => $ficha?->id,
             'ficha_submitted_at' => optional($ficha?->submitted_at)->toIso8601String(),
@@ -376,6 +380,15 @@ class PersonalResource extends JsonResource
             'estado_actual' => strtolower($estadoVisible),
             'situacion' => $situacionKey,
             'situacion_label' => $situacionLabel,
+            'contrato_datos' => $contratoDatos ? [
+                'id' => (string) $contratoDatos->id,
+                'downloaded_at' => optional($contratoDatos->downloaded_at)->toIso8601String(),
+                'signed_at' => optional($contratoDatos->signed_at)->toIso8601String(),
+                'fecha_firma' => optional($contratoDatos->fecha_firma)->toDateString(),
+                'signed_contract_original_name' => (string) ($contratoDatos->signed_contract_original_name ?? ''),
+            ] : null,
+            'contrato_datos_downloaded' => $contratoDatos?->downloaded_at !== null,
+            'contrato_firmado' => $contratoDatos?->signed_at !== null,
             'missing_required_ficha_fields' => $missingRequiredFichaFields,
             'bloqueado_bienestar' => $primaryBloqueo !== null,
             'puede_cesar' => $estadoVisible !== 'CESADO',

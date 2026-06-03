@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Support\Rbac\PermissionCatalog;
+use App\Modules\Notificaciones\Services\NotificationService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -66,6 +67,46 @@ class UsuarioNotificationTest extends TestCase
         $this->assertDatabaseMissing('notification_recipients', [
             'notification_event_id' => $eventId,
             'usuario_id' => $actorId,
+        ]);
+    }
+
+    public function test_usuario_con_notificaciones_denegadas_no_recibe_notificaciones(): void
+    {
+        $roleId = $this->createRole('DESTINO_NOTIF_' . Str::upper(Str::random(6)), [
+            'usuarios' => ['ver'],
+            'notificaciones' => ['ver'],
+        ]);
+        $allowedUserId = $this->createUser($roleId, 'permitido');
+        $deniedUserId = $this->createUser($roleId, 'denegado');
+
+        $this->ensureNotificationType();
+
+        DB::table('notification_user_settings')->insert([
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $deniedUserId,
+            'in_app_enabled' => false,
+            'email_enabled' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $event = app(NotificationService::class)->emit('usuario_creado', [
+            'message' => 'Notificacion de prueba para preferencias de usuario.',
+            'target_user_ids' => [$allowedUserId, $deniedUserId],
+            'require_permission' => false,
+            'dedupe_key' => 'usuario_creado:preferencias:' . Str::uuid(),
+            'priority' => 'high',
+            'category' => 'seguridad',
+        ]);
+
+        $this->assertNotNull($event);
+        $this->assertDatabaseHas('notification_recipients', [
+            'notification_event_id' => $event->id,
+            'usuario_id' => $allowedUserId,
+        ]);
+        $this->assertDatabaseMissing('notification_recipients', [
+            'notification_event_id' => $event->id,
+            'usuario_id' => $deniedUserId,
         ]);
     }
 

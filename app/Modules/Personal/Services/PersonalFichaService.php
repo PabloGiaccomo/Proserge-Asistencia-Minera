@@ -28,7 +28,10 @@ class PersonalFichaService
     public const TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE = 'LINK_ENVIADO_PENDIENTE';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO = 'LINK_ENVIADO_VENCIDO';
 
-    public function __construct(private readonly PersonalService $personalService)
+    public function __construct(
+        private readonly PersonalService $personalService,
+        private readonly PersonalContratoDatoService $contratoDatoService,
+    )
     {
     }
 
@@ -634,7 +637,12 @@ class PersonalFichaService
             $data['periodo_prueba_fin'] = PersonalNormalizer::isoDate($contractDates['periodo_prueba_fin'] ?? $data['periodo_prueba_fin'] ?? null) ?? '';
             $personal = $ficha->personal()->firstOrFail();
 
-            $this->personalService->update($personal, $this->personalPayloadFromFicha($data, 'ACTIVO'));
+            $this->personalService->update($personal, $this->personalPayloadFromFicha($data, PersonalContratoDatoService::PENDING_STATE));
+            $this->contratoDatoService->ensureForPersonal($personal->fresh(), [
+                ...$data,
+                'fecha_inicio_contrato' => $data['fecha_ingreso'] ?? null,
+                'puesto' => $data['puesto'] ?? $personal->puesto,
+            ], $user);
 
             $ficha->forceFill([
                 'estado' => PersonalFicha::ESTADO_APROBADO,
@@ -1544,14 +1552,6 @@ class PersonalFichaService
             $requiredKeys = $requiredKeys->merge(['quinta_otra_empresa', 'quinta_otra_empresa_ruc']);
         }
 
-        if (in_array((string) ($data['contrato'] ?? ''), ['REG', 'FIJO', 'INTER'], true)) {
-            $requiredKeys->push('fecha_fin_contrato');
-        }
-
-        if ((string) ($data['contrato'] ?? '') === 'INDET') {
-            $requiredKeys->push('fecha_ingreso');
-        }
-
         return $requiredKeys
             ->unique()
             ->filter(function (string $key) use ($data): bool {
@@ -1604,14 +1604,6 @@ class PersonalFichaService
 
         if (($data['quinta_empleador_principal'] ?? null) === 'Otra empresa') {
             $requiredKeys = $requiredKeys->merge(['quinta_otra_empresa', 'quinta_otra_empresa_ruc']);
-        }
-
-        if (in_array((string) ($data['contrato'] ?? ''), ['REG', 'FIJO', 'INTER'], true)) {
-            $requiredKeys->push('fecha_fin_contrato');
-        }
-
-        if ((string) ($data['contrato'] ?? '') === 'INDET') {
-            $requiredKeys->push('fecha_ingreso');
         }
 
         return $requiredKeys

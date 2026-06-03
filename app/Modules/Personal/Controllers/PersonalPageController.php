@@ -135,7 +135,7 @@ class PersonalPageController extends WebPageController
         )->resolve();
 
         if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
-            $trabajadores = array_values(array_filter($trabajadores, fn (array $trabajador): bool => strtoupper((string) ($trabajador['estado'] ?? '')) === $visibleStateFilter));
+            $trabajadores = array_values(array_filter($trabajadores, fn (array $trabajador): bool => strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter));
         }
 
         $catalogs = $this->getLocationCatalogs();

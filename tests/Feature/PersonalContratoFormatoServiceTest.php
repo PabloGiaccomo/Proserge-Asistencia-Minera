@@ -6,6 +6,8 @@ use App\Modules\Personal\Services\PersonalContratoFormatoService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -59,6 +61,20 @@ class PersonalContratoFormatoServiceTest extends TestCase
             'updated_at' => now(),
         ]);
 
+        DB::table('personal_contrato_datos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'fecha_inicio_contrato' => '2026-07-01',
+            'fecha_fin_contrato' => '2026-07-31',
+            'periodo_prueba_inicio' => '2026-07-01',
+            'periodo_prueba_fin' => '2026-07-15',
+            'puesto' => 'SUPERVISOR CONTRATO',
+            'sueldo_num' => '3500',
+            'sueldo_texto' => 'TRES MIL QUINIENTOS',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $preview = app(PersonalContratoFormatoService::class)->preview('nuevos_inter_2026_06_02', [$personalId]);
 
         $this->assertSame('NUEVOS INTER - 02/06/2026', $preview['template']['label']);
@@ -68,9 +84,9 @@ class PersonalContratoFormatoServiceTest extends TestCase
         $this->assertSame('AV. PRUEBA 123', $preview['rows'][0][3]);
         $this->assertSame('CERRO COLORADO - AREQUIPA - AREQUIPA', $preview['rows'][0][4]);
         $this->assertSame('ficha-contrato@test.local', $preview['rows'][0][5]);
-        $this->assertSame('02 DE JUNIO DEL 2026', $preview['rows'][0][6]);
-        $this->assertSame('30 DE JUNIO DEL 2026', $preview['rows'][0][7]);
-        $this->assertSame('SOLDADOR 3G', $preview['rows'][0][14]);
+        $this->assertSame('01 DE JULIO DEL 2026', $preview['rows'][0][6]);
+        $this->assertSame('31 DE JULIO DEL 2026', $preview['rows'][0][7]);
+        $this->assertSame('SUPERVISOR CONTRATO', $preview['rows'][0][14]);
     }
 
     public function test_contract_format_routes_return_templates_preview_and_download(): void
@@ -98,9 +114,42 @@ class PersonalContratoFormatoServiceTest extends TestCase
             ])
             ->assertOk()
             ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+        $this->assertNotNull(
+            DB::table('personal_contrato_datos')->where('personal_id', $personalId)->value('downloaded_at')
+        );
     }
 
-    private function createWorker(): string
+    public function test_signed_contract_upload_activates_worker_after_download(): void
+    {
+        Storage::fake('local');
+
+        $session = $this->updateSession();
+        $personalId = $this->createWorker('FALTA_CONTRATO');
+
+        DB::table('personal_contrato_datos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'downloaded_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($session)
+            ->post('/personal/' . $personalId . '/contrato-firmado', [
+                'contrato_pdf' => UploadedFile::fake()->create('contrato_firmado.pdf', 64, 'application/pdf'),
+            ])
+            ->assertRedirect('/personal');
+
+        $contract = DB::table('personal_contrato_datos')->where('personal_id', $personalId)->first();
+
+        $this->assertSame('ACTIVO', DB::table('personal')->where('id', $personalId)->value('estado'));
+        $this->assertNotNull($contract->signed_at);
+        $this->assertSame('contrato_firmado.pdf', $contract->signed_contract_original_name);
+        Storage::disk('local')->assertExists($contract->signed_contract_path);
+    }
+
+    private function createWorker(string $estado = 'ACTIVO'): string
     {
         $personalId = (string) Str::uuid();
 
@@ -116,7 +165,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
             'es_supervisor' => false,
             'qr_code' => 'QR-' . Str::upper(Str::random(10)),
             'fecha_ingreso' => '2026-06-02',
-            'estado' => 'ACTIVO',
+            'estado' => $estado,
             'telefono' => '999999999',
             'telefono_1' => '999999999',
             'correo' => 'contrato-formato@test.local',
@@ -151,6 +200,16 @@ class PersonalContratoFormatoServiceTest extends TestCase
 
     private function exportSession(): array
     {
+        return $this->sessionWithPersonalPermissions(['ver', 'exportar']);
+    }
+
+    private function updateSession(): array
+    {
+        return $this->sessionWithPersonalPermissions(['ver', 'actualizar']);
+    }
+
+    private function sessionWithPersonalPermissions(array $actions): array
+    {
         $roleId = (string) Str::uuid();
         $userId = (string) Str::uuid();
 
@@ -158,7 +217,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
             'id' => $roleId,
             'nombre' => 'EXPORT_CONTRATO_' . Str::upper(Str::random(6)),
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'personal' => ['ver', 'exportar'],
+                'personal' => $actions,
             ])),
             'estado' => 'ACTIVO',
             'created_at' => now(),
@@ -183,7 +242,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
                 'id' => $userId,
                 'email' => 'export@test.local',
                 'permissions' => PermissionCatalog::matrixFromSelections([
-                    'personal' => ['ver', 'exportar'],
+                    'personal' => $actions,
                 ]),
             ],
         ];

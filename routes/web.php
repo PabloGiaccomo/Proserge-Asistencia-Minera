@@ -9,6 +9,7 @@ use App\Modules\Personal\Controllers\PersonalDocumentoController;
 use App\Modules\Personal\Controllers\PersonalFichaController;
 use App\Modules\Personal\Controllers\PersonalContratoController;
 use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
+use App\Modules\Personal\Controllers\PersonalContratoDatoController;
 use App\Modules\Personal\Controllers\PublicPersonalFichaController;
 use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
@@ -94,6 +95,9 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/formatos-contrato/personal', [PersonalContratoFormatoController::class, 'searchWorkers'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.personal');
     Route::post('/personal/formatos-contrato/preview', [PersonalContratoFormatoController::class, 'preview'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.preview');
     Route::post('/personal/formatos-contrato/descargar', [PersonalContratoFormatoController::class, 'download'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.download');
+    Route::get('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.contrato-datos.edit');
+    Route::put('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.contrato-datos.update');
+    Route::post('/personal/{id}/contrato-firmado', [PersonalContratoDatoController::class, 'signedContract'])->middleware('web.permission:personal,actualizar')->name('personal.contrato-datos.signed');
     Route::get('/personal/crear', [PersonalPageController::class, 'create'])->middleware('web.permission:personal,crear')->name('personal.create');
     Route::post('/personal/crear', [PersonalPageController::class, 'store'])->middleware('web.permission:personal,crear')->name('personal.store');
     Route::get('/personal/fichas/importar', [PersonalFichaController::class, 'importForm'])->middleware('web.permission:personal,importar')->name('personal.fichas.import');
