@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaLink;
+use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -112,6 +114,109 @@ class PersonalFichaObservedResubmitTest extends TestCase
             'id' => $personalId,
             'estado' => PersonalFicha::ESTADO_ENVIADA,
         ]);
+    }
+
+    public function test_unapproved_public_submit_does_not_keep_worker_active(): void
+    {
+        Carbon::setTestNow('2026-06-03 09:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $data = $this->fichaData([
+            'numero_documento' => '87654321',
+            'telefono' => '977777777',
+            'correo' => 'revision@test.local',
+            'puesto' => 'Operario pendiente',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '87654321',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '87654321',
+            'nombre_completo' => 'Trabajador Activo Sin Aprobar',
+            'puesto' => 'Operario pendiente',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'fecha_ingreso' => '2026-06-01',
+            'estado' => 'ACTIVO',
+            'telefono' => '977777777',
+            'telefono_1' => '977777777',
+            'correo' => 'revision@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '87654321',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', 'active-not-approved-token'),
+            'token_encrypted' => encrypt('active-not-approved-token'),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        app(PersonalFichaService::class)->submitFromWorker(
+            PersonalFichaLink::query()->findOrFail($linkId),
+            $data,
+            [],
+            'data:image/png;base64,pending',
+            null,
+            [],
+        );
+
+        $this->assertDatabaseHas('personal_fichas', [
+            'id' => $fichaId,
+            'estado' => PersonalFicha::ESTADO_ENVIADA,
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_ENVIADA,
+        ]);
+    }
+
+    public function test_observed_worker_is_shown_as_review_ficha_in_personal_list(): void
+    {
+        $personalId = (string) Str::uuid();
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '76543210',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '76543210',
+            'nombre_completo' => 'Trabajador Observado Lista',
+            'puesto' => 'Operario',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'fecha_ingreso' => '2026-06-01',
+            'estado' => PersonalFicha::ESTADO_OBSERVADO,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $row = (new PersonalResource(Personal::query()->findOrFail($personalId)))->resolve();
+
+        $this->assertSame('revisar_ficha', $row['situacion']);
+        $this->assertSame('Revisar ficha', $row['situacion_label']);
     }
 
     private function fichaData(array $overrides = []): array

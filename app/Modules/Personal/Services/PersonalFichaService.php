@@ -529,7 +529,7 @@ class PersonalFichaService
             ])->save();
 
             if ($ficha->personal) {
-                $newPersonalState = $wasApproved || in_array($previousPersonalState, ['ACTIVO', 'INACTIVO', 'CESADO'], true)
+                $newPersonalState = $wasApproved || in_array($previousPersonalState, ['INACTIVO', 'CESADO'], true)
                     ? $previousPersonalState
                     : PersonalFicha::ESTADO_ENVIADA;
 

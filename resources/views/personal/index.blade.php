@@ -506,6 +506,29 @@
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
     scrollbar-gutter: stable both-edges;
+    cursor: grab;
+    user-select: auto;
+}
+
+.personal-page .table-responsive.personal-grid-wrap.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+}
+
+.personal-page .table-responsive.personal-grid-wrap button,
+.personal-page .table-responsive.personal-grid-wrap a,
+.personal-page .table-responsive.personal-grid-wrap [role="button"] {
+    cursor: pointer;
+}
+
+.personal-page .table-responsive.personal-grid-wrap input,
+.personal-page .table-responsive.personal-grid-wrap textarea {
+    cursor: text;
+}
+
+.personal-page .table-responsive.personal-grid-wrap select,
+.personal-page .table-responsive.personal-grid-wrap label {
+    cursor: default;
 }
 
 .personal-page .personal-grid-shell {
@@ -3339,6 +3362,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const viewStateKey = 'proserge.personal.index.viewState.v1';
     const defaultVisibleColumns = ['documento', 'celular', 'correo', 'puesto', 'contrato', 'estado', 'situacion', 'ocupacion', 'acciones'];
     let syncingScroll = false;
+    let gridDragState = null;
 
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
@@ -3605,7 +3629,10 @@ document.addEventListener('DOMContentLoaded', function () {
         topScrollbar.style.width = tableWrap.getBoundingClientRect().width + 'px';
         topScrollbarInner.style.width = (topScrollbar.clientWidth + tableMaxScrollLeft) + 'px';
         tableWrap.scrollLeft = currentScrollLeft;
-        topScrollbar.scrollLeft = currentScrollLeft;
+        const topMaxScrollLeft = Math.max(0, topScrollbar.scrollWidth - topScrollbar.clientWidth);
+        topScrollbar.scrollLeft = topMaxScrollLeft > 0 && Math.abs(currentScrollLeft - tableMaxScrollLeft) <= 2
+            ? topMaxScrollLeft
+            : Math.max(0, Math.min(currentScrollLeft, topMaxScrollLeft));
     };
 
     const syncHorizontalScrollPosition = function (preferredScrollLeft) {
@@ -3615,11 +3642,13 @@ document.addEventListener('DOMContentLoaded', function () {
         const requested = Number.isFinite(preferredScrollLeft)
             ? preferredScrollLeft
             : tableWrap.scrollLeft;
-        const nextScrollLeft = Math.max(0, Math.min(requested, maxScrollLeft));
+        const nextScrollLeft = maxScrollLeft > 0 && Math.abs(requested - maxScrollLeft) <= 2
+            ? maxScrollLeft
+            : Math.max(0, Math.min(requested, maxScrollLeft));
 
         tableWrap.scrollLeft = nextScrollLeft;
         if (topScrollbar) {
-            topScrollbar.scrollLeft = nextScrollLeft;
+            syncScrollPair(tableWrap, topScrollbar);
         }
     };
 
@@ -3629,8 +3658,26 @@ document.addEventListener('DOMContentLoaded', function () {
         const sourceMax = Math.max(0, source.scrollWidth - source.clientWidth);
         const targetMax = Math.max(0, target.scrollWidth - target.clientWidth);
         const sourceAtEnd = sourceMax > 0 && Math.abs(source.scrollLeft - sourceMax) <= 2;
+        const ratio = sourceMax > 0 ? source.scrollLeft / sourceMax : 0;
+        const nextScrollLeft = sourceAtEnd ? targetMax : targetMax * ratio;
 
-        target.scrollLeft = sourceAtEnd ? targetMax : Math.max(0, Math.min(source.scrollLeft, targetMax));
+        target.scrollLeft = Math.max(0, Math.min(nextScrollLeft, targetMax));
+    };
+
+    const isGridDragBlockedTarget = function (target) {
+        return !!target.closest('a, button, input, select, textarea, label, form, [role="button"], [contenteditable="true"], .dg-filter-popover, .personal-action-buttons, .modal, .dropdown-menu');
+    };
+
+    const canStartGridDrag = function (event) {
+        if (!tableWrap || event.button !== 0 || event.pointerType === 'touch') return false;
+        if (isGridDragBlockedTarget(event.target)) return false;
+        return (tableWrap.scrollWidth - tableWrap.clientWidth) > 2;
+    };
+
+    const finishGridDrag = function () {
+        if (!tableWrap || !gridDragState) return;
+        tableWrap.classList.remove('is-dragging');
+        gridDragState = null;
     };
 
     const closeAllPopovers = function () {
@@ -4161,6 +4208,36 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (tableWrap) {
+        tableWrap.addEventListener('pointerdown', function (event) {
+            if (!canStartGridDrag(event)) return;
+
+            gridDragState = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                startScrollLeft: tableWrap.scrollLeft,
+                hasMoved: false,
+            };
+            tableWrap.setPointerCapture?.(event.pointerId);
+        });
+
+        tableWrap.addEventListener('pointermove', function (event) {
+            if (!gridDragState || gridDragState.pointerId !== event.pointerId) return;
+
+            const deltaX = event.clientX - gridDragState.startX;
+            const deltaY = event.clientY - gridDragState.startY;
+            if (!gridDragState.hasMoved && Math.abs(deltaX) < 4 && Math.abs(deltaY) < 4) return;
+
+            gridDragState.hasMoved = true;
+            tableWrap.classList.add('is-dragging');
+            event.preventDefault();
+            syncHorizontalScrollPosition(gridDragState.startScrollLeft - deltaX);
+        });
+
+        tableWrap.addEventListener('pointerup', finishGridDrag);
+        tableWrap.addEventListener('pointercancel', finishGridDrag);
+        tableWrap.addEventListener('lostpointercapture', finishGridDrag);
+
         tableWrap.addEventListener('scroll', function () {
             if (topScrollbar && !syncingScroll) {
                 syncingScroll = true;

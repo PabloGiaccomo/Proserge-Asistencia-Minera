@@ -248,8 +248,7 @@ class PersonalResource extends JsonResource
         $contratoVencido = $fechaFinContrato !== null && $fechaFinContrato !== '' && $fechaFinContrato < $todayString;
         $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
         $motivoCese = trim((string) ($this->motivo_cese ?? ''));
-        $revisarFicha = $estadoPersonal === 'FICHA_ENVIADA';
-        $fichaObservada = $estadoPersonal === 'OBSERVADO';
+        $revisarFicha = in_array($estadoPersonal, ['FICHA_ENVIADA', 'OBSERVADO'], true);
         $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
             || $ficha === null
             || count($missingRequiredFichaFields) > 0;
@@ -269,7 +268,6 @@ class PersonalResource extends JsonResource
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
             $revisarFicha => 'revisar_ficha',
-            $fichaObservada => 'ficha_observada',
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'descanso_medico' => 'descanso_medico',
