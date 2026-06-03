@@ -2403,7 +2403,7 @@
                                                         <path d="M8 17h5"/>
                                                     </svg>
                                                 </a>
-                                                @if($canUpdatePersonal && !empty($trabajador['contrato_datos_downloaded']) && empty($trabajador['contrato_firmado']))
+                                                @if($canUpdatePersonal && !empty($trabajador['contrato_datos']) && empty($trabajador['contrato_firmado']))
                                                     <button
                                                         type="button"
                                                         class="btn btn-outline btn-xs personal-icon-btn"

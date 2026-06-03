@@ -43,7 +43,7 @@ class PersonalContratoDatoController extends WebPageController
         $this->service->update($personal, $validated, $this->requireAuthenticatedUser());
 
         return redirect()
-            ->route('personal.contrato-datos.edit', $personal->id)
+            ->route('personal.index')
             ->with('success', 'Datos de contrato actualizados correctamente.');
     }
 

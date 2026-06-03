@@ -149,6 +149,36 @@ class PersonalContratoFormatoServiceTest extends TestCase
         Storage::disk('local')->assertExists($contract->signed_contract_path);
     }
 
+    public function test_contract_data_update_redirects_to_personal_list(): void
+    {
+        $session = $this->updateSession();
+        $personalId = $this->createWorker('FALTA_CONTRATO');
+
+        $this->withSession($session)
+            ->put('/personal/' . $personalId . '/datos-contrato', [
+                'fecha_inicio_contrato' => '2026-06-03',
+                'fecha_fin_contrato' => '2026-12-31',
+                'periodo_prueba_inicio' => '2026-06-03',
+                'periodo_prueba_fin' => '2026-09-02',
+                'puesto' => 'Operario contrato',
+                'sueldo_num' => '2500',
+                'sueldo_texto' => 'DOS MIL QUINIENTOS',
+            ])
+            ->assertRedirect('/personal');
+
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personalId,
+            'fecha_inicio_contrato' => '2026-06-03',
+            'fecha_fin_contrato' => '2026-12-31',
+            'periodo_prueba_inicio' => '2026-06-03',
+            'periodo_prueba_fin' => '2026-09-02',
+            'puesto' => 'Operario contrato',
+            'sueldo_num' => '2500',
+            'sueldo_texto' => 'DOS MIL QUINIENTOS',
+        ]);
+        $this->assertSame('Operario contrato', DB::table('personal')->where('id', $personalId)->value('puesto'));
+    }
+
     private function createWorker(string $estado = 'ACTIVO'): string
     {
         $personalId = (string) Str::uuid();
