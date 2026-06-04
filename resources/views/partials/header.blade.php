@@ -1,7 +1,8 @@
 @php
     $permissions = session('user.permissions', []);
-    $canNotificacionesVer = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'ver');
-    $canNotificacionesActualizar = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'actualizar');
+    $canNotificacionesVer = (bool) ($notificationsEnabled ?? false)
+        || \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'ver');
+    $canNotificacionesActualizar = $canNotificacionesVer;
 @endphp
 
 <header class="app-header">

@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Modules\Seguridad\Services\RoleManagementService;
 use App\Modules\Notificaciones\Services\NotificationInboxService;
+use App\Models\NotificationUserSetting;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Schema;
@@ -43,8 +44,9 @@ class AppServiceProvider extends ServiceProvider
         View::composer('partials.header', function ($view): void {
             $userId = (string) session('user.id', '');
             $schemaReady = Schema::hasTable('notification_recipients') && Schema::hasTable('notification_events');
+            $notificationsAllowed = $this->notificationsAllowedForUser($userId);
 
-            if ($userId === '' || !$schemaReady) {
+            if ($userId === '' || !$schemaReady || !$notificationsAllowed) {
                 $view->with('notificationsEnabled', false);
                 $view->with('headerUnreadCount', 0);
                 $view->with('headerNotifications', collect());
@@ -62,5 +64,31 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('headerNotifications', collect());
             }
         });
+    }
+
+    private function notificationsAllowedForUser(string $userId): bool
+    {
+        if ($userId === '') {
+            return false;
+        }
+
+        if (!Schema::hasTable('notification_user_settings')) {
+            return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
+        }
+
+        try {
+            $setting = NotificationUserSetting::query()
+                ->where('usuario_id', $userId)
+                ->first();
+        } catch (Throwable) {
+            return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
+        }
+
+        if (!$setting) {
+            return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
+        }
+
+        return (bool) $setting->in_app_enabled
+            && (!$setting->muted_until || now()->gte($setting->muted_until));
     }
 }

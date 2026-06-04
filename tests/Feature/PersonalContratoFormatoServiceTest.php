@@ -179,6 +179,34 @@ class PersonalContratoFormatoServiceTest extends TestCase
         $this->assertSame('Operario contrato', DB::table('personal')->where('id', $personalId)->value('puesto'));
     }
 
+    public function test_signed_contract_can_be_downloaded_from_documents_view(): void
+    {
+        Storage::fake('local');
+
+        $session = $this->updateSession();
+        $personalId = $this->createWorker('ACTIVO');
+        $path = 'personal_contratos/' . $personalId . '/contrato_firmado_test.pdf';
+        Storage::disk('local')->put($path, 'PDF firmado de prueba');
+
+        DB::table('personal_contrato_datos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'signed_at' => now(),
+            'signed_contract_path' => $path,
+            'signed_contract_original_name' => 'contrato_firmado_test.pdf',
+            'signed_contract_mime' => 'application/pdf',
+            'signed_contract_size' => strlen('PDF firmado de prueba'),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($session)
+            ->get('/personal/' . $personalId . '/documentos/contrato-firmado')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertSee('PDF firmado de prueba');
+    }
+
     private function createWorker(string $estado = 'ACTIVO'): string
     {
         $personalId = (string) Str::uuid();

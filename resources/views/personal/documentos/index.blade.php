@@ -145,6 +145,51 @@
     <div class="docs-grid">
         <div class="card">
             <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                <span class="card-title">Contrato firmado</span>
+                <span class="text-muted">{{ $contratoDatos?->signed_at ? 'Registrado' : 'Pendiente' }}</span>
+            </div>
+            <div class="card-body">
+                <div class="docs-row">
+                    <div>
+                        <div class="docs-title">Contrato laboral firmado</div>
+                        <div class="docs-meta">
+                            @if($contratoDatos?->signed_at)
+                                {{ $contratoDatos->signed_contract_original_name ?: 'Contrato firmado.pdf' }} - {{ $formatSize($contratoDatos->signed_contract_size) }}
+                                <br>
+                                Firmado/subido: {{ optional($contratoDatos->signed_at)->format('d/m/Y H:i') }}
+                            @else
+                                El contrato firmado todavia no fue subido.
+                            @endif
+                        </div>
+                    </div>
+                    <div>
+                        <span class="docs-status {{ $contratoDatos?->signed_at ? 'docs-status-ok' : 'docs-status-missing' }}">
+                            {{ $contratoDatos?->signed_at ? 'Cargado' : 'Faltante' }}
+                        </span>
+                    </div>
+                    <div class="docs-actions">
+                        @if($contratoDatos?->signed_at)
+                            <a
+                                href="{{ route('personal.documentos.contrato-firmado', $trabajador->id) }}"
+                                class="btn btn-outline btn-xs docs-icon-btn"
+                                title="Descargar contrato firmado"
+                                aria-label="Descargar contrato firmado">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <path d="M7 10l5 5 5-5"/>
+                                    <path d="M12 15V3"/>
+                                </svg>
+                            </a>
+                        @else
+                            <span class="text-muted" style="font-size:12px;">Se sube desde el check del listado de personal.</span>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
                 <span class="card-title">Documentos cargados</span>
                 <span class="text-muted">{{ $attachedCatalogRows->count() }} documento(s)</span>
             </div>

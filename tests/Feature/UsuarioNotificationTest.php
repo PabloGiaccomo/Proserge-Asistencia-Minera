@@ -110,6 +110,64 @@ class UsuarioNotificationTest extends TestCase
         ]);
     }
 
+    public function test_permiso_general_permitido_muestra_y_habilita_notificaciones_sin_permiso_de_rol(): void
+    {
+        $roleId = $this->createRole('SIN_MODULO_NOTIF_' . Str::upper(Str::random(6)), [
+            'inicio' => ['ver'],
+        ]);
+        $userId = $this->createUser($roleId, 'notif-general');
+
+        DB::table('notification_user_settings')->insert([
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $userId,
+            'in_app_enabled' => true,
+            'email_enabled' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $html = view('partials.header', [
+            'notificationsEnabled' => true,
+            'headerUnreadCount' => 0,
+            'headerNotifications' => collect(),
+        ])->render();
+
+        $this->assertStringContainsString('headerNotifToggle', $html);
+
+        $this->withSession($this->sessionFor($userId, PermissionCatalog::matrixFromSelections([
+            'inicio' => ['ver'],
+        ])))
+            ->getJson('/notificaciones/poll')
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+    }
+
+    public function test_permiso_general_denegado_bloquea_notificaciones_aunque_el_rol_tenga_permiso(): void
+    {
+        $roleId = $this->createRole('CON_MODULO_NOTIF_' . Str::upper(Str::random(6)), [
+            'inicio' => ['ver'],
+            'notificaciones' => ['ver', 'actualizar'],
+        ]);
+        $userId = $this->createUser($roleId, 'notif-denegado');
+
+        DB::table('notification_user_settings')->insert([
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $userId,
+            'in_app_enabled' => false,
+            'email_enabled' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($this->sessionFor($userId, PermissionCatalog::matrixFromSelections([
+            'inicio' => ['ver'],
+            'notificaciones' => ['ver', 'actualizar'],
+        ])))
+            ->getJson('/notificaciones/poll')
+            ->assertForbidden()
+            ->assertJsonPath('error', 'PERMISSION_DENIED');
+    }
+
     private function createRole(string $name, array $permissions): string
     {
         $id = (string) Str::uuid();
@@ -157,6 +215,19 @@ class UsuarioNotificationTest extends TestCase
         ]);
 
         return $id;
+    }
+
+    private function sessionFor(string $userId, array $permissions): array
+    {
+        return [
+            'auth_token' => 'test-token',
+            'user_id' => $userId,
+            'user' => [
+                'id' => $userId,
+                'email' => 'notificaciones@test.local',
+                'permissions' => $permissions,
+            ],
+        ];
     }
 
     private function ensureNotificationType(): void

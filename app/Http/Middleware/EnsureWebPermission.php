@@ -2,11 +2,13 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\NotificationUserSetting;
 use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureWebPermission
@@ -15,16 +17,41 @@ class EnsureWebPermission
     {
         $permissions = session('user.permissions', []);
 
+        if ($module === 'notificaciones') {
+            $notificationAccess = $this->notificationAccessFromUserSetting();
+            if ($notificationAccess === true) {
+                return $next($request);
+            }
+            if ($notificationAccess === false) {
+                return $this->deny($request, $permissions, $module, $action);
+            }
+        }
+
         if (PermissionMatrix::allows($permissions, $module, $action)) {
             return $next($request);
         }
 
         $permissions = $this->refreshPermissionsFromDatabase();
 
+        if ($module === 'notificaciones') {
+            $notificationAccess = $this->notificationAccessFromUserSetting();
+            if ($notificationAccess === true) {
+                return $next($request);
+            }
+            if ($notificationAccess === false) {
+                return $this->deny($request, $permissions, $module, $action);
+            }
+        }
+
         if (PermissionMatrix::allows($permissions, $module, $action)) {
             return $next($request);
         }
 
+        return $this->deny($request, $permissions, $module, $action);
+    }
+
+    private function deny(Request $request, array $permissions, string $module, string $action): Response
+    {
         $normalized = PermissionMatrix::normalize($permissions);
 
         Log::warning('web.permission_denied', [
@@ -46,6 +73,28 @@ class EnsureWebPermission
         }
 
         abort(403, 'No tienes permiso para realizar esta accion.');
+    }
+
+    private function notificationAccessFromUserSetting(): ?bool
+    {
+        $userId = (string) (session('user_id') ?: session('user.id') ?: '');
+        if ($userId === '' || !Schema::hasTable('notification_user_settings')) {
+            return null;
+        }
+
+        $setting = NotificationUserSetting::query()
+            ->where('usuario_id', $userId)
+            ->first();
+
+        if (!$setting) {
+            return null;
+        }
+
+        if (!$setting->in_app_enabled || ($setting->muted_until && now()->lt($setting->muted_until))) {
+            return false;
+        }
+
+        return true;
     }
 
     private function refreshPermissionsFromDatabase(): array

@@ -14,6 +14,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -27,6 +28,7 @@ class PersonalDocumentoController extends WebPageController
     {
         $trabajador = Personal::query()
             ->with([
+                'contratoDatos',
                 'fichaColaborador.archivos',
                 'bloqueos' => function ($query): void {
                     $query->where('estado', 'ACTIVO')
@@ -50,6 +52,7 @@ class PersonalDocumentoController extends WebPageController
             'requirements' => $requirements,
             'attachedByType' => $attachedByType,
             'extraArchivos' => $extraArchivos,
+            'contratoDatos' => $trabajador->contratoDatos,
             'isMujer' => $this->isFemale($trabajador),
             'gestacionBloqueos' => $trabajador->bloqueos,
             'today' => Carbon::today(),
@@ -139,6 +142,24 @@ class PersonalDocumentoController extends WebPageController
         return response($dompdf->output(), 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
+    }
+
+    public function contratoFirmado(string $id): Response
+    {
+        $trabajador = Personal::query()
+            ->with('contratoDatos')
+            ->findOrFail($id);
+
+        $contrato = $trabajador->contratoDatos;
+        abort_unless($contrato?->signed_contract_path && Storage::disk('local')->exists($contrato->signed_contract_path), 404);
+
+        $filename = $contrato->signed_contract_original_name
+            ?: 'contrato_firmado_' . Str::slug($trabajador->nombre_completo ?: $trabajador->dni) . '.pdf';
+
+        return response(Storage::disk('local')->get($contrato->signed_contract_path), 200, [
+            'Content-Type' => $contrato->signed_contract_mime ?: 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . str_replace('"', '', $filename) . '"',
         ]);
     }
 

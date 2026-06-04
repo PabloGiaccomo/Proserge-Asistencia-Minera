@@ -129,6 +129,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
     Route::get('/personal/{id}/documentos', [PersonalDocumentoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.documentos.index');
     Route::post('/personal/{id}/documentos', [PersonalDocumentoController::class, 'store'])->middleware('web.permission:personal,actualizar')->name('personal.documentos.store');
+    Route::get('/personal/{id}/documentos/contrato-firmado', [PersonalDocumentoController::class, 'contratoFirmado'])->middleware('web.permission:personal,ver')->name('personal.documentos.contrato-firmado');
     Route::get('/personal/{id}/gestacion/{bloqueoId}/pdf', [PersonalDocumentoController::class, 'gestacionPdf'])->middleware('web.permission:personal,ver')->name('personal.documentos.gestacion.pdf');
     Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.edit');
     Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.update');
