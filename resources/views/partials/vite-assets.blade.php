@@ -19,6 +19,10 @@
         }
     }
 
+    if (app()->environment('production')) {
+        $hotAvailable = false;
+    }
+
     $manifest = is_file($manifestPath)
         ? (json_decode((string) file_get_contents($manifestPath), true) ?: [])
         : [];
@@ -57,13 +61,13 @@
     $fallbackCssVersion = is_file($fallbackCssPath) ? filemtime($fallbackCssPath) : null;
 @endphp
 
+@if($fallbackCssVersion)
+    <link rel="stylesheet" href="{{ url('/proserge-app.css') }}?v={{ $fallbackCssVersion }}">
+@endif
+
 @if($hotAvailable)
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 @else
-    @if($fallbackCssVersion)
-        <link rel="stylesheet" href="{{ asset($fallbackCss) }}?v={{ $fallbackCssVersion }}">
-    @endif
-
     @foreach($cssFiles as $cssFile)
         <link rel="stylesheet" href="{{ asset('build/'.$cssFile) }}">
     @endforeach

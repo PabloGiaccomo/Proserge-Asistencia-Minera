@@ -57,6 +57,19 @@ Route::get('/img/LogoProserge.png', function () {
     abort(404);
 })->name('logo-proserge');
 
+Route::get('/proserge-app.css', function () {
+    foreach ([public_path('css/proserge-app.css'), base_path('public/css/proserge-app.css')] as $path) {
+        if (is_file($path) && filesize($path) > 0) {
+            return response()->file($path, [
+                'Content-Type' => 'text/css; charset=UTF-8',
+                'Cache-Control' => 'public, max-age=604800',
+            ]);
+        }
+    }
+
+    abort(404);
+})->name('assets.proserge-css');
+
 Route::get('/', function () {
     if (session('auth_token')) {
         return redirect()->route('inicio');
