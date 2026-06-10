@@ -632,7 +632,11 @@
         width: min(1180px, calc(100vw - 28px));
     }
 
-    .mine-dialog.is-wide.no-body-scroll {
+    .mine-dialog:not([open]) {
+        display: none !important;
+    }
+
+    .mine-dialog[open].is-wide.no-body-scroll {
         height: min(90vh, 820px);
         max-height: 90vh;
         overflow: hidden;
