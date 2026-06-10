@@ -4,6 +4,7 @@ namespace App\Modules\Personal\Services;
 
 use App\Mail\PersonalFichaLinkMail;
 use App\Models\Personal;
+use App\Models\PersonalDocumentoEstado;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
 use App\Models\PersonalFichaFamiliar;
@@ -12,6 +13,7 @@ use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
@@ -210,7 +212,7 @@ class PersonalFichaService
         return DB::transaction(function () use ($data, $documentType, $documentNumber, $attributes, $verifyFields, $missingRequired, $user): array {
             $existing = $this->findPersonalByDocument($documentType, $documentNumber);
 
-            if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
+            if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'FALTA_CONTRATO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'OBSERVADO', 'LINK_VENCIDO'], true)) {
                 throw ValidationException::withMessages([
                     'fields.numero_documento' => 'Ya existe un trabajador activo o pendiente con este documento.',
                 ]);
@@ -266,7 +268,7 @@ class PersonalFichaService
         }
 
         $existing = $this->findPersonalByDocument($documentType, $documentNumber);
-        if ($existing && $existing->id !== $personal->id && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
+        if ($existing && $existing->id !== $personal->id && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'FALTA_CONTRATO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'OBSERVADO', 'LINK_VENCIDO'], true)) {
             throw ValidationException::withMessages([
                 'fields.numero_documento' => 'Ya existe otro trabajador activo o pendiente con este documento.',
             ]);
@@ -276,7 +278,7 @@ class PersonalFichaService
 
         return DB::transaction(function () use ($personal, $data, $attributes, $user, $documentType, $documentNumber, $documentPaths): array {
             $updatedPersonal = $this->personalService->update($personal, [
-                ...$this->personalPayloadFromFicha($data, $attributes['estado'] ?? ((string) $personal->estado ?: 'ACTIVO')),
+                ...$this->personalPayloadFromFicha($data, $attributes['estado'] ?? ((string) $personal->estado ?: PersonalFicha::ESTADO_PENDIENTE)),
                 'es_supervisor' => filter_var($attributes['es_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN),
                 'minas' => $attributes['minas'] ?? [],
             ]);
@@ -292,9 +294,16 @@ class PersonalFichaService
                     'datos_detectados_json' => $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $data),
                 ])->save();
             } else {
-                $estadoFicha = strtoupper((string) ($attributes['estado'] ?? $personal->estado)) === 'ACTIVO'
-                    ? PersonalFicha::ESTADO_APROBADO
-                    : 'INACTIVO';
+                $estadoPersonal = strtoupper((string) ($attributes['estado'] ?? $personal->estado));
+                $estadoFicha = match ($estadoPersonal) {
+                    'ACTIVO', PersonalContratoDatoService::PENDING_STATE, PersonalFicha::ESTADO_APROBADO => PersonalFicha::ESTADO_APROBADO,
+                    PersonalFicha::ESTADO_PENDIENTE,
+                    PersonalFicha::ESTADO_ENVIADA,
+                    PersonalFicha::ESTADO_OBSERVADO,
+                    PersonalFicha::ESTADO_LINK_VENCIDO,
+                    PersonalFicha::ESTADO_RECHAZADO => $estadoPersonal,
+                    default => 'INACTIVO',
+                };
 
                 $ficha = PersonalFicha::query()->create([
                     'id' => (string) Str::uuid(),
@@ -353,9 +362,16 @@ class PersonalFichaService
                 $data = $this->seedFichaDataFromPersonal($personal);
                 $documentType = PersonalNormalizer::documentType($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
                 $documentNumber = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
-                $estadoFicha = strtoupper((string) $personal->estado) === 'ACTIVO'
-                    ? PersonalFicha::ESTADO_APROBADO
-                    : (string) $personal->estado;
+                $estadoPersonal = strtoupper((string) $personal->estado);
+                $estadoFicha = match ($estadoPersonal) {
+                    'ACTIVO', PersonalContratoDatoService::PENDING_STATE, PersonalFicha::ESTADO_APROBADO => PersonalFicha::ESTADO_APROBADO,
+                    PersonalFicha::ESTADO_PENDIENTE,
+                    PersonalFicha::ESTADO_ENVIADA,
+                    PersonalFicha::ESTADO_OBSERVADO,
+                    PersonalFicha::ESTADO_LINK_VENCIDO,
+                    PersonalFicha::ESTADO_RECHAZADO => $estadoPersonal,
+                    default => (string) $personal->estado,
+                };
 
                 $ficha = PersonalFicha::query()->create([
                     'id' => (string) Str::uuid(),
@@ -396,7 +412,7 @@ class PersonalFichaService
         }
 
         $existing = $this->findPersonalByDocument($type, $number);
-        if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA'], true)) {
+        if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'FALTA_CONTRATO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'OBSERVADO', 'LINK_VENCIDO'], true)) {
             return [
                 'available' => true,
                 'type' => $type,
@@ -413,6 +429,216 @@ class PersonalFichaService
             'number' => $number,
             'message' => 'Disponible para generar link.',
         ];
+    }
+
+    public function documentMatrix(?PersonalFicha $ficha): array
+    {
+        $requirements = PersonalFichaCatalog::documentRequirements();
+
+        if (!$ficha) {
+            return collect($requirements)
+                ->map(function (array $requirement, string $key): array {
+                    return [
+                        'key' => $key,
+                        'label' => $requirement['label'] ?? $key,
+                        'description' => $requirement['description'] ?? '',
+                        'required' => (bool) ($requirement['required'] ?? false),
+                        'conditional' => ($requirement['condition'] ?? null) !== null,
+                        'applies' => true,
+                        'special' => $requirement['special'] ?? null,
+                        'estado' => PersonalDocumentoEstado::ESTADO_PENDIENTE,
+                        'estado_label' => PersonalFichaCatalog::documentStateLabels()[PersonalDocumentoEstado::ESTADO_PENDIENTE],
+                        'archivo' => null,
+                        'observacion' => null,
+                        'complete' => false,
+                        'missing_file' => (bool) ($requirement['required'] ?? false),
+                        'pending_review' => false,
+                        'observed' => false,
+                        'vida_ley_entrega_fisica' => null,
+                        'vida_ley_entrega_fisica_label' => null,
+                        'vida_ley_entrega_observacion' => null,
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $relations = ['archivos', 'familiares'];
+        if (Schema::hasTable('personal_documento_estados')) {
+            $relations[] = 'documentoEstados';
+        }
+        $ficha->loadMissing($relations);
+
+        $archivos = $ficha->archivos->keyBy('tipo');
+        $estados = Schema::hasTable('personal_documento_estados')
+            ? $ficha->documentoEstados->keyBy('tipo')
+            : collect();
+
+        return collect($requirements)
+            ->map(function (array $requirement, string $key) use ($ficha, $archivos, $estados): array {
+                $archivo = $archivos->get($key);
+                $estadoRecord = $estados->get($key);
+                $applies = $this->documentApplies($ficha, $key, $requirement);
+                $baseRequired = (bool) ($requirement['required'] ?? false);
+                $required = $baseRequired || (($requirement['condition'] ?? null) !== null && $applies);
+                $storedState = strtoupper(trim((string) ($estadoRecord?->estado ?? '')));
+
+                if (!$applies) {
+                    $estado = PersonalDocumentoEstado::ESTADO_NO_APLICA;
+                } elseif (in_array($storedState, PersonalDocumentoEstado::estados(), true)) {
+                    $estado = $storedState;
+                } else {
+                    $estado = $archivo
+                        ? PersonalDocumentoEstado::ESTADO_CARGADO
+                        : PersonalDocumentoEstado::ESTADO_PENDIENTE;
+                }
+
+                $labels = PersonalFichaCatalog::documentStateLabels();
+                $vidaLeyFisica = $estadoRecord?->vida_ley_entrega_fisica;
+                $vidaLeyLabels = PersonalFichaCatalog::vidaLeyPhysicalStateLabels();
+
+                return [
+                    'key' => $key,
+                    'label' => $requirement['label'] ?? $key,
+                    'description' => $requirement['description'] ?? '',
+                    'required' => $required,
+                    'conditional' => ($requirement['condition'] ?? null) !== null,
+                    'applies' => $applies,
+                    'special' => $requirement['special'] ?? null,
+                    'estado' => $estado,
+                    'estado_label' => $labels[$estado] ?? str_replace('_', ' ', $estado),
+                    'archivo' => $archivo,
+                    'observacion' => $estadoRecord?->observacion,
+                    'complete' => in_array($estado, [PersonalDocumentoEstado::ESTADO_APROBADO, PersonalDocumentoEstado::ESTADO_NO_APLICA], true),
+                    'missing_file' => $applies && $required && !$archivo,
+                    'pending_review' => $applies && $archivo && $estado === PersonalDocumentoEstado::ESTADO_CARGADO,
+                    'observed' => $applies && $estado === PersonalDocumentoEstado::ESTADO_OBSERVADO,
+                    'vida_ley_entrega_fisica' => $vidaLeyFisica,
+                    'vida_ley_entrega_fisica_label' => $vidaLeyFisica ? ($vidaLeyLabels[$vidaLeyFisica] ?? str_replace('_', ' ', $vidaLeyFisica)) : null,
+                    'vida_ley_entrega_observacion' => $estadoRecord?->vida_ley_entrega_observacion,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    public function documentSummary(?PersonalFicha $ficha): array
+    {
+        $rows = collect($this->documentMatrix($ficha));
+
+        return [
+            'total' => $rows->count(),
+            'aprobados' => $rows->where('estado', PersonalDocumentoEstado::ESTADO_APROBADO)->count(),
+            'cargados' => $rows->where('estado', PersonalDocumentoEstado::ESTADO_CARGADO)->count(),
+            'pendientes' => $rows->where('estado', PersonalDocumentoEstado::ESTADO_PENDIENTE)->count(),
+            'observados' => $rows->where('estado', PersonalDocumentoEstado::ESTADO_OBSERVADO)->count(),
+            'no_aplica' => $rows->where('estado', PersonalDocumentoEstado::ESTADO_NO_APLICA)->count(),
+            'faltan_archivos' => $rows->where('missing_file', true)->count(),
+            'pendientes_revision' => $rows->where('pending_review', true)->count(),
+            'completos' => $rows->every(fn (array $row): bool => (bool) $row['complete']),
+        ];
+    }
+
+    public function requiredDocumentKeysForPayload(array $fields, array $familiares): array
+    {
+        $data = [
+            ...$fields,
+            ...$this->normalizeFichaData($fields),
+        ];
+
+        return collect(PersonalFichaCatalog::documentRequirements())
+            ->filter(function (array $requirement) use ($data, $familiares): bool {
+                if ((bool) ($requirement['required'] ?? false)) {
+                    return true;
+                }
+
+                return ($requirement['condition'] ?? null) !== null
+                    && $this->documentAppliesToPayload($data, $familiares, $requirement);
+            })
+            ->keys()
+            ->values()
+            ->all();
+    }
+
+    public function updateDocumentState(PersonalFicha $ficha, string $tipo, array $payload, Usuario $user): PersonalDocumentoEstado
+    {
+        if (!Schema::hasTable('personal_documento_estados')) {
+            throw ValidationException::withMessages([
+                'documento' => 'La tabla de estados documentales todavia no esta disponible. Ejecuta las migraciones.',
+            ]);
+        }
+
+        $requirements = PersonalFichaCatalog::documentRequirements();
+        if (!array_key_exists($tipo, $requirements)) {
+            throw ValidationException::withMessages([
+                'documento' => 'Tipo de documento no reconocido.',
+            ]);
+        }
+
+        $ficha->loadMissing(['archivos', 'familiares']);
+        $requirement = $requirements[$tipo];
+        $applies = $this->documentApplies($ficha, $tipo, $requirement);
+        $archivo = $ficha->archivos->firstWhere('tipo', $tipo);
+        $estado = strtoupper(trim((string) ($payload['estado'] ?? PersonalDocumentoEstado::ESTADO_PENDIENTE)));
+
+        if (!in_array($estado, PersonalDocumentoEstado::estados(), true)) {
+            throw ValidationException::withMessages([
+                'estado' => 'Estado documental invalido.',
+            ]);
+        }
+
+        if ($estado === PersonalDocumentoEstado::ESTADO_APROBADO && !$archivo) {
+            throw ValidationException::withMessages([
+                'estado' => 'No se puede aprobar un documento sin archivo cargado.',
+            ]);
+        }
+
+        if ($estado === PersonalDocumentoEstado::ESTADO_OBSERVADO && trim((string) ($payload['observacion'] ?? '')) === '') {
+            throw ValidationException::withMessages([
+                'observacion' => 'Escribe la observacion del documento.',
+            ]);
+        }
+
+        if ($estado === PersonalDocumentoEstado::ESTADO_NO_APLICA && $applies && (bool) ($requirement['required'] ?? false) && ($requirement['condition'] ?? null) === null) {
+            throw ValidationException::withMessages([
+                'estado' => 'Este documento obligatorio no puede marcarse como no aplica.',
+            ]);
+        }
+
+        $vidaLeyFisica = $payload['vida_ley_entrega_fisica'] ?? null;
+        if (($requirement['special'] ?? null) === 'vida_ley' && $vidaLeyFisica !== null) {
+            $vidaLeyFisica = strtoupper(trim((string) $vidaLeyFisica));
+            if (!in_array($vidaLeyFisica, PersonalDocumentoEstado::vidaLeyEntregaFisicaEstados(), true)) {
+                throw ValidationException::withMessages([
+                    'vida_ley_entrega_fisica' => 'Estado de entrega fisica de Vida Ley invalido.',
+                ]);
+            }
+        } else {
+            $vidaLeyFisica = null;
+        }
+
+        return DB::transaction(function () use ($ficha, $tipo, $estado, $payload, $vidaLeyFisica, $user): PersonalDocumentoEstado {
+            $record = PersonalDocumentoEstado::query()
+                ->firstOrNew([
+                    'personal_ficha_id' => $ficha->id,
+                    'tipo' => $tipo,
+                ]);
+
+            if (!$record->exists) {
+                $record->id = (string) Str::uuid();
+            }
+
+            $record->forceFill([
+                'estado' => $estado,
+                'observacion' => trim((string) ($payload['observacion'] ?? '')) ?: null,
+                'vida_ley_entrega_fisica' => $vidaLeyFisica,
+                'vida_ley_entrega_observacion' => trim((string) ($payload['vida_ley_entrega_observacion'] ?? '')) ?: null,
+                'updated_by_usuario_id' => $user->id,
+                'estado_updated_at' => now(),
+            ])->save();
+
+            return $record->fresh();
+        });
     }
 
     public function resolveToken(string $token): array
@@ -1439,6 +1665,7 @@ class PersonalFichaService
                     'numero_documento' => PersonalNormalizer::documentNumber($item['numero_documento'] ?? '') ?: null,
                     'telefono' => PersonalNormalizer::combinePhones($phoneData['telefono_1'] ?? null, $phoneData['telefono_2'] ?? null),
                     'vive_con_trabajador' => filter_var($item['vive_con_trabajador'] ?? false, FILTER_VALIDATE_BOOL),
+                    'estudia' => filter_var($item['estudia'] ?? false, FILTER_VALIDATE_BOOL),
                     'contacto_emergencia' => filter_var($item['contacto_emergencia'] ?? false, FILTER_VALIDATE_BOOL),
                 ];
             })
@@ -1461,6 +1688,7 @@ class PersonalFichaService
                 'numero_documento' => $item->numero_documento,
                 'telefono' => $item->telefono,
                 'vive_con_trabajador' => $item->vive_con_trabajador,
+                'estudia' => $item->estudia,
                 'contacto_emergencia' => $item->contacto_emergencia,
             ])->values()->all();
         }
@@ -1474,6 +1702,7 @@ class PersonalFichaService
                 'numero_documento' => '',
                 'telefono' => '',
                 'vive_con_trabajador' => false,
+                'estudia' => false,
                 'contacto_emergencia' => false,
             ])
             ->all();
@@ -1488,13 +1717,11 @@ class PersonalFichaService
             ));
         }
 
-        $ficha->loadMissing('archivos');
-        $attachedTypes = $ficha->archivos->pluck('tipo')->map(fn ($value): string => (string) $value)->all();
-
-        return collect(PersonalFichaCatalog::documentRequirements())
-            ->filter(fn (array $requirement): bool => (bool) ($requirement['required'] ?? false))
-            ->keys()
-            ->reject(fn (string $key): bool => in_array($key, $attachedTypes, true))
+        return collect($this->documentMatrix($ficha))
+            ->filter(fn (array $row): bool => (bool) ($row['required'] ?? false))
+            ->filter(fn (array $row): bool => (bool) ($row['applies'] ?? true))
+            ->filter(fn (array $row): bool => (bool) ($row['missing_file'] ?? false) || (bool) ($row['observed'] ?? false))
+            ->pluck('key')
             ->values()
             ->all();
     }
@@ -1796,6 +2023,183 @@ class PersonalFichaService
         return Str::slug($tipo, '_') ?: 'documento';
     }
 
+    private function documentApplies(PersonalFicha $ficha, string $tipo, array $requirement): bool
+    {
+        $condition = $requirement['condition'] ?? null;
+        if ($condition === null) {
+            return true;
+        }
+
+        $ficha->loadMissing('familiares');
+        $rawData = is_array($ficha->datos_json ?? null) ? $ficha->datos_json : [];
+        $data = [
+            ...$rawData,
+            ...$this->normalizeFichaData($rawData),
+        ];
+
+        return match ($condition) {
+            'married' => $this->isMarriedCivilState((string) ($data['estado_civil'] ?? '')),
+            'minor_children' => $this->hasChildrenByAge($ficha, 'minor'),
+            'adult_studying_children' => $this->hasAdultStudyingChildren($ficha) || ($this->hasChildrenByAge($ficha, 'adult') && $this->hasAdultStudyingChildrenFlag($data)),
+            default => true,
+        };
+    }
+
+    private function documentAppliesToPayload(array $data, array $familiares, array $requirement): bool
+    {
+        $condition = $requirement['condition'] ?? null;
+        if ($condition === null) {
+            return true;
+        }
+
+        return match ($condition) {
+            'married' => $this->isMarriedCivilState((string) ($data['estado_civil'] ?? '')),
+            'minor_children' => $this->payloadHasChildrenByAge($familiares, 'minor'),
+            'adult_studying_children' => $this->payloadHasAdultStudyingChildren($familiares) || ($this->payloadHasChildrenByAge($familiares, 'adult') && $this->hasAdultStudyingChildrenFlag($data)),
+            default => true,
+        };
+    }
+
+    private function isMarriedCivilState(string $state): bool
+    {
+        $normalized = Str::lower(trim($state));
+
+        return in_array($normalized, ['casado', 'casada', 'conviviente'], true);
+    }
+
+    private function hasChildrenByAge(PersonalFicha $ficha, string $ageGroup): bool
+    {
+        return $ficha->familiares->contains(function (PersonalFichaFamiliar $familiar) use ($ageGroup): bool {
+            $parentesco = Str::lower(trim((string) $familiar->parentesco));
+            if (!str_contains($parentesco, 'hijo') && !str_contains($parentesco, 'hija')) {
+                return false;
+            }
+
+            if (!$familiar->fecha_nacimiento) {
+                return false;
+            }
+
+            $age = $familiar->fecha_nacimiento->age;
+
+            return $ageGroup === 'minor'
+                ? $age < 18
+                : $age >= 18;
+        });
+    }
+
+    private function hasAdultStudyingChildren(PersonalFicha $ficha): bool
+    {
+        return $ficha->familiares->contains(function (PersonalFichaFamiliar $familiar): bool {
+            $parentesco = Str::lower(trim((string) $familiar->parentesco));
+            if (!str_contains($parentesco, 'hijo') && !str_contains($parentesco, 'hija')) {
+                return false;
+            }
+
+            return (bool) $familiar->estudia
+                && $familiar->fecha_nacimiento
+                && $familiar->fecha_nacimiento->age >= 18;
+        });
+    }
+
+    private function hasAdultStudyingChildrenFlag(array $data): bool
+    {
+        foreach (['hijos_mayores_estudian', 'hijos_mayores_estudiantes', 'tiene_hijos_mayores_estudiando'] as $key) {
+            $value = Str::lower(trim((string) ($data[$key] ?? '')));
+            if (in_array($value, ['1', 'si', 'sí', 'true', 'estudia', 'estudian'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function payloadHasChildrenByAge(array $familiares, string $ageGroup): bool
+    {
+        foreach ($familiares as $familiar) {
+            if (!is_array($familiar)) {
+                continue;
+            }
+
+            $parentesco = Str::lower(trim((string) ($familiar['parentesco'] ?? '')));
+            if (!str_contains($parentesco, 'hijo') && !str_contains($parentesco, 'hija')) {
+                continue;
+            }
+
+            $date = trim((string) ($familiar['fecha_nacimiento'] ?? ''));
+            if ($date === '') {
+                continue;
+            }
+
+            try {
+                $age = Carbon::parse($date)->age;
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($ageGroup === 'minor' && $age < 18) {
+                return true;
+            }
+
+            if ($ageGroup === 'adult' && $age >= 18) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function payloadHasAdultStudyingChildren(array $familiares): bool
+    {
+        foreach ($familiares as $familiar) {
+            if (!is_array($familiar) || empty($familiar['estudia'])) {
+                continue;
+            }
+
+            $parentesco = Str::lower(trim((string) ($familiar['parentesco'] ?? '')));
+            if (!str_contains($parentesco, 'hijo') && !str_contains($parentesco, 'hija')) {
+                continue;
+            }
+
+            $date = trim((string) ($familiar['fecha_nacimiento'] ?? ''));
+            if ($date === '') {
+                continue;
+            }
+
+            try {
+                if (Carbon::parse($date)->age >= 18) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return false;
+    }
+
+    private function markDocumentUploaded(PersonalFicha $ficha, string $tipo, ?Usuario $user): void
+    {
+        if (!Schema::hasTable('personal_documento_estados') || !array_key_exists($tipo, PersonalFichaCatalog::documentRequirements())) {
+            return;
+        }
+
+        $record = PersonalDocumentoEstado::query()
+            ->firstOrNew([
+                'personal_ficha_id' => $ficha->id,
+                'tipo' => $tipo,
+            ]);
+
+        if (!$record->exists) {
+            $record->id = (string) Str::uuid();
+        }
+
+        $record->forceFill([
+            'estado' => PersonalDocumentoEstado::ESTADO_CARGADO,
+            'updated_by_usuario_id' => $user?->id,
+            'estado_updated_at' => now(),
+        ])->save();
+    }
+
     private function replaceFichaArchivo(
         PersonalFicha $ficha,
         string $tipo,
@@ -1816,7 +2220,7 @@ class PersonalFichaService
             $existing->delete();
         }
 
-        return PersonalFichaArchivo::query()->create([
+        $archivo = PersonalFichaArchivo::query()->create([
             'id' => (string) Str::uuid(),
             'personal_ficha_id' => $ficha->id,
             'tipo' => $tipo,
@@ -1827,6 +2231,10 @@ class PersonalFichaService
             'uploaded_by_usuario_id' => $uploadedByPublic ? null : $user?->id,
             'uploaded_by_public' => $uploadedByPublic,
         ]);
+
+        $this->markDocumentUploaded($ficha, $tipo, $uploadedByPublic ? null : $user);
+
+        return $archivo;
     }
 
     private function reviewNotificationUserIds(): array

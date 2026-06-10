@@ -13,6 +13,7 @@
 
     $stateByLocation = old('mina_estado', $trabajador['minas_estado'] ?? []);
     $familyRows = old('familiares', app(\App\Modules\Personal\Services\PersonalFichaService::class)->familyRowsForEdit($ficha));
+    $canRegularizeLegacy = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'actualizar');
 @endphp
 <style>
     .personal-edit-action-bar {
@@ -57,6 +58,9 @@
             </div>
             <div class="page-actions personal-edit-action-bar">
                 <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
+                @if($canRegularizeLegacy)
+                    <a href="{{ route('personal.antiguo.regularize', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Regularizar antiguo</a>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
                 <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
@@ -68,6 +72,20 @@
                     Este trabajador ya fue cesado antes en el contrato {{ $trabajador['ultimo_contrato_cerrado']['numero'] ?? '-' }}.
                     Motivo: {{ $trabajador['ultimo_contrato_cerrado']['motivo_cese'] ?? 'Motivo no registrado' }}.
                     <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}">Ver contratos</a>
+                </div>
+            </div>
+        @endif
+        @if(session('warning'))
+            <div class="page-header-top" style="margin-top:10px;">
+                <div class="ficha-alert ficha-alert-warning" style="width:100%; margin:0;">
+                    {{ session('warning') }}
+                </div>
+            </div>
+        @endif
+        @if(!empty($trabajador['pendiente_regularizacion']))
+            <div class="page-header-top" style="margin-top:10px;">
+                <div class="ficha-alert ficha-alert-warning" style="width:100%; margin:0;">
+                    Este trabajador esta marcado como pendiente de regularizacion historica.
                 </div>
             </div>
         @endif
@@ -298,6 +316,7 @@
                                         <th>Apellidos y nombres</th>
                                         <th>Fecha nacimiento</th>
                                         <th>Vive conmigo</th>
+                                        <th>Estudia</th>
                                         <th>Telefono</th>
                                         <th></th>
                                     </tr>
@@ -314,6 +333,7 @@
                                             </td>
                                             <td><input class="ficha-input" type="date" name="familiares[{{ $index }}][fecha_nacimiento]" value="{{ $familiar['fecha_nacimiento'] ?? '' }}"></td>
                                             <td style="text-align:center;"><input type="checkbox" name="familiares[{{ $index }}][vive_con_trabajador]" value="1" @checked((bool) ($familiar['vive_con_trabajador'] ?? false))></td>
+                                            <td style="text-align:center;"><input type="checkbox" name="familiares[{{ $index }}][estudia]" value="1" @checked((bool) ($familiar['estudia'] ?? false))></td>
                                             <td><input class="ficha-input" name="familiares[{{ $index }}][telefono]" value="{{ $familiar['telefono'] ?? '' }}"></td>
                                             <td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>
                                         </tr>
@@ -710,7 +730,7 @@
                 const count = familyTableBody.querySelectorAll('tr[data-family-item]').length;
                 const tr = document.createElement('tr');
                 tr.setAttribute('data-family-item', '1');
-                tr.innerHTML = '<td><input class="ficha-input" name="familiares[0][parentesco]" value="Hijo ' + Math.max(count - 2, 1) + '"></td><td><input class="ficha-input" name="familiares[0][nombres_apellidos]" value=""><input type="hidden" name="familiares[0][tipo_documento]" value="DNI"><input type="hidden" name="familiares[0][numero_documento]" value=""><input type="hidden" name="familiares[0][contacto_emergencia]" value="0"></td><td><input class="ficha-input" type="date" name="familiares[0][fecha_nacimiento]" value=""></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][vive_con_trabajador]" value="1"></td><td><input class="ficha-input" name="familiares[0][telefono]" value=""></td><td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
+                tr.innerHTML = '<td><input class="ficha-input" name="familiares[0][parentesco]" value="Hijo ' + Math.max(count - 2, 1) + '"></td><td><input class="ficha-input" name="familiares[0][nombres_apellidos]" value=""><input type="hidden" name="familiares[0][tipo_documento]" value="DNI"><input type="hidden" name="familiares[0][numero_documento]" value=""><input type="hidden" name="familiares[0][contacto_emergencia]" value="0"></td><td><input class="ficha-input" type="date" name="familiares[0][fecha_nacimiento]" value=""></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][vive_con_trabajador]" value="1"></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][estudia]" value="1"></td><td><input class="ficha-input" name="familiares[0][telefono]" value=""></td><td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
                 familyTableBody.appendChild(tr);
                 reindexFamilyRows();
             });

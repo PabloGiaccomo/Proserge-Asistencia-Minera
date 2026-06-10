@@ -53,12 +53,25 @@ class PersonalResource extends JsonResource
             ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'CERRADO')
             ->values();
         $contratoActual = $contratosLaborales
-            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'ACTIVO')
+            ->filter(fn ($contratoLaboral): bool => in_array(strtoupper((string) ($contratoLaboral->estado ?? '')), ['PREPARACION', 'ACTIVO'], true))
+            ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
+            ->first();
+        $contratoVigenteFirmado = $contratosLaborales
+            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'ACTIVO'
+                && $contratoLaboral->signed_at
+                && trim((string) ($contratoLaboral->signed_contract_path ?? '')) !== ''
+                && (!optional($contratoLaboral->fecha_fin)->toDateString()
+                    || optional($contratoLaboral->fecha_fin)->toDateString() >= $todayString))
+            ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
+            ->first();
+        $contratoPreparacion = $contratosLaborales
+            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'PREPARACION')
             ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
             ->first();
         $ultimoContratoCerrado = $contratosCerrados
             ->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))
             ->first();
+        $hasCurrentSignedContract = $this->hasCurrentSignedContract($contratoDatos, $contratoActual, $contratoVigenteFirmado);
         $estadoFicha = $ficha?->estado;
         $contrato = PersonalNormalizer::contract($this->contrato);
         $fichaData = is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : [];
@@ -250,16 +263,19 @@ class PersonalResource extends JsonResource
         $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
         $motivoCese = trim((string) ($this->motivo_cese ?? ''));
         $revisarFicha = in_array($estadoPersonal, ['FICHA_ENVIADA', 'OBSERVADO'], true);
-        $terminarFicha = in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
+        $faltaContrato = $estadoPersonal === 'FALTA_CONTRATO';
+        $terminarFicha = !$hasCurrentSignedContract && (
+            in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
             || $ficha === null
-            || count($missingRequiredFichaFields) > 0;
+            || count($missingRequiredFichaFields) > 0
+        );
         $bienestarInactivo = $primaryBloqueo && in_array((string) $primaryBloqueo->tipo, ['vacaciones', 'descanso_medico'], true);
         $intermitenteActivo = $contrato === 'INTER' && ($hasParadaActiva || $hasRqProsergeParadaActiva);
         $trabajadorNoIntermitenteActivo = $contrato !== 'INTER';
 
         $estadoVisible = match (true) {
             $estadoPersonal === 'CESADO' || $contratoVencido || $ceseVigente => 'CESADO',
-            $estadoPersonal === 'FALTA_CONTRATO' => 'ACTIVO',
+            $faltaContrato => 'INACTIVO',
             $terminarFicha => 'INACTIVO',
             $bienestarInactivo || ($primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion') => 'INACTIVO',
             $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
@@ -270,6 +286,7 @@ class PersonalResource extends JsonResource
 
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
+            $faltaContrato => 'falta_contrato',
             $revisarFicha => 'revisar_ficha',
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
@@ -287,6 +304,7 @@ class PersonalResource extends JsonResource
         $situacionLabel = match ($situacionKey) {
             'revisar_ficha' => 'Revisar ficha',
             'ficha_observada' => 'Ficha observada',
+            'falta_contrato' => 'Falta contrato firmado',
             'terminar_ficha' => 'Terminar ficha',
             'vacaciones' => 'Vacaciones',
             'descanso_medico' => 'Descanso medico',
@@ -360,6 +378,9 @@ class PersonalResource extends JsonResource
             'contratos_cerrados_count' => $contratosCerrados->count(),
             'tuvo_contratos_previos' => $contratosCerrados->isNotEmpty() || $contratosLaborales->count() > 1,
             'contrato_actual' => $formatContract($contratoActual),
+            'contrato_vigente_firmado' => $formatContract($contratoVigenteFirmado),
+            'contrato_preparacion' => $formatContract($contratoPreparacion),
+            'renovacion_en_preparacion' => strtoupper((string) ($contratoPreparacion?->tipo_movimiento ?? '')) === 'RENOVACION',
             'ultimo_contrato_cerrado' => $ultimoContratoCerrado ? array_merge($formatContract($ultimoContratoCerrado) ?? [], [
                 'motivo_cese' => trim((string) ($ultimoContratoCerrado->motivo_cese ?? '')),
                 'cerrado_por_nombre' => $ultimoCerradoPorNombre,
@@ -378,6 +399,9 @@ class PersonalResource extends JsonResource
             'ficha_link_expires_at' => optional($ficha?->link?->expires_at)->toIso8601String(),
             'activo' => $estadoVisible === 'ACTIVO',
             'estado_actual' => strtolower($estadoVisible),
+            'origen_registro' => (string) ($this->origen_registro ?? 'NUEVO'),
+            'observacion_historica' => (string) ($this->observacion_historica ?? ''),
+            'pendiente_regularizacion' => (bool) ($this->pendiente_regularizacion ?? false),
             'situacion' => $situacionKey,
             'situacion_label' => $situacionLabel,
             'contrato_datos' => $contratoDatos ? [
@@ -388,10 +412,10 @@ class PersonalResource extends JsonResource
                 'signed_contract_original_name' => (string) ($contratoDatos->signed_contract_original_name ?? ''),
             ] : null,
             'contrato_datos_downloaded' => $contratoDatos?->downloaded_at !== null,
-            'contrato_firmado' => $contratoDatos?->signed_at !== null,
+            'contrato_firmado' => $hasCurrentSignedContract,
             'missing_required_ficha_fields' => $missingRequiredFichaFields,
             'bloqueado_bienestar' => $primaryBloqueo !== null,
-            'puede_cesar' => $estadoVisible !== 'CESADO',
+            'puede_cesar' => $estadoVisible === 'ACTIVO' && $estadoPersonal === 'ACTIVO',
             'bloqueo_bienestar' => $primaryBloqueo ? [
                 'tipo' => (string) $primaryBloqueo->tipo,
                 'tipo_label' => method_exists($primaryBloqueo, 'tipoLabel') ? $primaryBloqueo->tipoLabel() : ucfirst(str_replace('_', ' ', (string) $primaryBloqueo->tipo)),
@@ -412,5 +436,26 @@ class PersonalResource extends JsonResource
             'created_at' => optional($this->created_at)->toIso8601String(),
             'updated_at' => optional($this->updated_at)->toIso8601String(),
         ];
+    }
+
+    private function hasCurrentSignedContract($contratoDatos, $contratoActual, $contratoVigenteFirmado = null): bool
+    {
+        if ($contratoVigenteFirmado?->signed_at && trim((string) ($contratoVigenteFirmado->signed_contract_path ?? '')) !== '') {
+            return true;
+        }
+
+        if ($contratoActual?->signed_at && trim((string) ($contratoActual->signed_contract_path ?? '')) !== '') {
+            return true;
+        }
+
+        if (!$contratoDatos?->signed_at || trim((string) ($contratoDatos->signed_contract_path ?? '')) === '') {
+            return false;
+        }
+
+        if (!$contratoActual?->activado_at) {
+            return true;
+        }
+
+        return $contratoDatos->signed_at->greaterThanOrEqualTo($contratoActual->activado_at);
     }
 }

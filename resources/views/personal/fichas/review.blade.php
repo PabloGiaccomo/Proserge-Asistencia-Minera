@@ -109,6 +109,9 @@
                                 @if($familiar->vive_con_trabajador)
                                     <span class="ficha-status">Vive con el trabajador</span>
                                 @endif
+                                @if($familiar->estudia)
+                                    <span class="ficha-status ficha-status-sent">Estudia</span>
+                                @endif
                                 @if($familiar->contacto_emergencia)
                                     <span class="ficha-status ficha-status-sent">Contacto de emergencia</span>
                                 @endif
@@ -125,32 +128,22 @@
                     <h3 class="ficha-section-title">Documentos requeridos</h3>
                 </div>
                 <div class="ficha-card-body">
-                    <div class="ficha-fields" style="padding:0;">
-                        @foreach(\App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements() as $docKey => $requirement)
-                            @php
-                                $archivo = $ficha->archivos->firstWhere('tipo', $docKey);
-                                $docLabel = $requirement['label'] ?? $requirement;
-                                $docRequired = (bool) ($requirement['required'] ?? true);
-                            @endphp
-                            <div class="ficha-field ficha-field-wide">
-                                <span class="ficha-label">
-                                    {{ $docLabel }}
-                                    @if($docRequired)
-                                        <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Obligatorio</span>
-                                    @else
-                                        <span class="ficha-status ficha-status-pending" style="padding:2px 7px;font-size:10px;">Opcional</span>
-                                    @endif
-                                </span>
-                                <div class="ficha-input" style="height:auto;min-height:42px;">
-                                    @if($archivo)
-                                        <a href="{{ route('personal.fichas.archivos.download', $archivo->id) }}">{{ $archivo->nombre_original ?: 'Descargar documento' }}</a>
-                                    @else
-                                        {{ $docRequired ? 'No adjuntado' : 'No adjuntado (opcional)' }}
-                                    @endif
-                                </div>
-                            </div>
-                        @endforeach
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                        <span class="ficha-status ficha-status-approved">{{ $documentSummary['aprobados'] ?? 0 }} aprobados</span>
+                        <span class="ficha-status ficha-status-sent">{{ $documentSummary['cargados'] ?? 0 }} cargados</span>
+                        <span class="ficha-status ficha-status-pending">{{ $documentSummary['pendientes'] ?? 0 }} pendientes</span>
+                        <span class="ficha-status ficha-status-expired">{{ $documentSummary['observados'] ?? 0 }} observados</span>
+                        <span class="ficha-status">{{ $documentSummary['no_aplica'] ?? 0 }} no aplica</span>
                     </div>
+                    @include('personal.documentos._document-status-table', [
+                        'documentMatrix' => $documentMatrix,
+                        'documentStateLabels' => $documentStateLabels,
+                        'vidaLeyPhysicalStateLabels' => $vidaLeyPhysicalStateLabels,
+                        'canUploadDocuments' => $canUploadDocuments,
+                        'canReviewDocuments' => $canReviewDocuments,
+                        'trabajador' => $ficha->personal,
+                        'ficha' => $ficha,
+                    ])
                 </div>
             </section>
 
@@ -186,7 +179,7 @@
         <div class="ficha-card-header">
             <div>
                 <h2 class="ficha-card-title">Decision de RRHH</h2>
-                <p class="ficha-card-subtitle">Aprobar activa al trabajador en Personal.</p>
+                <p class="ficha-card-subtitle">Aprobar deja al trabajador pendiente de contrato firmado.</p>
             </div>
         </div>
         <div class="ficha-card-body">

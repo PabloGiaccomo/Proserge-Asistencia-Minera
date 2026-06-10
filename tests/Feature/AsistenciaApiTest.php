@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -22,7 +23,9 @@ class AsistenciaApiTest extends TestCase
         DB::table('roles')->insert([
             'id' => $this->rolPlannerId,
             'nombre' => 'PLANNER',
-            'permisos' => json_encode([]),
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'asistencias' => ['ver', 'actualizar', 'cerrar'],
+            ])),
             'estado' => 'ACTIVO',
         ]);
     }

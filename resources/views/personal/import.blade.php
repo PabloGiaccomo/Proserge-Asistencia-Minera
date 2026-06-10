@@ -62,6 +62,7 @@
             if (($importResult['relacionesMinaEliminadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['relacionesMinaEliminadas'] ?? 0) . ' relacion(es) de mina eliminada(s)';
             if (($importResult['duplicados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['duplicados'] ?? 0) . ' duplicado(s)';
             if (($importResult['omitidos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['omitidos'] ?? 0) . ' omitido(s)';
+            if (($importResult['activacionesBloqueadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResult['activacionesBloqueadas'] ?? 0) . ' activacion(es) bloqueada(s) por contrato firmado pendiente';
 
             $importSummaryLinesSession = $summaryPartsFallback !== []
                 ? ['Cambios detectados en la importacion: ' . implode(', ', $summaryPartsFallback) . '.']
@@ -113,6 +114,7 @@
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['actualizados'] ?? 0 }}</strong><div class="text-muted">Actualizados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['camposActualizados'] ?? 0 }}</strong><div class="text-muted">Campos modificados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['reactivados'] ?? 0 }}</strong><div class="text-muted">Reactivados</div></div></div>
+                    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['activacionesBloqueadas'] ?? 0 }}</strong><div class="text-muted">Activaciones bloqueadas</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['inactivados'] ?? 0 }}</strong><div class="text-muted">Inactivados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['omitidos'] ?? 0 }}</strong><div class="text-muted">Omitidos</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['duplicados'] ?? 0 }}</strong><div class="text-muted">Duplicados</div></div></div>
@@ -187,6 +189,34 @@
                                             <td>{{ $item['nombre'] ?? '-' }}</td>
                                             <td>{{ $item['correo'] ?? '-' }}</td>
                                             <td>{{ $item['motivo'] ?? 'Formato de correo invalido' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
+
+                @if(!empty($importResult['activacionesBloqueadasDetalle']))
+                    <div style="margin-top:20px;">
+                        <h3 style="margin:0 0 12px; font-size:16px;">Activaciones bloqueadas</h3>
+                        <div class="table-responsive import-scroll-panel">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>DNI</th>
+                                        <th>Trabajador</th>
+                                        <th>Cambio aplicado</th>
+                                        <th>Motivo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($importResult['activacionesBloqueadasDetalle'] as $item)
+                                        <tr>
+                                            <td>{{ $item['dni'] ?? '-' }}</td>
+                                            <td>{{ $item['nombre'] ?? '-' }}</td>
+                                            <td>{{ $item['antes'] ?? '-' }} -> {{ $item['despues'] ?? '-' }}</td>
+                                            <td>{{ $item['motivo'] ?? 'El trabajador no fue activado porque no tiene contrato firmado vigente.' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
@@ -328,6 +358,7 @@
             if (($importResultFallback['relacionesMinaEliminadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['relacionesMinaEliminadas'] ?? 0) . ' relacion(es) de mina eliminada(s)';
             if (($importResultFallback['duplicados'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['duplicados'] ?? 0) . ' duplicado(s)';
             if (($importResultFallback['omitidos'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['omitidos'] ?? 0) . ' omitido(s)';
+            if (($importResultFallback['activacionesBloqueadas'] ?? 0) > 0) $summaryPartsFallback[] = ($importResultFallback['activacionesBloqueadas'] ?? 0) . ' activacion(es) bloqueada(s) por contrato firmado pendiente';
         @endphp
         <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
             <div class="card-body">

@@ -3,11 +3,13 @@
 namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalContratoDatoService;
 use App\Modules\Personal\Services\PersonalService;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class PersonalContratoDatoController extends WebPageController
@@ -15,13 +17,22 @@ class PersonalContratoDatoController extends WebPageController
     public function __construct(
         private readonly PersonalService $personalService,
         private readonly PersonalContratoDatoService $service,
+        private readonly PersonalContratoService $contratoService,
     ) {
     }
 
-    public function edit(string $id): View
+    public function edit(string $id): View|RedirectResponse
     {
         $personal = $this->personalService->find($id);
         abort_if(!$personal, 404);
+
+        try {
+            $contrato = $this->contratoService->assertContractEditable($personal, $this->requireAuthenticatedUser());
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.contratos.index', $personal->id)
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se puede editar este contrato.');
+        }
 
         $datos = $this->service->ensureForPersonal($personal, [
             'fecha_inicio_contrato' => $this->dateString($personal->fecha_ingreso),
@@ -31,6 +42,7 @@ class PersonalContratoDatoController extends WebPageController
         return view('personal.contrato-datos.edit', [
             'personal' => $personal,
             'datos' => $datos,
+            'contrato' => $contrato,
         ]);
     }
 
@@ -40,7 +52,13 @@ class PersonalContratoDatoController extends WebPageController
         abort_if(!$personal, 404);
 
         $validated = $request->validate($this->rules());
-        $this->service->update($personal, $validated, $this->requireAuthenticatedUser());
+        try {
+            $this->service->update($personal, $validated, $this->requireAuthenticatedUser());
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.contratos.index', $personal->id)
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo actualizar el contrato.');
+        }
 
         return redirect()
             ->route('personal.index')
@@ -60,7 +78,13 @@ class PersonalContratoDatoController extends WebPageController
             'contrato_pdf.max' => 'El PDF no debe superar 20 MB.',
         ]);
 
-        $this->service->uploadSignedContract($personal, $validated['contrato_pdf'], $this->requireAuthenticatedUser());
+        try {
+            $this->service->uploadSignedContract($personal, $validated['contrato_pdf'], $this->requireAuthenticatedUser());
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo subir el contrato firmado.');
+        }
 
         return redirect()
             ->route('personal.index')

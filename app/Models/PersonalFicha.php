@@ -86,4 +86,9 @@ class PersonalFicha extends Model
     {
         return $this->hasMany(PersonalFichaArchivo::class, 'personal_ficha_id');
     }
+
+    public function documentoEstados(): HasMany
+    {
+        return $this->hasMany(PersonalDocumentoEstado::class, 'personal_ficha_id');
+    }
 }

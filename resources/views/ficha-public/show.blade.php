@@ -74,6 +74,7 @@
                         'numero_documento' => $item->numero_documento,
                         'telefono' => $item->telefono,
                         'vive_con_trabajador' => $item->vive_con_trabajador,
+                        'estudia' => $item->estudia,
                         'contacto_emergencia' => $item->contacto_emergencia,
                     ])->values()->all()
                     : collect(['Padre', 'Madre', 'Conyuge'])->map(fn ($parentesco) => [
@@ -84,6 +85,7 @@
                         'numero_documento' => '',
                         'telefono' => '',
                         'vive_con_trabajador' => false,
+                        'estudia' => false,
                         'contacto_emergencia' => false,
                     ])->all();
             }
@@ -238,6 +240,7 @@
                                                 <th>Apellidos y nombres</th>
                                                 <th>Fecha nacimiento</th>
                                                 <th>Vive conmigo</th>
+                                                <th>Estudia</th>
                                                 <th>Telefono</th>
                                                 <th></th>
                                             </tr>
@@ -254,6 +257,7 @@
                                                     </td>
                                                     <td><input class="ficha-input" type="date" name="familiares[{{ $index }}][fecha_nacimiento]" value="{{ $familiar['fecha_nacimiento'] ?? '' }}" {{ $readonly ? 'readonly' : '' }}></td>
                                                     <td style="text-align:center;"><input type="checkbox" name="familiares[{{ $index }}][vive_con_trabajador]" value="1" @checked((bool) ($familiar['vive_con_trabajador'] ?? false)) {{ $readonly ? 'disabled' : '' }}></td>
+                                                    <td style="text-align:center;"><input type="checkbox" name="familiares[{{ $index }}][estudia]" value="1" @checked((bool) ($familiar['estudia'] ?? false)) {{ $readonly ? 'disabled' : '' }}></td>
                                                     <td><input class="ficha-input" name="familiares[{{ $index }}][telefono]" value="{{ $familiar['telefono'] ?? '' }}" {{ $readonly ? 'readonly' : '' }}></td>
                                                     <td>@if(!$readonly)<button type="button" class="btn btn-outline btn-sm" data-remove-family aria-label="Eliminar familiar">X</button>@endif</td>
                                                 </tr>
@@ -442,38 +446,56 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         const point = function (event) {
+            const source = event.touches?.[0] || event.changedTouches?.[0] || event;
             const rect = canvas.getBoundingClientRect();
             return {
-                x: event.clientX - rect.left,
-                y: event.clientY - rect.top,
+                x: source.clientX - rect.left,
+                y: source.clientY - rect.top,
             };
         };
 
-        canvas.addEventListener('pointerdown', function (event) {
+        const startDrawing = function (event) {
+            event.preventDefault();
             drawing = true;
             hasSignature = true;
-            canvas.setPointerCapture(event.pointerId);
+            if (event.pointerId !== undefined && canvas.setPointerCapture) {
+                canvas.setPointerCapture(event.pointerId);
+            }
             const p = point(event);
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
-        });
+        };
 
-        canvas.addEventListener('pointermove', function (event) {
+        const moveDrawing = function (event) {
             if (!drawing) return;
+            event.preventDefault();
             const p = point(event);
             ctx.lineTo(p.x, p.y);
             ctx.stroke();
             hidden.value = canvas.toDataURL('image/png');
-        });
+        };
 
-        const stop = function () {
+        const stop = function (event) {
             if (!drawing) return;
+            event?.preventDefault?.();
             drawing = false;
             hidden.value = canvas.toDataURL('image/png');
         };
 
-        canvas.addEventListener('pointerup', stop);
-        canvas.addEventListener('pointercancel', stop);
+        if (window.PointerEvent) {
+            canvas.addEventListener('pointerdown', startDrawing);
+            canvas.addEventListener('pointermove', moveDrawing);
+            canvas.addEventListener('pointerup', stop);
+            canvas.addEventListener('pointercancel', stop);
+        } else {
+            canvas.addEventListener('touchstart', startDrawing, { passive: false });
+            canvas.addEventListener('touchmove', moveDrawing, { passive: false });
+            canvas.addEventListener('touchend', stop, { passive: false });
+            canvas.addEventListener('touchcancel', stop, { passive: false });
+            canvas.addEventListener('mousedown', startDrawing);
+            window.addEventListener('mousemove', moveDrawing);
+            window.addEventListener('mouseup', stop);
+        }
         window.addEventListener('resize', resizeCanvas);
 
         if (clearBtn) {
@@ -757,7 +779,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const restoreDraft = async function () {
         const draft = readDraft();
         if (!draft || !form) {
-            await Promise.all(draftFileInputs.map(loadDraftFile));
+            await Promise.allSettled(draftFileInputs.map(loadDraftFile));
             return;
         }
 
@@ -791,6 +813,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     '<input type="hidden" name="familiares[' + index + '][contacto_emergencia]" value="' + ((familiar.contacto_emergencia ?? false) ? '1' : '0') + '"></td>' +
                     '<td><input class="ficha-input" type="date" name="familiares[' + index + '][fecha_nacimiento]" value="' + escapeHtml(familiar.fecha_nacimiento || '') + '"></td>' +
                     '<td style="text-align:center;"><input type="checkbox" name="familiares[' + index + '][vive_con_trabajador]" value="1" ' + ((familiar.vive_con_trabajador ?? false) ? 'checked' : '') + '></td>' +
+                    '<td style="text-align:center;"><input type="checkbox" name="familiares[' + index + '][estudia]" value="1" ' + ((familiar.estudia ?? false) ? 'checked' : '') + '></td>' +
                     '<td><input class="ficha-input" name="familiares[' + index + '][telefono]" value="' + escapeHtml(familiar.telefono || '') + '"></td>' +
                     '<td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
                 familyTableBody.appendChild(tr);
@@ -809,7 +832,7 @@ document.addEventListener('DOMContentLoaded', function () {
             hasSignature = true;
         }
 
-        await Promise.all(draftFileInputs.map(loadDraftFile));
+        await Promise.allSettled(draftFileInputs.map(loadDraftFile));
 
         if (draftNotice) {
             draftNotice.style.display = 'block';
@@ -1016,7 +1039,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const count = list.querySelectorAll('[data-family-item]').length + 1;
             const clone = document.createElement('tr');
             clone.setAttribute('data-family-item', '');
-            clone.innerHTML = '<td><input class="ficha-input" name="familiares[0][parentesco]" value="Hijo ' + Math.max(count - 2, 1) + '"></td><td><input class="ficha-input" name="familiares[0][nombres_apellidos]" value=""><input type="hidden" name="familiares[0][tipo_documento]" value="DNI"><input type="hidden" name="familiares[0][numero_documento]" value=""><input type="hidden" name="familiares[0][contacto_emergencia]" value="0"></td><td><input class="ficha-input" type="date" name="familiares[0][fecha_nacimiento]" value=""></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][vive_con_trabajador]" value="1"></td><td><input class="ficha-input" name="familiares[0][telefono]" value=""></td><td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
+            clone.innerHTML = '<td><input class="ficha-input" name="familiares[0][parentesco]" value="Hijo ' + Math.max(count - 2, 1) + '"></td><td><input class="ficha-input" name="familiares[0][nombres_apellidos]" value=""><input type="hidden" name="familiares[0][tipo_documento]" value="DNI"><input type="hidden" name="familiares[0][numero_documento]" value=""><input type="hidden" name="familiares[0][contacto_emergencia]" value="0"></td><td><input class="ficha-input" type="date" name="familiares[0][fecha_nacimiento]" value=""></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][vive_con_trabajador]" value="1"></td><td style="text-align:center;"><input type="checkbox" name="familiares[0][estudia]" value="1"></td><td><input class="ficha-input" name="familiares[0][telefono]" value=""></td><td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>';
             list.appendChild(clone);
             reindexFamilies();
         });
@@ -1058,9 +1081,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
             event.preventDefault();
             draftSubmitting = true;
-            await Promise.all(draftFileInputs.map(loadDraftFile));
+            await Promise.allSettled(draftFileInputs.map(loadDraftFile));
             syncEmployers();
-            form.requestSubmit();
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+                return;
+            }
+
+            HTMLFormElement.prototype.submit.call(form);
         });
     } else if (@json(session('success') ? true : false)) {
         clearDraft();

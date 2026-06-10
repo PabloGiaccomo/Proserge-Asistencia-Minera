@@ -4,13 +4,17 @@ namespace Tests\Feature;
 
 use App\Models\Personal;
 use App\Models\Usuario;
+use App\Modules\Personal\Services\PersonalContratoDatoService;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class PersonalContratoServiceTest extends TestCase
@@ -77,13 +81,13 @@ class PersonalContratoServiceTest extends TestCase
         $this->assertDatabaseHas('personal_contratos', [
             'personal_id' => $personalId,
             'contrato_numero' => 2,
-            'estado' => 'ACTIVO',
+            'estado' => 'PREPARACION',
             'fecha_inicio' => '2026-06-01',
             'fecha_fin' => null,
         ]);
         $expectedActivatedPersonal = [
             'id' => $personalId,
-            'estado' => 'ACTIVO',
+            'estado' => 'FALTA_CONTRATO',
             'fecha_ingreso' => '2026-06-01',
         ];
         if (Schema::hasColumn('personal', 'fecha_cese')) {
@@ -100,11 +104,12 @@ class PersonalContratoServiceTest extends TestCase
 
     }
 
-    public function test_delete_historical_contract_removes_only_closed_contracts(): void
+    public function test_historical_contracts_are_not_physically_deleted(): void
     {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
         $personalId = $this->createPersonal();
         $closedId = (string) Str::uuid();
-        $activeId = (string) Str::uuid();
+        $preparingId = (string) Str::uuid();
 
         DB::table('personal_contratos')->insert([
             [
@@ -119,10 +124,10 @@ class PersonalContratoServiceTest extends TestCase
                 'updated_at' => now(),
             ],
             [
-                'id' => $activeId,
+                'id' => $preparingId,
                 'personal_id' => $personalId,
                 'contrato_numero' => 2,
-                'estado' => 'ACTIVO',
+                'estado' => 'PREPARACION',
                 'fecha_inicio' => '2026-06-01',
                 'fecha_fin' => null,
                 'motivo_cese' => null,
@@ -134,14 +139,146 @@ class PersonalContratoServiceTest extends TestCase
         $service = app(PersonalContratoService::class);
         $personal = Personal::query()->findOrFail($personalId);
 
-        $this->assertTrue($service->deleteHistoricalContract($personal, $closedId));
-        $this->assertDatabaseMissing('personal_contratos', ['id' => $closedId]);
+        try {
+            $service->annulContract($personal, $closedId, 'Error de prueba', $actor);
+            $this->fail('No debio permitir anular un contrato historico cerrado.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                'No se puede anular un contrato historico cerrado. El historial es inamovible.',
+                collect($exception->errors())->flatten()->first(),
+            );
+        }
 
-        $this->assertFalse($service->deleteHistoricalContract($personal, $activeId));
         $this->assertDatabaseHas('personal_contratos', [
-            'id' => $activeId,
+            'id' => $closedId,
+            'estado' => 'CERRADO',
+        ]);
+
+        $service->annulContract($personal, $preparingId, 'Creado por error', $actor);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $preparingId,
+            'estado' => 'ANULADO',
+            'motivo_anulacion' => 'Creado por error',
+        ]);
+    }
+
+    public function test_closed_contract_cannot_be_edited(): void
+    {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+
+        DB::table('personal')->where('id', $personalId)->update(['estado' => 'CESADO']);
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'CERRADO',
+            'fecha_inicio' => '2026-01-01',
+            'fecha_fin' => '2026-05-31',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        try {
+            app(PersonalContratoDatoService::class)->update(
+                Personal::query()->findOrFail($personalId),
+                ['puesto' => 'No debe cambiar'],
+                $actor,
+            );
+            $this->fail('No debio permitir editar un contrato cerrado.');
+        } catch (ValidationException $exception) {
+            $this->assertSame('Solo se puede modificar el contrato vigente o en preparacion.', collect($exception->errors())->flatten()->first());
+        }
+
+        $this->assertSame('Operario', DB::table('personal')->where('id', $personalId)->value('puesto'));
+    }
+
+    public function test_signed_contract_is_attached_to_current_contract(): void
+    {
+        Storage::fake('local');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        DB::table('personal')->where('id', $personalId)->update(['estado' => 'FALTA_CONTRATO']);
+
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'PREPARACION',
+            'fecha_inicio' => '2026-06-01',
+            'activado_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        app(PersonalContratoDatoService::class)->uploadSignedContract(
+            Personal::query()->findOrFail($personalId),
+            UploadedFile::fake()->create('contrato-firmado.pdf', 24, 'application/pdf'),
+            $actor,
+        );
+
+        $contract = DB::table('personal_contratos')->where('personal_id', $personalId)->first();
+        $this->assertSame('ACTIVO', $contract->estado);
+        $this->assertSame('contrato-firmado.pdf', $contract->signed_contract_original_name);
+        $this->assertNotNull($contract->signed_at);
+        $this->assertSame('ACTIVO', DB::table('personal')->where('id', $personalId)->value('estado'));
+    }
+
+    public function test_old_signed_contract_does_not_activate_new_preparing_contract(): void
+    {
+        $personalId = $this->createPersonal();
+        DB::table('personal')->where('id', $personalId)->update(['estado' => 'FALTA_CONTRATO']);
+
+        DB::table('personal_contrato_datos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'signed_at' => '2026-05-01 08:00:00',
+            'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_antiguo.pdf',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_contratos')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personalId,
+                'contrato_numero' => 1,
+                'estado' => 'CERRADO',
+                'fecha_inicio' => '2026-01-01',
+                'fecha_fin' => '2026-05-31',
+                'activado_at' => null,
+                'signed_at' => '2026-05-01 08:00:00',
+                'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_antiguo.pdf',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personalId,
+                'contrato_numero' => 2,
+                'estado' => 'PREPARACION',
+                'fecha_inicio' => '2026-06-01',
+                'fecha_fin' => null,
+                'activado_at' => '2026-06-01 09:00:00',
+                'signed_at' => null,
+                'signed_contract_path' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $updated = app(PersonalService::class)->update(Personal::query()->findOrFail($personalId), [
+            'dni' => '70000002',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '70000002',
+            'nombre_completo' => 'Falta Contrato',
+            'puesto' => 'Operario',
+            'contrato' => 'FIJO',
             'estado' => 'ACTIVO',
         ]);
+
+        $this->assertSame('FALTA_CONTRATO', $updated->estado);
     }
 
     private function createRole(string $name): string

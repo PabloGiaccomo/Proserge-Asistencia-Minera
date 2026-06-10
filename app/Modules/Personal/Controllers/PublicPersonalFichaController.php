@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 
 class PublicPersonalFichaController extends Controller
@@ -62,6 +63,21 @@ class PublicPersonalFichaController extends Controller
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
         $fields['tipo_documento'] = $ficha->tipo_documento;
         $fields['numero_documento'] = $ficha->numero_documento;
+        $requiredDocumentKeys = $this->fichaService->requiredDocumentKeysForPayload($fields, $validated['familiares']);
+        $uploadedDocuments = $request->file('documentos', []);
+        $missingConditionalDocuments = collect($requiredDocumentKeys)
+            ->filter(function (string $key) use ($ficha, $uploadedDocuments): bool {
+                return !$ficha->archivos->contains('tipo', $key)
+                    && !(($uploadedDocuments[$key] ?? null) instanceof \Illuminate\Http\UploadedFile);
+            })
+            ->values()
+            ->all();
+
+        if (!empty($missingConditionalDocuments)) {
+            throw ValidationException::withMessages([
+                'documentos' => 'Adjunta los documentos obligatorios o condicionales que corresponden segun tus datos.',
+            ]);
+        }
 
         $submitted = $this->fichaService->submitFromWorker(
             $resolved['link'],
@@ -138,6 +154,7 @@ class PublicPersonalFichaController extends Controller
             'familiares.*.numero_documento' => ['nullable', 'string', 'max:40'],
             'familiares.*.telefono' => ['nullable', 'string', 'max:30'],
             'familiares.*.vive_con_trabajador' => ['nullable'],
+            'familiares.*.estudia' => ['nullable'],
             'familiares.*.contacto_emergencia' => ['nullable'],
             'firma_base64' => ['required', 'string'],
             'huella' => [$hasHuella ? 'nullable' : 'required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
@@ -225,6 +242,7 @@ class PublicPersonalFichaController extends Controller
                     'numero_documento' => trim((string) ($item['numero_documento'] ?? '')),
                     'telefono' => trim((string) ($item['telefono'] ?? '')),
                     'vive_con_trabajador' => !empty($item['vive_con_trabajador']),
+                    'estudia' => !empty($item['estudia']),
                     'contacto_emergencia' => !empty($item['contacto_emergencia']),
                 ];
             })

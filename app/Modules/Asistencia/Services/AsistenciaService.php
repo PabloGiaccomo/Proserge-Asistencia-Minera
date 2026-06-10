@@ -281,7 +281,7 @@ class AsistenciaService
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
     }
 
-    public function marcarMasivo(Usuario $usuario, string $grupoId, array $payload): array
+    public function marcarMasivoPorGrupoId(Usuario $usuario, string $grupoId, array $payload): array
     {
         $grupo = $this->getGrupo($usuario, $grupoId);
         

@@ -3,13 +3,16 @@
 namespace App\Modules\Personal\Services;
 
 use App\Models\Personal;
+use App\Models\PersonalContrato;
 use App\Models\PersonalContratoDato;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PersonalContratoDatoService
 {
@@ -40,6 +43,8 @@ class PersonalContratoDatoService
     public function update(Personal $personal, array $payload, Usuario $user): PersonalContratoDato
     {
         return DB::transaction(function () use ($personal, $payload, $user): PersonalContratoDato {
+            app(PersonalContratoService::class)->assertContractEditable($personal, $user);
+
             $data = $this->normalizePayload($payload);
             $data['updated_by_usuario_id'] = $user->id;
 
@@ -50,7 +55,10 @@ class PersonalContratoDatoService
                 $personal->forceFill(['puesto' => trim((string) $data['puesto'])])->save();
             }
 
-            return $record->fresh();
+            $record = $record->fresh();
+            app(PersonalContratoService::class)->syncEditableContractData($personal->fresh(['fichaColaborador', 'minas']) ?: $personal, $record, $user);
+
+            return $record;
         });
     }
 
@@ -70,9 +78,14 @@ class PersonalContratoDatoService
     public function uploadSignedContract(Personal $personal, UploadedFile $file, Usuario $user): PersonalContratoDato
     {
         return DB::transaction(function () use ($personal, $file, $user): PersonalContratoDato {
+            app(PersonalContratoService::class)->assertContractEditable($personal, $user);
             $record = $this->ensureForPersonal($personal, [], $user);
 
-            if ($record->signed_contract_path && Storage::disk('local')->exists($record->signed_contract_path)) {
+            if (
+                $record->signed_contract_path
+                && Storage::disk('local')->exists($record->signed_contract_path)
+                && !$this->isSignedPathReferencedByContract($record->signed_contract_path)
+            ) {
                 Storage::disk('local')->delete($record->signed_contract_path);
             }
 
@@ -91,11 +104,10 @@ class PersonalContratoDatoService
                 'updated_by_usuario_id' => $user->id,
             ])->save();
 
-            if (strtoupper((string) $personal->estado) === self::PENDING_STATE) {
-                $personal->forceFill(['estado' => 'ACTIVO'])->save();
-            }
+            $record = $record->fresh();
+            app(PersonalContratoService::class)->markEditableContractSigned($personal, $record, $user);
 
-            return $record->fresh();
+            return $record;
         });
     }
 
@@ -123,5 +135,14 @@ class PersonalContratoDatoService
         $text = trim((string) $value);
 
         return $text === '' ? null : mb_substr($text, 0, $limit);
+    }
+
+    private function isSignedPathReferencedByContract(string $path): bool
+    {
+        return Schema::hasTable('personal_contratos')
+            && Schema::hasColumn('personal_contratos', 'signed_contract_path')
+            && PersonalContrato::query()
+                ->where('signed_contract_path', $path)
+                ->exists();
     }
 }

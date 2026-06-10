@@ -5,6 +5,9 @@ namespace App\Modules\Personal\Services;
 use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\PersonalBloqueo;
+use App\Models\PersonalContrato;
+use App\Models\PersonalContratoDato;
+use App\Models\PersonalFicha;
 use App\Models\PersonalFichaFamiliar;
 use App\Models\PersonalFichaLink;
 use App\Models\PersonalMina;
@@ -265,7 +268,7 @@ class PersonalService
                 'es_supervisor' => $this->resolveSupervisor($payload),
                 'qr_code' => 'QR-' . $legacyDni . '-' . Str::upper(Str::random(8)),
                 'fecha_ingreso' => PersonalNormalizer::isoDate($payload['fecha_ingreso'] ?? null),
-                'estado' => $this->resolveState($payload['estado'] ?? 'ACTIVO'),
+                'estado' => $this->resolveInitialState($payload['estado'] ?? PersonalFicha::ESTADO_PENDIENTE),
             ];
 
             if (Schema::hasColumn('personal', 'tipo_documento')) {
@@ -293,6 +296,18 @@ class PersonalService
 
             if (Schema::hasColumn('personal', 'correo')) {
                 $data['correo'] = PersonalNormalizer::text($payload['correo'] ?? '') ?: null;
+            }
+
+            if (Schema::hasColumn('personal', 'origen_registro')) {
+                $data['origen_registro'] = $this->resolveRecordOrigin($payload['origen_registro'] ?? 'NUEVO');
+            }
+
+            if (Schema::hasColumn('personal', 'observacion_historica')) {
+                $data['observacion_historica'] = PersonalNormalizer::text($payload['observacion_historica'] ?? '') ?: null;
+            }
+
+            if (Schema::hasColumn('personal', 'pendiente_regularizacion')) {
+                $data['pendiente_regularizacion'] = filter_var($payload['pendiente_regularizacion'] ?? false, FILTER_VALIDATE_BOOLEAN);
             }
 
             $personal = Personal::query()->create($data);
@@ -323,7 +338,7 @@ class PersonalService
                 'contrato' => PersonalNormalizer::contract($payload['contrato'] ?? null),
                 'es_supervisor' => $this->resolveSupervisor($payload),
                 'fecha_ingreso' => PersonalNormalizer::isoDate($payload['fecha_ingreso'] ?? null),
-                'estado' => $this->resolveState($payload['estado'] ?? 'ACTIVO'),
+                'estado' => $this->resolveWorkflowStateForUpdate($personal, $payload['estado'] ?? $personal->estado ?? PersonalFicha::ESTADO_PENDIENTE),
             ];
 
             if (Schema::hasColumn('personal', 'tipo_documento')) {
@@ -351,6 +366,18 @@ class PersonalService
 
             if (Schema::hasColumn('personal', 'correo')) {
                 $data['correo'] = PersonalNormalizer::text($payload['correo'] ?? '') ?: null;
+            }
+
+            if (Schema::hasColumn('personal', 'origen_registro') && array_key_exists('origen_registro', $payload)) {
+                $data['origen_registro'] = $this->resolveRecordOrigin($payload['origen_registro']);
+            }
+
+            if (Schema::hasColumn('personal', 'observacion_historica') && array_key_exists('observacion_historica', $payload)) {
+                $data['observacion_historica'] = PersonalNormalizer::text($payload['observacion_historica'] ?? '') ?: null;
+            }
+
+            if (Schema::hasColumn('personal', 'pendiente_regularizacion') && array_key_exists('pendiente_regularizacion', $payload)) {
+                $data['pendiente_regularizacion'] = filter_var($payload['pendiente_regularizacion'] ?? false, FILTER_VALIDATE_BOOLEAN);
             }
 
             $personal->fill($data);
@@ -425,6 +452,96 @@ class PersonalService
     public function normalizeStateInput(mixed $value): string
     {
         return $this->resolveState($value);
+    }
+
+    public function hasSignedContract(Personal $personal): bool
+    {
+        if (!Schema::hasTable('personal_contratos')) {
+            if (!Schema::hasTable('personal_contrato_datos')) {
+                return false;
+            }
+
+            $legacyRecord = $personal->relationLoaded('contratoDatos')
+                ? $personal->contratoDatos
+                : PersonalContratoDato::query()
+                    ->where('personal_id', $personal->id)
+                    ->whereNotNull('signed_at')
+                    ->whereNotNull('signed_contract_path')
+                    ->first();
+
+            return $legacyRecord !== null
+                && $legacyRecord->signed_at !== null
+                && trim((string) $legacyRecord->signed_contract_path) !== '';
+        }
+
+        $signedActiveContract = PersonalContrato::query()
+            ->where('personal_id', $personal->id)
+            ->where('estado', PersonalContrato::ESTADO_ACTIVO)
+            ->whereNotNull('signed_at')
+            ->whereNotNull('signed_contract_path')
+            ->where(function (Builder $query): void {
+                $query->whereNull('fecha_fin')
+                    ->orWhereDate('fecha_fin', '>=', Carbon::today()->toDateString());
+            })
+            ->latest('contrato_numero')
+            ->first();
+
+        if ($signedActiveContract && trim((string) ($signedActiveContract->signed_contract_path ?? '')) !== '') {
+            return true;
+        }
+
+        $activeContract = $personal->relationLoaded('contratoLaboralActual')
+            ? $personal->contratoLaboralActual
+            : PersonalContrato::query()
+                ->where('personal_id', $personal->id)
+                ->whereIn('estado', [PersonalContrato::ESTADO_PREPARACION, PersonalContrato::ESTADO_ACTIVO])
+                ->latest('contrato_numero')
+                ->first();
+
+        if (!Schema::hasTable('personal_contrato_datos')) {
+            return false;
+        }
+
+        $record = $personal->relationLoaded('contratoDatos')
+            ? $personal->contratoDatos
+            : PersonalContratoDato::query()
+                ->where('personal_id', $personal->id)
+                ->whereNotNull('signed_at')
+                ->whereNotNull('signed_contract_path')
+                ->first();
+
+        if (!$record || $record->signed_at === null || trim((string) $record->signed_contract_path) === '') {
+            return false;
+        }
+
+        if (!$activeContract?->activado_at) {
+            return true;
+        }
+
+        return $record->signed_at->greaterThanOrEqualTo($activeContract->activado_at);
+    }
+
+    public function resolveActiveIntentState(?Personal $personal): string
+    {
+        if (!$personal) {
+            return PersonalFicha::ESTADO_PENDIENTE;
+        }
+
+        $current = strtoupper((string) $personal->estado);
+        if ($current === 'CESADO') {
+            return 'CESADO';
+        }
+
+        if ($this->hasSignedContract($personal)) {
+            return 'ACTIVO';
+        }
+
+        $ficha = $personal->relationLoaded('fichaColaborador') ? $personal->fichaColaborador : $personal->fichaColaborador()->first();
+        $hasApprovedFicha = strtoupper((string) ($ficha?->estado ?? '')) === PersonalFicha::ESTADO_APROBADO;
+
+        return $hasApprovedFicha || in_array($current, [PersonalContratoDatoService::PENDING_STATE, PersonalFicha::ESTADO_APROBADO], true)
+            ? PersonalContratoDatoService::PENDING_STATE
+            : PersonalFicha::ESTADO_PENDIENTE;
     }
 
     public function markCeased(Personal $personal, string $motivo, ?Usuario $usuario = null, ?string $fechaCese = null): Personal
@@ -546,6 +663,15 @@ class PersonalService
         return PersonalNormalizer::isSupervisorOccupation($payload['ocupacion'] ?? null);
     }
 
+    private function resolveRecordOrigin(mixed $value): string
+    {
+        $origin = strtoupper(trim((string) $value));
+
+        return in_array($origin, ['NUEVO', 'ANTIGUO', 'IMPORTADO', 'HISTORICO'], true)
+            ? $origin
+            : 'NUEVO';
+    }
+
     private function resolveState(mixed $value): string
     {
         if (is_bool($value)) {
@@ -572,6 +698,29 @@ class PersonalService
         }
 
         return in_array($state, ['1', 'ACTIVE'], true) ? 'ACTIVO' : 'INACTIVO';
+    }
+
+    private function resolveInitialState(mixed $value): string
+    {
+        $state = $this->resolveState($value);
+
+        return $state === 'ACTIVO' ? PersonalFicha::ESTADO_PENDIENTE : $state;
+    }
+
+    private function resolveWorkflowStateForUpdate(Personal $personal, mixed $value): string
+    {
+        $state = $this->resolveState($value);
+
+        if ($state !== 'ACTIVO') {
+            return $state;
+        }
+
+        $current = strtoupper((string) $personal->estado);
+        if ($current === 'ACTIVO' || $this->hasSignedContract($personal)) {
+            return 'ACTIVO';
+        }
+
+        return $this->resolveActiveIntentState($personal);
     }
 
     private function applySearch(Builder $query, string $search): void

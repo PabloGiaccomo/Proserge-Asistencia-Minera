@@ -166,6 +166,8 @@ class ImportPersonalService
                 'nuevosDetalle' => [],
                 'reactivadosDetalle' => [],
                 'inactivadosDetalle' => [],
+                'activacionesBloqueadas' => 0,
+                'activacionesBloqueadasDetalle' => [],
             ];
 
             $existingSelect = [
@@ -205,7 +207,7 @@ class ImportPersonalService
             }
 
             $existing = Personal::query()
-                ->with('fichaColaborador')
+                ->with(['fichaColaborador', 'contratoDatos', 'contratoLaboralActual'])
                 ->get($existingSelect)
                 ->keyBy('dni');
 
@@ -292,19 +294,28 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                     $workerChanges = [];
                     $mergedFichaData = [];
 
-                    if (strtoupper((string) $personal->estado) === 'INACTIVO') {
-                        $updates['estado'] = 'ACTIVO';
-                        $stats['reactivados']++;
-                        $this->registerFieldChange($workerChanges, $stats, 'estado', 'Estado', $personal->estado, 'ACTIVO');
+                    $estadoAntesImport = strtoupper((string) $personal->estado);
+                    $estadoPorIntencionActiva = app(PersonalService::class)->resolveActiveIntentState($personal);
+                    if ($estadoPorIntencionActiva !== $estadoAntesImport) {
+                        $updates['estado'] = $estadoPorIntencionActiva;
+                        $this->registerFieldChange($workerChanges, $stats, 'estado', 'Estado', $personal->estado, $estadoPorIntencionActiva);
 
-                        if (count($stats['reactivadosDetalle']) < self::MAX_CHANGE_DETAILS) {
-                            $stats['reactivadosDetalle'][] = [
-                                'dni' => $dni,
-                                'nombre' => $nombre,
-                                'antes' => 'INACTIVO',
-                                'despues' => 'ACTIVO',
-                            ];
+                        if ($estadoPorIntencionActiva === 'ACTIVO') {
+                            $stats['reactivados']++;
+
+                            if (count($stats['reactivadosDetalle']) < self::MAX_CHANGE_DETAILS) {
+                                $stats['reactivadosDetalle'][] = [
+                                    'dni' => $dni,
+                                    'nombre' => $nombre,
+                                    'antes' => $estadoAntesImport,
+                                    'despues' => 'ACTIVO',
+                                ];
+                            }
+                        } elseif ($estadoAntesImport === 'ACTIVO' || $estadoPorIntencionActiva !== 'CESADO') {
+                            $this->registerBlockedActivation($stats, $dni, $nombre, $estadoAntesImport, $estadoPorIntencionActiva);
                         }
+                    } elseif ($estadoAntesImport !== 'ACTIVO' && $estadoPorIntencionActiva !== 'CESADO') {
+                        $this->registerBlockedActivation($stats, $dni, $nombre, $estadoAntesImport, $estadoPorIntencionActiva);
                     }
 
                     if (Schema::hasColumn('personal', 'tipo_documento') && (string) ($personal->tipo_documento ?? '') !== 'DNI') {
@@ -418,7 +429,7 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                         'es_supervisor' => $isSupervisor,
                         'qr_code' => 'QR-' . $dni . '-' . Str::upper(Str::random(8)),
                         'fecha_ingreso' => $fechaIngreso,
-                        'estado' => 'ACTIVO',
+                        'estado' => app(PersonalService::class)->resolveActiveIntentState(null),
                     ];
 
                     if (Schema::hasColumn('personal', 'tipo_documento')) {
@@ -446,6 +457,7 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                     }
 
                     $personal = Personal::query()->create($newData);
+                    $this->registerBlockedActivation($stats, $dni, $nombre, 'NUEVO', (string) $newData['estado']);
 
                     $existing->put($dni, $personal);
                     $this->syncFichaWithImportData($personal, $this->buildFichaImportData(
@@ -719,6 +731,8 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
             'nuevosDetalle' => [],
             'reactivadosDetalle' => [],
             'inactivadosDetalle' => [],
+            'activacionesBloqueadas' => 0,
+            'activacionesBloqueadasDetalle' => [],
         ];
     }
 
@@ -1424,6 +1438,31 @@ $normalizedHeader = PersonalNormalizer::normalizeKey($upper);
             'nombre' => PersonalNormalizer::text($nombre) ?: '-',
             'correo' => $correo,
             'motivo' => 'Formato de correo invalido',
+        ];
+    }
+
+    private function registerBlockedActivation(array &$stats, mixed $dni, mixed $nombre, string $before, string $after): void
+    {
+        if (!isset($stats['activacionesBloqueadas'])) {
+            $stats['activacionesBloqueadas'] = 0;
+        }
+
+        if (!isset($stats['activacionesBloqueadasDetalle']) || !is_array($stats['activacionesBloqueadasDetalle'])) {
+            $stats['activacionesBloqueadasDetalle'] = [];
+        }
+
+        $stats['activacionesBloqueadas']++;
+
+        if (count($stats['activacionesBloqueadasDetalle']) >= self::MAX_CHANGE_DETAILS) {
+            return;
+        }
+
+        $stats['activacionesBloqueadasDetalle'][] = [
+            'dni' => PersonalNormalizer::text($dni) ?: 'Sin DNI',
+            'nombre' => PersonalNormalizer::text($nombre) ?: '-',
+            'antes' => $before,
+            'despues' => $after,
+            'motivo' => 'El trabajador no fue activado porque no tiene contrato firmado vigente.',
         ];
     }
 

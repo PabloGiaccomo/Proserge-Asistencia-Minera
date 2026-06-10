@@ -5,8 +5,12 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\Personal;
 use App\Models\PersonalBloqueo;
+use App\Models\PersonalDocumentoEstado;
+use App\Models\PersonalFicha;
+use App\Modules\Personal\Services\PersonalDocumentoDownloadService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -14,14 +18,17 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class PersonalDocumentoController extends WebPageController
 {
-    public function __construct(private readonly PersonalFichaService $fichaService)
-    {
+    public function __construct(
+        private readonly PersonalFichaService $fichaService,
+        private readonly PersonalDocumentoDownloadService $downloadService,
+    ) {
     }
 
     public function index(string $id): View
@@ -30,6 +37,8 @@ class PersonalDocumentoController extends WebPageController
             ->with([
                 'contratoDatos',
                 'fichaColaborador.archivos',
+                'fichaColaborador.documentoEstados',
+                'fichaColaborador.familiares',
                 'bloqueos' => function ($query): void {
                     $query->where('estado', 'ACTIVO')
                         ->where('tipo', 'gestacion')
@@ -45,6 +54,7 @@ class PersonalDocumentoController extends WebPageController
         $extraArchivos = $ficha?->archivos
             ? $ficha->archivos->reject(fn ($archivo) => in_array((string) $archivo->tipo, $catalogKeys, true))->values()
             : collect();
+        $permissions = session('user.permissions', []);
 
         return view('personal.documentos.index', [
             'trabajador' => $trabajador,
@@ -52,6 +62,14 @@ class PersonalDocumentoController extends WebPageController
             'requirements' => $requirements,
             'attachedByType' => $attachedByType,
             'extraArchivos' => $extraArchivos,
+            'documentMatrix' => $this->fichaService->documentMatrix($ficha),
+            'documentSummary' => $this->fichaService->documentSummary($ficha),
+            'documentStateLabels' => PersonalFichaCatalog::documentStateLabels(),
+            'vidaLeyPhysicalStateLabels' => PersonalFichaCatalog::vidaLeyPhysicalStateLabels(),
+            'documentTypeOptions' => $this->downloadService->documentTypeOptions(),
+            'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
+            'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
+            'canDownloadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['ver', 'administrar']),
             'contratoDatos' => $trabajador->contratoDatos,
             'isMujer' => $this->isFemale($trabajador),
             'gestacionBloqueos' => $trabajador->bloqueos,
@@ -97,6 +115,80 @@ class PersonalDocumentoController extends WebPageController
         return redirect()
             ->route('personal.documentos.index', $trabajador->id)
             ->with('success', 'Documento actualizado correctamente.');
+    }
+
+    public function updateEstado(Request $request, string $id, string $tipo): RedirectResponse
+    {
+        $trabajador = Personal::query()
+            ->with('fichaColaborador.archivos', 'fichaColaborador.familiares')
+            ->findOrFail($id);
+
+        $ficha = $trabajador->fichaColaborador;
+        abort_unless($ficha instanceof PersonalFicha, 404);
+
+        $validated = $request->validate([
+            'estado' => ['required', 'string', 'max:30', 'in:' . implode(',', PersonalDocumentoEstado::estados())],
+            'observacion' => ['nullable', 'string', 'max:2000'],
+            'vida_ley_entrega_fisica' => ['nullable', 'string', 'max:40', 'in:' . implode(',', PersonalDocumentoEstado::vidaLeyEntregaFisicaEstados())],
+            'vida_ley_entrega_observacion' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $this->fichaService->updateDocumentState(
+            $ficha,
+            $tipo,
+            $validated,
+            $this->requireAuthenticatedUser(),
+        );
+
+        return redirect()
+            ->route('personal.documentos.index', $trabajador->id)
+            ->with('success', 'Estado documental actualizado correctamente.');
+    }
+
+    public function downloadSelected(Request $request, string $id): BinaryFileResponse
+    {
+        Personal::query()->findOrFail($id);
+
+        $validated = $request->validate([
+            'document_types' => ['required', 'array', 'min:1'],
+            'document_types.*' => ['string', 'in:' . implode(',', $this->downloadService->validDocumentTypes())],
+        ], [
+            'document_types.required' => 'Selecciona al menos un tipo de documento.',
+            'document_types.min' => 'Selecciona al menos un tipo de documento.',
+        ]);
+
+        $zip = $this->downloadService->createZipForPersonalIds(
+            [$id],
+            $validated['document_types'],
+        );
+
+        return response()
+            ->download($zip['path'], $zip['filename'], ['Content-Type' => 'application/zip'])
+            ->deleteFileAfterSend(true);
+    }
+
+    public function downloadBulk(Request $request): BinaryFileResponse
+    {
+        $validated = $request->validate([
+            'personal_ids' => ['required', 'array', 'min:1'],
+            'personal_ids.*' => ['string', 'exists:personal,id'],
+            'document_types' => ['required', 'array', 'min:1'],
+            'document_types.*' => ['string', 'in:' . implode(',', $this->downloadService->validDocumentTypes())],
+        ], [
+            'personal_ids.required' => 'Selecciona al menos un trabajador.',
+            'personal_ids.min' => 'Selecciona al menos un trabajador.',
+            'document_types.required' => 'Selecciona al menos un tipo de documento.',
+            'document_types.min' => 'Selecciona al menos un tipo de documento.',
+        ]);
+
+        $zip = $this->downloadService->createZipForPersonalIds(
+            $validated['personal_ids'],
+            $validated['document_types'],
+        );
+
+        return response()
+            ->download($zip['path'], $zip['filename'], ['Content-Type' => 'application/zip'])
+            ->deleteFileAfterSend(true);
     }
 
     public function gestacionPdf(string $id, string $bloqueoId): Response
@@ -148,10 +240,13 @@ class PersonalDocumentoController extends WebPageController
     public function contratoFirmado(string $id): Response
     {
         $trabajador = Personal::query()
-            ->with('contratoDatos')
+            ->with('contratoDatos', 'contratoLaboralActual')
             ->findOrFail($id);
 
-        $contrato = $trabajador->contratoDatos;
+        $contrato = $trabajador->contratoLaboralActual?->hasSignedFile()
+            ? $trabajador->contratoLaboralActual
+            : $trabajador->contratoDatos;
+
         abort_unless($contrato?->signed_contract_path && Storage::disk('local')->exists($contrato->signed_contract_path), 404);
 
         $filename = $contrato->signed_contract_original_name

@@ -33,6 +33,11 @@ class Personal extends Model
         'cesado_at',
         'cesado_by_usuario_id',
         'estado',
+        'origen_registro',
+        'observacion_historica',
+        'pendiente_regularizacion',
+        'registrado_como_antiguo_at',
+        'registrado_como_antiguo_by_usuario_id',
         'telefono',
         'telefono_1',
         'telefono_2',
@@ -44,6 +49,8 @@ class Personal extends Model
         'fecha_ingreso' => 'date',
         'fecha_cese' => 'date',
         'cesado_at' => 'datetime',
+        'pendiente_regularizacion' => 'boolean',
+        'registrado_como_antiguo_at' => 'datetime',
     ];
 
     public function setNombreCompletoAttribute(mixed $value): void
@@ -102,7 +109,7 @@ class Personal extends Model
     public function contratoLaboralActual(): HasOne
     {
         return $this->hasOne(PersonalContrato::class, 'personal_id')
-            ->where('estado', 'ACTIVO')
+            ->whereIn('estado', [PersonalContrato::ESTADO_PREPARACION, PersonalContrato::ESTADO_ACTIVO])
             ->latestOfMany('contrato_numero');
     }
 

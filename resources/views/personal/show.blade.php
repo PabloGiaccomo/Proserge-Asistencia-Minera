@@ -54,8 +54,13 @@
                 <div class="ficha-field"><span class="ficha-label">Telefono</span><div class="ficha-input">{{ $trabajador['telefono'] ?? '-' }}</div></div>
                 <div class="ficha-field"><span class="ficha-label">Correo</span><div class="ficha-input">{{ $trabajador['correo'] ?? '-' }}</div></div>
                 <div class="ficha-field"><span class="ficha-label">Contrato</span><div class="ficha-input">{{ $trabajador['tipo_contrato'] ?? '-' }}</div></div>
+                <div class="ficha-field"><span class="ficha-label">Origen registro</span><div class="ficha-input">{{ $trabajador['origen_registro'] ?? 'NUEVO' }}</div></div>
+                <div class="ficha-field"><span class="ficha-label">Regularizacion</span><div class="ficha-input">{{ !empty($trabajador['pendiente_regularizacion']) ? 'Pendiente' : 'Al dia' }}</div></div>
                 <div class="ficha-field"><span class="ficha-label">Fecha ingreso</span><div class="ficha-input">{{ $trabajador['fecha_ingreso'] ?? '-' }}</div></div>
                 <div class="ficha-field ficha-field-wide"><span class="ficha-label">Minas / sedes</span><div class="ficha-input">{{ implode(', ', $trabajador['minas'] ?? []) ?: '-' }}</div></div>
+                @if(!empty($trabajador['observacion_historica']))
+                    <div class="ficha-field ficha-field-wide"><span class="ficha-label">Observacion historica</span><div class="ficha-input">{{ $trabajador['observacion_historica'] }}</div></div>
+                @endif
             </div>
         </div>
     </div>

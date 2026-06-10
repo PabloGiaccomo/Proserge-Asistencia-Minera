@@ -238,8 +238,9 @@ class PersonalFichaController extends WebPageController
     public function review(string $id): View
     {
         $ficha = PersonalFicha::query()
-            ->with(['personal', 'familiares', 'link', 'archivos'])
+            ->with(['personal', 'familiares', 'link', 'archivos', 'documentoEstados'])
             ->findOrFail($id);
+        $permissions = session('user.permissions', []);
 
         return view('personal.fichas.review', [
             'ficha' => $ficha,
@@ -247,6 +248,12 @@ class PersonalFichaController extends WebPageController
             'sections' => PersonalFichaCatalog::sections(),
             'estadoLabel' => PersonalFichaCatalog::stateLabel($ficha->estado),
             'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha->huella_path),
+            'documentMatrix' => $this->fichaService->documentMatrix($ficha),
+            'documentSummary' => $this->fichaService->documentSummary($ficha),
+            'documentStateLabels' => PersonalFichaCatalog::documentStateLabels(),
+            'vidaLeyPhysicalStateLabels' => PersonalFichaCatalog::vidaLeyPhysicalStateLabels(),
+            'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
+            'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
         ]);
     }
 
@@ -261,7 +268,7 @@ class PersonalFichaController extends WebPageController
 
         return redirect()
             ->route('personal.show', $ficha->personal_id)
-            ->with('success', 'Ficha aprobada. El trabajador ya queda activo en Personal.');
+            ->with('success', 'Ficha aprobada. El trabajador queda pendiente de contrato firmado.');
     }
 
     public function observe(Request $request, string $id): RedirectResponse

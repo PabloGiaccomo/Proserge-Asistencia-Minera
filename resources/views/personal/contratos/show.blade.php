@@ -29,6 +29,7 @@
     };
 
     $trabajadorSnapshot = $snapshot['trabajador'] ?? [];
+    $contratoDatosSnapshot = $snapshot['datos_contrato'] ?? [];
     $fichaSnapshot = $snapshot['ficha'] ?? [];
     $fichaDatos = $fichaSnapshot['datos'] ?? [];
     $familiares = collect($fichaSnapshot['familiares'] ?? []);
@@ -145,9 +146,47 @@
                 <div class="contract-detail-value">{{ ucfirst(strtolower($contrato->estado)) }}</div>
             </div>
             <div class="contract-detail-item">
+                <div class="contract-detail-label">Contrato firmado</div>
+                <div class="contract-detail-value">
+                    @if($contrato->hasSignedFile())
+                        {{ $contrato->signed_contract_original_name ?: 'Contrato firmado.pdf' }} - {{ $formatDateTime($contrato->signed_at) }}
+                    @else
+                        {{ $contrato->archivo_pendiente_regularizacion ? 'Pendiente de regularizacion' : 'No registrado en este contrato' }}
+                    @endif
+                </div>
+            </div>
+            <div class="contract-detail-item">
                 <div class="contract-detail-label">Inicio</div>
                 <div class="contract-detail-value">{{ $formatDate($periodoInicio) }}</div>
             </div>
+            <div class="contract-detail-item">
+                <div class="contract-detail-label">Origen</div>
+                <div class="contract-detail-value">{{ $contrato->origen_registro ?: 'NUEVO' }}{{ $contrato->es_historico ? ' / historico' : '' }}</div>
+            </div>
+            @if($contrato->tipo_movimiento)
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Movimiento</div>
+                    <div class="contract-detail-value">{{ ucfirst(strtolower($contrato->tipo_movimiento)) }}</div>
+                </div>
+            @endif
+            @if($contrato->origen_contrato_id)
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Contrato base</div>
+                    <div class="contract-detail-value">Creado desde contrato anterior</div>
+                </div>
+            @endif
+            @if($contrato->observacion_renovacion)
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Observacion de movimiento</div>
+                    <div class="contract-detail-value">{{ $contrato->observacion_renovacion }}</div>
+                </div>
+            @endif
+            @if($contrato->observacion_historica)
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Observacion historica</div>
+                    <div class="contract-detail-value">{{ $contrato->observacion_historica }}</div>
+                </div>
+            @endif
             <div class="contract-detail-item">
                 <div class="contract-detail-label">Fin</div>
                 <div class="contract-detail-value">{{ $periodoFin ? $formatDate($periodoFin) : 'Vigente' }}</div>
@@ -156,6 +195,12 @@
                 <div class="contract-detail-label">Motivo de cese</div>
                 <div class="contract-detail-value">{{ $contrato->motivo_cese ?: data_get($snapshot, 'extra.motivo_cese', '-') }}</div>
             </div>
+            @if(strtoupper((string) $contrato->estado) === 'ANULADO')
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Motivo de anulacion</div>
+                    <div class="contract-detail-value">{{ $contrato->motivo_anulacion ?: '-' }}</div>
+                </div>
+            @endif
             <div class="contract-detail-item">
                 <div class="contract-detail-label">Activado por</div>
                 <div class="contract-detail-value">{{ $contrato->activadoPor?->personal?->nombre_completo ?: $contrato->activadoPor?->email ?: 'No registrado' }}</div>
@@ -228,6 +273,20 @@
                 <div class="contract-detail-label">Cuenta</div>
                 <div class="contract-detail-value">{{ $value($fichaDatos, 'numero_cuenta') }}</div>
             </div>
+            @if(!empty($contratoDatosSnapshot))
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Sueldo</div>
+                    <div class="contract-detail-value">{{ $value($contratoDatosSnapshot, 'sueldo_num') }} {{ $value($contratoDatosSnapshot, 'sueldo_texto', '') }}</div>
+                </div>
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Periodo de prueba</div>
+                    <div class="contract-detail-value">{{ $formatDate($value($contratoDatosSnapshot, 'periodo_prueba_inicio', null)) }} al {{ $formatDate($value($contratoDatosSnapshot, 'periodo_prueba_fin', null)) }}</div>
+                </div>
+                <div class="contract-detail-item contract-data-wide">
+                    <div class="contract-detail-label">Funciones</div>
+                    <div class="contract-detail-value">{{ $value($contratoDatosSnapshot, 'funciones') }}</div>
+                </div>
+            @endif
         </div>
     </div>
 

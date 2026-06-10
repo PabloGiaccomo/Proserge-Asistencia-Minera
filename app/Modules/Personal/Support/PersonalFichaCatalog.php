@@ -229,17 +229,87 @@ class PersonalFichaCatalog
     public static function documentRequirements(): array
     {
         return [
-            'cv_documentado' => ['label' => 'Curriculum vitae documentado (certificados de trabajo y estudios, mencionar a PROSERGE en experiencia laboral) en Word o PDF.', 'required' => true],
-            'dni_vigente' => ['label' => 'Copia de DNI vigente.', 'required' => true],
-            'dni_derechohabientes' => ['label' => 'Copia de DNI de derecho-habientes (hijos menores de 18 anos y esposa si corresponde).', 'required' => false],
-            'matrimonio_union' => ['label' => 'Copia de partida de matrimonio o resolucion de union de hechos.', 'required' => false],
-            'dni_conyuge' => ['label' => 'Copia de DNI de esposa/conviviente.', 'required' => false],
-            'certificado_unico_laboral' => ['label' => 'Copia de Certificado Unico Laboral.', 'required' => false],
-            'retenciones_quinta' => ['label' => 'Copia certificado de Retenciones de renta de Quinta categoria.', 'required' => false],
-            'vida_ley_notarial' => ['label' => 'Declaracion Jurada Vida Ley legalizada por notario.', 'required' => false],
-            'recibo_servicio' => ['label' => 'Copia de recibo de agua o luz.', 'required' => true],
-            'carnet_vacunacion' => ['label' => 'Carnet de vacunacion 3 dosis completo descriptivo.', 'required' => true],
-            'foto_carnet' => ['label' => 'Foto tamano carnet JPG: 640x480 px, fondo blanco, reciente, mirada frontal, sin accesorios.', 'required' => true],
+            'cv_documentado' => [
+                'label' => 'CV documentado',
+                'description' => 'Curriculum vitae documentado con certificados de trabajo y estudios.',
+                'required' => true,
+            ],
+            'certificado_unico_laboral' => [
+                'label' => 'Certiadulto o Certijoven',
+                'description' => 'Certificado unico laboral vigente, segun corresponda.',
+                'required' => true,
+            ],
+            'foto_carnet' => [
+                'label' => 'Foto',
+                'description' => 'Foto tipo carnet o archivo de imagen del trabajador.',
+                'required' => true,
+            ],
+            'dni_vigente' => [
+                'label' => 'DNI',
+                'description' => 'Copia legible del documento de identidad vigente.',
+                'required' => true,
+            ],
+            'matrimonio_union' => [
+                'label' => 'Partida de matrimonio',
+                'description' => 'Aplica si el trabajador declara estar casado o conviviente.',
+                'required' => false,
+                'condition' => 'married',
+            ],
+            'dni_hijos_menores' => [
+                'label' => 'DNI de hijos menores',
+                'description' => 'Aplica si el trabajador registra hijos menores de edad.',
+                'required' => false,
+                'condition' => 'minor_children',
+            ],
+            'dni_hijos_mayores_estudiantes' => [
+                'label' => 'DNI de hijos mayores que estudian',
+                'description' => 'Aplica para hijos mayores de edad que siguen estudiando.',
+                'required' => false,
+                'condition' => 'adult_studying_children',
+            ],
+            'constancia_estudios_hijos' => [
+                'label' => 'Constancia de estudios de hijos mayores',
+                'description' => 'Aplica para hijos mayores de edad que siguen estudiando.',
+                'required' => false,
+                'condition' => 'adult_studying_children',
+            ],
+            'recibo_servicio' => [
+                'label' => 'Recibo de luz o agua',
+                'description' => 'Copia de recibo de servicio del domicilio declarado.',
+                'required' => true,
+            ],
+            'retenciones_quinta' => [
+                'label' => 'Renta de quinta',
+                'description' => 'Declaracion o certificado de retenciones de quinta categoria.',
+                'required' => true,
+            ],
+            'vida_ley_notarial' => [
+                'label' => 'Declaracion jurada de Vida Ley',
+                'description' => 'Archivo digital y control independiente de entrega fisica.',
+                'required' => true,
+                'special' => 'vida_ley',
+            ],
+        ];
+    }
+
+    public static function documentStateLabels(): array
+    {
+        return [
+            'PENDIENTE' => 'Pendiente',
+            'CARGADO' => 'Cargado',
+            'OBSERVADO' => 'Observado',
+            'APROBADO' => 'Aprobado',
+            'NO_APLICA' => 'No aplica',
+        ];
+    }
+
+    public static function vidaLeyPhysicalStateLabels(): array
+    {
+        return [
+            'ENTREGADO' => 'Entregado fisicamente',
+            'NO_ENTREGADO' => 'No entregado fisicamente',
+            'PENDIENTE' => 'Pendiente de entrega fisica',
+            'NO_APLICA_UBICACION' => 'No requiere entrega fisica por ubicacion',
         ];
     }
 

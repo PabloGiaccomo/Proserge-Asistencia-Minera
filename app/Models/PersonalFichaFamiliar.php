@@ -23,12 +23,14 @@ class PersonalFichaFamiliar extends Model
         'numero_documento',
         'telefono',
         'vive_con_trabajador',
+        'estudia',
         'contacto_emergencia',
     ];
 
     protected $casts = [
         'fecha_nacimiento' => 'date',
         'vive_con_trabajador' => 'boolean',
+        'estudia' => 'boolean',
         'contacto_emergencia' => 'boolean',
     ];
 

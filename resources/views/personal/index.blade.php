@@ -15,7 +15,9 @@
     $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
     $canEditContractData = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
     $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['actualizar', 'administrar']);
+    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['ver', 'administrar']);
     $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'exportar');
+    $documentDownloadOptions = \App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements();
 @endphp
 <style>
 .acciones-dropdown .accion-item {
@@ -587,7 +589,10 @@
 }
 
 .personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="trabajador"],
-.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="trabajador"] { min-width: 240px; width: 240px; }
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="trabajador"] { min-width: 240px; width: 240px; left: 44px; }
+
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="seleccion"],
+.personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="seleccion"] { min-width: 44px; width: 44px; }
 
 .personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th[data-column="correo"],
 .personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td[data-column="correo"] { min-width: 220px; width: 220px; }
@@ -619,7 +624,7 @@
 
 .personal-page .data-table.personal-grid-compact {
     width: 100%;
-    min-width: 1120px;
+    min-width: 1164px;
     table-layout: fixed;
     border-collapse: collapse;
 }
@@ -640,19 +645,37 @@
     background: #f8fafc;
 }
 
+.personal-page .data-table.personal-grid-compact th[data-column="seleccion"],
+.personal-page .data-table.personal-grid-compact td[data-column="seleccion"] {
+    min-width: 44px;
+    width: 44px;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    text-align: center;
+    background: #fff;
+}
+
 .personal-page .data-table.personal-grid-compact th[data-column="trabajador"],
 .personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
     min-width: 220px;
     width: 220px;
     position: sticky;
-    left: 0;
+    left: 44px;
     z-index: 1;
     background: #fff;
 }
 
+.personal-page .data-table.personal-grid-compact thead th[data-column="seleccion"],
 .personal-page .data-table.personal-grid-compact thead th[data-column="trabajador"] {
     z-index: 4;
     background: #f8fafc;
+}
+
+.personal-page .personal-select-check {
+    width: 16px;
+    height: 16px;
+    accent-color: #0d9488;
 }
 
 .personal-page .data-table.personal-grid-compact th[data-column="documento"],
@@ -1213,6 +1236,52 @@
     color: #0f172a;
 }
 
+.personal-document-download-modal {
+    width: min(720px, calc(100vw - 32px));
+    border-radius: 14px;
+    padding: 18px;
+}
+
+.personal-document-download-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.personal-document-download-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    color: #334155;
+    font-size: 13px;
+}
+
+.personal-document-download-option input {
+    width: 16px;
+    height: 16px;
+    accent-color: #0d9488;
+}
+
+.personal-document-download-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.personal-document-download-error {
+    display: none;
+    margin-top: 10px;
+    color: #dc2626;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .personal-contract-modal {
     width: min(760px, calc(100vw - 32px));
     height: auto;
@@ -1557,6 +1626,7 @@
     .personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
         width: 180px;
         min-width: 180px;
+        left: 44px;
         font-size: 12px;
     }
 
@@ -1670,6 +1740,15 @@
                             </svg>
                             Añadir manualmente
                         </a>
+                        <a class="accion-item" href="{{ route('personal.antiguo.create') }}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                                <circle cx="9" cy="7" r="4"/>
+                                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                            </svg>
+                            Registrar personal antiguo
+                        </a>
                         <a class="accion-item" href="{{ route('personal.fichas.import') }}">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -1703,6 +1782,16 @@
                             </svg>
                             Exportar
                         </a>
+                        @if($canDownloadDocuments)
+                            <button type="button" class="accion-item" onclick="openDocumentDownloadModal(); document.getElementById('accionesMenu').style.display = 'none';">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <path d="M7 10l5 5 5-5"/>
+                                    <path d="M12 15V3"/>
+                                </svg>
+                                Descargar documentos
+                            </button>
+                        @endif
                         @if($canDownloadContractFormats)
                             <button type="button" class="accion-item" onclick="openContractFormatModal(); document.getElementById('accionesMenu').style.display = 'none';">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
@@ -1880,7 +1969,7 @@
             <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="contrato" checked> Contrato</label>
             <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="estado" checked> Estado</label>
             <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="situacion" checked> Situacion</label>
-            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="ocupacion" checked> Ocupacion</label>
+            <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="ocupacion" checked> Minas / Habilitacion</label>
             <label class="personal-column-option"><input type="checkbox" class="js-col-toggle" value="acciones" checked> Acciones</label>
         </div>
         <div class="personal-view-actions">
@@ -1947,6 +2036,11 @@
                         <table class="data-table personal-grid-compact" id="personalDataGrid">
                         <thead>
                             <tr>
+                                @if($canDownloadDocuments)
+                                    <th data-column="seleccion" onclick="event.stopPropagation()">
+                                        <input type="checkbox" id="personalSelectAllDocuments" class="personal-select-check" title="Seleccionar todos los visibles" aria-label="Seleccionar todos los trabajadores visibles">
+                                    </th>
+                                @endif
                                 <th data-column="trabajador">
                                     <div class="dg-head-cell">
                                         <span>Trabajador</span>
@@ -2048,8 +2142,8 @@
                                 </th>
                                 <th data-column="ocupacion">
                                     <div class="dg-head-cell">
-                                        <span>Ocupación</span>
-                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterOcupacion" title="Filtrar Ocupación" aria-label="Filtrar Ocupación">
+                                        <span>Minas / Habilitación</span>
+                                        <button type="button" class="dg-filter-icon js-dg-filter-trigger" data-target="dgFilterOcupacion" title="Filtrar minas y habilitación" aria-label="Filtrar minas y habilitación">
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
                                         </button>
                                         <div id="dgFilterOcupacion" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
@@ -2105,17 +2199,13 @@
                             @foreach($trabajadores as $trabajador)
                                 @php
                                     $estadoRaw = strtoupper((string) ($trabajador['estado'] ?? 'ACTIVO'));
-                                    $estadoText = match ($estadoRaw) {
-                                        'CESADO' => 'Cesado',
-                                        'INACTIVO' => 'Inactivo',
-                                        'FALTA_CONTRATO' => 'Falta contrato',
-                                        default => 'Activo',
-                                    };
+                                    $estadoText = \App\Modules\Personal\Support\PersonalFichaCatalog::stateLabel($estadoRaw);
                                     $situacionKey = (string) ($trabajador['situacion'] ?? 'habilitado');
                                     $situacionLabel = (string) ($trabajador['situacion_label'] ?? 'Habilitado');
                                     $estadoClass = match (mb_strtolower($estadoText)) {
-                                        'activo' => 'dg-pill-estado-activo',
                                         'falta contrato' => 'dg-pill-estado-contrato',
+                                        'activo' => 'dg-pill-estado-activo',
+                                        'ficha enviada', 'ficha observada', 'pendiente completar ficha', 'link vencido' => 'dg-pill-estado-contrato',
                                         'inactivo' => 'dg-pill-estado-inactivo',
                                         'cesado' => 'dg-pill-estado-cesado',
                                         default => 'dg-pill-neutral',
@@ -2141,7 +2231,7 @@
                                         'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
-                                        'revisar_ficha', 'ficha_observada' => 'dg-pill-situacion-revision',
+                                        'revisar_ficha', 'ficha_observada', 'falta_contrato' => 'dg-pill-situacion-revision',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
                                         'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',
@@ -2179,6 +2269,16 @@
                                     data-ocup-oficina="{{ implode(' ', $ocupOficinas) }}"
                                     data-ocup-taller="{{ implode(' ', $ocupTalleres) }}"
                                     onclick="showWorkerDetail(this)">
+                                    @if($canDownloadDocuments)
+                                        <td data-column="seleccion" onclick="event.stopPropagation()">
+                                            <input
+                                                type="checkbox"
+                                                class="personal-select-check js-personal-document-check"
+                                                value="{{ $trabajador['id'] ?? '' }}"
+                                                data-worker-name="{{ $trabajador['nombre'] ?? 'Trabajador' }}"
+                                                aria-label="Seleccionar {{ $trabajador['nombre'] ?? 'trabajador' }} para descarga documental">
+                                        </td>
+                                    @endif
                                     <td data-column="trabajador">
                                         <span class="personal-worker-name">{{ $trabajador['nombre'] ?? 'Sin nombre' }}</span>
                                     </td>
@@ -2602,6 +2702,43 @@
             </div>
         </form>
     </div>
+
+    @if($canDownloadDocuments)
+        <div id="documentDownloadModal" class="modal" style="display:none;" onclick="if (event.target === this) closeDocumentDownloadModal()">
+            <div class="modal-backdrop" onclick="closeDocumentDownloadModal()"></div>
+            <form id="documentDownloadForm" method="POST" action="{{ route('personal.documentos.download-bulk') }}" class="modal-content personal-document-download-modal">
+                @csrf
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">Descargar documentos</h2>
+                        <p class="modal-subtitle">Se generara un ZIP con una carpeta por trabajador.</p>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeDocumentDownloadModal()" aria-label="Cerrar">X</button>
+                </div>
+                <div class="modal-body">
+                    <div class="personal-document-download-summary">
+                        <span class="card-badge" id="documentDownloadSelectedCount">0 trabajadores seleccionados</span>
+                        <span class="card-badge">Los documentos no cargados se omiten</span>
+                    </div>
+                    <div id="documentDownloadWorkerInputs"></div>
+                    <label class="ficha-label">Tipos de documentos</label>
+                    <div class="personal-document-download-grid">
+                        @foreach($documentDownloadOptions as $docKey => $docRequirement)
+                            <label class="personal-document-download-option">
+                                <input type="checkbox" name="document_types[]" value="{{ $docKey }}" checked>
+                                <span>{{ $docRequirement['label'] ?? $docKey }}</span>
+                            </label>
+                        @endforeach
+                    </div>
+                    <div id="documentDownloadError" class="personal-document-download-error"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeDocumentDownloadModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Confirmar descarga</button>
+                </div>
+            </form>
+        </div>
+    @endif
 </div>
 
 @if($canDownloadContractFormats)
@@ -2674,6 +2811,7 @@ let pendingCeaseForm = null;
 const todayForActivation = @json(now()->toDateString());
 const personalCsrfToken = @json(csrf_token());
 const signedContractRouteTemplate = @json(route('personal.contrato-datos.signed', '__ID__'));
+const canDownloadDocuments = @json($canDownloadDocuments);
 const canDownloadContractFormats = @json($canDownloadContractFormats);
 const contractFormatEndpoints = {
     templates: @json(route('personal.contrato-formatos.templates')),
@@ -3066,6 +3204,83 @@ function closeSignedContractModal() {
     closeModal('signedContractModal');
 }
 
+function documentDownloadVisibleChecks() {
+    return Array.from(document.querySelectorAll('.js-personal-document-check')).filter(function (input) {
+        const row = input.closest('tr');
+        return !input.disabled && row && row.style.display !== 'none';
+    });
+}
+
+function documentDownloadSelectedChecks() {
+    return Array.from(document.querySelectorAll('.js-personal-document-check:checked')).filter(function (input) {
+        return !input.disabled && String(input.value || '').trim() !== '';
+    });
+}
+
+function updateDocumentDownloadSelectionState() {
+    const selected = documentDownloadSelectedChecks();
+    const visible = documentDownloadVisibleChecks();
+    const selectedVisible = visible.filter(function (input) { return input.checked; });
+    const selectAll = document.getElementById('personalSelectAllDocuments');
+    const countNode = document.getElementById('documentDownloadSelectedCount');
+
+    if (selectAll) {
+        selectAll.checked = visible.length > 0 && selectedVisible.length === visible.length;
+        selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visible.length;
+        selectAll.disabled = visible.length === 0;
+    }
+
+    if (countNode) {
+        countNode.textContent = selected.length + ' trabajador(es) seleccionado(s)';
+    }
+}
+
+function setDocumentDownloadError(message) {
+    const errorNode = document.getElementById('documentDownloadError');
+    if (!errorNode) return;
+    errorNode.textContent = message || '';
+    errorNode.style.display = message ? 'block' : 'none';
+}
+
+function openDocumentDownloadModal() {
+    updateDocumentDownloadSelectionState();
+    setDocumentDownloadError('');
+    openModal('documentDownloadModal');
+}
+
+function closeDocumentDownloadModal() {
+    setDocumentDownloadError('');
+    closeModal('documentDownloadModal');
+}
+
+function prepareDocumentDownloadForm() {
+    const form = document.getElementById('documentDownloadForm');
+    const workerInputs = document.getElementById('documentDownloadWorkerInputs');
+    if (!form || !workerInputs) {
+        return false;
+    }
+
+    const selectedWorkers = documentDownloadSelectedChecks();
+    const selectedTypes = Array.from(form.querySelectorAll('input[name="document_types[]"]:checked'));
+
+    if (selectedWorkers.length === 0) {
+        setDocumentDownloadError('Selecciona al menos un trabajador.');
+        return false;
+    }
+
+    if (selectedTypes.length === 0) {
+        setDocumentDownloadError('Selecciona al menos un tipo de documento.');
+        return false;
+    }
+
+    workerInputs.innerHTML = selectedWorkers.map(function (input) {
+        return '<input type="hidden" name="personal_ids[]" value="' + escapeHtml(input.value) + '">';
+    }).join('');
+    setDocumentDownloadError('');
+
+    return true;
+}
+
 function requestCeaseReason(form) {
     const existingInput = form.querySelector('input[name="motivo_cese"]');
     if (existingInput && existingInput.value.trim() !== '') {
@@ -3262,11 +3477,16 @@ function showWorkerDetail(card) {
 
     let estadoClass = '';
     let estadoLabel = '';
-    switch (worker.estado_actual) {
-        case 'activo': estadoClass = 'status-active'; estadoLabel = 'Activo'; break;
-        case 'cesado': estadoClass = 'status-inactive'; estadoLabel = 'Cesado'; break;
-        case 'inactivo': estadoClass = 'status-inactive'; estadoLabel = 'Inactivo'; break;
-        default: estadoClass = 'status-active'; estadoLabel = 'Activo';
+    switch (String(worker.estado || worker.estado_actual || '').toUpperCase()) {
+        case 'ACTIVO': estadoClass = 'status-active'; estadoLabel = 'Activo'; break;
+        case 'FALTA_CONTRATO': estadoClass = 'status-parada'; estadoLabel = 'Falta contrato'; break;
+        case 'FICHA_ENVIADA': estadoClass = 'status-parada'; estadoLabel = 'Ficha enviada'; break;
+        case 'OBSERVADO': estadoClass = 'status-parada'; estadoLabel = 'Ficha observada'; break;
+        case 'PENDIENTE_COMPLETAR_FICHA': estadoClass = 'status-parada'; estadoLabel = 'Pendiente completar ficha'; break;
+        case 'LINK_VENCIDO': estadoClass = 'status-inactive'; estadoLabel = 'Link vencido'; break;
+        case 'CESADO': estadoClass = 'status-inactive'; estadoLabel = 'Cesado'; break;
+        case 'INACTIVO': estadoClass = 'status-inactive'; estadoLabel = 'Inactivo'; break;
+        default: estadoClass = 'status-inactive'; estadoLabel = 'Inactivo';
     }
 
     const fechas = worker.fechas || {};
@@ -3471,6 +3691,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const expandToggle = document.getElementById('personalExpandToggle');
     const contractWorkerSearch = document.getElementById('contractWorkerSearch');
     const contractDownloadForm = document.getElementById('contractFormatDownloadForm');
+    const documentDownloadForm = document.getElementById('documentDownloadForm');
+    const documentDownloadSelectAll = document.getElementById('personalSelectAllDocuments');
+    const documentDownloadChecks = Array.from(document.querySelectorAll('.js-personal-document-check'));
     const columnCheckboxes = Array.from(document.querySelectorAll('.js-col-toggle'));
     const viewStateKey = 'proserge.personal.index.viewState.v1';
     const defaultVisibleColumns = ['documento', 'celular', 'correo', 'puesto', 'contrato', 'estado', 'situacion', 'ocupacion', 'acciones'];
@@ -3552,6 +3775,27 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    if (documentDownloadSelectAll) {
+        documentDownloadSelectAll.addEventListener('change', function () {
+            documentDownloadVisibleChecks().forEach(function (input) {
+                input.checked = documentDownloadSelectAll.checked;
+            });
+            updateDocumentDownloadSelectionState();
+        });
+    }
+
+    documentDownloadChecks.forEach(function (input) {
+        input.addEventListener('change', updateDocumentDownloadSelectionState);
+    });
+
+    if (documentDownloadForm) {
+        documentDownloadForm.addEventListener('submit', function (event) {
+            if (!prepareDocumentDownloadForm()) {
+                event.preventDefault();
+            }
+        });
+    }
+
     const collectVisibleColumns = function () {
         return columnCheckboxes
             .filter(function (input) { return input.checked; })
@@ -3569,7 +3813,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         document.querySelectorAll('[data-column]').forEach(function (cell) {
             const key = cell.getAttribute('data-column');
-            if (!key || key === 'trabajador') {
+            if (!key || key === 'trabajador' || key === 'seleccion') {
                 cell.classList.remove('is-col-hidden');
                 return;
             }
@@ -4160,6 +4404,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         syncFilterIndicators();
         renderPagination(totalPages);
+        updateDocumentDownloadSelectionState();
         syncTopScrollbar();
 
         saveViewState({

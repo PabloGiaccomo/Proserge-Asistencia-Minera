@@ -10,6 +10,7 @@ use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
 use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaService;
+use App\Modules\Personal\Services\PersonalAntiguoService;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
@@ -30,6 +31,7 @@ class PersonalPageController extends WebPageController
         private readonly ExportPersonalService $exportService,
         private readonly PersonalFichaExportService $fichaExportService,
         private readonly PersonalFichaService $fichaService,
+        private readonly PersonalAntiguoService $personalAntiguoService,
         private readonly PersonalContratoService $contratoService,
     ) {
     }
@@ -249,6 +251,97 @@ class PersonalPageController extends WebPageController
         ]);
     }
 
+    public function createAntiguo(): View
+    {
+        return view('personal.antiguo.create');
+    }
+
+    public function storeAntiguo(Request $request): RedirectResponse
+    {
+        $validated = $request->validate($this->legacyCreateRules(), [
+            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+            'contrato_firmado.mimes' => 'El contrato firmado debe ser un PDF.',
+        ]);
+
+        try {
+            $personal = $this->personalAntiguoService->create(
+                $validated,
+                $request->file('contrato_firmado'),
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'No se pudo registrar el personal antiguo. Revisa los datos o intenta nuevamente.');
+        }
+
+        return redirect()
+            ->route('personal.contratos.index', $personal->id)
+            ->with('success', 'Personal antiguo registrado correctamente. El historial contractual quedo guardado.');
+    }
+
+    public function regularizeAntiguo(string $id): View
+    {
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        $personal->loadMissing(['contratoDatos', 'contratoLaboralActual']);
+
+        return view('personal.antiguo.regularizar', [
+            'personal' => $personal,
+            'trabajador' => PersonalResource::make($personal)->resolve(),
+            'contratoDatos' => $personal->contratoDatos,
+            'contratoActual' => $personal->contratoLaboralActual,
+            'hasSignedContract' => $this->service->hasSignedContract($personal),
+        ]);
+    }
+
+    public function updateRegularizacionAntiguo(Request $request, string $id): RedirectResponse
+    {
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        $validated = $request->validate($this->legacyRegularizationRules(), [
+            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+            'contrato_firmado.mimes' => 'El contrato firmado debe ser un PDF.',
+        ]);
+
+        try {
+            $result = $this->personalAntiguoService->regularizeExisting(
+                $personal,
+                $validated,
+                $request->file('contrato_firmado'),
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'No se pudo regularizar el trabajador existente. Revisa los datos o intenta nuevamente.');
+        }
+
+        $redirect = redirect()
+            ->route('personal.edit', $result['personal']->id)
+            ->with('success', ($result['contract_created'] ?? false)
+                ? 'Personal antiguo regularizado y contrato laboral sincronizado.'
+                : 'Personal antiguo regularizado correctamente.');
+
+        if (!empty($result['warnings'])) {
+            $redirect->with('warning', implode(' ', $result['warnings']));
+        }
+
+        return $redirect;
+    }
+
     public function edit(string $id): View
     {
         $personal = $this->service->find($id);
@@ -389,7 +482,7 @@ class PersonalPageController extends WebPageController
                 $personal,
                 $validated['fields'] ?? [],
                 [
-                    'estado' => $validated['estado'] ?? 'ACTIVO',
+                    'estado' => $validated['estado'] ?? $personal->estado ?? 'PENDIENTE_COMPLETAR_FICHA',
                     'es_supervisor' => $validated['es_supervisor'] ?? false,
                     'minas' => $this->buildMinePayload($validated),
                     'familiares' => $validated['familiares'] ?? [],
@@ -520,7 +613,7 @@ class PersonalPageController extends WebPageController
 
         return redirect()
             ->route('personal.edit', $id)
-            ->with('success', 'Trabajador activado con un nuevo contrato.');
+            ->with('success', 'Trabajador reactivado con un nuevo contrato. Queda pendiente de contrato firmado antes de pasar a activo.');
     }
 
     private function buildPayloadFromWeb(array $validated, array $existing = []): array
@@ -586,6 +679,7 @@ class PersonalPageController extends WebPageController
         $rules['familiares.*.numero_documento'] = ['nullable', 'string', 'max:40'];
         $rules['familiares.*.telefono'] = ['nullable', 'string', 'max:30'];
         $rules['familiares.*.vive_con_trabajador'] = ['nullable'];
+        $rules['familiares.*.estudia'] = ['nullable'];
         $rules['familiares.*.contacto_emergencia'] = ['nullable'];
         $rules['documentos'] = ['nullable', 'array'];
 
@@ -596,11 +690,61 @@ class PersonalPageController extends WebPageController
         return $rules;
     }
 
+    private function legacyCreateRules(): array
+    {
+        return [
+            'tipo_documento' => ['required', 'string', 'in:' . implode(',', array_map('strval', array_keys(PersonalFichaCatalog::DOCUMENT_TYPES)))],
+            'numero_documento' => ['required', 'string', 'max:40'],
+            'nombres' => ['required', 'string', 'max:191'],
+            'apellido_paterno' => ['required', 'string', 'max:191'],
+            'apellido_materno' => ['required', 'string', 'max:191'],
+            'telefono' => ['nullable', 'string', 'max:30'],
+            'correo' => ['nullable', 'email', 'max:191'],
+            'puesto' => ['required', 'string', 'max:191'],
+            'ocupacion' => ['nullable', 'string', 'max:191'],
+            'contrato' => ['required', 'string', 'in:REG,FIJO,INTER,INDET'],
+            'estado_laboral' => ['required', 'string', 'in:ACTIVO,FALTA_CONTRATO,CESADO'],
+            'estado_contrato' => ['required', 'string', 'in:VIGENTE,CERRADO'],
+            'fecha_inicio' => ['required', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'fecha_firma' => ['nullable', 'date'],
+            'area' => ['nullable', 'string', 'max:191'],
+            'mina' => ['nullable', 'string', 'max:191'],
+            'remuneracion' => ['nullable', 'string', 'max:120'],
+            'costo_hora' => ['nullable', 'string', 'max:120'],
+            'es_supervisor' => ['nullable', 'boolean'],
+            'motivo_cese' => ['nullable', 'string', 'max:2000'],
+            'observacion_historica' => ['nullable', 'string', 'max:5000'],
+            'contrato_firmado' => ['nullable', 'file', 'max:15360', 'mimes:pdf'],
+        ];
+    }
+
+    private function legacyRegularizationRules(): array
+    {
+        return [
+            'origen_registro' => ['required', 'string', 'in:ANTIGUO,HISTORICO,IMPORTADO'],
+            'pendiente_regularizacion' => ['nullable', 'boolean'],
+            'sincronizar_contrato' => ['nullable', 'boolean'],
+            'estado_contrato' => ['required', 'string', 'in:VIGENTE,CERRADO'],
+            'contrato' => ['nullable', 'string', 'in:REG,FIJO,INTER,INDET'],
+            'fecha_inicio' => ['nullable', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'fecha_firma' => ['nullable', 'date'],
+            'area' => ['nullable', 'string', 'max:191'],
+            'mina' => ['nullable', 'string', 'max:191'],
+            'remuneracion' => ['nullable', 'string', 'max:120'],
+            'costo_hora' => ['nullable', 'string', 'max:120'],
+            'motivo_cese' => ['nullable', 'string', 'max:2000'],
+            'observacion_historica' => ['nullable', 'string', 'max:5000'],
+            'contrato_firmado' => ['nullable', 'file', 'max:15360', 'mimes:pdf'],
+        ];
+    }
+
     private function editFichaRules(): array
     {
         return [
             ...$this->manualCreateRules(),
-            'estado' => ['required', 'in:ACTIVO,INACTIVO,CESADO'],
+            'estado' => ['required', 'in:ACTIVO,FALTA_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'],
         ];
     }
 

@@ -6,6 +6,7 @@
 @php
     $dateValue = fn ($field): string => old($field, optional($datos->{$field})->toDateString() ?? '');
     $textValue = fn ($field): string => (string) old($field, $datos->{$field} ?? '');
+    $estadoContrato = strtoupper((string) ($contrato->estado ?? 'PREPARACION'));
 @endphp
 
 <style>
@@ -21,7 +22,10 @@
         <div class="page-header-top">
             <div>
                 <h1 class="page-title">Datos de contrato</h1>
-                <p class="page-subtitle">{{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}</p>
+                <p class="page-subtitle">
+                    {{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}
+                    · Contrato #{{ $contrato->contrato_numero ?? '-' }} {{ $estadoContrato === 'PREPARACION' ? 'en preparacion' : strtolower($estadoContrato) }}
+                </p>
             </div>
             <div class="page-actions">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>

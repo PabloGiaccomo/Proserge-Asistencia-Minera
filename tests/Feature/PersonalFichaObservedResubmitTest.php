@@ -192,6 +192,127 @@ class PersonalFichaObservedResubmitTest extends TestCase
         ]);
     }
 
+    public function test_public_mobile_submit_uses_files_already_saved_as_draft(): void
+    {
+        Carbon::setTestNow('2026-06-04 08:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'mobile-public-token';
+        $data = $this->fichaData([
+            'numero_documento' => '45678912',
+            'telefono' => '955444333',
+            'correo' => 'mobile@test.local',
+            'puesto' => 'Operario mobile',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45678912',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45678912',
+            'nombre_completo' => 'Trabajador Mobile',
+            'puesto' => 'Operario mobile',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'fecha_ingreso' => '2026-06-01',
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '955444333',
+            'telefono_1' => '955444333',
+            'correo' => 'mobile@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45678912',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'huella_path' => 'personal_fichas/' . $fichaId . '/huella_borrador.jpg',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        foreach (array_keys(PersonalFichaCatalog::documentRequirements()) as $tipo) {
+            if (in_array($tipo, ['matrimonio_union', 'dni_hijos_menores', 'dni_hijos_mayores_estudiantes', 'constancia_estudios_hijos'], true)) {
+                continue;
+            }
+
+            DB::table('personal_ficha_archivos')->insert([
+                'id' => (string) Str::uuid(),
+                'personal_ficha_id' => $fichaId,
+                'tipo' => $tipo,
+                'nombre_original' => $tipo . '.pdf',
+                'path' => 'personal_fichas/' . $fichaId . '/documentos/' . $tipo . '.pdf',
+                'mime' => 'application/pdf',
+                'size' => 1234,
+                'uploaded_by_public' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        DB::table('personal_ficha_archivos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $fichaId,
+            'tipo' => 'huella',
+            'nombre_original' => 'huella.jpg',
+            'path' => 'personal_fichas/' . $fichaId . '/huella_borrador.jpg',
+            'mime' => 'image/jpeg',
+            'size' => 1234,
+            'uploaded_by_public' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->post(route('ficha-colaborador.submit', ['token' => $token]), [
+            'fields' => [
+                ...$data,
+                'telefono' => '966555444',
+                'correo' => 'mobile-corregido@test.local',
+                'domicilio_direccion' => 'Av. enviada desde celular 456',
+            ],
+            'familiares' => [],
+            'firma_base64' => 'data:image/png;base64,mobile',
+            'declaraciones' => collect(PersonalFichaCatalog::declarationCheckboxes())
+                ->mapWithKeys(fn ($_label, string $key): array => [$key => '1'])
+                ->all(),
+        ]);
+
+        $response->assertRedirect(route('ficha-colaborador.show', ['token' => $token]));
+
+        $ficha = PersonalFicha::query()->findOrFail($fichaId);
+
+        $this->assertSame(PersonalFicha::ESTADO_ENVIADA, $ficha->estado);
+        $this->assertSame('966555444', $ficha->datos_json['telefono']);
+        $this->assertSame('mobile-corregido@test.local', $ficha->datos_json['correo']);
+        $this->assertSame('Av. enviada desde celular 456', $ficha->datos_json['domicilio_direccion']);
+        $this->assertSame('data:image/png;base64,mobile', $ficha->firma_base64);
+        $this->assertSame('personal_fichas/' . $fichaId . '/huella_borrador.jpg', $ficha->huella_path);
+        $this->assertDatabaseHas('personal_ficha_links', [
+            'id' => $linkId,
+            'estado' => PersonalFichaLink::ESTADO_ENVIADO,
+        ]);
+    }
+
     public function test_observed_worker_is_shown_as_review_ficha_in_personal_list(): void
     {
         $personalId = (string) Str::uuid();
@@ -219,7 +340,7 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertSame('Revisar ficha', $row['situacion_label']);
     }
 
-    public function test_pending_contract_worker_is_not_shown_as_inactive_for_intermitente(): void
+    public function test_pending_contract_worker_is_not_operationally_active_before_signed_contract(): void
     {
         $personalId = (string) Str::uuid();
         $fichaId = (string) Str::uuid();
@@ -273,10 +394,10 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $row = (new PersonalResource($personal))->resolve();
 
         $this->assertSame('FALTA_CONTRATO', $row['estado']);
-        $this->assertSame('ACTIVO', $row['estado_operativo']);
-        $this->assertTrue($row['activo']);
-        $this->assertSame('habilitado', $row['situacion']);
-        $this->assertSame('Habilitado', $row['situacion_label']);
+        $this->assertSame('INACTIVO', $row['estado_operativo']);
+        $this->assertFalse($row['activo']);
+        $this->assertSame('falta_contrato', $row['situacion']);
+        $this->assertSame('Falta contrato firmado', $row['situacion_label']);
         $this->assertFalse($row['contrato_datos_downloaded']);
         $this->assertFalse($row['contrato_firmado']);
     }

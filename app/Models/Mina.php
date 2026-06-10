@@ -36,6 +36,11 @@ class Mina extends Model
         return $this->hasMany(PersonalMina::class, 'mina_id');
     }
 
+    public function requisitos(): HasMany
+    {
+        return $this->hasMany(MinaRequisito::class, 'mina_id');
+    }
+
     public function paraderos(): HasMany
     {
         return $this->hasMany(MinaParadero::class, 'mina_id');

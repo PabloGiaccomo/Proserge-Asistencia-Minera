@@ -3732,6 +3732,11 @@ body.notif-panel-open {
     color: #166534;
 }
 
+.status-inactive {
+    background: #e5e7eb;
+    color: #374151;
+}
+
 .status-vacaciones {
     background: #DBEAFE;
     color: #1D4ED8;

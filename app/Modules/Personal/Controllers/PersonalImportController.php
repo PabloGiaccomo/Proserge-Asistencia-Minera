@@ -44,6 +44,9 @@ class PersonalImportController extends Controller
                     $result['inactivados'] ?? 0,
                     $result['camposActualizados'] ?? 0,
                 );
+                if (($result['activacionesBloqueadas'] ?? 0) > 0) {
+                    $message .= ' ' . ($result['activacionesBloqueadas'] ?? 0) . ' activacion(es) quedaron pendientes por contrato firmado.';
+                }
             }
 
             \Illuminate\Support\Facades\Log::info('ImportPersonalSummary', $result);
@@ -106,6 +109,7 @@ class PersonalImportController extends Controller
         $noEncontrados = (int) ($result['noEncontrados'] ?? 0);
         $correosInvalidos = (int) ($result['correosInvalidos'] ?? 0);
         $sinCambios = (int) ($result['sinCambios'] ?? 0);
+        $activacionesBloqueadas = (int) ($result['activacionesBloqueadas'] ?? 0);
 
         if (!empty($result['formatoDetectado'])) {
             $lines[] = 'Formato detectado: ' . $result['formatoDetectado'] . '.';
@@ -130,6 +134,9 @@ class PersonalImportController extends Controller
             if ($camposActualizados > 0) {
                 $parts[] = $camposActualizados . ' campo(s) modificado(s)';
             }
+            if ($activacionesBloqueadas > 0) {
+                $parts[] = $activacionesBloqueadas . ' activacion(es) bloqueada(s)';
+            }
 
             if ($parts !== []) {
                 $lines[] = 'Cambios aplicados: ' . implode(', ', $parts) . '.';
@@ -145,6 +152,10 @@ class PersonalImportController extends Controller
                 $parts[] = $omitidos . ' omitido(s)';
             }
             $lines[] = 'Observaciones detectadas: ' . implode(', ', $parts) . '.';
+        }
+
+        if ($activacionesBloqueadas > 0) {
+            $lines[] = 'Advertencia: ' . $activacionesBloqueadas . ' trabajador(es) no fueron activados porque no tienen contrato firmado vigente.';
         }
 
         if (($noEncontrados + $correosInvalidos + $sinCambios) > 0) {
