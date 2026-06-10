@@ -52,11 +52,18 @@
 
     $cssFiles = $cssFiles->filter()->unique();
     $jsFiles = $jsFiles->filter()->unique();
+    $fallbackCss = 'css/proserge-app.css';
+    $fallbackCssPath = public_path($fallbackCss);
+    $fallbackCssVersion = is_file($fallbackCssPath) ? filemtime($fallbackCssPath) : null;
 @endphp
 
 @if($hotAvailable)
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 @else
+    @if($fallbackCssVersion)
+        <link rel="stylesheet" href="{{ asset($fallbackCss) }}?v={{ $fallbackCssVersion }}">
+    @endif
+
     @foreach($cssFiles as $cssFile)
         <link rel="stylesheet" href="{{ asset('build/'.$cssFile) }}">
     @endforeach
