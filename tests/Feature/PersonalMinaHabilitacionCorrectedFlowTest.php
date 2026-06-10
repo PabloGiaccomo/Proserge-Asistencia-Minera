@@ -42,10 +42,42 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertSee('Editar examen')
             ->assertSee('Configurar ex')
             ->assertSee('Importar Excel master')
+            ->assertSee('Analizando Excel master')
+            ->assertSee('data-defer-loading-submit="true"', false)
+            ->assertSee('data-persistent-modal="true"', false)
+            ->assertSee('mineExcelImportModalOpen')
             ->assertSee('Recalcular estados')
             ->assertDontSee('Cargar informacion actual')
             ->assertDontSee('Asignar trabajador a mina')
             ->assertDontSee('Catalogo general de examenes mineros');
+    }
+
+    public function test_vista_no_abre_importar_excel_al_entrar_con_preview_guardada(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $preview = $this->fakeImportPreview();
+
+        $this->withSession(array_merge($this->sessionFor($userId), [
+            'habilitacion_mina_import_preview' => $preview,
+        ]))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertSee('Vista previa generada')
+            ->assertDontSee("window.sessionStorage?.setItem('mineExcelImportModalOpen', '1');", false);
+    }
+
+    public function test_vista_abre_importar_excel_solo_con_flag_temporal(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $preview = $this->fakeImportPreview();
+
+        $this->withSession(array_merge($this->sessionFor($userId), [
+            'habilitacion_mina_import_preview' => $preview,
+            'habilitacion_mina_import_modal_open' => true,
+        ]))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertSee("window.sessionStorage?.setItem('mineExcelImportModalOpen', '1');", false);
     }
 
     public function test_agregar_examen_valida_campos_condicionales_y_maximo_dos_intentos(): void
@@ -332,7 +364,8 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
                 'archivo' => $file,
             ])
             ->assertRedirect()
-            ->assertSessionHas('habilitacion_mina_import_preview');
+            ->assertSessionHas('habilitacion_mina_import_preview')
+            ->assertSessionHas('habilitacion_mina_import_modal_open');
 
         $this->assertDatabaseMissing('personal', ['numero_documento' => '77889900']);
         $this->assertDatabaseMissing('minas', ['nombre' => 'OPERACION DINAMICA']);
@@ -406,6 +439,85 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertDatabaseHas('personal_mina_examenes', [
             'estado' => PersonalMinaExamen::ESTADO_VENCIDO,
             'fecha_vencimiento' => '2026-05-12',
+        ]);
+    }
+
+    public function test_excel_master_normaliza_dni_de_siete_digitos_y_actualiza_habilitacion_existente(): void
+    {
+        Carbon::setTestNow('2026-06-08 09:00:00');
+
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $workerId = (string) Str::uuid();
+        DB::table('personal')->insert([
+            'id' => $workerId,
+            'dni' => '09344260',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '09344260',
+            'nombre_completo' => 'TRABAJADOR CON CERO',
+            'puesto' => 'Operario',
+            'ocupacion' => 'Operario',
+            'contrato' => 'FIJO',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => 'ACTIVO',
+            'telefono' => '999999999',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $file = $this->buildMasterExcelWithSevenDigitDni();
+
+        $this->withSession($this->sessionFor($userId))
+            ->post(route('personal.habilitacion-minera.import.preview'), [
+                'archivo' => $file,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('habilitacion_mina_import_preview');
+
+        $preview = session('habilitacion_mina_import_preview');
+        $this->assertSame(0, $preview['summary']['trabajadores_nuevos']);
+        $this->assertSame(1, $preview['summary']['trabajadores_existentes']);
+        $this->assertSame(1, $preview['summary']['dni_7_digitos_corregidos']);
+        $this->assertSame(0, $preview['summary']['conflictos']);
+        $this->assertSame('09344260', $preview['rows'][0]['documento']);
+        $this->assertTrue($preview['rows'][0]['documento_corregido_con_cero']);
+        $this->assertNotContains('EXAMEN MEDICO / OBS', collect($preview['unmapped'])->pluck('columna')->all());
+        $this->assertNotContains('N°', collect($preview['unmapped'])->pluck('columna')->all());
+        $this->assertNotContains('OCUPACION', collect($preview['unmapped'])->pluck('columna')->all());
+
+        $this->withSession(array_merge($this->sessionFor($userId), ['habilitacion_mina_import_preview' => $preview]))
+            ->post(route('personal.habilitacion-minera.import.confirm'), [
+                'token' => $preview['token'],
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertSame(1, Personal::query()->where('numero_documento', '09344260')->count());
+        $this->assertDatabaseMissing('personal', ['numero_documento' => '9344260']);
+        $worker = Personal::query()->findOrFail($workerId);
+        $this->assertSame('TRABAJADOR CON CERO', $worker->nombre_completo);
+        $this->assertSame('Operario', $worker->ocupacion);
+
+        $mine = Mina::query()->where('nombre', 'BOROO')->firstOrFail();
+        $assignment = PersonalMina::query()
+            ->where('personal_id', $workerId)
+            ->where('mina_id', $mine->id)
+            ->firstOrFail();
+
+        $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignment->estado_habilitacion);
+        $this->assertDatabaseHas('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'nombre_snapshot' => 'EXAMEN MEDICO',
+            'estado' => PersonalMinaExamen::ESTADO_VIGENTE,
+            'fecha_programacion' => '2026-06-01',
+            'fecha_vencimiento' => '2027-06-01',
+            'lugar_snapshot' => 'CLINICA SAN MARTIN',
+            'observacion' => 'Apto importado',
+        ]);
+        $this->assertDatabaseHas('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'nombre_snapshot' => 'BLOQUEO',
+            'estado' => PersonalMinaExamen::ESTADO_NO_APLICA,
+            'observacion' => 'No aplica confirmado desde Excel master.',
         ]);
     }
 
@@ -569,6 +681,81 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         return new \Illuminate\Http\UploadedFile($path, 'master-real.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
     }
 
+    private function buildMasterExcelWithSevenDigitDni()
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('BOROO');
+        $sheet->mergeCells('R1:V1');
+        $sheet->mergeCells('W1:Y1');
+        $sheet->setCellValue('R1', 'EXAMEN MEDICO');
+        $sheet->setCellValue('W1', 'BLOQUEO');
+        $sheet->fromArray([
+            [
+                'N°',
+                'ESTADO ACRED.',
+                'ESTADO',
+                'RESPONSABLE',
+                'TIPO CONTRATO',
+                'OCUPACION',
+                'CC',
+                'DNI',
+                'APELLIDOS Y NOMBRES',
+                'CARGO',
+                'CARGO CONTEO',
+                'CELULAR PARTICULAR',
+                'RESIDENCIA',
+                'FECHA FIN',
+                'ESTADO DE CONTRATO',
+                'OBSR',
+                'PASO',
+                'F PROG.',
+                'F. VTO',
+                'ESTADO EMO',
+                'OBS',
+                'CLINICA',
+                'F PROG.',
+                'F. VTO',
+                'ESTADO BLOQUEO',
+            ],
+            [
+                '1',
+                'HABILITADO',
+                '',
+                '',
+                'INTER',
+                'O',
+                '101100022',
+                '9344260',
+                'NOMBRE DIFERENTE EN EXCEL',
+                'OPERARIO',
+                'OPERARIO',
+                '999888777',
+                'AREQUIPA',
+                '',
+                '',
+                '',
+                '',
+                '2026-06-01',
+                '2027-06-01',
+                'VIGENTE',
+                'Apto importado',
+                'CLINICA SAN MARTIN',
+                'NO APLICA',
+                'NO APLICA',
+                'NO APLICA',
+            ],
+        ], null, 'A2');
+
+        $path = storage_path('app/testing/master-dni-cero-' . Str::random(8) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new \Illuminate\Http\UploadedFile($path, 'master-dni-cero.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
     private function createExam(string $name, array $overrides = []): ExamenMinero
     {
         $id = (string) Str::uuid();
@@ -633,6 +820,22 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
 
         return Personal::query()->findOrFail($id);
+    }
+
+    private function fakeImportPreview(): array
+    {
+        return [
+            'token' => 'preview-test-token',
+            'generated_at' => '2026-06-10 10:00:00',
+            'summary' => [
+                'filas_leidas' => 1,
+                'trabajadores_existentes' => 1,
+            ],
+            'rows' => [],
+            'errors' => [],
+            'unmapped' => [],
+            'conflicts' => [],
+        ];
     }
 
     private function createUser(array $permissions): string

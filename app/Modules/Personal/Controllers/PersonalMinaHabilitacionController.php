@@ -55,6 +55,7 @@ class PersonalMinaHabilitacionController extends WebPageController
             'examStateOptions' => $this->service->examStateOptions(),
             'attemptResultOptions' => $this->service->attemptResultOptions(),
             'importPreview' => session('habilitacion_mina_import_preview'),
+            'importPreviewOpen' => (bool) session('habilitacion_mina_import_modal_open', false),
             'service' => $this->service,
         ]);
     }
@@ -411,7 +412,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
-            ->with('success', 'Excel analizado. Revisa la vista previa antes de confirmar.');
+            ->with('success', 'Excel analizado. Revisa la vista previa antes de confirmar.')
+            ->with('habilitacion_mina_import_modal_open', true);
     }
 
     public function confirmImport(Request $request): RedirectResponse
@@ -428,7 +430,8 @@ class PersonalMinaHabilitacionController extends WebPageController
         } catch (\Throwable $exception) {
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
-                ->with('error', 'No se pudo confirmar la importacion: ' . $exception->getMessage());
+                ->with('error', 'No se pudo confirmar la importacion: ' . $exception->getMessage())
+                ->with('habilitacion_mina_import_modal_open', true);
         }
 
         session()->forget('habilitacion_mina_import_preview');

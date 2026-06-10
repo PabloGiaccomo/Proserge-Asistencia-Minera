@@ -1112,6 +1112,48 @@
         text-align: center;
     }
 
+    .mine-inline-loading {
+        grid-column: 1 / -1;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid #99f6e4;
+        background: #f0fdfa;
+        color: #134e4a;
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 13px;
+        line-height: 1.4;
+    }
+
+    .mine-inline-loading.is-visible {
+        display: flex;
+    }
+
+    .mine-inline-loading[hidden] {
+        display: none;
+    }
+
+    .mine-inline-loading strong {
+        display: block;
+        color: #0f766e;
+        font-size: 13px;
+    }
+
+    .mine-inline-loading span {
+        color: #475569;
+    }
+
+    .mine-inline-spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        border: 3px solid #ccfbf1;
+        border-top-color: #0d9488;
+        flex: 0 0 auto;
+        animation: mine-spin 0.8s linear infinite;
+    }
+
     .mine-spinner {
         width: 38px;
         height: 38px;
@@ -1898,7 +1940,7 @@
             </div>
         </dialog>
 
-        <dialog id="modal-excel" class="mine-dialog is-wide">
+        <dialog id="modal-excel" class="mine-dialog is-wide" data-persistent-modal="true" data-modal-storage-key="mineExcelImportModalOpen">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
                     <span class="mine-dialog-kicker">Importación controlada</span>
@@ -1911,7 +1953,7 @@
             <div class="mine-dialog-body">
                 <div class="alert alert-info">Al confirmar se crean o actualizan trabajadores, minas, exámenes por mina, asignaciones e intentos detectados.</div>
 
-                <form method="POST" enctype="multipart/form-data" action="{{ route('personal.habilitacion-minera.import.preview', $currentQuery) }}" class="mine-form mine-form-section" data-loading-message="Analizando Excel master. Puede tardar si el archivo tiene muchas hojas...">
+                <form method="POST" enctype="multipart/form-data" action="{{ route('personal.habilitacion-minera.import.preview', $currentQuery) }}" class="mine-form mine-form-section" data-loading-message="Analizando Excel master. Puede tardar si el archivo tiene muchas hojas..." data-inline-loading="#mineExcelPreviewLoading" data-loading-button-label="Analizando..." data-defer-loading-submit="true">
                     @csrf
                     <div class="mine-section-title is-full">
                         <div>
@@ -1922,6 +1964,13 @@
                     <label class="is-wide">Archivo Excel<input type="file" name="archivo" accept=".xlsx,.xls,.csv" required></label>
                     <div class="mine-form-actions">
                         <button type="submit" class="btn btn-primary btn-sm">Analizar vista previa</button>
+                    </div>
+                    <div id="mineExcelPreviewLoading" class="mine-inline-loading" hidden>
+                        <div class="mine-inline-spinner" aria-hidden="true"></div>
+                        <div>
+                            <strong>Analizando Excel master</strong>
+                            <span>Estamos leyendo hojas, DNIs, minas, examenes y estados. Espera sin cerrar esta ventana.</span>
+                        </div>
                     </div>
                 </form>
 
@@ -1992,10 +2041,14 @@
             </div>
         </dialog>
 
-        @if($importPreview)
+        @if($importPreview && ($importPreviewOpen ?? false))
             <script>
                 window.addEventListener('DOMContentLoaded', function () {
-                    document.getElementById('modal-excel')?.showModal();
+                    const dialog = document.getElementById('modal-excel');
+                    if (dialog && !dialog.open) {
+                        window.sessionStorage?.setItem('mineExcelImportModalOpen', '1');
+                        dialog.showModal();
+                    }
                 });
             </script>
         @endif
@@ -2092,11 +2145,30 @@ function closeActionsMenu() {
 
 function openDialog(id) {
     closeActionsMenu();
-    document.getElementById(id)?.showModal();
+    const dialog = document.getElementById(id);
+    if (!dialog) return;
+
+    persistDialogOpenState(dialog, true);
+    dialog.showModal();
 }
 
 function closeDialog(button) {
-    button.closest('dialog')?.close();
+    const dialog = button.closest('dialog');
+    if (!dialog) return;
+
+    persistDialogOpenState(dialog, false);
+    dialog.close();
+}
+
+function persistDialogOpenState(dialog, isOpen) {
+    const storageKey = dialog?.dataset?.modalStorageKey;
+    if (!storageKey || !window.sessionStorage) return;
+
+    if (isOpen) {
+        window.sessionStorage.setItem(storageKey, '1');
+    } else {
+        window.sessionStorage.removeItem(storageKey);
+    }
 }
 
 function escHtml(value) {
@@ -2115,10 +2187,24 @@ document.addEventListener('click', function(event) {
 document.querySelectorAll('dialog.mine-dialog').forEach(function(dialog) {
     dialog.addEventListener('click', function(event) {
         if (event.target === dialog) {
+            if (dialog.dataset.persistentModal === 'true') {
+                return;
+            }
             dialog.close();
         }
     });
 });
+
+function restorePersistentDialogs() {
+    document.querySelectorAll('dialog.mine-dialog[data-modal-storage-key]').forEach(function(dialog) {
+        const storageKey = dialog.dataset.modalStorageKey;
+        if (window.sessionStorage?.getItem(storageKey) === '1' && !dialog.open) {
+            dialog.showModal();
+        }
+    });
+}
+
+window.addEventListener('DOMContentLoaded', restorePersistentDialogs);
 
 function showMineLoading(message) {
     const overlay = document.getElementById('mineLoadingOverlay');
@@ -2128,10 +2214,39 @@ function showMineLoading(message) {
     overlay.classList.add('is-visible');
 }
 
+function showInlineFormLoading(form) {
+    const target = form.dataset.inlineLoading ? document.querySelector(form.dataset.inlineLoading) : null;
+    if (target) {
+        target.hidden = false;
+        target.classList.add('is-visible');
+    }
+
+    const label = form.dataset.loadingButtonLabel || 'Procesando...';
+    form.querySelectorAll('button[type="submit"]').forEach(function(button) {
+        button.dataset.originalText = button.textContent;
+        button.textContent = label;
+        button.disabled = true;
+    });
+}
+
 document.addEventListener('submit', function(event) {
     const form = event.target;
     if (form && form.matches('form[data-loading-message]')) {
+        const dialog = form.closest('dialog');
+        if (dialog) {
+            persistDialogOpenState(dialog, true);
+        }
+
+        showInlineFormLoading(form);
         showMineLoading(form.dataset.loadingMessage);
+
+        if (form.dataset.deferLoadingSubmit === 'true' && form.dataset.loadingSubmitted !== 'true') {
+            event.preventDefault();
+            form.dataset.loadingSubmitted = 'true';
+            window.setTimeout(function() {
+                HTMLFormElement.prototype.submit.call(form);
+            }, 80);
+        }
     }
 });
 

@@ -28,7 +28,7 @@ class PersonalMinaExcelImportService
 
     public function preview(UploadedFile $file): array
     {
-        @set_time_limit(300);
+        $this->extendRuntimeLimit(600);
 
         $spreadsheet = $this->loadSpreadsheetForPreview($file);
         $rows = [];
@@ -70,7 +70,8 @@ class PersonalMinaExcelImportService
                     continue;
                 }
 
-                $document = $this->cleanDocument($row[$columns['documento']] ?? '');
+                $rawDocument = (string) ($row[$columns['documento']] ?? '');
+                $document = $this->cleanDocument($rawDocument);
                 if ($document === '') {
                     $errors[] = [
                         'hoja' => $sheet->getTitle(),
@@ -112,9 +113,12 @@ class PersonalMinaExcelImportService
                     'mina' => $mineName,
                     'mina_existe' => false,
                     'documento' => $document,
+                    'documento_original' => $this->rawDocumentDigits($rawDocument),
+                    'documento_corregido_con_cero' => strlen($this->rawDocumentDigits($rawDocument)) === 7 && strlen($document) === 8,
                     'trabajador_existe' => false,
                     'nombre' => PersonalNormalizer::text($row[$columns['nombre']] ?? '') ?: null,
                     'cargo' => PersonalNormalizer::text($row[$columns['cargo']] ?? '') ?: null,
+                    'ocupacion' => PersonalNormalizer::text($row[$columns['ocupacion']] ?? '') ?: null,
                     'area' => PersonalNormalizer::text($row[$columns['area']] ?? '') ?: null,
                     'telefono' => PersonalNormalizer::text($row[$columns['telefono']] ?? '') ?: null,
                     'estado_laboral' => PersonalNormalizer::text($row[$columns['estado_laboral']] ?? '') ?: null,
@@ -132,7 +136,7 @@ class PersonalMinaExcelImportService
 
     public function confirm(array $preview, Usuario $user): array
     {
-        @set_time_limit(600);
+        $this->extendRuntimeLimit(900);
 
         $counts = [
             'trabajadores_creados' => 0,
@@ -230,6 +234,12 @@ class PersonalMinaExcelImportService
         return $reader->load($file->getRealPath());
     }
 
+    private function extendRuntimeLimit(int $seconds): void
+    {
+        @ini_set('max_execution_time', (string) $seconds);
+        @set_time_limit($seconds);
+    }
+
     private function sheetGrid($sheet): array
     {
         $highestRow = min((int) $sheet->getHighestDataRow(), 2000);
@@ -309,6 +319,7 @@ class PersonalMinaExcelImportService
             'documento' => null,
             'nombre' => null,
             'cargo' => null,
+            'ocupacion' => null,
             'area' => null,
             'telefono' => null,
             'estado_laboral' => null,
@@ -324,7 +335,7 @@ class PersonalMinaExcelImportService
             $combined = trim($parentNormalized . ' ' . $normalized);
 
             if ($this->isDocumentHeader($combined)) {
-                $columns['documento'] = $column;
+                $columns['documento'] = $this->preferredDocumentColumn($grid, $headerRow, $columns['documento'], $column);
                 continue;
             }
             if ($this->isNameHeader($combined)) {
@@ -333,6 +344,10 @@ class PersonalMinaExcelImportService
             }
             if (str_contains($combined, 'cargo') || str_contains($combined, 'puesto')) {
                 $columns['cargo'] = $column;
+                continue;
+            }
+            if (str_contains($combined, 'ocupacion')) {
+                $columns['ocupacion'] = $column;
                 continue;
             }
             if (preg_match('/\barea\b/u', $combined)) {
@@ -352,10 +367,23 @@ class PersonalMinaExcelImportService
                 continue;
             }
 
+            if ($this->isOverallHabilitationHeader($normalized)) {
+                $columns['estado_habilitacion'] = $column;
+                continue;
+            }
+
+            if ($this->isAggregateSummaryHeader($normalized)) {
+                continue;
+            }
+
             $subfield = $this->detectExamSubfield($normalized ?: $combined);
             if ($subfield && $parentNormalized !== '' && !$this->isWorkerDataHeader($parentNormalized)) {
                 $examName = mb_substr(PersonalNormalizer::text($parent), 0, 191);
                 $columns['examenes'][$examName][$subfield] = $column;
+                continue;
+            }
+
+            if ($this->isIgnoredWorkerMetadataHeader($normalized, $combined)) {
                 continue;
             }
 
@@ -431,20 +459,27 @@ class PersonalMinaExcelImportService
     private function previewDatabaseIndex(array $rows): array
     {
         $workerDocs = collect($rows)->pluck('documento')->filter()->unique()->values();
+        $workerDocVariants = $workerDocs
+            ->flatMap(fn ($document) => $this->documentLookupVariants((string) $document))
+            ->unique()
+            ->values();
         $mineNames = collect($rows)->pluck('mina')->filter()->unique()->values();
         $examNames = collect($rows)->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))->filter()->unique()->values();
 
         $workersByDocument = [];
-        if ($workerDocs->isNotEmpty()) {
+        if ($workerDocVariants->isNotEmpty()) {
             Personal::query()
-                ->whereIn('numero_documento', $workerDocs)
-                ->orWhereIn('dni', $workerDocs)
+                ->whereIn('numero_documento', $workerDocVariants)
+                ->orWhereIn('dni', $workerDocVariants)
                 ->get(['id', 'nombre_completo', 'numero_documento', 'dni'])
                 ->each(function (Personal $worker) use (&$workersByDocument): void {
                     foreach ([$worker->numero_documento, $worker->dni] as $document) {
                         $document = $this->cleanDocument((string) $document);
                         if ($document !== '') {
-                            $workersByDocument[$document] = $worker;
+                            $current = $workersByDocument[$document] ?? null;
+                            if (!$current || (!$this->workerHasExactDocument($current, $document) && $this->workerHasExactDocument($worker, $document))) {
+                                $workersByDocument[$document] = $worker;
+                            }
                         }
                     }
                 });
@@ -552,6 +587,7 @@ class PersonalMinaExcelImportService
                 'datos_no_mapeados' => count($unmapped),
                 'conflictos' => $conflicts->count(),
                 'cambios_precio_detectados' => $this->countPriceChanges($rows),
+                'dni_7_digitos_corregidos' => collect($rows)->where('documento_corregido_con_cero', true)->pluck('documento')->unique()->count(),
             ],
             'rows' => $rows,
             'errors' => $errors,
@@ -563,18 +599,31 @@ class PersonalMinaExcelImportService
 
     private function resolveWorker(array $row, array &$counts): Personal
     {
-        $personal = Personal::query()
-            ->where('numero_documento', $row['documento'])
-            ->orWhere('dni', $row['documento'])
-            ->first();
+        $document = $this->cleanDocument((string) ($row['documento'] ?? ''));
+        $documentVariants = $this->documentLookupVariants($document);
+
+        $candidates = Personal::query()
+            ->whereIn('numero_documento', $documentVariants)
+            ->orWhereIn('dni', $documentVariants)
+            ->get();
+        $personal = $this->bestWorkerForDocument($candidates, $document);
 
         if ($personal) {
             $updates = [];
+            foreach (['dni', 'numero_documento'] as $field) {
+                $current = (string) ($personal->{$field} ?? '');
+                if (($current === '' || $this->cleanDocument($current) === $document) && $current !== $document) {
+                    $updates[$field] = $document;
+                }
+            }
             if (!$personal->nombre_completo && !empty($row['nombre'])) {
                 $updates['nombre_completo'] = $row['nombre'];
             }
             if (!$personal->puesto && !empty($row['cargo'])) {
                 $updates['puesto'] = $row['cargo'];
+            }
+            if (!$personal->ocupacion && !empty($row['ocupacion'])) {
+                $updates['ocupacion'] = $row['ocupacion'];
             }
             if (!$personal->telefono && !empty($row['telefono'])) {
                 $updates['telefono'] = $row['telefono'];
@@ -591,12 +640,12 @@ class PersonalMinaExcelImportService
 
         return Personal::query()->create([
             'id' => (string) Str::uuid(),
-            'dni' => $row['documento'],
+            'dni' => $document,
             'tipo_documento' => 'DNI',
-            'numero_documento' => $row['documento'],
-            'nombre_completo' => $row['nombre'] ?: 'SIN NOMBRE ' . $row['documento'],
+            'numero_documento' => $document,
+            'nombre_completo' => $row['nombre'] ?: 'SIN NOMBRE ' . $document,
             'puesto' => $row['cargo'] ?: 'SIN CARGO IMPORTADO',
-            'ocupacion' => $row['cargo'] ?: 'SIN CARGO IMPORTADO',
+            'ocupacion' => $row['ocupacion'] ?: ($row['cargo'] ?: 'SIN CARGO IMPORTADO'),
             'contrato' => $row['estado_laboral'] ?: null,
             'qr_code' => 'QR-' . Str::upper(Str::random(12)),
             'telefono' => $row['telefono'] ?: null,
@@ -761,9 +810,17 @@ class PersonalMinaExcelImportService
             'nota' => $this->numericOrNull($values['nota'] ?? null),
             'observacion' => PersonalNormalizer::text($values['observacion'] ?? '') ?: null,
         ];
+        $state = $this->stateFromImportedValues($values, $payload);
+        $hasStateOnlyValue = $this->hasImportedStateOnlyValue($values, $state);
 
-        if (!$result && !$payload['fecha_programacion'] && !$payload['fecha_realizacion'] && !$payload['fecha_vencimiento'] && !$payload['observacion'] && $payload['nota'] === null) {
+        if (!$result && !$payload['fecha_programacion'] && !$payload['fecha_realizacion'] && !$payload['fecha_vencimiento'] && !$payload['observacion'] && $payload['nota'] === null && !$hasStateOnlyValue) {
             return null;
+        }
+
+        if ($state === PersonalMinaExamen::ESTADO_NO_APLICA && !$payload['fecha_programacion'] && !$payload['fecha_realizacion']) {
+            $this->updateWorkerExamSnapshotFromImport($workerExam, $values, $payload, $user);
+
+            return 'updated';
         }
 
         if ($this->attemptAlreadyImported($workerExam, $payload)) {
@@ -849,21 +906,23 @@ class PersonalMinaExcelImportService
         if ($state === PersonalMinaExamen::ESTADO_NO_APLICA && !$observation) {
             $observation = 'No aplica confirmado desde Excel master.';
         }
+        $place = PersonalNormalizer::text($values['lugar'] ?? '') ?: $workerExam->lugar_snapshot;
 
         DB::table('personal_mina_examenes')
             ->where('id', $workerExam->id)
             ->update([
-            'estado' => $state,
-            'resultado' => $payload['resultado'],
-            'fecha_programacion' => $payload['fecha_programacion'],
-            'fecha_realizacion' => $payload['fecha_realizacion'],
-            'fecha_vencimiento' => $payload['fecha_vencimiento'],
-            'nota_obtenida' => $payload['nota'],
-            'observacion' => $observation,
-            'usuario_actualizacion_id' => $user->id,
-            'fecha_actualizacion' => now(),
-            'updated_at' => now(),
-        ]);
+                'lugar_snapshot' => $place ? mb_substr($place, 0, 191) : null,
+                'estado' => $state,
+                'resultado' => $payload['resultado'],
+                'fecha_programacion' => $payload['fecha_programacion'],
+                'fecha_realizacion' => $payload['fecha_realizacion'],
+                'fecha_vencimiento' => $payload['fecha_vencimiento'],
+                'nota_obtenida' => $payload['nota'],
+                'observacion' => $observation,
+                'usuario_actualizacion_id' => $user->id,
+                'fecha_actualizacion' => now(),
+                'updated_at' => now(),
+            ]);
     }
 
     private function stateFromImportedValues(array $values, array $payload): string
@@ -872,6 +931,10 @@ class PersonalMinaExcelImportService
             $values['estado'] ?? '',
             $values['resultado'] ?? '',
             $values['observacion'] ?? '',
+            $values['aplica'] ?? '',
+            $values['fecha_programacion'] ?? '',
+            $values['fecha_realizacion'] ?? '',
+            $values['fecha_vencimiento'] ?? '',
         ]);
         $raw = $this->normalizeHeader($rawText);
         $rawCompact = trim(str_replace(['.', '/'], '', $raw));
@@ -1028,23 +1091,38 @@ class PersonalMinaExcelImportService
             || $this->isNameHeader($value)
             || str_contains($value, 'cargo')
             || str_contains($value, 'puesto')
+            || str_contains($value, 'ocupacion')
             || str_contains($value, 'area')
             || str_contains($value, 'telefono')
             || str_contains($value, 'contrato');
     }
 
+    private function isIgnoredWorkerMetadataHeader(string $normalized, string $combined): bool
+    {
+        $compact = str_replace(['.', ' ', '/', '-', '°', 'º'], '', $normalized);
+
+        return in_array($compact, ['n', 'no', 'nro', 'num', 'numero', '#', 'cc'], true)
+            || in_array($normalized, ['estado', 'responsable', 'residencia', 'paso', 'obsr'], true)
+            || str_contains($combined, 'cargo conteo')
+            || str_contains($combined, 'fecha fin')
+            || str_contains($combined, 'centro costo');
+    }
+
     private function detectExamSubfield(string $value): ?string
     {
+        $compact = str_replace(['.', ' ', '/', '-'], '', $value);
+
         return match (true) {
-            str_contains($value, 'program') || preg_match('/\benv\b/u', $value) => 'fecha_programacion',
+            str_contains($value, 'program') || str_contains($value, 'prog') || str_contains($value, 'inicio') || preg_match('/\benv\b/u', $value) => 'fecha_programacion',
             str_contains($value, 'realizacion') || str_contains($value, 'fecha examen') || preg_match('/\breal\b/u', $value) => 'fecha_realizacion',
-            str_contains($value, 'venc') || str_contains($value, 'vto') => 'fecha_vencimiento',
+            str_contains($value, 'venc') || str_contains($value, 'vto') || str_contains($compact, 'fv') => 'fecha_vencimiento',
             str_contains($value, 'resultado') => 'resultado',
             str_contains($value, 'estado') => 'estado',
-            str_contains($value, 'observ') => 'observacion',
+            str_contains($value, 'observ') || in_array($value, ['obs', 'obsr'], true) => 'observacion',
             str_contains($value, 'sede') || str_contains($value, 'clinica') || str_contains($value, 'lugar') => 'lugar',
             str_contains($value, 'nota') => 'nota',
             str_contains($value, 'precio') || str_contains($value, 'costo') => 'precio',
+            str_contains($value, 'requiere') || preg_match('/\baplica\b/u', $value) => 'aplica',
             default => null,
         };
     }
@@ -1056,7 +1134,118 @@ class PersonalMinaExcelImportService
 
     private function cleanDocument(string $value): string
     {
+        $digits = $this->rawDocumentDigits($value);
+
+        return strlen($digits) === 7 ? '0' . $digits : $digits;
+    }
+
+    private function rawDocumentDigits(string $value): string
+    {
+        $value = trim($value);
+        if (preg_match('/^\d+(\.0+)?$/', $value)) {
+            $value = str_replace('.0', '', $value);
+        }
+
         return preg_replace('/\D+/', '', $value) ?: '';
+    }
+
+    private function documentLookupVariants(string $document): array
+    {
+        $document = $this->cleanDocument($document);
+        if ($document === '') {
+            return [];
+        }
+
+        $variants = [$document];
+        if (strlen($document) === 8 && str_starts_with($document, '0')) {
+            $variants[] = ltrim($document, '0') ?: $document;
+        }
+
+        return array_values(array_unique($variants));
+    }
+
+    private function bestWorkerForDocument($workers, string $document): ?Personal
+    {
+        if ($workers->isEmpty()) {
+            return null;
+        }
+
+        return $workers->first(fn (Personal $worker) => $this->workerHasExactDocument($worker, $document))
+            ?: $workers->first();
+    }
+
+    private function workerHasExactDocument(Personal $worker, string $document): bool
+    {
+        foreach ([$worker->numero_documento, $worker->dni] as $value) {
+            if ($this->rawDocumentDigits((string) $value) === $document) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function preferredDocumentColumn(array $grid, int $headerRow, ?int $currentColumn, int $candidateColumn): int
+    {
+        if ($currentColumn === null) {
+            return $candidateColumn;
+        }
+
+        return $this->documentColumnScore($grid, $headerRow, $candidateColumn) > $this->documentColumnScore($grid, $headerRow, $currentColumn)
+            ? $candidateColumn
+            : $currentColumn;
+    }
+
+    private function documentColumnScore(array $grid, int $headerRow, int $column): int
+    {
+        $score = 0;
+        $lastRow = min(count($grid), $headerRow + 80);
+        for ($row = $headerRow + 1; $row <= $lastRow; $row++) {
+            $digits = $this->rawDocumentDigits((string) ($grid[$row][$column] ?? ''));
+            $length = strlen($digits);
+            if ($length === 8) {
+                $score += 5;
+                if (str_starts_with($digits, '0')) {
+                    $score += 3;
+                }
+                continue;
+            }
+            if ($length === 7) {
+                $score += 3;
+                continue;
+            }
+            if ($length > 0) {
+                $score += 1;
+            }
+        }
+
+        return $score;
+    }
+
+    private function isOverallHabilitationHeader(string $value): bool
+    {
+        return in_array($value, ['estado gral', 'estado gral.', 'estado general', 'estado acreditacion'], true);
+    }
+
+    private function isAggregateSummaryHeader(string $value): bool
+    {
+        return in_array($value, ['vigente', 'vencido', 'no aplica', 'por vencer'], true)
+            || preg_match('/^estado\s+gral\.?$/u', $value) === 1;
+    }
+
+    private function hasImportedStateOnlyValue(array $values, string $state): bool
+    {
+        if ($state === PersonalMinaExamen::ESTADO_PENDIENTE) {
+            return false;
+        }
+
+        foreach (['estado', 'resultado', 'observacion', 'aplica', 'fecha_programacion', 'fecha_realizacion', 'fecha_vencimiento'] as $field) {
+            if (trim((string) ($values[$field] ?? '')) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function indexKey(string $value): string
@@ -1110,23 +1299,22 @@ class PersonalMinaExcelImportService
 
     private function conflicts(array $rows, array $index)
     {
-        return collect($rows)
-            ->filter(function ($row) use ($index): bool {
-                $worker = $index['workersByDocument'][$row['documento']] ?? null;
-
-                return $worker && !empty($row['nombre']) && $worker->nombre_completo && Str::ascii(mb_strtolower($worker->nombre_completo)) !== Str::ascii(mb_strtolower($row['nombre']));
-            })
-            ->map(fn ($row) => [
-                'hoja' => $row['hoja'],
-                'fila' => $row['fila'],
-                'documento' => $row['documento'],
-                'motivo' => 'El nombre del Excel difiere del registrado.',
-            ]);
+        return collect();
     }
 
     private function normalizeDate(mixed $value): ?string
     {
-        return PersonalNormalizer::isoDate($value);
+        $date = PersonalNormalizer::isoDate($value);
+        if (!$date) {
+            return null;
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return null;
+        }
+
+        $year = (int) substr($date, 0, 4);
+
+        return $year >= 1900 && $year <= 2100 ? $date : null;
     }
 
     private function numericOrNull(mixed $value): ?float
