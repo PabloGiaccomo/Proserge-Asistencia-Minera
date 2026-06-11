@@ -313,6 +313,202 @@ class PersonalFichaObservedResubmitTest extends TestCase
         ]);
     }
 
+    public function test_public_draft_data_is_saved_without_submitting_ficha(): void
+    {
+        Carbon::setTestNow('2026-06-05 09:15:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'server-draft-token';
+        $baseData = $this->fichaData([
+            'numero_documento' => '45871236',
+            'telefono' => '900111222',
+            'correo' => 'borrador@test.local',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45871236',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45871236',
+            'nombre_completo' => 'Trabajador Borrador',
+            'puesto' => 'Operario',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45871236',
+            'datos_detectados_json' => json_encode($baseData),
+            'datos_json' => json_encode($baseData),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->postJson(route('ficha-colaborador.datos-borrador', ['token' => $token]), [
+            'fields' => [
+                'telefono' => '944333222',
+                'correo' => 'guardado-servidor@test.local',
+                'domicilio_direccion' => 'Calle guardada 123',
+            ],
+            'familiares' => [
+                [
+                    'parentesco' => 'Hijo',
+                    'nombres_apellidos' => 'Familiar Guardado',
+                    'fecha_nacimiento' => '2015-01-01',
+                    'tipo_documento' => 'DNI',
+                    'numero_documento' => '01234567',
+                    'telefono' => '955111222',
+                    'vive_con_trabajador' => '1',
+                    'estudia' => '1',
+                ],
+            ],
+            'firma_base64' => 'data:image/png;base64,draft',
+            'declaraciones' => collect(PersonalFichaCatalog::declarationCheckboxes())
+                ->mapWithKeys(fn ($_label, string $key): array => [$key => '1'])
+                ->all(),
+        ]);
+
+        $response->assertOk();
+
+        $ficha = PersonalFicha::query()->with('familiares')->findOrFail($fichaId);
+
+        $this->assertSame(PersonalFicha::ESTADO_PENDIENTE, $ficha->estado);
+        $this->assertNull($ficha->submitted_at);
+        $this->assertSame('944333222', $ficha->datos_json['telefono']);
+        $this->assertSame('guardado-servidor@test.local', $ficha->datos_json['correo']);
+        $this->assertSame('Calle guardada 123', $ficha->datos_json['domicilio_direccion']);
+        $this->assertSame('data:image/png;base64,draft', $ficha->firma_base64);
+        $this->assertCount(1, $ficha->familiares);
+        $this->assertSame('Familiar Guardado', $ficha->familiares->first()->nombres_apellidos);
+    }
+
+    public function test_public_submit_uses_server_draft_when_final_post_loses_form_fields(): void
+    {
+        Carbon::setTestNow('2026-06-05 10:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'server-draft-submit-token';
+        $data = $this->fichaData([
+            'numero_documento' => '41785623',
+            'telefono' => '977123456',
+            'correo' => 'respaldo@test.local',
+            'domicilio_direccion' => 'Av. respaldada 456',
+            'declaraciones_json' => json_encode(array_keys(PersonalFichaCatalog::declarationCheckboxes())),
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '41785623',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '41785623',
+            'nombre_completo' => 'Trabajador Respaldo',
+            'puesto' => 'Operario respaldo',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '977123456',
+            'telefono_1' => '977123456',
+            'correo' => 'respaldo@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '41785623',
+            'datos_detectados_json' => json_encode(PersonalFichaCatalog::emptyData()),
+            'datos_json' => json_encode($data),
+            'firma_base64' => 'data:image/png;base64,server-draft',
+            'huella_path' => 'personal_fichas/' . $fichaId . '/huella_borrador.jpg',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        foreach (array_keys(PersonalFichaCatalog::documentRequirements()) as $tipo) {
+            if (in_array($tipo, ['matrimonio_union', 'dni_hijos_menores', 'dni_hijos_mayores_estudiantes', 'constancia_estudios_hijos'], true)) {
+                continue;
+            }
+
+            DB::table('personal_ficha_archivos')->insert([
+                'id' => (string) Str::uuid(),
+                'personal_ficha_id' => $fichaId,
+                'tipo' => $tipo,
+                'nombre_original' => $tipo . '.pdf',
+                'path' => 'personal_fichas/' . $fichaId . '/documentos/' . $tipo . '.pdf',
+                'mime' => 'application/pdf',
+                'size' => 1234,
+                'uploaded_by_public' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        DB::table('personal_ficha_archivos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $fichaId,
+            'tipo' => 'huella',
+            'nombre_original' => 'huella.jpg',
+            'path' => 'personal_fichas/' . $fichaId . '/huella_borrador.jpg',
+            'mime' => 'image/jpeg',
+            'size' => 1234,
+            'uploaded_by_public' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->post(route('ficha-colaborador.submit', ['token' => $token]), []);
+
+        $response->assertRedirect(route('ficha-colaborador.show', ['token' => $token]));
+
+        $ficha = PersonalFicha::query()->findOrFail($fichaId);
+
+        $this->assertSame(PersonalFicha::ESTADO_ENVIADA, $ficha->estado);
+        $this->assertSame('977123456', $ficha->datos_json['telefono']);
+        $this->assertSame('respaldo@test.local', $ficha->datos_json['correo']);
+        $this->assertSame('Av. respaldada 456', $ficha->datos_json['domicilio_direccion']);
+        $this->assertSame('data:image/png;base64,server-draft', $ficha->firma_base64);
+    }
+
     public function test_observed_worker_is_shown_as_review_ficha_in_personal_list(): void
     {
         $personalId = (string) Str::uuid();

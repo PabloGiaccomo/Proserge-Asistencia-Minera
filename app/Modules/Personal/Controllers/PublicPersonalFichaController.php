@@ -53,11 +53,13 @@ class PublicPersonalFichaController extends Controller
                 ->with('error', 'Este link ya no permite modificaciones.');
         }
 
+        $ficha = $resolved['ficha']->loadMissing(['archivos', 'familiares']);
+        $this->mergeStoredDraftIntoRequest($request, $ficha);
+
         $request->merge([
             'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
         ]);
 
-        $ficha = $resolved['ficha']->loadMissing('archivos');
         $validated = $request->validate($this->rules($ficha), $this->messages());
         $fields = $validated['fields'];
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
@@ -139,6 +141,68 @@ class PublicPersonalFichaController extends Controller
         ]);
     }
 
+    public function storeDraftData(Request $request, string $token): JsonResponse
+    {
+        $resolved = $this->fichaService->resolveToken($token);
+
+        if (($resolved['mode'] ?? '') !== 'edit' || !($resolved['link'] instanceof PersonalFichaLink)) {
+            return response()->json([
+                'message' => 'Este link ya no permite guardar datos.',
+            ], 403);
+        }
+
+        $request->merge([
+            'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
+        ]);
+
+        $validated = $request->validate([
+            'fields' => ['nullable', 'array'],
+            'fields.*' => ['nullable', 'string', 'max:12000'],
+            'familiares' => ['nullable', 'array'],
+            'familiares.*.nombres_apellidos' => ['nullable', 'string', 'max:191'],
+            'familiares.*.parentesco' => ['nullable', 'string', 'max:80'],
+            'familiares.*.fecha_nacimiento' => ['nullable', 'date'],
+            'familiares.*.tipo_documento' => ['nullable', 'string', 'max:40'],
+            'familiares.*.numero_documento' => ['nullable', 'string', 'max:40'],
+            'familiares.*.telefono' => ['nullable', 'string', 'max:30'],
+            'familiares.*.vive_con_trabajador' => ['nullable'],
+            'familiares.*.estudia' => ['nullable'],
+            'familiares.*.contacto_emergencia' => ['nullable'],
+            'firma_base64' => ['nullable', 'string', 'max:2500000'],
+            'declaraciones' => ['nullable', 'array'],
+        ], [
+            'fields.*.max' => 'Uno de los campos supera el tamano permitido.',
+            'firma_base64.max' => 'La firma es demasiado grande. Limpiala y vuelve a firmar.',
+        ]);
+
+        $ficha = $resolved['ficha'];
+        $fields = $validated['fields'] ?? [];
+        $fields['tipo_documento'] = $ficha->tipo_documento;
+        $fields['numero_documento'] = $ficha->numero_documento;
+
+        if (isset($validated['declaraciones']) && is_array($validated['declaraciones'])) {
+            $fields['declaraciones_json'] = json_encode(
+                collect($validated['declaraciones'])
+                    ->filter(fn ($value): bool => filter_var($value, FILTER_VALIDATE_BOOL))
+                    ->keys()
+                    ->values()
+                    ->all()
+            );
+        }
+
+        $draft = $this->fichaService->storePublicDraftData(
+            $resolved['link'],
+            $fields,
+            $validated['familiares'] ?? [],
+            $validated['firma_base64'] ?? null,
+        );
+
+        return response()->json([
+            'message' => 'Datos guardados como borrador.',
+            'saved_at' => optional($draft->updated_at)->toDateTimeString(),
+        ]);
+    }
+
     private function rules(PersonalFicha $ficha): array
     {
         $ficha->loadMissing('archivos');
@@ -208,6 +272,45 @@ class PublicPersonalFichaController extends Controller
         $rules['fields.quinta_ejercicio_anio'] = ['nullable', 'string', 'max:4'];
 
         return $rules;
+    }
+
+    private function mergeStoredDraftIntoRequest(Request $request, PersonalFicha $ficha): void
+    {
+        $storedFields = is_array($ficha->datos_json) ? $ficha->datos_json : [];
+        $incomingFields = is_array($request->input('fields')) ? $request->input('fields') : [];
+
+        if (!empty($storedFields)) {
+            $request->merge([
+                'fields' => array_replace($storedFields, $incomingFields),
+            ]);
+        }
+
+        if (!$request->filled('firma_base64') && filled($ficha->firma_base64)) {
+            $request->merge(['firma_base64' => $ficha->firma_base64]);
+        }
+
+        if (!is_array($request->input('familiares')) || count($request->input('familiares', [])) === 0) {
+            $storedFamiliares = collect($this->fichaService->familyRowsForEdit($ficha))
+                ->filter(fn (array $item): bool => trim((string) ($item['nombres_apellidos'] ?? '')) !== '')
+                ->values()
+                ->all();
+
+            if (!empty($storedFamiliares)) {
+                $request->merge(['familiares' => $storedFamiliares]);
+            }
+        }
+
+        if (!is_array($request->input('declaraciones')) && filled($storedFields['declaraciones_json'] ?? null)) {
+            $storedDeclarations = json_decode((string) $storedFields['declaraciones_json'], true);
+
+            if (is_array($storedDeclarations) && !empty($storedDeclarations)) {
+                $request->merge([
+                    'declaraciones' => collect($storedDeclarations)
+                        ->mapWithKeys(fn ($key): array => [(string) $key => '1'])
+                        ->all(),
+                ]);
+            }
+        }
     }
 
     private function messages(): array

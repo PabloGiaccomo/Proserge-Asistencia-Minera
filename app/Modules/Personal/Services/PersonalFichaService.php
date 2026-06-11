@@ -831,6 +831,41 @@ class PersonalFichaService
         });
     }
 
+    public function storePublicDraftData(PersonalFichaLink $link, array $fields, array $familiares = [], ?string $firmaBase64 = null): PersonalFicha
+    {
+        $ficha = $link->ficha()->with(['personal', 'familiares'])->firstOrFail();
+        $existingData = is_array($ficha->datos_json) ? $ficha->datos_json : [];
+
+        $data = $this->normalizeFichaData(array_replace($existingData, [
+            ...$fields,
+            'tipo_documento' => $ficha->tipo_documento,
+            'numero_documento' => $ficha->numero_documento,
+        ]));
+
+        return DB::transaction(function () use ($ficha, $data, $familiares, $firmaBase64): PersonalFicha {
+            $payload = [
+                'datos_json' => $data,
+            ];
+
+            if (filled($firmaBase64)) {
+                $payload['firma_base64'] = $firmaBase64;
+            }
+
+            $ficha->forceFill($payload)->save();
+
+            PersonalFichaFamiliar::query()->where('personal_ficha_id', $ficha->id)->delete();
+            foreach ($this->normalizeFamiliares($familiares) as $familiar) {
+                PersonalFichaFamiliar::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'personal_ficha_id' => $ficha->id,
+                    ...$familiar,
+                ]);
+            }
+
+            return $ficha->fresh(['personal', 'familiares', 'link', 'archivos']);
+        });
+    }
+
     public function notifyFichaSubmitted(PersonalFicha $ficha): void
     {
         app(NotificationService::class)->emit('personal_ficha_completada', [

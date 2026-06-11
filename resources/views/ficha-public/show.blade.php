@@ -415,6 +415,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftFileStoreName = 'files';
     const draftFileInputs = Array.from(document.querySelectorAll('.js-draft-file-input'));
     const csrfToken = form?.querySelector('input[name="_token"]')?.value || '';
+    const draftDataUrl = @json(route('ficha-colaborador.datos-borrador', ['token' => $token]));
     let drawing = false;
     let hasSignature = Boolean(hidden && hidden.value);
 
@@ -624,6 +625,11 @@ document.addEventListener('DOMContentLoaded', function () {
             input.required = false;
             input.dataset.hasServerFile = '1';
             setFileStatus(input, 'Guardado en la ficha: ' + (data.nombre_original || file.name));
+            try {
+                input.value = '';
+            } catch (error) {
+                // noop
+            }
 
             return true;
         } catch (error) {
@@ -719,9 +725,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    const writeDraft = function () {
-        if (isReadonly || !form) return;
-
+    const collectDraft = function () {
         const draft = {
             revision_key: draftRevisionKey,
             fields: {},
@@ -764,7 +768,71 @@ document.addEventListener('DOMContentLoaded', function () {
             draft.quinta_otros_empleadores_json = employersField.value || '';
         }
 
+        return draft;
+    };
+
+    const writeDraft = function () {
+        if (isReadonly || !form) return null;
+
+        const draft = collectDraft();
         window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+
+        return draft;
+    };
+
+    const appendDraftPayload = function (payload, draft) {
+        payload.append('_token', csrfToken);
+
+        Object.entries(draft.fields || {}).forEach(function ([key, value]) {
+            payload.append('fields[' + key + ']', value ?? '');
+        });
+
+        (draft.familiares || []).forEach(function (familiar, index) {
+            Object.entries(familiar || {}).forEach(function ([key, value]) {
+                payload.append('familiares[' + index + '][' + key + ']', value ? String(value) : '');
+            });
+        });
+
+        Object.entries(draft.declaraciones || {}).forEach(function ([key, checked]) {
+            if (checked) {
+                payload.append('declaraciones[' + key + ']', '1');
+            }
+        });
+
+        if (draft.firma_base64) {
+            payload.append('firma_base64', draft.firma_base64);
+        }
+    };
+
+    const saveDraftData = async function () {
+        if (isReadonly || !form || !draftDataUrl) return false;
+
+        syncEmployers();
+        const draft = writeDraft();
+        if (!draft) return false;
+
+        const payload = new FormData();
+        appendDraftPayload(payload, draft);
+
+        try {
+            const response = await fetch(draftDataUrl, {
+                method: 'POST',
+                body: payload,
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(data.message || 'No se pudo guardar el borrador de datos.');
+            }
+
+            return true;
+        } catch (error) {
+            return false;
+        }
     };
 
     const clearDraft = function () {
@@ -1065,10 +1133,16 @@ document.addEventListener('DOMContentLoaded', function () {
         updateQuintaDefaults();
 
         let autosaveTimer = null;
+        let serverAutosaveTimer = null;
+        let lastServerAutosave = Promise.resolve(false);
         let draftSubmitting = false;
         const scheduleDraftSave = function () {
             window.clearTimeout(autosaveTimer);
+            window.clearTimeout(serverAutosaveTimer);
             autosaveTimer = window.setTimeout(writeDraft, 500);
+            serverAutosaveTimer = window.setTimeout(function () {
+                lastServerAutosave = saveDraftData();
+            }, 1500);
         };
 
         form?.addEventListener('input', scheduleDraftSave, true);
@@ -1081,8 +1155,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
             event.preventDefault();
             draftSubmitting = true;
-            await Promise.allSettled(draftFileInputs.map(loadDraftFile));
+            window.clearTimeout(autosaveTimer);
+            window.clearTimeout(serverAutosaveTimer);
             syncEmployers();
+            writeDraft();
+            await lastServerAutosave.catch(() => false);
+            await saveDraftData();
+            await Promise.allSettled(draftFileInputs.map(loadDraftFile));
+            await Promise.allSettled(draftFileInputs.map(uploadDraftFile));
             if (typeof form.requestSubmit === 'function') {
                 form.requestSubmit();
                 return;

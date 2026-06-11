@@ -83,6 +83,7 @@ Route::post('/logout', [LoginPageController::class, 'logout'])->name('logout');
 
 Route::get('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'show'])->name('ficha-colaborador.show');
 Route::post('/ficha-colaborador/{token}/archivo-borrador', [PublicPersonalFichaController::class, 'storeDraftArchivo'])->name('ficha-colaborador.archivo-borrador');
+Route::post('/ficha-colaborador/{token}/datos-borrador', [PublicPersonalFichaController::class, 'storeDraftData'])->name('ficha-colaborador.datos-borrador');
 Route::post('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'submit'])->name('ficha-colaborador.submit');
 
 Route::middleware('web.auth')->group(function (): void {
@@ -161,6 +162,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivate'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.deactivate');
     Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/generar-examenes', [PersonalMinaHabilitacionController::class, 'generateExams'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.generate-exams');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/intentos', [PersonalMinaHabilitacionController::class, 'storeAttempt'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam-attempts.store');
+    Route::post('/personal/habilitacion-minera/intentos/{attemptId}/completar', [PersonalMinaHabilitacionController::class, 'completeScheduledAttempt'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam-attempts.complete');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/no-aplica', [PersonalMinaHabilitacionController::class, 'notApplicable'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam.not-applicable');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/convalidar', [PersonalMinaHabilitacionController::class, 'convalidate'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam.convalidate');
     Route::get('/personal/habilitacion-minera/intentos/{attemptId}/archivo', [PersonalMinaHabilitacionController::class, 'downloadAttempt'])->middleware('web.permission:personal,ver')->name('personal.habilitacion-minera.attempt.download');

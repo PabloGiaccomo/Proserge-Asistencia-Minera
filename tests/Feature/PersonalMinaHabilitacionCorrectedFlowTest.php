@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ExamenMinero;
 use App\Models\Mina;
+use App\Models\MinaRequisito;
 use App\Models\Personal;
 use App\Models\PersonalMina;
 use App\Models\PersonalMinaExamen;
@@ -46,7 +47,8 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertSee('data-defer-loading-submit="true"', false)
             ->assertSee('data-persistent-modal="true"', false)
             ->assertSee('mineExcelImportModalOpen')
-            ->assertSee('Recalcular estados')
+            ->assertDontSee('Recalcular estados')
+            ->assertDontSee('modal-recalcular')
             ->assertDontSee('Cargar informacion actual')
             ->assertDontSee('Asignar trabajador a mina')
             ->assertDontSee('Catalogo general de examenes mineros');
@@ -63,6 +65,9 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->get(route('personal.habilitacion-minera.index'))
             ->assertOk()
             ->assertSee('Vista previa generada')
+            ->assertSee('10/06/2026 12:52:31 hora Perú')
+            ->assertSee('Importando Excel master')
+            ->assertSee('data-inline-loading="#mineExcelConfirmLoading"', false)
             ->assertDontSee("window.sessionStorage?.setItem('mineExcelImportModalOpen', '1');", false);
     }
 
@@ -142,7 +147,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
     }
 
-    public function test_historial_de_precios_no_modifica_intentos_anteriores_y_nuevo_intento_usa_precio_vigente(): void
+    public function test_historial_de_precios_no_modifica_intentos_anteriores_y_el_intento_usa_fecha_de_registro(): void
     {
         Carbon::setTestNow('2026-06-06 09:00:00');
 
@@ -176,9 +181,10 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ], null, $actor);
 
         $attempts = PersonalMinaExamenIntento::query()->orderBy('fecha_programacion')->get();
-        $this->assertSame('100.00', $attempts->first()->precio_aplicado);
+        $this->assertSame('150.00', $attempts->first()->precio_aplicado);
         $this->assertSame('150.00', $attempts->last()->precio_aplicado);
         $this->assertSame('historial_precio', $attempts->last()->fuente_precio);
+        $this->assertSame('2026-06-06', $attempts->first()->fecha_precio_aplicado->toDateString());
     }
 
     public function test_configurar_examenes_por_mina_en_columnas_y_quitar_examen(): void
@@ -198,6 +204,11 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->get(route('personal.habilitacion-minera.index'))
             ->assertOk()
             ->assertSee('mine-columns', false)
+            ->assertSee('mine-config-matrix-wrap', false)
+            ->assertSee('height: min(62vh, 680px);', false)
+            ->assertSee('min-height: 232px;', false)
+            ->assertSee('overflow: hidden;', false)
+            ->assertSee('overflow-y: hidden;', false)
             ->assertSee($mine->nombre)
             ->assertSee($exam->nombre);
 
@@ -206,6 +217,63 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertRedirect();
 
         $this->assertFalse($requirement->fresh()->activo);
+    }
+
+    public function test_configurar_requisito_genera_y_recalcula_automaticamente_sin_boton_manual(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina automatica');
+        $exam = $this->createExam('Examen automatico');
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $this->assertDatabaseMissing('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'examen_id' => $exam->id,
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->post(route('personal.habilitacion-minera.requisitos.store'), [
+                'mina_id' => $mine->id,
+                'examen_id' => $exam->id,
+                'obligatorio' => true,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $requirement = MinaRequisito::query()
+            ->where('mina_id', $mine->id)
+            ->where('examen_id', $exam->id)
+            ->firstOrFail();
+        $this->assertDatabaseHas('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'examen_id' => $exam->id,
+            'mina_requisito_id' => $requirement->id,
+            'estado' => PersonalMinaExamen::ESTADO_PENDIENTE,
+        ]);
+
+        $workerExam = PersonalMinaExamen::query()
+            ->where('personal_mina_id', $assignment->id)
+            ->where('examen_id', $exam->id)
+            ->firstOrFail();
+        $service->registerAttempt($workerExam, [
+            'fecha_realizacion' => '2026-06-10',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
+        ], null, $actor);
+        $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignment->fresh()->estado_habilitacion);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->post(route('personal.habilitacion-minera.requisitos.deactivate', $requirement->id))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertFalse($requirement->fresh()->activo);
+        $this->assertSame(PersonalMina::ESTADO_EN_PROCESO, $assignment->fresh()->estado_habilitacion);
     }
 
     public function test_editar_examen_genera_historial_de_precio_sin_modificar_intentos_previos(): void
@@ -326,6 +394,215 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
     }
 
+    public function test_selector_de_trabajador_queda_limpio_y_filtros_operativos_van_en_matriz(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+
+        $response = $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertSee('Buscar por nombre, DNI o cargo')
+            ->assertSee('id="matrixFilterForm"', false)
+            ->assertSee('form="matrixFilterForm"', false);
+
+        $html = $response->getContent();
+        $workerForm = Str::betweenFirst($html, 'id="workerSearchForm"', '</form>');
+        $matrixForm = Str::betweenFirst($html, 'id="matrixFilterForm"', '</form>');
+
+        $this->assertStringNotContainsString('name="mina_id"', $workerForm);
+        $this->assertStringNotContainsString('name="estado_habilitacion"', $workerForm);
+        $this->assertStringNotContainsString('name="estado_laboral"', $workerForm);
+        $this->assertStringNotContainsString('name="estado_examen"', $workerForm);
+        $this->assertStringContainsString('name="mina_id"', $matrixForm);
+        $this->assertStringContainsString('name="estado_habilitacion"', $matrixForm);
+        $this->assertStringContainsString('name="estado_laboral"', $matrixForm);
+        $this->assertStringContainsString('name="estado_examen"', $matrixForm);
+    }
+
+    public function test_selector_de_trabajador_muestra_total_real_y_no_solo_limite_visible(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $prefix = 'CONTADOR VISUAL ' . Str::upper(Str::random(5));
+
+        for ($i = 1; $i <= 12; $i++) {
+            $this->createPersonalWithDocument((string) (78000000 + $i), [
+                'nombre_completo' => $prefix . ' ' . str_pad((string) $i, 2, '0', STR_PAD_LEFT),
+            ]);
+        }
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.habilitacion-minera.index', [
+                'trabajador' => $prefix,
+                'worker_limit' => 10,
+            ]))
+            ->assertOk()
+            ->assertSee('Mostrando 1-10 de 12')
+            ->assertSee('mine-page-buttons', false)
+            ->assertSee('worker_page=2', false);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.habilitacion-minera.index', [
+                'trabajador' => $prefix,
+                'worker_limit' => 10,
+                'worker_page' => 2,
+            ]))
+            ->assertOk()
+            ->assertSee('Mostrando 11-12 de 12')
+            ->assertSee($prefix . ' 11')
+            ->assertSee($prefix . ' 12')
+            ->assertDontSee($prefix . ' 01');
+    }
+
+    public function test_acciones_de_trabajador_diferencian_asignar_y_gestionar_examenes(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $assignedWorker = $this->createPersonal();
+        $unassignedWorker = $this->createPersonal();
+        $mine = $this->createMine('Mina acciones');
+        $exam = $this->createExam('Examen acciones');
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+        $service->assignMine([
+            'personal_id' => $assignedWorker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $response = $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['worker_limit' => 80]))
+            ->assertOk()
+            ->assertSee('data-testid="worker-assign-' . $assignedWorker->id . '"', false)
+            ->assertSee('data-testid="worker-manage-' . $assignedWorker->id . '"', false)
+            ->assertSee('data-testid="worker-assign-' . $unassignedWorker->id . '"', false);
+
+        $this->assertStringNotContainsString(
+            'data-testid="worker-manage-' . $unassignedWorker->id . '"',
+            $response->getContent()
+        );
+    }
+
+    public function test_gestionar_examenes_del_trabajador_permite_abrir_o_generar_desde_el_modal(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mineWithExams = $this->createMine('Mina gestion con examenes');
+        $mineWithoutGenerated = $this->createMine('Mina gestion sin generados');
+        $hiddenByFilterMine = $this->createMine('Mina filtro distinta');
+        $exam = $this->createExam('Examen gestion modal');
+
+        $service->storeRequirement([
+            'mina_id' => $mineWithExams->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+        $service->storeRequirement([
+            'mina_id' => $mineWithoutGenerated->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $assignmentWithExams = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mineWithExams->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $assignmentWithoutGeneratedId = (string) Str::uuid();
+        DB::table('personal_mina')->insert([
+            'id' => $assignmentWithoutGeneratedId,
+            'personal_id' => $worker->id,
+            'mina_id' => $mineWithoutGenerated->id,
+            'estado' => PersonalMina::ESTADO_EN_PROCESO,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+            'fecha_asignacion' => '2026-06-11',
+            'fecha_inicio_proceso' => '2026-06-11',
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', [
+                'worker_id' => $worker->id,
+                'mina_id' => $hiddenByFilterMine->id,
+            ]))
+            ->assertOk()
+            ->assertSee('Abrir gestion')
+            ->assertSee('Generar examenes')
+            ->assertSee('Programar examen')
+            ->assertSee('Ver programados')
+            ->assertSee('Registrar examen realizado')
+            ->assertSee($assignmentWithExams->id)
+            ->assertSee($assignmentWithoutGeneratedId)
+            ->assertSee('/personal/habilitacion-minera/asignaciones/' . $assignmentWithoutGeneratedId . '/generar-examenes', false)
+            ->assertSee('generate_exams_url', false);
+    }
+
+    public function test_minas_disponibles_muestran_asignado_pendiente_y_evitan_reasignacion(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina pendiente inicio');
+        $exam = $this->createExam('Examen pendiente inicio');
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+        $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['worker_id' => $worker->id]))
+            ->assertOk()
+            ->assertSee('data-testid="mine-worker-mine-board"', false)
+            ->assertSee('data-visual-state="ASIGNADO_PENDIENTE_INICIO"', false)
+            ->assertSee('Programar examenes')
+            ->assertSee('Sin examenes iniciados')
+            ->assertSee('Ya asignada')
+            ->assertSee('openWorkerExams', false);
+    }
+
+    public function test_matriz_diferencia_desaprobado_con_reintento_de_desaprobado_definitivo(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina reintento visual');
+        $exam = $this->createExam('Examen reintento visual', [
+            'permite_reintento' => true,
+            'max_intentos' => 2,
+        ]);
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+        $service->registerAttempt($assignment->examenes->first(), [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+        ], null, $actor);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['mina_id' => $mine->id]))
+            ->assertOk()
+            ->assertSee('mine-exam-cell orange', false)
+            ->assertSee('Registrar siguiente intento');
+    }
+
     public function test_listado_de_habilitacion_se_pagina_por_cantidad_elegida(): void
     {
         $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
@@ -350,8 +627,75 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->withSession($this->sessionFor($userId))
             ->get(route('personal.habilitacion-minera.index', ['mina_id' => $mine->id, 'per_page' => 10]))
             ->assertOk()
-            ->assertSee('Asignaciones')
-            ->assertSee('Mostrando 1 - 10 de 16 asignaciones');
+            ->assertSee('Mostrar')
+            ->assertSee('trabajadores')
+            ->assertDontSee('Asignaciones por página')
+            ->assertSee('Mostrando 1 - 10 de 16 trabajadores');
+    }
+
+    public function test_matriz_operativa_por_mina_muestra_examenes_dinamicos_y_estados_visuales(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina matriz');
+        $exam = $this->createExam('Examen matriz');
+
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $service->registerAttempt($assignment->examenes->first(), [
+            'fecha_programacion' => '2026-06-08',
+            'fecha_realizacion' => '2026-06-08',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
+        ], null, $actor);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['mina_id' => $mine->id]))
+            ->assertOk()
+            ->assertSee('Matriz operativa')
+            ->assertSee('data-testid="mine-operational-matrix"', false)
+            ->assertSee('Estado habilitacion')
+            ->assertSee('Accion siguiente')
+            ->assertSee($exam->nombre)
+            ->assertSee('Intento 1/2')
+            ->assertSee('mine-exam-cell ok', false)
+            ->assertSee('data-visual-state="' . PersonalMina::ESTADO_HABILITADO . '"', false);
+    }
+
+    public function test_vista_no_muestra_habilitado_visual_sin_examenes_configurados_o_generados(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina visual');
+        DB::table('personal_mina')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado' => PersonalMina::ESTADO_HABILITADO,
+            'estado_habilitacion' => PersonalMina::ESTADO_HABILITADO,
+            'fecha_asignacion' => '2026-06-08',
+            'fecha_inicio_proceso' => '2026-06-08',
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.habilitacion-minera.index', ['mina_id' => $mine->id]))
+            ->assertOk()
+            ->assertSee('Sin examenes configurados para esta mina')
+            ->assertSee('data-visual-state="' . PersonalMina::ESTADO_EN_PROCESO . '"', false)
+            ->assertSee('En proceso');
     }
 
     public function test_excel_master_preview_no_guarda_y_confirmacion_importa_datos(): void
@@ -372,8 +716,57 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
 
         $preview = session('habilitacion_mina_import_preview');
         $this->assertSame(1, $preview['summary']['trabajadores_nuevos']);
+        $this->assertSame(1, $preview['summary']['trabajadores_no_encontrados']);
+        $this->assertSame(0, $preview['summary']['trabajadores_existentes']);
+        $this->assertSame(0, $preview['summary']['trabajadores_asignados_a_minas']);
         $this->assertSame(1, $preview['summary']['minas_nuevas']);
         $this->assertSame(1, $preview['summary']['examenes_nuevos']);
+        $this->assertSame(1, $preview['summary']['precios_detectados_omitidos']);
+        $this->assertSame('OMITIR_TRABAJADOR_NO_ENCONTRADO', $preview['rows'][0]['accion_importacion']);
+
+        $this->withSession(array_merge($this->sessionFor($userId), ['habilitacion_mina_import_preview' => $preview]))
+            ->post(route('personal.habilitacion-minera.import.confirm'), [
+                'token' => $preview['token'],
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success', fn ($message) => str_contains($message, 'trabajadores_no_encontrados: 1'))
+            ->assertSessionHas('habilitacion_mina_import_completed')
+            ->assertSessionMissing('habilitacion_mina_import_preview');
+
+        $this->assertDatabaseMissing('personal', ['numero_documento' => '77889900']);
+        $this->assertDatabaseHas('minas', ['nombre' => 'OPERACION DINAMICA']);
+        $this->assertDatabaseHas('examenes_mineros', ['nombre' => 'EXAMEN DINAMICO']);
+        $this->assertDatabaseMissing('personal_mina_examenes', [
+            'nombre_snapshot' => 'EXAMEN DINAMICO',
+            'estado' => PersonalMinaExamen::ESTADO_APROBADO,
+        ]);
+    }
+
+    public function test_excel_master_actualiza_solo_habilitacion_de_trabajador_existente_sin_pisar_datos_internos(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $worker = $this->createPersonalWithDocument('77889900', [
+            'nombre_completo' => 'NOMBRE INTERNO',
+            'puesto' => 'Cargo interno',
+            'ocupacion' => 'Ocupacion interna',
+            'contrato' => 'INDETERMINADO',
+            'estado' => 'ACTIVO',
+        ]);
+        $file = $this->buildMasterExcel();
+
+        $this->withSession($this->sessionFor($userId))
+            ->post(route('personal.habilitacion-minera.import.preview'), [
+                'archivo' => $file,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('habilitacion_mina_import_preview');
+
+        $preview = session('habilitacion_mina_import_preview');
+        $this->assertSame(0, $preview['summary']['trabajadores_nuevos']);
+        $this->assertSame(0, $preview['summary']['trabajadores_no_encontrados']);
+        $this->assertSame(1, $preview['summary']['trabajadores_existentes']);
+        $this->assertSame(1, $preview['summary']['trabajadores_asignados_a_minas']);
+        $this->assertSame('ACTUALIZAR_HABILITACION_EXISTENTE', $preview['rows'][0]['accion_importacion']);
 
         $this->withSession(array_merge($this->sessionFor($userId), ['habilitacion_mina_import_preview' => $preview]))
             ->post(route('personal.habilitacion-minera.import.confirm'), [
@@ -382,10 +775,28 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertRedirect()
             ->assertSessionHas('success');
 
-        $this->assertDatabaseHas('personal', ['numero_documento' => '77889900']);
-        $this->assertDatabaseHas('minas', ['nombre' => 'OPERACION DINAMICA']);
-        $this->assertDatabaseHas('examenes_mineros', ['nombre' => 'EXAMEN DINAMICO']);
-        $this->assertDatabaseHas('personal_mina_examenes', ['estado' => PersonalMinaExamen::ESTADO_APROBADO]);
+        $worker->refresh();
+        $this->assertSame('NOMBRE INTERNO', $worker->nombre_completo);
+        $this->assertSame('Cargo interno', $worker->puesto);
+        $this->assertSame('Ocupacion interna', $worker->ocupacion);
+        $this->assertSame('INDETERMINADO', $worker->contrato);
+        $this->assertSame('ACTIVO', $worker->estado);
+        $this->assertSame(1, Personal::query()->where('numero_documento', '77889900')->count());
+
+        $mine = Mina::query()->where('nombre', 'OPERACION DINAMICA')->firstOrFail();
+        $assignment = PersonalMina::query()
+            ->where('personal_id', $worker->id)
+            ->where('mina_id', $mine->id)
+            ->firstOrFail();
+        $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignment->estado_habilitacion);
+        $this->assertDatabaseHas('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'estado' => PersonalMinaExamen::ESTADO_APROBADO,
+            'observacion' => 'Carga inicial',
+        ]);
+
+        $exam = ExamenMinero::query()->where('nombre', 'EXAMEN DINAMICO')->firstOrFail();
+        $this->assertDatabaseMissing('examen_minero_precios', ['examen_id' => $exam->id]);
     }
 
     public function test_excel_master_real_con_hojas_por_mina_importa_evaluaciones_y_multiples_minas(): void
@@ -393,6 +804,11 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         Carbon::setTestNow('2026-06-08 09:00:00');
 
         $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $this->createPersonalWithDocument('77889911', [
+            'nombre_completo' => 'TRABAJADOR MULTIMINA',
+            'puesto' => 'Cargo interno multiple',
+            'ocupacion' => 'Ocupacion interna multiple',
+        ]);
         $file = $this->buildRealMasterExcel();
 
         $this->withSession($this->sessionFor($userId))
@@ -404,6 +820,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
 
         $preview = session('habilitacion_mina_import_preview');
         $this->assertSame(2, $preview['summary']['trabajadores_asignados_a_minas']);
+        $this->assertSame(0, $preview['summary']['trabajadores_no_encontrados']);
         $this->assertSame(0, $preview['summary']['filas_con_error']);
         $this->assertNotContains('RESUMEN GRAL', collect($preview['rows'])->pluck('hoja')->all());
 
@@ -427,7 +844,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertDatabaseHas('personal_mina', [
             'personal_id' => $worker->id,
             'mina_id' => $cerroVerde->id,
-            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+            'estado_habilitacion' => PersonalMina::ESTADO_NO_HABILITADO,
             'activo' => true,
         ]);
         $this->assertDatabaseHas('examenes_mineros', ['nombre' => 'EXAMEN MEDICO']);
@@ -475,6 +892,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
 
         $preview = session('habilitacion_mina_import_preview');
         $this->assertSame(0, $preview['summary']['trabajadores_nuevos']);
+        $this->assertSame(0, $preview['summary']['trabajadores_no_encontrados']);
         $this->assertSame(1, $preview['summary']['trabajadores_existentes']);
         $this->assertSame(1, $preview['summary']['dni_7_digitos_corregidos']);
         $this->assertSame(0, $preview['summary']['conflictos']);
@@ -495,7 +913,10 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertDatabaseMissing('personal', ['numero_documento' => '9344260']);
         $worker = Personal::query()->findOrFail($workerId);
         $this->assertSame('TRABAJADOR CON CERO', $worker->nombre_completo);
+        $this->assertSame('Operario', $worker->puesto);
         $this->assertSame('Operario', $worker->ocupacion);
+        $this->assertSame('FIJO', $worker->contrato);
+        $this->assertSame('ACTIVO', $worker->estado);
 
         $mine = Mina::query()->where('nombre', 'BOROO')->firstOrFail();
         $assignment = PersonalMina::query()
@@ -517,7 +938,46 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             'personal_mina_id' => $assignment->id,
             'nombre_snapshot' => 'BLOQUEO',
             'estado' => PersonalMinaExamen::ESTADO_NO_APLICA,
-            'observacion' => 'No aplica confirmado desde Excel master.',
+            'observacion' => null,
+        ]);
+    }
+
+    public function test_excel_master_programar_emo_queda_en_proceso_y_accion_pendiente(): void
+    {
+        Carbon::setTestNow('2026-06-08 09:00:00');
+
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $worker = $this->createPersonalWithDocument('77889922');
+        $file = $this->buildMasterExcelProgramarEmo();
+
+        $this->withSession($this->sessionFor($userId))
+            ->post(route('personal.habilitacion-minera.import.preview'), [
+                'archivo' => $file,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('habilitacion_mina_import_preview');
+
+        $preview = session('habilitacion_mina_import_preview');
+        $this->assertSame(PersonalMinaExamen::ESTADO_PROGRAMADO, data_get($preview, 'rows.0.examenes.0.preview.estado_mapeado'));
+        $this->assertSame('PROGRAMAR_EXAMEN', data_get($preview, 'rows.0.examenes.0.preview.accion_pendiente'));
+
+        $this->withSession(array_merge($this->sessionFor($userId), ['habilitacion_mina_import_preview' => $preview]))
+            ->post(route('personal.habilitacion-minera.import.confirm'), [
+                'token' => $preview['token'],
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $mine = Mina::query()->where('nombre', 'OPERACION PROGRAMACION')->firstOrFail();
+        $assignment = PersonalMina::query()
+            ->where('personal_id', $worker->id)
+            ->where('mina_id', $mine->id)
+            ->firstOrFail();
+        $this->assertSame(PersonalMina::ESTADO_EN_PROCESO, $assignment->estado_habilitacion);
+        $this->assertDatabaseHas('personal_mina_examenes', [
+            'personal_mina_id' => $assignment->id,
+            'nombre_snapshot' => 'EXAMEN MEDICO',
+            'estado' => PersonalMinaExamen::ESTADO_PROGRAMADO,
         ]);
     }
 
@@ -569,6 +1029,71 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
     }
 
+    public function test_recalcular_corrige_habilitado_con_requisitos_pero_sin_examenes_generados(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina configurada sin generados');
+        $exam = $this->createExam('Examen pendiente de generar');
+
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $assignmentId = (string) Str::uuid();
+        DB::table('personal_mina')->insert([
+            'id' => $assignmentId,
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado' => PersonalMina::ESTADO_HABILITADO,
+            'estado_habilitacion' => PersonalMina::ESTADO_HABILITADO,
+            'fecha_asignacion' => '2026-06-08',
+            'fecha_inicio_proceso' => '2026-06-08',
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $result = $service->syncCurrentInformation($actor);
+        $assignment = PersonalMina::query()->with('examenes')->findOrFail($assignmentId);
+
+        $this->assertGreaterThanOrEqual(1, $result['examenes_generados']);
+        $this->assertSame(PersonalMina::ESTADO_EN_PROCESO, $assignment->estado_habilitacion);
+        $this->assertCount(1, $assignment->examenes);
+    }
+
+    public function test_snapshot_de_precio_caida_a_programacion_y_realizacion_si_no_hay_fecha_registro(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $exam = $service->storeMiningExam([
+            'nombre' => 'Control precio prioridad',
+            'empresa_paga' => true,
+            'precio' => 80,
+            'moneda' => 'PEN',
+            'precio_desde' => '2026-01-01',
+            'max_intentos' => 2,
+        ], $actor);
+        $service->storeExamPrice($exam, [
+            'precio' => 120,
+            'moneda' => 'PEN',
+            'fecha_inicio' => '2026-06-05',
+        ], $actor);
+        $assignment = $this->assignmentWithExam($service, $actor, $exam);
+        $workerExam = $assignment->examenes->first();
+
+        $bySchedule = $service->resolveAttemptPriceSnapshot($workerExam, null, '2026-06-05', '2026-06-01');
+        $byDone = $service->resolveAttemptPriceSnapshot($workerExam, null, null, '2026-06-05');
+
+        $this->assertSame('2026-06-05', $bySchedule['fecha']);
+        $this->assertSame('120.00', (string) $bySchedule['precio']);
+        $this->assertSame('2026-06-05', $byDone['fecha']);
+        $this->assertSame('120.00', (string) $byDone['precio']);
+    }
+
     public function test_permisos_y_nombres_propios(): void
     {
         $denied = $this->createUser(['personal' => ['ver']]);
@@ -593,6 +1118,11 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         foreach ($files as $file) {
             $this->assertDoesNotMatchRegularExpression('/elida|diego/i', file_get_contents($file), $file);
         }
+        $this->assertDoesNotMatchRegularExpression(
+            '/marcobre|cerro verde|chinalco|cuajone|toquepala|orcopampa|boroo/i',
+            file_get_contents(app_path('Modules/Personal/Services/PersonalMinaExcelImportService.php')),
+            'El importador no debe depender de nombres de minas quemados.'
+        );
     }
 
     private function assignmentWithExam(PersonalMinaHabilitacionService $service, Usuario $actor, ExamenMinero $exam): PersonalMina
@@ -620,18 +1150,20 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $sheet->setCellValue('A2', 'DNI');
         $sheet->setCellValue('B2', 'Nombre completo');
         $sheet->setCellValue('C2', 'Cargo');
-        foreach (['D1', 'E1', 'F1'] as $cell) {
+        foreach (['D1', 'E1', 'F1', 'G1'] as $cell) {
             $sheet->setCellValue($cell, 'Examen dinamico');
         }
         $sheet->setCellValue('D2', 'Fecha de realizacion');
         $sheet->setCellValue('E2', 'Resultado');
         $sheet->setCellValue('F2', 'Observacion');
+        $sheet->setCellValue('G2', 'Precio');
         $sheet->setCellValue('A3', '77889900');
         $sheet->setCellValue('B3', 'Trabajador Importado');
         $sheet->setCellValue('C3', 'Operario');
         $sheet->setCellValue('D3', '2026-06-06');
         $sheet->setCellValue('E3', 'Aprobado');
         $sheet->setCellValue('F3', 'Carga inicial');
+        $sheet->setCellValue('G3', 450);
 
         $path = storage_path('app/testing/master-habilitacion-' . Str::random(8) . '.xlsx');
         if (!is_dir(dirname($path))) {
@@ -640,6 +1172,34 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         (new Xlsx($spreadsheet))->save($path);
 
         return new \Illuminate\Http\UploadedFile($path, 'master.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    private function buildMasterExcelProgramarEmo()
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Operacion programacion');
+        $sheet->setCellValue('A2', 'DNI');
+        $sheet->setCellValue('B2', 'Nombre completo');
+        $sheet->setCellValue('C2', 'Cargo');
+        foreach (['D1', 'E1'] as $cell) {
+            $sheet->setCellValue($cell, 'Examen medico');
+        }
+        $sheet->setCellValue('D2', 'Estado EMO');
+        $sheet->setCellValue('E2', 'Observacion');
+        $sheet->setCellValue('A3', '77889922');
+        $sheet->setCellValue('B3', 'Trabajador Programado');
+        $sheet->setCellValue('C3', 'Operario');
+        $sheet->setCellValue('D3', 'PROGRAMAR EMO');
+        $sheet->setCellValue('E3', 'Pendiente de cita');
+
+        $path = storage_path('app/testing/master-programar-emo-' . Str::random(8) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new \Illuminate\Http\UploadedFile($path, 'master-programar-emo.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
     }
 
     private function buildRealMasterExcel()
@@ -802,7 +1362,14 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
     {
         $id = (string) Str::uuid();
         $document = (string) random_int(73000000, 73999999);
-        DB::table('personal')->insert([
+
+        return $this->createPersonalWithDocument($document);
+    }
+
+    private function createPersonalWithDocument(string $document, array $overrides = []): Personal
+    {
+        $id = (string) Str::uuid();
+        DB::table('personal')->insert(array_merge([
             'id' => $id,
             'dni' => $document,
             'tipo_documento' => 'DNI',
@@ -817,7 +1384,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             'telefono' => '999999999',
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ], $overrides));
 
         return Personal::query()->findOrFail($id);
     }
@@ -826,7 +1393,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
     {
         return [
             'token' => 'preview-test-token',
-            'generated_at' => '2026-06-10 10:00:00',
+            'generated_at' => '2026-06-10T17:52:31+00:00',
             'summary' => [
                 'filas_leidas' => 1,
                 'trabajadores_existentes' => 1,

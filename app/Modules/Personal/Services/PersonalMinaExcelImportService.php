@@ -92,6 +92,7 @@ class PersonalMinaExcelImportService
                         'nombre' => $examName,
                         'existe' => false,
                         'datos' => $values,
+                        'preview' => $this->previewMetadataForExamValues($values),
                     ];
                 }
 
@@ -141,6 +142,7 @@ class PersonalMinaExcelImportService
         $counts = [
             'trabajadores_creados' => 0,
             'trabajadores_actualizados' => 0,
+            'trabajadores_no_encontrados' => 0,
             'minas_creadas' => 0,
             'examenes_creados' => 0,
             'examenes_mina_agregados' => 0,
@@ -149,6 +151,8 @@ class PersonalMinaExcelImportService
             'intentos_importados' => 0,
             'intentos_omitidos_duplicados' => 0,
             'estados_habilitacion_actualizados' => 0,
+            'precios_detectados_omitidos' => 0,
+            'convalidaciones_sugeridas' => 0,
             'filas_omitidas' => 0,
         ];
 
@@ -158,6 +162,8 @@ class PersonalMinaExcelImportService
             $examCache = [];
             $requirementCache = [];
             $assignmentCache = [];
+            $processedWorkerIds = [];
+            $missingDocuments = [];
 
             foreach ($preview['rows'] ?? [] as $row) {
                 if (empty($row['documento'])) {
@@ -165,7 +171,7 @@ class PersonalMinaExcelImportService
                     continue;
                 }
 
-                $personal = $this->resolveWorkerCached($row, $counts, $workerCache);
+                $personal = $this->resolveWorkerCached($row, $workerCache);
                 $mina = $this->resolveMineCached((string) ($row['mina'] ?? ''), $counts, $mineCache);
                 if (!$mina) {
                     $counts['filas_omitidas']++;
@@ -175,9 +181,29 @@ class PersonalMinaExcelImportService
                 $resolvedExams = [];
                 foreach ($row['examenes'] ?? [] as $examRow) {
                     $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache);
-                    $this->applyPriceFromImport($exam, $examRow['datos'] ?? [], $user);
+                    if ($this->hasImportedPrice($examRow['datos'] ?? [])) {
+                        $counts['precios_detectados_omitidos']++;
+                    }
+                    if (!empty($examRow['preview']['convalidacion_sugerida'])) {
+                        $counts['convalidaciones_sugeridas']++;
+                    }
                     $this->resolveRequirementCached($mina, $exam, $counts, $requirementCache);
                     $resolvedExams[] = [$exam, $examRow];
+                }
+
+                if (!$personal) {
+                    $document = $this->cleanDocument((string) ($row['documento'] ?? ''));
+                    if ($document !== '' && !isset($missingDocuments[$document])) {
+                        $counts['trabajadores_no_encontrados']++;
+                        $missingDocuments[$document] = true;
+                    }
+                    $counts['filas_omitidas']++;
+                    continue;
+                }
+
+                if (!isset($processedWorkerIds[$personal->id])) {
+                    $counts['trabajadores_actualizados']++;
+                    $processedWorkerIds[$personal->id] = true;
                 }
 
                 $assignment = $this->resolveAssignmentCached($personal, $mina, $user, $counts, $assignmentCache);
@@ -205,6 +231,9 @@ class PersonalMinaExcelImportService
                 }
 
                 if ($this->applyImportedAssignmentState($personal, $mina, $row, $user)) {
+                    $counts['estados_habilitacion_actualizados']++;
+                }
+                if ($this->habilitation->refreshAssignmentFromExams($assignment, $user)) {
                     $counts['estados_habilitacion_actualizados']++;
                 }
             }
@@ -421,21 +450,10 @@ class PersonalMinaExcelImportService
         }
 
         $name = PersonalNormalizer::text(preg_replace('/\s*\(\d+\)\s*$/u', '', $sheetTitle) ?: $sheetTitle);
-        $normalized = $this->normalizeHeader($name);
-        $aliases = [
-            'marcobre' => 'MARCOBRE',
-            'cerro verde' => 'CERRO VERDE',
-            'chinalco' => 'CHINALCO',
-            'cuajone' => 'CUAJONE',
-            'toquepala' => 'TOQUEPALA',
-            'orcopampa' => 'ORCOPAMPA',
-            'boroo' => 'BOROO',
-        ];
-
-        foreach ($aliases as $needle => $label) {
-            if (str_contains($normalized, $needle)) {
-                return $label;
-            }
+        $parts = preg_split('/\s+/u', $name) ?: [];
+        while (count($parts) > 2 && mb_strtolower((string) end($parts)) === mb_strtolower((string) $parts[0])) {
+            array_pop($parts);
+            $name = implode(' ', $parts);
         }
 
         return mb_substr($name, 0, 191);
@@ -454,6 +472,28 @@ class PersonalMinaExcelImportService
     private function hasUsefulExamValues(array $values): bool
     {
         return collect($values)->contains(fn ($value) => trim((string) $value) !== '');
+    }
+
+    private function previewMetadataForExamValues(array $values): array
+    {
+        $payload = [
+            'fecha_programacion' => $this->normalizeDate($values['fecha_programacion'] ?? null),
+            'fecha_realizacion' => $this->normalizeDate($values['fecha_realizacion'] ?? null),
+            'fecha_vencimiento' => $this->normalizeDate($values['fecha_vencimiento'] ?? null),
+            'resultado' => $this->normalizeResult($values['resultado'] ?? $values['estado'] ?? '') ?: PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+            'nota' => $this->numericOrNull($values['nota'] ?? null),
+            'observacion' => PersonalNormalizer::text($values['observacion'] ?? '') ?: null,
+        ];
+        $state = $this->stateFromImportedValues($values, $payload);
+
+        return [
+            'estado_mapeado' => $state,
+            'resultado_mapeado' => $payload['resultado'],
+            'accion_pendiente' => $this->pendingActionFromImportedValues($values, $state),
+            'no_aplica_detectado' => $state === PersonalMinaExamen::ESTADO_NO_APLICA,
+            'convalidacion_sugerida' => $this->isConvalidationHint($values),
+            'precio_detectado_omitido' => $this->hasImportedPrice($values),
+        ];
     }
 
     private function previewDatabaseIndex(array $rows): array
@@ -552,9 +592,15 @@ class PersonalMinaExcelImportService
 
             $row['trabajador_existe'] = (bool) $worker;
             $row['mina_existe'] = (bool) $mine;
+            $row['trabajador_no_encontrado'] = !$worker;
+            $row['accion_importacion'] = $worker
+                ? 'ACTUALIZAR_HABILITACION_EXISTENTE'
+                : 'OMITIR_TRABAJADOR_NO_ENCONTRADO';
 
             foreach ($row['examenes'] as &$examRow) {
-                $examRow['existe'] = isset($index['examsByName'][$this->indexKey((string) ($examRow['nombre'] ?? ''))]);
+                $examName = (string) ($examRow['nombre'] ?? '');
+                $examRow['existe'] = isset($index['examsByName'][$this->indexKey($examName)]);
+                $examRow['examenes_parecidos'] = $this->similarExamSuggestionsFor($examName, $index);
             }
             unset($examRow);
         }
@@ -569,13 +615,18 @@ class PersonalMinaExcelImportService
         $mineNames = collect($rows)->pluck('mina')->filter()->unique();
         $examNames = collect($rows)->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))->filter()->unique();
         $conflicts = $this->conflicts($rows, $index);
+        $missingWorkerDocs = $workerDocs->filter(fn ($doc) => !isset($index['workersByDocument'][$doc]));
+        $existingWorkerDocs = $workerDocs->filter(fn ($doc) => isset($index['workersByDocument'][$doc]));
 
         return [
             'token' => (string) Str::uuid(),
-            'generated_at' => now()->toDateTimeString(),
+            'generated_at' => now()->toIso8601String(),
             'summary' => [
-                'trabajadores_nuevos' => $workerDocs->filter(fn ($doc) => !isset($index['workersByDocument'][$doc]))->count(),
-                'trabajadores_existentes' => $workerDocs->filter(fn ($doc) => isset($index['workersByDocument'][$doc]))->count(),
+                'trabajadores_nuevos' => $missingWorkerDocs->count(),
+                'trabajadores_no_encontrados' => $missingWorkerDocs->count(),
+                'trabajadores_existentes' => $existingWorkerDocs->count(),
+                'filas_importables' => collect($rows)->where('trabajador_existe', true)->count(),
+                'filas_no_importables_trabajador_no_encontrado' => collect($rows)->where('trabajador_existe', false)->count(),
                 'minas_nuevas' => $mineNames->filter(fn ($name) => !isset($index['minesByName'][$this->indexKey((string) $name)]))->count(),
                 'minas_existentes' => $mineNames->filter(fn ($name) => isset($index['minesByName'][$this->indexKey((string) $name)]))->count(),
                 'examenes_nuevos' => $examNames->filter(fn ($name) => !isset($index['examsByName'][$this->indexKey((string) $name)]))->count(),
@@ -587,8 +638,29 @@ class PersonalMinaExcelImportService
                 'datos_no_mapeados' => count($unmapped),
                 'conflictos' => $conflicts->count(),
                 'cambios_precio_detectados' => $this->countPriceChanges($rows),
+                'precios_detectados_omitidos' => $this->countPriceChanges($rows),
+                'convalidaciones_sugeridas' => $this->countConvalidationHints($rows),
+                'no_aplica_detectados' => $this->countMappedExamStates($rows, PersonalMinaExamen::ESTADO_NO_APLICA),
                 'dni_7_digitos_corregidos' => collect($rows)->where('documento_corregido_con_cero', true)->pluck('documento')->unique()->count(),
             ],
+            'sheets' => [
+                'detectadas' => collect($rows)->pluck('hoja')->filter()->unique()->values()->all(),
+                'omitidas' => $omitted,
+            ],
+            'trabajadores_no_encontrados' => $rows
+                ? collect($rows)
+                    ->where('trabajador_existe', false)
+                    ->map(fn ($row) => [
+                        'hoja' => $row['hoja'] ?? null,
+                        'fila' => $row['fila'] ?? null,
+                        'documento' => $row['documento'] ?? null,
+                        'nombre' => $row['nombre'] ?? null,
+                    ])
+                    ->unique(fn ($row) => ($row['documento'] ?? '') . '|' . ($row['hoja'] ?? '') . '|' . ($row['fila'] ?? ''))
+                    ->values()
+                    ->all()
+                : [],
+            'examenes_parecidos' => $this->similarExamSuggestions($rows, $index),
             'rows' => $rows,
             'errors' => $errors,
             'omitted' => $omitted,
@@ -597,7 +669,7 @@ class PersonalMinaExcelImportService
         ];
     }
 
-    private function resolveWorker(array $row, array &$counts): Personal
+    private function resolveWorker(array $row): ?Personal
     {
         $document = $this->cleanDocument((string) ($row['documento'] ?? ''));
         $documentVariants = $this->documentLookupVariants($document);
@@ -609,59 +681,20 @@ class PersonalMinaExcelImportService
         $personal = $this->bestWorkerForDocument($candidates, $document);
 
         if ($personal) {
-            $updates = [];
-            foreach (['dni', 'numero_documento'] as $field) {
-                $current = (string) ($personal->{$field} ?? '');
-                if (($current === '' || $this->cleanDocument($current) === $document) && $current !== $document) {
-                    $updates[$field] = $document;
-                }
-            }
-            if (!$personal->nombre_completo && !empty($row['nombre'])) {
-                $updates['nombre_completo'] = $row['nombre'];
-            }
-            if (!$personal->puesto && !empty($row['cargo'])) {
-                $updates['puesto'] = $row['cargo'];
-            }
-            if (!$personal->ocupacion && !empty($row['ocupacion'])) {
-                $updates['ocupacion'] = $row['ocupacion'];
-            }
-            if (!$personal->telefono && !empty($row['telefono'])) {
-                $updates['telefono'] = $row['telefono'];
-            }
-            if ($updates) {
-                $personal->forceFill($updates)->save();
-                $counts['trabajadores_actualizados']++;
-            }
-
             return $personal;
         }
 
-        $counts['trabajadores_creados']++;
-
-        return Personal::query()->create([
-            'id' => (string) Str::uuid(),
-            'dni' => $document,
-            'tipo_documento' => 'DNI',
-            'numero_documento' => $document,
-            'nombre_completo' => $row['nombre'] ?: 'SIN NOMBRE ' . $document,
-            'puesto' => $row['cargo'] ?: 'SIN CARGO IMPORTADO',
-            'ocupacion' => $row['ocupacion'] ?: ($row['cargo'] ?: 'SIN CARGO IMPORTADO'),
-            'contrato' => $row['estado_laboral'] ?: null,
-            'qr_code' => 'QR-' . Str::upper(Str::random(12)),
-            'telefono' => $row['telefono'] ?: null,
-            'estado' => 'PENDIENTE_COMPLETAR_FICHA',
-            'origen_registro' => 'IMPORTADO',
-        ]);
+        return null;
     }
 
-    private function resolveWorkerCached(array $row, array &$counts, array &$cache): Personal
+    private function resolveWorkerCached(array $row, array &$cache): ?Personal
     {
         $key = $this->cleanDocument((string) ($row['documento'] ?? ''));
-        if (isset($cache[$key])) {
+        if (array_key_exists($key, $cache)) {
             return $cache[$key];
         }
 
-        return $cache[$key] = $this->resolveWorker($row, $counts);
+        return $cache[$key] = $this->resolveWorker($row);
     }
 
     private function resolveMine(string $name, array &$counts): ?Mina
@@ -851,10 +884,19 @@ class PersonalMinaExcelImportService
             ->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)
             ->count();
         $nextAttempt = $currentAttempts + 1;
-        $maxAttempts = max(1, (int) ($workerExam->max_intentos_snapshot ?: 2));
+        $maxAttempts = $workerExam->permite_reintento_snapshot
+            ? min(2, max(1, (int) ($workerExam->max_intentos_snapshot ?: 2)))
+            : 1;
         if ($nextAttempt > $maxAttempts) {
             return false;
         }
+
+        $priceSnapshot = $this->habilitation->resolveAttemptPriceSnapshot(
+            $workerExam,
+            Carbon::today()->toDateString(),
+            $payload['fecha_programacion'],
+            $payload['fecha_realizacion'],
+        );
 
         DB::table('personal_mina_examen_intentos')->insert([
             'id' => (string) Str::uuid(),
@@ -864,6 +906,10 @@ class PersonalMinaExcelImportService
             'fecha_realizacion' => $payload['fecha_realizacion'],
             'resultado' => $payload['resultado'],
             'nota' => $payload['nota'],
+            'precio_aplicado' => $priceSnapshot['precio'],
+            'moneda_aplicada' => $priceSnapshot['moneda'],
+            'fecha_precio_aplicado' => $priceSnapshot['fecha'],
+            'fuente_precio' => $priceSnapshot['fuente'],
             'observacion' => $payload['observacion'],
             'usuario_registro_id' => $user->id,
             'created_at' => now(),
@@ -903,9 +949,6 @@ class PersonalMinaExcelImportService
 
         $state = $this->stateFromImportedValues($values, $payload);
         $observation = $payload['observacion'] ?: $workerExam->observacion;
-        if ($state === PersonalMinaExamen::ESTADO_NO_APLICA && !$observation) {
-            $observation = 'No aplica confirmado desde Excel master.';
-        }
         $place = PersonalNormalizer::text($values['lugar'] ?? '') ?: $workerExam->lugar_snapshot;
 
         DB::table('personal_mina_examenes')
@@ -950,7 +993,7 @@ class PersonalMinaExcelImportService
         if (str_contains($raw, 'desaprob') || str_contains($raw, 'no apt') || str_contains($raw, 'rechaz')) {
             return PersonalMinaExamen::ESTADO_DESAPROBADO;
         }
-        if (str_contains($raw, 'observ')) {
+        if (str_contains($raw, 'levantar observ') || str_contains($raw, 'observ') || str_contains($raw, 'restric')) {
             return PersonalMinaExamen::ESTADO_OBSERVADO;
         }
         if (str_contains($raw, 'vencido')) {
@@ -958,6 +1001,9 @@ class PersonalMinaExcelImportService
         }
         if (str_contains($raw, 'por vencer')) {
             return PersonalMinaExamen::ESTADO_POR_VENCER;
+        }
+        if (str_contains($raw, 'programar emo') || str_contains($raw, 'pendiente resultado')) {
+            return PersonalMinaExamen::ESTADO_PROGRAMADO;
         }
         if (str_contains($raw, 'vigente') || str_contains($raw, 'aprob') || str_contains($raw, 'apto')) {
             return $this->stateForImportedExpiration($payload['fecha_vencimiento']);
@@ -1035,37 +1081,52 @@ class PersonalMinaExcelImportService
             str_contains($value, 'habilitado') && !str_contains($value, 'no habilitado') => PersonalMina::ESTADO_HABILITADO,
             str_contains($value, 'no habilitado') => PersonalMina::ESTADO_NO_HABILITADO,
             str_contains($value, 'observ') => PersonalMina::ESTADO_OBSERVADO,
-            str_contains($value, 'desaprob') => PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION,
-            str_contains($value, 'proceso') || str_contains($value, 'pend') => PersonalMina::ESTADO_EN_PROCESO,
+            str_contains($value, 'desaprob') => PersonalMina::ESTADO_NO_HABILITADO,
+            str_contains($value, 'proceso') || str_contains($value, 'pend') || str_contains($value, 'program') => PersonalMina::ESTADO_EN_PROCESO,
             default => null,
         };
     }
 
-    private function applyPriceFromImport(ExamenMinero $exam, array $values, Usuario $user): void
+    private function hasImportedPrice(array $values): bool
     {
-        $price = $this->numericOrNull($values['precio'] ?? null);
-        if ($price === null) {
-            return;
+        return $this->numericOrNull($values['precio'] ?? null) !== null;
+    }
+
+    private function isConvalidationHint(array $values): bool
+    {
+        $raw = $this->normalizeHeader(implode(' ', [
+            $values['estado'] ?? '',
+            $values['resultado'] ?? '',
+            $values['observacion'] ?? '',
+            $values['aplica'] ?? '',
+        ]));
+
+        return str_contains($raw, 'convalid');
+    }
+
+    private function pendingActionFromImportedValues(array $values, string $state): ?string
+    {
+        $raw = $this->normalizeHeader(implode(' ', [
+            $values['estado'] ?? '',
+            $values['resultado'] ?? '',
+            $values['observacion'] ?? '',
+            $values['aplica'] ?? '',
+        ]));
+
+        if (str_contains($raw, 'programar emo') || (str_contains($raw, 'program') && str_contains($raw, 'emo'))) {
+            return 'PROGRAMAR_EXAMEN';
+        }
+        if (str_contains($raw, 'pendiente resultado')) {
+            return 'REGISTRAR_RESULTADO';
+        }
+        if (str_contains($raw, 'levantar observ')) {
+            return 'LEVANTAR_OBSERVACION';
+        }
+        if ($state === PersonalMinaExamen::ESTADO_OBSERVADO) {
+            return 'REVISAR_OBSERVACION';
         }
 
-        $date = $this->normalizeDate($values['fecha_realizacion'] ?? null)
-            ?: $this->normalizeDate($values['fecha_programacion'] ?? null)
-            ?: Carbon::today()->toDateString();
-
-        $exists = $exam->precios()
-            ->where('precio', $price)
-            ->where('fecha_inicio', $date)
-            ->exists();
-        if ($exists) {
-            return;
-        }
-
-        $this->habilitation->storeExamPrice($exam, [
-            'precio' => $price,
-            'moneda' => 'PEN',
-            'fecha_inicio' => $date,
-            'observacion' => 'Precio detectado desde Excel master.',
-        ], $user);
+        return null;
     }
 
     private function normalizeHeader(string $value): string
@@ -1284,7 +1345,7 @@ class PersonalMinaExcelImportService
                 $worker = $index['workersByDocument'][$row['documento']] ?? null;
                 $mine = $index['minesByName'][$this->indexKey((string) ($row['mina'] ?? ''))] ?? null;
 
-                return !$worker || !$mine || !isset($index['assignmentKeys'][$worker->id . '|' . $mine->id]);
+                return $worker && (!$mine || !isset($index['assignmentKeys'][$worker->id . '|' . $mine->id]));
             })
             ->count();
     }
@@ -1297,9 +1358,72 @@ class PersonalMinaExcelImportService
             ->count();
     }
 
+    private function countConvalidationHints(array $rows): int
+    {
+        return collect($rows)
+            ->flatMap(fn ($row) => $row['examenes'] ?? [])
+            ->filter(fn ($exam) => (bool) data_get($exam, 'preview.convalidacion_sugerida', false))
+            ->count();
+    }
+
+    private function countMappedExamStates(array $rows, string $state): int
+    {
+        return collect($rows)
+            ->flatMap(fn ($row) => $row['examenes'] ?? [])
+            ->filter(fn ($exam) => data_get($exam, 'preview.estado_mapeado') === $state)
+            ->count();
+    }
+
     private function conflicts(array $rows, array $index)
     {
         return collect();
+    }
+
+    private function similarExamSuggestions(array $rows, array $index): array
+    {
+        return collect($rows)
+            ->flatMap(fn ($row) => $row['examenes'] ?? [])
+            ->pluck('nombre')
+            ->filter()
+            ->unique()
+            ->flatMap(fn ($name) => $this->similarExamSuggestionsFor((string) $name, $index))
+            ->unique(fn ($item) => $item['detectado'] . '|' . $item['existente'])
+            ->values()
+            ->take(50)
+            ->all();
+    }
+
+    private function similarExamSuggestionsFor(string $name, array $index): array
+    {
+        $normalized = $this->indexKey($name);
+        if ($normalized === '' || isset($index['examsByName'][$normalized])) {
+            return [];
+        }
+
+        $suggestions = [];
+        foreach ($index['examsByName'] as $existingKey => $exam) {
+            if ($existingKey === '') {
+                continue;
+            }
+            $distance = levenshtein($normalized, $existingKey);
+            $maxLength = max(strlen($normalized), strlen($existingKey), 1);
+            $ratio = 1 - ($distance / $maxLength);
+            $contains = str_contains($normalized, $existingKey) || str_contains($existingKey, $normalized);
+            if (!$contains && $ratio < 0.78) {
+                continue;
+            }
+
+            $suggestions[] = [
+                'detectado' => $name,
+                'existente' => $exam->nombre,
+                'similitud' => round($contains ? max($ratio, 0.9) : $ratio, 2),
+                'accion' => 'SUGERIR_REVISION_MANUAL',
+            ];
+        }
+
+        usort($suggestions, fn ($a, $b) => $b['similitud'] <=> $a['similitud']);
+
+        return array_slice($suggestions, 0, 3);
     }
 
     private function normalizeDate(mixed $value): ?string
@@ -1330,6 +1454,9 @@ class PersonalMinaExcelImportService
         }
         if (str_contains($value, 'desaprob') || str_contains($value, 'no apt') || str_contains($value, 'rechaz')) {
             return PersonalMinaExamenIntento::RESULTADO_DESAPROBADO;
+        }
+        if (str_contains($value, 'observ') || str_contains($value, 'restric') || str_contains($value, 'levantar observ')) {
+            return PersonalMinaExamenIntento::RESULTADO_PENDIENTE;
         }
         if (str_contains($value, 'aprob') || str_contains($value, 'vigente') || str_contains($value, 'habil') || str_contains($value, 'apto') || str_contains($value, 'vencido') || str_contains($value, 'por vencer')) {
             return PersonalMinaExamenIntento::RESULTADO_APROBADO;

@@ -80,6 +80,22 @@ Trabajadores nuevos:
 
 - Estado laboral y contrato son responsabilidades del modulo Personal/Contratos.
 - Habilitacion minera solo gestiona trabajador-mina-examenes-intentos.
+- Habilitacion minera no modifica cargo, supervisor, ficha, documentos
+  personales, renovaciones, estado laboral ni contratos.
+- El master Excel de habilitacion es apoyo de importacion con preview y
+  confirmacion; no es fuente absoluta de verdad y por ahora no crea trabajadores
+  nuevos automaticamente.
+- En habilitacion minera se separa estado general de accion siguiente: tareas
+  del Excel como "programar examen" deben quedar como `EN_PROCESO` mas accion
+  pendiente, no como estado final.
+- Un trabajador-mina solo puede ser `HABILITADO` cuando la mina tiene examenes
+  configurados, estos fueron generados para el trabajador y todos quedaron
+  resueltos, vigentes, convalidados o `NO_APLICA`.
+- Si el trabajador agota intentos o desaprueba el ultimo intento requerido,
+  debe mostrarse como `NO_HABILITADO` para esa mina. No debe quedar visible como
+  `OBSERVADO` por ese motivo.
+- Convalidaciones son sugeridas por el sistema y confirmadas por el usuario; no
+  se aplican automaticamente.
 - Documentos tienen estado propio y pueden estar pendientes, cargados,
   observados, aprobados o no aplicar.
 - Contratos antiguos y cerrados son solo lectura.

@@ -111,13 +111,24 @@ Reglas:
 
 ## Habilitacion minera y examenes
 
+Cadena funcional:
+
+- Trabajador.
+- Mina.
+- Examenes o requisitos requeridos.
+- Intentos.
+- Resultado.
+- Estado de habilitacion.
+
 Estados de habilitacion:
 
 - `EN_PROCESO`.
 - `HABILITADO`.
 - `NO_HABILITADO`.
 - `OBSERVADO`.
-- `FINALIZADO_POR_DESAPROBACION`.
+- `FINALIZADO_POR_DESAPROBACION` solo si se requiere por compatibilidad
+  historica. La prioridad funcional y visible ante agotamiento de intentos es
+  `NO_HABILITADO`.
 
 Estados de examen:
 
@@ -135,14 +146,85 @@ Estados de examen:
 Reglas:
 
 - Habilitacion minera no cambia estado laboral ni contratos.
+- Habilitacion minera tampoco cambia cargo, supervisor, ficha, documentos
+  personales ni renovaciones.
 - Un trabajador puede tener varias minas.
 - Cada mina tiene requisitos/examenes configurables, no quemados en codigo.
 - Cada examen del trabajador guarda snapshot de requisito/precio/vigencia.
 - Intentos conservan historial; cambios de precio no modifican intentos previos.
-- Examen critico desaprobado puede finalizar proceso de habilitacion.
+- Un examen puede tener maximo 1 o 2 intentos; nunca debe permitirse un tercer
+  intento.
+- Si desaprueba el primer intento y tiene segundo intento disponible, el examen
+  sigue `EN_PROCESO`, la mina sigue `EN_PROCESO` y se habilita registrar el
+  segundo intento.
+- Si desaprueba el ultimo intento o agota intentos, el examen queda
+  `DESAPROBADO` o equivalente compatible, la mina queda `NO_HABILITADO` y no
+  puede continuar para esa mina.
+- Si un examen desaprobado sin intentos disponibles tambien es requerido por
+  otra mina, esa otra mina debe mostrarse bloqueada/gris para ese trabajador,
+  no permitir asignacion y mostrar motivo operativo.
+- Examen critico desaprobado puede finalizar proceso de habilitacion; si esto
+  ocurre, el estado visible principal debe priorizar `NO_HABILITADO`.
 - Examen vencido puede dejar no habilitado, segun regla del servicio.
-- `NO_APLICA` debe ser explicito.
+- `NO_APLICA` debe ser explicito, no exige observacion obligatoria y cuenta como
+  requisito resuelto.
 - Convalidacion debe conservar origen y no inventar datos.
+- Convalidacion debe sugerirse, no aplicarse automaticamente.
+- Convalidacion solo puede aplicarse si el examen permite convalidacion, existe
+  examen equivalente aprobado o vigente en otra mina, el examen origen no esta
+  vencido, no fue desaprobado sin intentos disponibles y el usuario confirma.
+- No puede existir `HABILITADO` sin examenes configurados en la mina.
+- No puede existir `HABILITADO` sin examenes generados para el trabajador-mina.
+- No puede existir `HABILITADO` con examenes pendientes, vencidos,
+  desaprobados, observados o sin resolver.
+
+Estados, acciones pendientes y Excel:
+
+- Textos del Excel como `PROGRAMAR EMO` o equivalentes no son estados finales.
+  Deben interpretarse como `EN_PROCESO` mas accion pendiente: programar examen.
+- Cualquier texto del Excel que represente tarea pendiente debe separarse en
+  estado general y accion siguiente.
+- El Excel master no es fuente absoluta de verdad.
+- El Excel master debe actualizar solo trabajadores existentes. Si trae un DNI
+  que no existe, se muestra en preview como trabajador no encontrado, no se crea
+  automaticamente.
+- El Excel puede detectar minas, examenes, asignaciones de trabajadores
+  existentes, estados, fechas, vencimientos, observaciones, notas, datos no
+  mapeados y ayudar a configurar examenes por mina.
+- El Excel no debe sobrescribir sin confirmacion cargo, contrato, estado
+  laboral, supervisor, datos personales sensibles ni ocupacion interna del
+  sistema.
+- Los colores del Excel son ayuda visual, no fuente de verdad. El sistema debe
+  calcular estados segun configuracion, examenes generados, intentos,
+  resultados, vencimientos, convalidaciones, no aplica y desaprobaciones.
+
+Precios:
+
+- El precio del examen se toma por prioridad: fecha de registro del intento,
+  fecha de programacion, fecha de realizacion y, si ninguna existe, fecha actual
+  del sistema.
+- Cada intento debe guardar `precio_aplicado`, `moneda_aplicada`,
+  `fecha_precio_aplicado` y `fuente_precio`.
+- Cambiar el precio del examen no modifica intentos anteriores.
+- Si la empresa no paga el examen, puede no contabilizarse y no debe exigir
+  precio.
+
+Pantalla y acciones:
+
+- La vista principal debe ser operativa y simple; no debe mostrar formularios
+  administrativos abiertos desde el inicio.
+- La vista principal se enfoca en trabajador -> mina -> examenes -> intentos ->
+  estado.
+- Todo lo administrativo debe estar dentro de Acciones: agregar examen, editar
+  examen, configurar examenes por mina, importar Excel master, recalcular
+  estados, historial de precios y revisar equivalencias.
+- El boton "Cargar informacion actual" no debe existir. Si aparece, debe
+  renombrarse a "Recalcular estados".
+- "Recalcular estados" debe explicar y mostrar resumen de asignaciones
+  revisadas, examenes generados, estados corregidos, minas sin examenes
+  configurados, asignaciones que no pueden habilitarse y errores encontrados.
+- No quemar nombres de minas, examenes ni personas en codigo, rutas, vistas,
+  migraciones ni tests.
 
 ## Historial, antiguedad y trazabilidad
 

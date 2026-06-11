@@ -20,23 +20,214 @@
         }
     };
 
-    $stateLabel = fn ($state): string => $stateOptions[$state] ?? $state ?? '-';
+    $stateLabel = fn ($state): string => match ($state) {
+        'ASIGNADO_PENDIENTE_INICIO' => 'Asignado - pendiente de iniciar',
+        'NEUTRO' => 'Disponible',
+        'BLOQUEADA' => 'Bloqueada',
+        default => $stateOptions[$state] ?? $state ?? '-',
+    };
     $examStateLabel = fn ($state): string => $examStateOptions[$state] ?? $state ?? '-';
     $attemptResultLabel = fn ($state): string => $attemptResultOptions[$state] ?? $state ?? '-';
 
     $mineBoard = $service->mineStatusBoardFor($selectedWorker);
+    $mineBoardCollection = collect($mineBoard);
+    $selectedWorkerAssignedMineCount = $mineBoardCollection->filter(fn ($tile) => !empty($tile['assignment']))->count();
+    $selectedWorkerAssignableMineCount = $mineBoardCollection->filter(fn ($tile) => $selectedWorker && empty($tile['assignment']) && ($tile['state'] ?? null) !== 'BLOQUEADA')->count();
     $requirementsByMine = $requirements->groupBy('mina_id');
+    $activeRequirementsByMine = $requirements
+        ->filter(fn ($requirement) => (bool) ($requirement->activo ?? true) && filled($requirement->examen_id))
+        ->groupBy('mina_id');
+    $selectedMineId = trim((string) ($filters['mina_id'] ?? request('mina_id', '')));
+    $selectedMine = $selectedMineId !== '' ? $mines->firstWhere('id', $selectedMineId) : null;
+    $selectedMineRequirements = $selectedMineId !== '' ? ($activeRequirementsByMine->get($selectedMineId) ?? collect()) : collect();
+    $isMineMatrix = $selectedMineId !== '';
 
-    $workerLimitOptions = [10, 20, 50, 80, 100, 200];
+    $resolvedExamStates = [
+        \App\Models\PersonalMinaExamen::ESTADO_APROBADO,
+        \App\Models\PersonalMinaExamen::ESTADO_VIGENTE,
+        \App\Models\PersonalMinaExamen::ESTADO_CONVALIDADO,
+        \App\Models\PersonalMinaExamen::ESTADO_NO_APLICA,
+        \App\Models\PersonalMinaExamen::ESTADO_POR_VENCER,
+    ];
+
+    $badgeForHabilitationState = function (?string $state): string {
+        return match ($state) {
+            \App\Models\PersonalMina::ESTADO_HABILITADO => 'ok',
+            \App\Models\PersonalMina::ESTADO_NO_HABILITADO,
+            \App\Models\PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION => 'danger',
+            \App\Models\PersonalMina::ESTADO_OBSERVADO => 'info',
+            'ASIGNADO_PENDIENTE_INICIO' => 'info',
+            'NEUTRO' => 'neutral',
+            'BLOQUEADA' => 'danger',
+            default => 'warn',
+        };
+    };
+
+    $badgeForExamState = function (?string $state): string {
+        return match ($state) {
+            \App\Models\PersonalMinaExamen::ESTADO_APROBADO,
+            \App\Models\PersonalMinaExamen::ESTADO_VIGENTE,
+            \App\Models\PersonalMinaExamen::ESTADO_CONVALIDADO,
+            \App\Models\PersonalMinaExamen::ESTADO_NO_APLICA => 'ok',
+            \App\Models\PersonalMinaExamen::ESTADO_POR_VENCER,
+            \App\Models\PersonalMinaExamen::ESTADO_PROGRAMADO => 'warn',
+            \App\Models\PersonalMinaExamen::ESTADO_OBSERVADO => 'orange',
+            \App\Models\PersonalMinaExamen::ESTADO_DESAPROBADO,
+            \App\Models\PersonalMinaExamen::ESTADO_VENCIDO => 'danger',
+            \App\Models\PersonalMinaExamen::ESTADO_PENDIENTE => 'neutral',
+            default => 'neutral',
+        };
+    };
+
+    $attemptCountFor = function ($exam): int {
+        if (!$exam || !$exam->relationLoaded('intentos')) {
+            return 0;
+        }
+
+        return $exam->intentos
+            ->where('resultado', '!=', \App\Models\PersonalMinaExamenIntento::RESULTADO_ANULADO)
+            ->count();
+    };
+
+    $visualAssignmentState = function ($assignment, $requirementsForMine) use ($resolvedExamStates, $service): string {
+        if (!$assignment) {
+            return \App\Models\PersonalMina::ESTADO_EN_PROCESO;
+        }
+
+        $state = $service->visualAssignmentStateFor($assignment);
+        if ($state === 'ASIGNADO_PENDIENTE_INICIO') {
+            return $state;
+        }
+        if ($state !== \App\Models\PersonalMina::ESTADO_HABILITADO) {
+            return $state;
+        }
+
+        $configured = collect($requirementsForMine)->filter(fn ($requirement) => (bool) ($requirement->activo ?? true) && filled($requirement->examen_id));
+        $requiredExams = $assignment->examenes->where('obligatorio_snapshot', true);
+
+        if ($configured->isEmpty() || $assignment->examenes->isEmpty() || $requiredExams->isEmpty()) {
+            return \App\Models\PersonalMina::ESTADO_EN_PROCESO;
+        }
+
+        return $requiredExams->every(fn ($exam) => in_array($exam->estado, $resolvedExamStates, true))
+            ? $state
+            : \App\Models\PersonalMina::ESTADO_EN_PROCESO;
+    };
+
+    $progressForAssignment = function ($assignment) use ($resolvedExamStates): array {
+        if (!$assignment) {
+            return ['done' => 0, 'total' => 0, 'percent' => 0];
+        }
+
+        $exams = $assignment->examenes->where('obligatorio_snapshot', true);
+        if ($exams->isEmpty()) {
+            $exams = $assignment->examenes;
+        }
+
+        $total = $exams->count();
+        $done = $exams->filter(fn ($exam) => in_array($exam->estado, $resolvedExamStates, true))->count();
+
+        return [
+            'done' => $done,
+            'total' => $total,
+            'percent' => $total > 0 ? (int) round(($done / $total) * 100) : 0,
+        ];
+    };
+
+    $nextActionForAssignment = function ($assignment, $requirementsForMine) use ($attemptCountFor, $visualAssignmentState, $service): string {
+        if (!$assignment) {
+            return 'Sin proceso';
+        }
+        if ($service->visualAssignmentStateFor($assignment) === 'ASIGNADO_PENDIENTE_INICIO') {
+            return 'Programar examenes';
+        }
+
+        $configured = collect($requirementsForMine)->filter(fn ($requirement) => (bool) ($requirement->activo ?? true) && filled($requirement->examen_id));
+        if ($configured->isEmpty()) {
+            return 'Configurar examenes';
+        }
+        if ($assignment->examenes->isEmpty()) {
+            return 'Generar examenes';
+        }
+
+        $exams = $assignment->examenes->where('obligatorio_snapshot', true);
+        if ($exams->isEmpty()) {
+            $exams = $assignment->examenes;
+        }
+
+        foreach ([
+            \App\Models\PersonalMinaExamen::ESTADO_VENCIDO => 'Actualizar vencido',
+            \App\Models\PersonalMinaExamen::ESTADO_OBSERVADO => 'Revisar observacion',
+            \App\Models\PersonalMinaExamen::ESTADO_PENDIENTE => 'Programar examen',
+            \App\Models\PersonalMinaExamen::ESTADO_PROGRAMADO => 'Registrar resultado',
+            \App\Models\PersonalMinaExamen::ESTADO_POR_VENCER => 'Revisar vencimiento',
+        ] as $state => $label) {
+            if ($exams->contains(fn ($exam) => $exam->estado === $state)) {
+                return $label;
+            }
+        }
+
+        $failed = $exams->first(fn ($exam) => $exam->estado === \App\Models\PersonalMinaExamen::ESTADO_DESAPROBADO);
+        if ($failed) {
+            $maxAttempts = max(1, (int) ($failed->max_intentos_snapshot ?: 1));
+
+            return $attemptCountFor($failed) < $maxAttempts
+                ? 'Registrar siguiente intento'
+                : 'No habilitado';
+        }
+
+        return $visualAssignmentState($assignment, $requirementsForMine) === \App\Models\PersonalMina::ESTADO_HABILITADO
+            ? 'Sin pendientes'
+            : 'Revisar proceso';
+    };
+
+    $workerLimitOptions = [10, 20, 50, 80, 200];
     $assignmentPerPageOptions = [10, 15, 25, 50, 100];
     $workerLimit = (int) ($filters['worker_limit'] ?? request('worker_limit', 20));
     $assignmentPerPage = (int) ($filters['per_page'] ?? request('per_page', 15));
+    $workerVisibleCount = method_exists($workers, 'count') ? $workers->count() : collect($workers)->count();
+    $workerTotalCount = method_exists($workers, 'total') ? (int) $workers->total() : (int) ($workersTotal ?? $workerVisibleCount);
+    $workerFirstItem = method_exists($workers, 'firstItem') ? (int) ($workers->firstItem() ?? 0) : ($workerVisibleCount > 0 ? 1 : 0);
+    $workerLastItem = method_exists($workers, 'lastItem') ? (int) ($workers->lastItem() ?? 0) : $workerVisibleCount;
+
+    $paginationWindow = function ($paginator): array {
+        if (!method_exists($paginator, 'lastPage')) {
+            return [];
+        }
+
+        $last = (int) $paginator->lastPage();
+        $current = (int) $paginator->currentPage();
+        if ($last <= 1) {
+            return [];
+        }
+        if ($last <= 9) {
+            return range(1, $last);
+        }
+
+        $rawPages = [1, 2, $current - 1, $current, $current + 1, $last - 1, $last];
+        $pages = collect($rawPages)
+            ->filter(fn ($page) => $page >= 1 && $page <= $last)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $window = [];
+        $previous = null;
+        foreach ($pages as $page) {
+            if ($previous !== null && $page > $previous + 1) {
+                $window[] = '...';
+            }
+            $window[] = $page;
+            $previous = $page;
+        }
+
+        return $window;
+    };
+    $workerPaginationWindow = $paginationWindow($workers);
 
     $workerActiveFilters = [
         'trabajador' => filled($filters['trabajador'] ?? request('trabajador')),
-        'mina_id' => filled($filters['mina_id'] ?? request('mina_id')),
-        'estado_habilitacion' => filled($filters['estado_habilitacion'] ?? request('estado_habilitacion')),
-        'estado_laboral' => filled($filters['estado_laboral'] ?? request('estado_laboral')),
     ];
     $workerActiveFilterCount = collect($workerActiveFilters)->filter()->count();
 
@@ -58,12 +249,25 @@
         ? collect($assignments->items())
         : collect($assignments);
 
-    $assignmentsJson = $assignmentSource->flatten(1)->map(function ($a) use ($service) {
+    $selectedWorkerAssignmentsForJson = $mineBoardCollection
+        ->pluck('assignment')
+        ->filter();
+    $assignmentSource = $assignmentSource
+        ->flatten(1)
+        ->concat($selectedWorkerAssignmentsForJson)
+        ->filter()
+        ->unique(fn ($assignment) => $assignment->id)
+        ->values();
+
+    $assignmentsJson = $assignmentSource->map(function ($a) use ($service, $currentQuery) {
         return [
             'id' => $a->id,
+            'personal_id' => $a->personal_id,
+            'mina_id' => $a->mina_id,
             'personal_nombre' => $a->personal?->nombre_completo,
             'mina_nombre' => $a->mina?->nombre,
             'estado_habilitacion' => $a->estadoHabilitacionActual(),
+            'generate_exams_url' => route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $a->id], $currentQuery)),
             'examenes' => $a->examenes->map(function ($e) {
                 $attempts = $e->intentos;
                 $attemptCount = $attempts->where('resultado', '!=', \App\Models\PersonalMinaExamenIntento::RESULTADO_ANULADO)->count();
@@ -85,6 +289,10 @@
                         return [
                             'id' => $att->id,
                             'numero' => $att->numero_intento,
+                            'fecha_programacion' => $att->fecha_programacion ? $att->fecha_programacion->format('d/m/Y') : null,
+                            'fecha_programacion_iso' => $att->fecha_programacion ? $att->fecha_programacion->toDateString() : null,
+                            'fecha_realizacion' => $att->fecha_realizacion ? $att->fecha_realizacion->format('d/m/Y') : null,
+                            'fecha_realizacion_iso' => $att->fecha_realizacion ? $att->fecha_realizacion->toDateString() : null,
                             'resultado' => $att->resultado,
                             'nota' => $att->nota,
                             'observacion' => $att->observacion,
@@ -103,18 +311,23 @@
     .mine-page {
         display: grid;
         gap: 16px;
+        max-width: 100%;
+        overflow-x: hidden;
     }
 
     .mine-worker-card {
-        order: 1;
-    }
-
-    .mine-mines-card {
         order: 2;
     }
 
     .mine-assignments-card {
         order: 3;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    .mine-mines-card {
+        order: 1;
     }
 
     .mine-toolbar {
@@ -131,6 +344,16 @@
 
     .mine-page .card {
         overflow: visible;
+    }
+
+    .mine-assignments-card.card {
+        overflow: hidden;
+    }
+
+    .mine-assignments-card .card-body {
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
     }
 
     .mine-card-header,
@@ -228,6 +451,12 @@
         transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
 
+    button.mine-tile {
+        width: 100%;
+        font: inherit;
+        text-align: left;
+    }
+
     .mine-tile:hover {
         box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
         border-color: #94a3b8;
@@ -242,6 +471,16 @@
     .mine-tile.warn {
         border-color: #fde68a;
         background: #fffbeb;
+    }
+
+    .mine-tile.info {
+        border-color: #93c5fd;
+        background: #eff6ff;
+    }
+
+    .mine-tile.neutral {
+        border-color: #e2e8f0;
+        background: #f8fafc;
     }
 
     .mine-tile.blocked {
@@ -310,6 +549,12 @@
         border-color: #fecaca;
     }
 
+    .mine-badge.orange {
+        background: #ffedd5;
+        color: #9a3412;
+        border-color: #fdba74;
+    }
+
     .mine-badge.info {
         background: #dbeafe;
         color: #1d4ed8;
@@ -334,6 +579,10 @@
         padding: 12px;
         background: #ffffff;
         margin-bottom: 12px;
+    }
+
+    .mine-matrix-filters {
+        background: #f8fafc;
     }
 
     .mine-filter-row {
@@ -424,9 +673,53 @@
         font-size: 11px;
     }
 
+    .mine-view-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 8px 0 10px;
+        color: #334155;
+        font-size: 12px;
+    }
+
+    .mine-view-size {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .mine-view-select {
+        width: auto;
+        min-width: 48px;
+        min-height: 32px;
+        border: 1px solid #dbe3ef;
+        border-radius: 9px;
+        padding: 5px 8px;
+        background: #ffffff;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .mine-view-select:focus {
+        outline: none;
+        border-color: #19d3c5;
+        box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
+    }
+
+    .mine-view-summary {
+        color: #475569;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
     .mine-table-wrap,
     .worker-table-wrap {
         overflow-x: auto;
+        max-width: 100%;
         border: 1px solid #e2e8f0;
         border-radius: 12px;
         background: #ffffff;
@@ -443,7 +736,7 @@
     }
 
     .worker-table {
-        min-width: 700px;
+        min-width: 620px;
     }
 
     .mine-table th,
@@ -485,6 +778,282 @@
         border-bottom: 0;
     }
 
+    .mine-matrix-wrap,
+    .mining-matrix-wrapper {
+        overflow-x: auto;
+        overflow-y: auto;
+        max-width: 100%;
+        width: 100%;
+        min-width: 0;
+        border: 1px solid #dbe3ef;
+        border-radius: 12px;
+        background: #ffffff;
+        max-height: 72vh;
+        overscroll-behavior-x: contain;
+        scrollbar-gutter: stable both-edges;
+    }
+
+    .mine-matrix-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .mine-matrix-table th,
+    .mine-matrix-table td {
+        border-bottom: 1px solid #edf2f7;
+        border-right: 1px solid #edf2f7;
+        padding: 9px;
+        text-align: left;
+        vertical-align: top;
+        font-size: 12px;
+        background: #ffffff;
+    }
+
+    .mine-matrix-table th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #f8fafc;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+    }
+
+    .mine-matrix-table td:first-child,
+    .mine-matrix-table th:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        min-width: 250px;
+        max-width: 300px;
+        box-shadow: 1px 0 0 #edf2f7;
+    }
+
+    .mine-matrix-table th:first-child {
+        z-index: 5;
+    }
+
+    .mine-matrix-table tbody tr:hover td {
+        background: #f8fafc;
+    }
+
+    .mine-matrix-table .mine-col-doc {
+        min-width: 110px;
+    }
+
+    .mine-matrix-table .mine-col-cargo {
+        min-width: 180px;
+    }
+
+    .mine-matrix-table .mine-col-state {
+        min-width: 145px;
+    }
+
+    .mine-matrix-table .mine-col-progress {
+        min-width: 145px;
+    }
+
+    .mine-matrix-table .mine-col-action {
+        min-width: 170px;
+    }
+
+    .mine-matrix-exam-head {
+        display: grid;
+        gap: 3px;
+        min-width: 160px;
+        max-width: 210px;
+        white-space: normal;
+    }
+
+    .mine-matrix-exam-head strong {
+        color: #0f172a;
+        line-height: 1.2;
+    }
+
+    .mine-state-chip,
+    .mine-next-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: max-content;
+        max-width: 100%;
+        border-radius: 999px;
+        padding: 5px 9px;
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1.1;
+        border: 1px solid #dbe3ef;
+        background: #f8fafc;
+        color: #334155;
+        white-space: normal;
+    }
+
+    .mine-state-chip.ok,
+    .mine-next-action.ok {
+        background: #dcfce7;
+        color: #166534;
+        border-color: #86efac;
+    }
+
+    .mine-state-chip.warn,
+    .mine-next-action.warn {
+        background: #fef3c7;
+        color: #92400e;
+        border-color: #fcd34d;
+    }
+
+    .mine-state-chip.danger,
+    .mine-next-action.danger {
+        background: #fee2e2;
+        color: #991b1b;
+        border-color: #fecaca;
+    }
+
+    .mine-state-chip.info {
+        background: #dbeafe;
+        color: #1d4ed8;
+        border-color: #93c5fd;
+    }
+
+    .mine-state-chip.orange,
+    .mine-next-action.orange {
+        background: #ffedd5;
+        color: #9a3412;
+        border-color: #fdba74;
+    }
+
+    .mine-state-chip.neutral {
+        background: #f1f5f9;
+        color: #475569;
+        border-color: #cbd5e1;
+    }
+
+    .mine-progress {
+        display: grid;
+        gap: 5px;
+        min-width: 118px;
+    }
+
+    .mine-progress-line {
+        height: 7px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        overflow: hidden;
+    }
+
+    .mine-progress-bar {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: #0d9488;
+    }
+
+    .mine-progress-text {
+        color: #475569;
+        font-size: 11px;
+        font-weight: 800;
+    }
+
+    .mine-exam-cell {
+        width: 100%;
+        min-width: 154px;
+        min-height: 86px;
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        padding: 8px;
+        display: grid;
+        gap: 5px;
+        text-align: left;
+        background: #f8fafc;
+        color: #0f172a;
+        cursor: pointer;
+        transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .mine-exam-cell:hover {
+        transform: translateY(-1px);
+        border-color: #0d9488;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+    }
+
+    .mine-exam-cell.ok {
+        background: #f0fdf4;
+        border-color: #86efac;
+    }
+
+    .mine-exam-cell.warn {
+        background: #fffbeb;
+        border-color: #fcd34d;
+    }
+
+    .mine-exam-cell.orange {
+        background: #fff7ed;
+        border-color: #fdba74;
+    }
+
+    .mine-exam-cell.danger {
+        background: #fef2f2;
+        border-color: #fecaca;
+    }
+
+    .mine-exam-cell.neutral {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+        color: #475569;
+    }
+
+    .mine-exam-cell.is-missing {
+        cursor: pointer;
+        border-style: dashed;
+    }
+
+    .mine-exam-cell.is-missing:hover {
+        transform: none;
+        box-shadow: none;
+        border-color: #cbd5e1;
+    }
+
+    .mine-exam-cell-name {
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+
+    .mine-exam-cell-meta,
+    .mine-exam-cell-date {
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 750;
+        line-height: 1.25;
+    }
+
+    .mine-operational-note {
+        display: grid;
+        gap: 5px;
+        padding: 10px 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 12px;
+        background: #eff6ff;
+        color: #1e3a8a;
+        font-size: 12px;
+        line-height: 1.35;
+        margin-bottom: 10px;
+    }
+
+    .mine-general-grid {
+        display: grid;
+        gap: 10px;
+    }
+
     .mine-cell-main {
         display: grid;
         gap: 4px;
@@ -499,6 +1068,30 @@
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
+    }
+
+    .mine-worker-actions {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .mine-worker-actions .mine-actions-panel {
+        min-width: 250px;
+    }
+
+    .mine-tile-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 4px;
+    }
+
+    .mine-tile-actions form {
+        margin: 0;
     }
 
     .mine-btn-link {
@@ -553,6 +1146,61 @@
         justify-content: flex-end;
     }
 
+    .mine-page-buttons {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .mine-page-button,
+    .mine-page-ellipsis {
+        min-width: 32px;
+        min-height: 32px;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .mine-page-button {
+        border: 1px solid #dbe3ef;
+        background: #ffffff;
+        color: #334155;
+        text-decoration: none;
+    }
+
+    .mine-page-button:hover {
+        border-color: #0d9488;
+        background: #f0fdfa;
+        color: #0f766e;
+    }
+
+    .mine-page-button.is-active {
+        border-color: #0d9488;
+        background: #0d9488;
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.2);
+    }
+
+    .mine-page-button.is-disabled {
+        color: #94a3b8;
+        background: #f8fafc;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
+    .mine-page-ellipsis {
+        color: #64748b;
+        min-width: 24px;
+        padding-inline: 2px;
+    }
+
     .selected-worker-alert {
         margin-top: 12px;
     }
@@ -562,6 +1210,13 @@
         flex-wrap: wrap;
         gap: 4px;
         align-items: center;
+    }
+
+    .selected-worker-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
     }
 
     .selected-worker-main span::before {
@@ -589,6 +1244,12 @@
         gap: 8px;
     }
 
+    .mine-exam-item.is-focused {
+        border-color: #0d9488;
+        box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+        background: #f0fdfa;
+    }
+
     .mine-exam-head {
         display: flex;
         align-items: center;
@@ -609,6 +1270,65 @@
         border-left: 2px solid #e2e8f0;
         display: grid;
         gap: 4px;
+    }
+
+    .mine-exam-action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-top: 2px;
+    }
+
+    .mine-exam-action-row .btn {
+        min-height: 32px;
+    }
+
+    .mine-exam-panel {
+        display: none;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #f8fafc;
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .mine-exam-panel.is-open {
+        display: grid;
+    }
+
+    .mine-programmed-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .mine-programmed-item {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #ffffff;
+    }
+
+    .mine-programmed-item.is-future {
+        background: #f8fafc;
+    }
+
+    .mine-programmed-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .mine-exam-empty-panel {
+        padding: 10px;
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        color: #64748b;
+        font-size: 12px;
+        background: #ffffff;
     }
 
     .mine-dialog {
@@ -962,24 +1682,32 @@
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         background: #f8fafc;
-        overflow-y: visible;
-        overflow-x: hidden;
-        max-height: none;
-        min-height: 0;
-        height: auto;
+        overflow: auto;
+        max-height: min(62vh, 680px);
+        min-height: min(430px, 62vh);
+        height: min(62vh, 680px);
         display: grid;
         align-content: start;
+        align-items: start;
+        padding: 10px;
+        gap: 10px;
+        scrollbar-gutter: stable both-edges;
     }
 
     .mine-config-row {
         display: grid;
-        grid-template-columns: 240px minmax(0, 1fr);
-        border-bottom: 1px solid #e2e8f0;
+        grid-template-columns: 260px minmax(780px, 1fr);
+        min-width: 1040px;
+        min-height: 232px;
+        align-items: stretch;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        overflow: hidden;
         background: #ffffff;
     }
 
     .mine-config-row:last-child {
-        border-bottom: 0;
+        border-bottom: 1px solid #e2e8f0;
     }
 
     .mine-config-mine-cell {
@@ -992,23 +1720,28 @@
         display: grid;
         align-content: start;
         gap: 6px;
+        min-height: 232px;
     }
 
     .mine-config-exams-strip {
         display: flex;
         gap: 10px;
+        align-items: stretch;
         overflow-x: auto;
         overflow-y: hidden;
-        padding: 12px;
+        padding: 14px 14px 20px;
         min-width: 0;
+        min-height: 232px;
+        box-sizing: border-box;
         scroll-snap-type: x proximity;
         scrollbar-gutter: stable;
     }
 
     .mine-config-exam-card {
-        min-width: 250px;
-        width: 250px;
-        flex: 0 0 250px;
+        min-width: 270px;
+        width: 270px;
+        flex: 0 0 270px;
+        min-height: 176px;
         scroll-snap-align: start;
         border: 1px solid #e2e8f0;
         border-radius: 12px;
@@ -1036,6 +1769,7 @@
     @media (max-width: 760px) {
         .mine-config-row {
             grid-template-columns: 1fr;
+            min-width: 760px;
         }
 
         .mine-config-mine-cell {
@@ -1177,6 +1911,10 @@
             min-width: min(280px, calc(100vw - 32px));
         }
 
+        .mine-board {
+            grid-template-columns: 1fr;
+        }
+
         .mine-filter-row {
             flex-direction: column;
             align-items: stretch;
@@ -1188,6 +1926,10 @@
             width: 100%;
             max-width: none;
             flex: 1;
+        }
+
+        .mine-view-toolbar {
+            grid-template-columns: 1fr;
         }
 
         .mine-pagination-controls {
@@ -1212,6 +1954,58 @@
 
         .selected-worker-main span::before {
             content: "";
+        }
+
+        .worker-table-wrap {
+            overflow: visible;
+            border: 0;
+            background: transparent;
+        }
+
+        .worker-table {
+            min-width: 0;
+            border-collapse: separate;
+            border-spacing: 0 10px;
+        }
+
+        .worker-table thead {
+            display: none;
+        }
+
+        .worker-table,
+        .worker-table tbody,
+        .worker-table tr,
+        .worker-table td {
+            display: block;
+            width: 100%;
+        }
+
+        .worker-table tr {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #ffffff;
+            padding: 10px;
+        }
+
+        .worker-table td {
+            border-bottom: 0;
+            padding: 5px 0;
+        }
+
+        .worker-table td[data-label]::before {
+            content: attr(data-label) ": ";
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .mine-matrix-wrap,
+        .mining-matrix-wrapper,
+        .mine-table-wrap {
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
     }
 </style>
@@ -1247,13 +2041,8 @@
                                 <span class="mine-action-item-copy">Define qué requisitos corresponden a cada mina.</span>
                             </button>
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-excel')">
-                                <span class="mine-action-item-title">Importar Excel master</span>
-                                <span class="mine-action-item-copy">Analiza primero, luego confirma la carga.</span>
-                            </button>
-
-                            <button type="button" class="mine-action-item" onclick="openDialog('modal-recalcular')">
-                                <span class="mine-action-item-title">Recalcular estados</span>
-                                <span class="mine-action-item-copy">Genera faltantes, corrige habilitaciones y revisa vencimientos.</span>
+                                <span class="mine-action-item-title">Importar Excel master con vista previa</span>
+                                <span class="mine-action-item-copy">En validacion: analiza primero, luego confirma la carga.</span>
                             </button>
 
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-precios')">
@@ -1284,24 +2073,50 @@
         </div>
 
         <div class="card-body">
-            <div class="mine-board">
+            @if(!$selectedWorker)
+                <div class="mine-operational-note" data-testid="mine-board-empty-worker">
+                    <strong>Selecciona un trabajador para ver las minas disponibles.</strong>
+                    <span>Usa el buscador de abajo por nombre, DNI o cargo. Al seleccionar, se activan las tarjetas de minas y sus acciones.</span>
+                </div>
+            @else
+            <div class="mine-board" data-testid="mine-worker-mine-board">
                 @foreach($mineBoard as $tile)
                     @php
                         $state = $tile['state'] ?? 'NEUTRO';
                         $tileClass = match($state) {
                             \App\Models\PersonalMina::ESTADO_HABILITADO => 'ok',
                             \App\Models\PersonalMina::ESTADO_EN_PROCESO, \App\Models\PersonalMina::ESTADO_OBSERVADO => 'warn',
+                            'ASIGNADO_PENDIENTE_INICIO' => 'info',
                             'BLOQUEADA' => 'blocked',
                             default => 'neutral',
                         };
+                        $assignment = $tile['assignment'] ?? null;
+                        $summary = $tile['summary'] ?? [];
                         $canClick = $state !== 'BLOQUEADA';
+                        $badgeClass = match ($tileClass) {
+                            'ok' => 'ok',
+                            'warn' => 'warn',
+                            'info' => 'info',
+                            'blocked' => 'danger',
+                            default => '',
+                        };
+                        $clickAction = $assignment
+                            ? "openWorkerExams(" . \Illuminate\Support\Js::from($assignment->id) . ", " . \Illuminate\Support\Js::from($selectedWorker?->nombre_completo ?: '') . ", " . \Illuminate\Support\Js::from($tile['mine']->nombre) . ")"
+                            : 'openMineExams(this)';
                         $tileAction = 'Selecciona trabajador';
                         if ($state === 'BLOQUEADA') {
                             $tileAction = 'Bloqueado';
-                        } elseif (!empty($tile['assignment'])) {
+                        } elseif ($assignment) {
                             $tileAction = $state === \App\Models\PersonalMina::ESTADO_HABILITADO ? 'Ver proceso' : 'Continuar exámenes';
                         } elseif ($selectedWorker) {
                             $tileAction = 'Asignar a esta mina';
+                        }
+                        if ($state !== 'BLOQUEADA' && $assignment) {
+                            $tileAction = $state === 'ASIGNADO_PENDIENTE_INICIO'
+                                ? 'Programar examenes'
+                                : ($state === \App\Models\PersonalMina::ESTADO_HABILITADO ? 'Ver proceso' : 'Continuar examenes');
+                        } elseif ($state !== 'BLOQUEADA' && $selectedWorker && !$assignment) {
+                            $tileAction = 'Disponible para asignar';
                         }
                     @endphp
 
@@ -1309,28 +2124,45 @@
                         class="mine-tile {{ $tileClass }}"
                         data-mine-id="{{ $tile['mine']->id }}"
                         data-mine-name="{{ $tile['mine']->nombre }}"
-                        onclick="{{ $canClick ? 'openMineExams(this)' : '' }}"
+                        data-visual-state="{{ $state }}"
+                        onclick="{{ $canClick ? $clickAction : '' }}"
                         title="{{ $tile['reason'] ?? '' }}"
                     >
                         <span class="mine-tile-title">{{ $tile['mine']->nombre }}</span>
-                        <span class="mine-badge {{ $tileClass === 'ok' ? 'ok' : ($tileClass === 'warn' ? 'warn' : ($tileClass === 'blocked' ? 'danger' : '')) }}">
+                        <span class="mine-badge {{ $badgeClass }}">
                             {{ $tile['label'] }}
                         </span>
                         <span class="mine-muted">{{ $tile['reason'] }}</span>
+                        @if($state === 'ASIGNADO_PENDIENTE_INICIO')
+                            <span class="mine-muted">Sin examenes iniciados.</span>
+                        @elseif(($summary['total'] ?? 0) > 0)
+                            <span class="mine-muted">
+                                {{ $summary['resueltos'] ?? 0 }}/{{ $summary['total'] ?? 0 }} resueltos
+                                @if(($summary['programados'] ?? 0) > 0)
+                                    · {{ $summary['programados'] }} programados
+                                @endif
+                                @if(($summary['vencidos'] ?? 0) > 0)
+                                    · {{ $summary['vencidos'] }} vencidos
+                                @endif
+                            </span>
+                        @elseif($assignment)
+                            <span class="mine-muted">Sin examenes iniciados.</span>
+                        @endif
                         <span class="mine-action-hint">{{ $tileAction }}</span>
 
-                        @if($canManage && $selectedWorker && $state !== 'BLOQUEADA' && empty($tile['assignment']))
-                            <form method="POST" action="{{ route('personal.habilitacion-minera.assign', $currentQuery) }}" onclick="event.stopPropagation()" data-loading-message="Asignando trabajador a mina...">
+                        @if($canManage && $selectedWorker && $state !== 'BLOQUEADA' && !$assignment)
+                            <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" onclick="event.stopPropagation()" data-loading-message="Asignando trabajador a mina...">
                                 @csrf
                                 <input type="hidden" name="personal_id" value="{{ $selectedWorker->id }}">
                                 <input type="hidden" name="mina_id" value="{{ $tile['mine']->id }}">
                                 <input type="hidden" name="estado_habilitacion" value="{{ \App\Models\PersonalMina::ESTADO_EN_PROCESO }}">
-                                <button type="submit" class="btn btn-outline btn-xs">Asignar a esta mina</button>
+                                <button type="submit" class="btn btn-outline btn-xs">Asignar</button>
                             </form>
                         @endif
                     </div>
                 @endforeach
             </div>
+            @endif
         </div>
     </div>
 
@@ -1338,7 +2170,7 @@
         <div class="card-header mine-worker-header">
             <div>
                 <span class="card-title">Seleccionar trabajador</span>
-                <p class="mine-header-copy">La búsqueda y los filtros se aplican automáticamente, sin botón de filtrar.</p>
+                <p class="mine-header-copy">Busca por nombre, DNI o cargo. Luego usa las minas disponibles para asignar o gestionar su proceso.</p>
             </div>
 
             @if($workerActiveFilterCount > 0)
@@ -1356,6 +2188,9 @@
                 class="mine-worker-filters"
                 autocomplete="off"
             >
+                @if($selectedWorker)
+                    <input type="hidden" name="worker_id" value="{{ $selectedWorker->id }}">
+                @endif
                 <div class="mine-filter-row">
                     <label @class(['mine-filter-group', 'is-wide', 'is-active' => $workerActiveFilters['trabajador']])>
                         <span class="mine-filter-label">Buscar trabajador</span>
@@ -1365,88 +2200,43 @@
                             id="trabajadorInput"
                             class="mine-filter-control"
                             value="{{ $filters['trabajador'] ?? '' }}"
-                            placeholder="Nombre, DNI o puesto"
+                            placeholder="Buscar por nombre, DNI o cargo"
                             data-filter-field
                         >
                     </label>
 
-                    <label @class(['mine-filter-group', 'is-active' => $workerActiveFilters['mina_id']])>
-                        <span class="mine-filter-label">Mina</span>
-                        <select name="mina_id" class="mine-filter-control" data-filter-change data-filter-field>
-                            <option value="">Todas</option>
-                            @foreach($mines as $mine)
-                                <option
-                                    value="{{ $mine->id }}"
-                                    @selected((string)($filters['mina_id'] ?? '') === (string)$mine->id)
-                                >
-                                    {{ $mine->nombre }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
-                    <label @class(['mine-filter-group', 'is-active' => $workerActiveFilters['estado_habilitacion']])>
-                        <span class="mine-filter-label">Estado habilitación</span>
-                        <select name="estado_habilitacion" class="mine-filter-control" data-filter-change data-filter-field>
-                            <option value="">Todos</option>
-                            @foreach($stateOptions as $key => $label)
-                                <option
-                                    value="{{ $key }}"
-                                    @selected(($filters['estado_habilitacion'] ?? '') === $key)
-                                >
-                                    {{ $label }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
-                    <label @class(['mine-filter-group', 'is-active' => $workerActiveFilters['estado_laboral']])>
-                        <span class="mine-filter-label">Estado laboral</span>
-                        <select name="estado_laboral" class="mine-filter-control" data-filter-change data-filter-field>
-                            <option value="">Todos</option>
-                            @foreach([
-                                'ACTIVO' => 'Activo',
-                                'FALTA_CONTRATO' => 'Falta contrato',
-                                'CESADO' => 'Cesado',
-                                'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente ficha',
-                                'FICHA_ENVIADA' => 'Ficha enviada',
-                                'OBSERVADO' => 'Observado'
-                            ] as $key => $label)
-                                <option
-                                    value="{{ $key }}"
-                                    @selected(($filters['estado_laboral'] ?? '') === $key)
-                                >
-                                    {{ $label }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
-                    <label class="mine-filter-group is-small">
-                        <span class="mine-filter-label">Trabajadores</span>
-                        <select name="worker_limit" class="mine-filter-control" data-filter-change data-ignore-active="true">
-                            @foreach($workerLimitOptions as $amount)
-                                <option value="{{ $amount }}" @selected($workerLimit === $amount)>
-                                    {{ $amount }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
-                    <label class="mine-filter-group is-small">
-                        <span class="mine-filter-label">Asignaciones</span>
-                        <select name="per_page" class="mine-filter-control" data-filter-change data-ignore-active="true">
-                            @foreach($assignmentPerPageOptions as $amount)
-                                <option value="{{ $amount }}" @selected($assignmentPerPage === $amount)>
-                                    {{ $amount }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
                 </div>
 
-                <p class="mine-filter-help">Los filtros con valor se resaltan en verde. Para limpiar, borra el texto o vuelve cada selector a “Todos”.</p>
+                <p class="mine-filter-help">El selector solo busca trabajadores. Los filtros de mina y estado están en la matriz operativa.</p>
             </form>
+
+            <div class="mine-view-toolbar" aria-label="Control de visualizacion del listado">
+                <label class="mine-view-size">
+                    <span>Mostrar</span>
+                    <select
+                        name="worker_limit"
+                        class="mine-view-select"
+                        form="workerSearchForm"
+                        data-external-filter-change
+                        data-ignore-active="true"
+                    >
+                        @foreach($workerLimitOptions as $amount)
+                            <option value="{{ $amount }}" @selected($workerLimit === $amount)>
+                                {{ $amount }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <span>trabajadores</span>
+                </label>
+
+                <span class="mine-view-summary">
+                    @if($workerVisibleCount > 0)
+                        Mostrando {{ $workerFirstItem }}-{{ $workerLastItem }} de {{ $workerTotalCount }}
+                    @else
+                        Sin trabajadores para mostrar
+                    @endif
+                </span>
+            </div>
 
             <div class="worker-table-wrap">
                 <table class="worker-table">
@@ -1463,17 +2253,39 @@
                     <tbody>
                         @forelse($workers as $worker)
                             <tr @class(['active' => (int)($selectedWorker?->id ?? 0) === (int)$worker->id])>
-                                <td><strong>{{ $worker->nombre_completo }}</strong></td>
-                                <td><span class="mine-muted">{{ $worker->numero_documento ?: $worker->dni ?: 'Sin documento' }}</span></td>
-                                <td><span class="mine-muted">{{ $worker->puesto ?: 'Sin cargo' }}</span></td>
-                                <td><span class="mine-badge">{{ $worker->estado ?: 'Sin estado' }}</span></td>
-                                <td class="text-center">
-                                    <a
-                                        class="btn btn-outline btn-xs"
-                                        href="{{ route('personal.habilitacion-minera.index', array_merge($currentQuery, ['worker_id' => $worker->id])) }}"
-                                    >
-                                        Seleccionar
-                                    </a>
+                                <td data-label="Trabajador"><strong>{{ $worker->nombre_completo }}</strong></td>
+                                <td data-label="Documento"><span class="mine-muted">{{ $worker->numero_documento ?: $worker->dni ?: 'Sin documento' }}</span></td>
+                                <td data-label="Puesto"><span class="mine-muted">{{ $worker->puesto ?: 'Sin cargo' }}</span></td>
+                                <td data-label="Estado"><span class="mine-badge">{{ $worker->estado ?: 'Sin estado' }}</span></td>
+                                <td data-label="Accion" class="text-center">
+                                    <div class="mine-worker-actions" data-testid="worker-actions-{{ $worker->id }}">
+                                        <a
+                                            class="btn btn-outline btn-xs"
+                                            href="{{ route('personal.habilitacion-minera.index', array_merge($currentQuery, ['worker_id' => $worker->id])) }}"
+                                        >
+                                            Seleccionar
+                                        </a>
+
+                                        @if($canManage)
+                                            <a
+                                                class="btn btn-outline btn-xs"
+                                                data-testid="worker-assign-{{ $worker->id }}"
+                                                href="{{ route('personal.habilitacion-minera.index', array_merge($currentQuery, ['worker_id' => $worker->id, 'open_assign' => 1])) }}"
+                                            >
+                                                Asignar a mina
+                                            </a>
+                                        @endif
+
+                                        @if(($worker->minas_activas_count ?? 0) > 0)
+                                            <a
+                                                class="btn btn-outline btn-xs"
+                                                data-testid="worker-manage-{{ $worker->id }}"
+                                                href="{{ route('personal.habilitacion-minera.index', array_merge($currentQuery, ['worker_id' => $worker->id, 'open_manage' => 1])) }}"
+                                            >
+                                                Gestionar examenes
+                                            </a>
+                                        @endif
+                                    </div>
                                 </td>
                             </tr>
                         @empty
@@ -1492,6 +2304,8 @@
                     <div class="mine-pagination-summary">
                         @if($workers->total() > 0)
                             Mostrando {{ $workers->firstItem() }} - {{ $workers->lastItem() }} de {{ $workers->total() }} trabajadores
+                        @elseif($workerTotalCount > 0)
+                            Mostrando 1 - {{ $workerVisibleCount }} de {{ $workerTotalCount }} trabajadores
                         @else
                             Sin trabajadores para mostrar
                         @endif
@@ -1499,7 +2313,29 @@
 
                     @if($workers->hasPages())
                         <div class="mine-pagination-links">
-                            {{ $workers->withQueryString()->onEachSide(1)->links() }}
+                            <nav class="mine-page-buttons" aria-label="Paginacion de trabajadores">
+                                @if($workers->onFirstPage())
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">‹</span>
+                                @else
+                                    <a class="mine-page-button" href="{{ $workers->previousPageUrl() }}" rel="prev" aria-label="Pagina anterior">‹</a>
+                                @endif
+
+                                @foreach($workerPaginationWindow as $page)
+                                    @if($page === '...')
+                                        <span class="mine-page-ellipsis" aria-hidden="true">...</span>
+                                    @elseif((int) $page === (int) $workers->currentPage())
+                                        <span class="mine-page-button is-active" aria-current="page">{{ $page }}</span>
+                                    @else
+                                        <a class="mine-page-button" href="{{ $workers->url($page) }}" aria-label="Ir a pagina {{ $page }}">{{ $page }}</a>
+                                    @endif
+                                @endforeach
+
+                                @if($workers->hasMorePages())
+                                    <a class="mine-page-button" href="{{ $workers->nextPageUrl() }}" rel="next" aria-label="Pagina siguiente">›</a>
+                                @else
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">›</span>
+                                @endif
+                            </nav>
                         </div>
                     @endif
                 </div>
@@ -1512,6 +2348,21 @@
                         <span>{{ $selectedWorker->numero_documento ?: $selectedWorker->dni ?: 'Sin documento' }}</span>
                         <span>{{ $selectedWorker->puesto ?: 'Sin cargo' }}</span>
                         <span>Estado laboral: {{ $selectedWorker->estado ?: 'Sin estado' }}</span>
+                        <span>Minas asignadas: {{ $selectedWorkerAssignedMineCount }}</span>
+                    </div>
+
+                    <div class="selected-worker-actions">
+                        @if($canManage)
+                            <button type="button" class="btn btn-outline btn-xs" onclick="openDialog('modal-asignar-mina')">
+                                Asignar a mina
+                            </button>
+                        @endif
+
+                        @if($selectedWorkerAssignedMineCount > 0)
+                            <button type="button" class="btn btn-outline btn-xs" onclick="openDialog('modal-gestionar-worker')">
+                                Gestionar examenes
+                            </button>
+                        @endif
                     </div>
 
                     @if(!$selectedWorker->contratoLaboralActual || !$selectedWorker->contratoLaboralActual->signed_contract_path)
@@ -1527,25 +2378,277 @@
     <div class="card mine-assignments-card">
         <div class="card-header mine-list-header">
             <div>
-                <span class="card-title">Trabajadores por mina</span>
-                <p class="mine-header-copy">Resumen operativo de asignaciones, estados y advertencias por trabajador.</p>
+                <span class="card-title">Matriz operativa</span>
+                <p class="mine-header-copy">
+                    @if($isMineMatrix && $selectedMine)
+                        Trabajadores y examenes de {{ $selectedMine->nombre }}. Cada celda abre el detalle operativo.
+                    @else
+                        Filtra una mina para ver sus examenes como columnas. Sin filtro, se muestra el estado general por trabajador.
+                    @endif
+                </p>
             </div>
-
-            @if(method_exists($assignments, 'total'))
-                <span class="mine-muted">
-                    Mostrando {{ $assignments->firstItem() ?: 0 }} - {{ $assignments->lastItem() ?: 0 }} de {{ $assignments->total() }} trabajadores
-                </span>
-            @endif
         </div>
 
         <div class="card-body">
+            <form
+                method="GET"
+                action="{{ route('personal.habilitacion-minera.index') }}"
+                id="matrixFilterForm"
+                class="mine-worker-filters mine-matrix-filters"
+                autocomplete="off"
+            >
+                @if($selectedWorker)
+                    <input type="hidden" name="worker_id" value="{{ $selectedWorker->id }}">
+                @endif
+                <input type="hidden" name="worker_limit" value="{{ $workerLimit }}">
+
+                <div class="mine-filter-row">
+                    <label @class(['mine-filter-group', 'is-active' => filled($filters['mina_id'] ?? request('mina_id'))])>
+                        <span class="mine-filter-label">Mina</span>
+                        <select name="mina_id" class="mine-filter-control" data-filter-change data-filter-field>
+                            <option value="">Todas las minas</option>
+                            @foreach($mines as $mine)
+                                <option
+                                    value="{{ $mine->id }}"
+                                    @selected((string)($filters['mina_id'] ?? '') === (string)$mine->id)
+                                >
+                                    {{ $mine->nombre }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_habilitacion'] ?? request('estado_habilitacion'))])>
+                        <span class="mine-filter-label">Estado habilitacion</span>
+                        <select name="estado_habilitacion" class="mine-filter-control" data-filter-change data-filter-field>
+                            <option value="">Todos</option>
+                            @foreach($stateOptions as $key => $label)
+                                <option value="{{ $key }}" @selected(($filters['estado_habilitacion'] ?? '') === $key)>
+                                    {{ $label }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_laboral'] ?? request('estado_laboral'))])>
+                        <span class="mine-filter-label">Estado laboral</span>
+                        <select name="estado_laboral" class="mine-filter-control" data-filter-change data-filter-field>
+                            <option value="">Todos</option>
+                            @foreach([
+                                'ACTIVO' => 'Activo',
+                                'FALTA_CONTRATO' => 'Falta contrato',
+                                'CESADO' => 'Cesado',
+                                'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente ficha',
+                                'FICHA_ENVIADA' => 'Ficha enviada',
+                                'OBSERVADO' => 'Observado'
+                            ] as $key => $label)
+                                <option value="{{ $key }}" @selected(($filters['estado_laboral'] ?? '') === $key)>
+                                    {{ $label }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_examen'] ?? request('estado_examen'))])>
+                        <span class="mine-filter-label">Estado examen</span>
+                        <select name="estado_examen" class="mine-filter-control" data-filter-change data-filter-field>
+                            <option value="">Todos</option>
+                            @foreach([
+                                \App\Models\PersonalMinaExamen::ESTADO_VENCIDO => 'Vencidos',
+                                \App\Models\PersonalMinaExamen::ESTADO_POR_VENCER => 'Por vencer',
+                                \App\Models\PersonalMinaExamen::ESTADO_PENDIENTE => 'Pendientes',
+                                \App\Models\PersonalMinaExamen::ESTADO_PROGRAMADO => 'Programados',
+                                \App\Models\PersonalMinaExamen::ESTADO_DESAPROBADO => 'Desaprobados',
+                                \App\Models\PersonalMinaExamen::ESTADO_OBSERVADO => 'Observados',
+                                \App\Models\PersonalMinaExamen::ESTADO_NO_APLICA => 'No aplica',
+                            ] as $key => $label)
+                                <option value="{{ $key }}" @selected(($filters['estado_examen'] ?? '') === $key)>
+                                    {{ $label }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </label>
+                </div>
+            </form>
+
+            <div class="mine-view-toolbar" aria-label="Control de visualizacion de trabajadores por mina">
+                <label class="mine-view-size">
+                    <span>Mostrar</span>
+                    <select
+                        name="per_page"
+                        class="mine-view-select"
+                        form="matrixFilterForm"
+                        data-external-filter-change
+                        data-ignore-active="true"
+                    >
+                        @foreach($assignmentPerPageOptions as $amount)
+                            <option value="{{ $amount }}" @selected($assignmentPerPage === $amount)>
+                                {{ $amount }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <span>trabajadores</span>
+                </label>
+
+                <span class="mine-view-summary">
+                    @if(method_exists($assignments, 'total') && $assignments->total() > 0)
+                        Mostrando {{ $assignments->firstItem() }}-{{ $assignments->lastItem() }} de {{ $assignments->total() }}
+                    @else
+                        Sin trabajadores para mostrar
+                    @endif
+                </span>
+            </div>
+
+            @if($isMineMatrix)
+                @if($selectedMineRequirements->isEmpty())
+                    <div class="mine-operational-note">
+                        <strong>Sin examenes configurados para esta mina.</strong>
+                        <span>Usa Acciones &gt; Configurar examenes por mina para crear las reglas. Ningun trabajador se mostrara visualmente como habilitado mientras no existan examenes configurados y generados.</span>
+                    </div>
+                @endif
+
+                <div class="mine-matrix-wrap mining-matrix-wrapper">
+                    <table class="mine-matrix-table" data-testid="mine-operational-matrix">
+                        <thead>
+                            <tr>
+                                <th>Trabajador</th>
+                                <th class="mine-col-doc">DNI</th>
+                                <th class="mine-col-cargo">Cargo</th>
+                                <th class="mine-col-state">Estado laboral</th>
+                                <th class="mine-col-state">Estado habilitacion</th>
+                                <th class="mine-col-progress">Avance</th>
+                                <th class="mine-col-action">Accion siguiente</th>
+                                @foreach($selectedMineRequirements as $requirement)
+                                    <th>
+                                        <span class="mine-matrix-exam-head">
+                                            <strong>{{ $requirement->examen?->nombre ?: $requirement->nombre }}</strong>
+                                            <span class="mine-muted">{{ $requirement->obligatorio ? 'Obligatorio' : 'Opcional' }}</span>
+                                        </span>
+                                    </th>
+                                @endforeach
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            @forelse($assignments as $personalId => $workerAssignments)
+                                @php
+                                    $assignment = $workerAssignments->first();
+                                    $worker = $assignment?->personal;
+                                    $displayState = $visualAssignmentState($assignment, $selectedMineRequirements);
+                                    $displayBadge = $badgeForHabilitationState($displayState);
+                                    $progress = $progressForAssignment($assignment);
+                                    $nextAction = $nextActionForAssignment($assignment, $selectedMineRequirements);
+                                    $warnings = $assignment ? collect($service->warningsFor($assignment))->unique() : collect();
+                                @endphp
+
+                                <tr data-visual-state="{{ $displayState }}">
+                                    <td>
+                                        <div class="mine-cell-main">
+                                            <strong>{{ $worker?->nombre_completo ?: 'N/A' }}</strong>
+                                            @if($warnings->isNotEmpty())
+                                                <div class="mine-inline-tags">
+                                                    @foreach($warnings as $warning)
+                                                        <span class="mine-badge warn">{{ $warning }}</span>
+                                                    @endforeach
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td><span class="mine-muted">{{ $worker?->numero_documento ?: $worker?->dni ?: 'Sin documento' }}</span></td>
+                                    <td><span class="mine-muted">{{ $worker?->puesto ?: '-' }}</span></td>
+                                    <td><span class="mine-badge">{{ $worker?->estado ?: '-' }}</span></td>
+                                    <td><span class="mine-state-chip {{ $displayBadge }}">{{ $stateLabel($displayState) }}</span></td>
+                                    <td>
+                                        <div class="mine-progress" aria-label="Avance {{ $progress['done'] }} de {{ $progress['total'] }}">
+                                            <span class="mine-progress-line"><span class="mine-progress-bar" style="width: {{ $progress['percent'] }}%;"></span></span>
+                                            <span class="mine-progress-text">{{ $progress['done'] }}/{{ $progress['total'] }} examenes</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="mine-next-action {{ $displayBadge }}">{{ $nextAction }}</span></td>
+
+                                    @foreach($selectedMineRequirements as $requirement)
+                                        @php
+                                            $workerExam = $assignment?->examenes->first(function ($exam) use ($requirement) {
+                                                return (string) $exam->mina_requisito_id === (string) $requirement->id
+                                                    || ((string) $exam->examen_id === (string) $requirement->examen_id && blank($exam->mina_requisito_id));
+                                            });
+                                            $examBadge = $badgeForExamState($workerExam?->estado);
+                                            $attemptCount = $attemptCountFor($workerExam);
+                                            $maxAttempts = max(1, (int) ($workerExam?->max_intentos_snapshot ?: $requirement->examen?->max_intentos ?: 1));
+                                            if ($workerExam?->estado === \App\Models\PersonalMinaExamen::ESTADO_DESAPROBADO) {
+                                                $examBadge = $attemptCount < $maxAttempts ? 'orange' : 'danger';
+                                            }
+                                            $expiration = 'Sin vencimiento';
+                                            if ($workerExam?->fecha_vencimiento) {
+                                                $expiration = $workerExam->estado === \App\Models\PersonalMinaExamen::ESTADO_VENCIDO
+                                                    ? 'Vencido ' . $formatDate($workerExam->fecha_vencimiento)
+                                                    : 'Vence ' . $formatDate($workerExam->fecha_vencimiento);
+                                            } elseif ($workerExam && in_array($workerExam->estado, $resolvedExamStates, true)) {
+                                                $expiration = $workerExam->estado === \App\Models\PersonalMinaExamen::ESTADO_NO_APLICA
+                                                    ? 'No aplica'
+                                                    : 'Aprobado sin vencimiento';
+                                            }
+                                            $examTitle = $requirement->examen?->nombre ?: $requirement->nombre;
+                                        @endphp
+
+                                        <td>
+                                            @if($workerExam)
+                                                <button
+                                                    type="button"
+                                                    class="mine-exam-cell {{ $examBadge }}"
+                                                    onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($assignment->mina?->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($workerExam->id) }})"
+                                                    title="{{ $examTitle }} - {{ $examStateLabel($workerExam->estado) }} - Intentos {{ $attemptCount }}/{{ $maxAttempts }} - {{ $expiration }}"
+                                                >
+                                                    <span class="mine-state-chip {{ $examBadge }}">{{ $examStateLabel($workerExam->estado) }}</span>
+                                                    <span class="mine-exam-cell-name">{{ $examTitle }}</span>
+                                                    <span class="mine-exam-cell-meta">Intento {{ $attemptCount }}/{{ $maxAttempts }}</span>
+                                                    <span class="mine-exam-cell-date">{{ $expiration }}</span>
+                                                </button>
+                                            @elseif($assignment)
+                                                <button
+                                                    type="button"
+                                                    class="mine-exam-cell neutral is-missing"
+                                                    onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($assignment->mina?->nombre ?: '') }})"
+                                                    title="{{ $examTitle }} sin examen generado"
+                                                >
+                                                    <span class="mine-state-chip neutral">Sin generar</span>
+                                                    <span class="mine-exam-cell-name">{{ $examTitle }}</span>
+                                                    <span class="mine-exam-cell-meta">Generar examenes requeridos</span>
+                                                    <span class="mine-exam-cell-date">Sin intento</span>
+                                                </button>
+                                            @else
+                                                <span class="mine-exam-cell neutral is-missing">
+                                                    <span class="mine-state-chip neutral">Sin proceso</span>
+                                                    <span class="mine-exam-cell-name">{{ $examTitle }}</span>
+                                                </span>
+                                            @endif
+                                        </td>
+                                    @endforeach
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="{{ 7 + $selectedMineRequirements->count() }}" class="mine-empty-state">
+                                        No hay trabajadores asignados a esta mina con los filtros actuales.
+                                    </td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            @else
+                <div class="mine-operational-note">
+                    <strong>Vista general.</strong>
+                    <span>Selecciona una mina en los filtros para ver trabajadores, examenes, intentos y vencimientos en formato matriz.</span>
+                </div>
+
             <div class="mine-table-wrap">
                 <table class="mine-table">
                     <thead>
                         <tr>
                             <th>Trabajador</th>
-                            <th>Minas</th>
-                            <th>Estado</th>
+                            <th>Minas / examenes</th>
+                            <th>Estado visual</th>
+                            <th>Accion siguiente</th>
                             <th>Advertencias</th>
                         </tr>
                     </thead>
@@ -1570,19 +2673,19 @@
                                     <div class="mine-inline-tags">
                                         @foreach($workerAssignments as $wa)
                                             @php
-                                                $wState = $wa->estadoHabilitacionActual();
-                                                $wBadge = $wState === \App\Models\PersonalMina::ESTADO_HABILITADO
-                                                    ? 'ok'
-                                                    : (in_array($wState, [\App\Models\PersonalMina::ESTADO_NO_HABILITADO, \App\Models\PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION], true) ? 'danger' : 'warn');
+                                                $reqsForMine = $activeRequirementsByMine->get($wa->mina_id) ?? collect();
+                                                $wState = $visualAssignmentState($wa, $reqsForMine);
+                                                $wBadge = $badgeForHabilitationState($wState);
+                                                $wProgress = $progressForAssignment($wa);
                                             @endphp
 
                                             <button
                                                 type="button"
                                                 class="mine-badge {{ $wBadge }} mine-btn-link"
-                                                onclick="openWorkerExams('{{ $wa->id }}', '{{ addslashes($worker?->nombre_completo ?: '') }}', '{{ addslashes($wa->mina?->nombre ?: '') }}')"
+                                                onclick="openWorkerExams({{ \Illuminate\Support\Js::from($wa->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($wa->mina?->nombre ?: '') }})"
                                                 title="Ver exámenes de {{ $worker?->nombre_completo }} en {{ $wa->mina?->nombre }}"
                                             >
-                                                {{ $wa->mina?->nombre }}
+                                                {{ $wa->mina?->nombre }} ({{ $wProgress['done'] }}/{{ $wProgress['total'] }})
                                             </button>
                                         @endforeach
                                     </div>
@@ -1594,20 +2697,38 @@
                                         $worstLabel = null;
 
                                         foreach ($workerAssignments as $wa) {
-                                            $s = $wa->estadoHabilitacionActual();
+                                            $reqsForMine = $activeRequirementsByMine->get($wa->mina_id) ?? collect();
+                                            $s = $visualAssignmentState($wa, $reqsForMine);
 
-                                            if (!$worst || $s === \App\Models\PersonalMina::ESTADO_NO_HABILITADO || $s === \App\Models\PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION) {
+                                            if (
+                                                !$worst
+                                                || $s === \App\Models\PersonalMina::ESTADO_NO_HABILITADO
+                                                || $s === \App\Models\PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION
+                                                || ($worst === \App\Models\PersonalMina::ESTADO_HABILITADO && $s !== \App\Models\PersonalMina::ESTADO_HABILITADO)
+                                            ) {
                                                 $worst = $s;
                                                 $worstLabel = $stateLabel($s);
                                             }
                                         }
 
-                                        $badgeClass = $worst === \App\Models\PersonalMina::ESTADO_HABILITADO
-                                            ? 'ok'
-                                            : (in_array($worst, [\App\Models\PersonalMina::ESTADO_NO_HABILITADO, \App\Models\PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION], true) ? 'danger' : 'warn');
+                                        $badgeClass = $badgeForHabilitationState($worst);
                                     @endphp
 
                                     <span class="mine-badge {{ $badgeClass }}">{{ $worstLabel ?: '-' }}</span>
+                                </td>
+
+                                <td>
+                                    <div class="mine-general-grid">
+                                        @foreach($workerAssignments as $wa)
+                                            @php
+                                                $reqsForMine = $activeRequirementsByMine->get($wa->mina_id) ?? collect();
+                                                $nextState = $visualAssignmentState($wa, $reqsForMine);
+                                            @endphp
+                                            <span class="mine-next-action {{ $badgeForHabilitationState($nextState) }}">
+                                                {{ $wa->mina?->nombre }}: {{ $nextActionForAssignment($wa, $reqsForMine) }}
+                                            </span>
+                                        @endforeach
+                                    </div>
                                 </td>
 
                                 <td>
@@ -1632,7 +2753,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="4" class="mine-empty-state">
+                                <td colspan="5" class="mine-empty-state">
                                     No hay asignaciones mineras con los filtros actuales.
                                 </td>
                             </tr>
@@ -1640,14 +2761,15 @@
                     </tbody>
                 </table>
             </div>
+            @endif
 
             @if(method_exists($assignments, 'links'))
                 <div class="mine-pagination-controls">
                     <div class="mine-pagination-summary">
                         @if($assignments->total() > 0)
-                            Mostrando {{ $assignments->firstItem() }} - {{ $assignments->lastItem() }} de {{ $assignments->total() }} asignaciones
+                            Mostrando {{ $assignments->firstItem() }} - {{ $assignments->lastItem() }} de {{ $assignments->total() }} trabajadores
                         @else
-                            Sin asignaciones para mostrar
+                            Sin trabajadores para mostrar
                         @endif
                     </div>
 
@@ -1660,6 +2782,108 @@
             @endif
         </div>
     </div>
+
+    @if($selectedWorker && $canManage)
+        <dialog id="modal-asignar-mina" class="mine-dialog is-wide">
+            <div class="mine-dialog-header">
+                <div class="mine-dialog-title">
+                    <span class="mine-dialog-kicker">Asignacion individual</span>
+                    <strong>Asignar mina a {{ $selectedWorker->nombre_completo }}</strong>
+                    <p class="mine-dialog-subtitle">Solo se habilitan minas disponibles. Las ya asignadas o bloqueadas no se reasignan desde aqui.</p>
+                </div>
+                <button type="button" class="mine-dialog-close" onclick="closeDialog(this)" aria-label="Cerrar">X</button>
+            </div>
+
+            <div class="mine-dialog-body">
+                <div class="mine-board">
+                    @foreach($mineBoardCollection as $tile)
+                        @php
+                            $state = $tile['state'] ?? 'NEUTRO';
+                            $assignment = $tile['assignment'] ?? null;
+                            $isBlocked = $state === 'BLOQUEADA';
+                            $tileClass = $isBlocked ? 'blocked' : ($assignment ? 'info' : 'neutral');
+                        @endphp
+
+                        <div class="mine-tile {{ $tileClass }}">
+                            <span class="mine-tile-title">{{ $tile['mine']->nombre }}</span>
+                            <span class="mine-badge {{ $isBlocked ? 'danger' : ($assignment ? 'info' : '') }}">
+                                {{ $assignment ? 'Ya asignada' : ($isBlocked ? 'Bloqueada' : 'Disponible') }}
+                            </span>
+                            <span class="mine-muted">{{ $tile['reason'] ?? 'Sin proceso iniciado.' }}</span>
+
+                            @if(!$assignment && !$isBlocked)
+                                <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" data-loading-message="Asignando trabajador a mina...">
+                                    @csrf
+                                    <input type="hidden" name="personal_id" value="{{ $selectedWorker->id }}">
+                                    <input type="hidden" name="mina_id" value="{{ $tile['mine']->id }}">
+                                    <input type="hidden" name="estado_habilitacion" value="{{ \App\Models\PersonalMina::ESTADO_EN_PROCESO }}">
+                                    <button type="submit" class="btn btn-primary btn-xs">Asignar</button>
+                                </form>
+                            @elseif($assignment)
+                                <button type="button" class="btn btn-outline btn-xs" onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($selectedWorker->nombre_completo) }}, {{ \Illuminate\Support\Js::from($tile['mine']->nombre) }})">
+                                    Gestionar examenes
+                                </button>
+                            @else
+                                <span class="mine-muted">No disponible para asignar.</span>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        </dialog>
+    @endif
+
+    @if($selectedWorker)
+        <dialog id="modal-gestionar-worker" class="mine-dialog is-wide">
+            <div class="mine-dialog-header">
+                <div class="mine-dialog-title">
+                    <span class="mine-dialog-kicker">Proceso minero</span>
+                    <strong>Gestionar examenes de {{ $selectedWorker->nombre_completo }}</strong>
+                    <p class="mine-dialog-subtitle">Abre la mina asignada y registra programacion, resultados, no aplica o documentos.</p>
+                </div>
+                <button type="button" class="mine-dialog-close" onclick="closeDialog(this)" aria-label="Cerrar">X</button>
+            </div>
+
+            <div class="mine-dialog-body">
+                @if($selectedWorkerAssignedMineCount === 0)
+                    <div class="mine-operational-note">
+                        <strong>Sin minas asignadas.</strong>
+                        <span>Primero asigna una mina para generar sus examenes requeridos.</span>
+                    </div>
+                @else
+                    <div class="mine-board">
+                        @foreach($mineBoardCollection->filter(fn ($tile) => !empty($tile['assignment'])) as $tile)
+                            @php
+                                $assignment = $tile['assignment'];
+                                $state = $tile['state'] ?? $assignment->estadoHabilitacionActual();
+                                $badgeClass = $badgeForHabilitationState($state);
+                                $summary = $tile['summary'] ?? [];
+                            @endphp
+
+                            <div class="mine-tile {{ $badgeClass === 'ok' ? 'ok' : ($badgeClass === 'danger' ? 'blocked' : ($badgeClass === 'info' ? 'info' : 'warn')) }}">
+                                <span class="mine-tile-title">{{ $tile['mine']->nombre }}</span>
+                                <span class="mine-badge {{ $badgeClass }}">{{ $stateLabel($state) }}</span>
+                                <span class="mine-muted">{{ $summary['resueltos'] ?? 0 }}/{{ $summary['total'] ?? 0 }} resueltos</span>
+                                <span class="mine-action-hint">{{ $tile['reason'] ?? 'Abrir proceso.' }}</span>
+                                <div class="mine-tile-actions">
+                                    <button type="button" class="btn btn-outline btn-xs" onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($selectedWorker->nombre_completo) }}, {{ \Illuminate\Support\Js::from($tile['mine']->nombre) }})">
+                                        Abrir gestion
+                                    </button>
+
+                                    @if($canManage && $assignment->examenes->isEmpty())
+                                        <form method="POST" action="{{ route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $assignment->id], $currentQuery)) }}" data-loading-message="Generando examenes requeridos...">
+                                            @csrf
+                                            <button type="submit" class="btn btn-primary btn-xs">Generar examenes</button>
+                                        </form>
+                                    @endif
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </div>
+        </dialog>
+    @endif
 
     @if($canManage)
         <dialog id="modal-examen" class="mine-dialog is-compact">
@@ -1951,7 +3175,7 @@
             </div>
 
             <div class="mine-dialog-body">
-                <div class="alert alert-info">Al confirmar se crean o actualizan trabajadores, minas, exámenes por mina, asignaciones e intentos detectados.</div>
+                <div class="alert alert-info">Al confirmar se crean catálogos detectados y se actualizan habilitaciones solo de trabajadores existentes. Los DNI no encontrados quedan pendientes de registro manual.</div>
 
                 <form method="POST" enctype="multipart/form-data" action="{{ route('personal.habilitacion-minera.import.preview', $currentQuery) }}" class="mine-form mine-form-section" data-loading-message="Analizando Excel master. Puede tardar si el archivo tiene muchas hojas..." data-inline-loading="#mineExcelPreviewLoading" data-loading-button-label="Analizando..." data-defer-loading-submit="true">
                     @csrf
@@ -1961,7 +3185,7 @@
                             <span>Usa el master actualizado. El sistema mostrará una vista previa antes de guardar.</span>
                         </div>
                     </div>
-                    <label class="is-wide">Archivo Excel<input type="file" name="archivo" accept=".xlsx,.xls,.csv" required></label>
+                    <label class="is-wide">Archivo Excel<input type="file" name="archivo" accept=".xlsx,.xls,.xlsm,.csv" required></label>
                     <div class="mine-form-actions">
                         <button type="submit" class="btn btn-primary btn-sm">Analizar vista previa</button>
                     </div>
@@ -1969,13 +3193,26 @@
                         <div class="mine-inline-spinner" aria-hidden="true"></div>
                         <div>
                             <strong>Analizando Excel master</strong>
-                            <span>Estamos leyendo hojas, DNIs, minas, examenes y estados. Espera sin cerrar esta ventana.</span>
+                            <span>Estamos leyendo hojas, DNIs, minas, examenes, acciones pendientes y estados. Espera sin cerrar esta ventana.</span>
                         </div>
                     </div>
                 </form>
 
                 @if($importPreview)
-                    <div class="alert alert-info">Vista previa generada el {{ $importPreview['generated_at'] }}. No se guardaron cambios definitivos todavía.</div>
+                    @php
+                        $previewGeneratedAt = $importPreview['generated_at'] ?? null;
+
+                        try {
+                            $previewGeneratedAt = $previewGeneratedAt
+                                ? \Illuminate\Support\Carbon::parse($previewGeneratedAt)
+                                    ->timezone(config('app.display_timezone', 'America/Lima'))
+                                    ->format('d/m/Y H:i:s')
+                                : '-';
+                        } catch (\Throwable) {
+                            $previewGeneratedAt = $importPreview['generated_at'] ?? '-';
+                        }
+                    @endphp
+                    <div class="alert alert-info">Vista previa generada el {{ $previewGeneratedAt }} hora Perú. No se guardaron cambios definitivos todavía.</div>
 
                     <div class="mine-preview-grid">
                         @foreach($importPreview['summary'] as $key => $value)
@@ -2004,40 +3241,21 @@
                         </details>
                     @endif
 
-                    <form method="POST" action="{{ route('personal.habilitacion-minera.import.confirm', $currentQuery) }}" class="mine-form-section" data-loading-message="Confirmando importación. Esto puede tardar por la cantidad de trabajadores y minas...">
+                    <form method="POST" action="{{ route('personal.habilitacion-minera.import.confirm', $currentQuery) }}" class="mine-form-section" data-loading-message="Confirmando importación. Esto puede tardar por la cantidad de trabajadores y minas..." data-inline-loading="#mineExcelConfirmLoading" data-loading-button-label="Importando..." data-defer-loading-submit="true">
                         @csrf
                         <input type="hidden" name="token" value="{{ $importPreview['token'] }}">
                         <div class="mine-form-actions">
                             <button type="submit" class="btn btn-primary btn-sm">Confirmar importación</button>
                         </div>
+                        <div id="mineExcelConfirmLoading" class="mine-inline-loading" hidden>
+                            <div class="mine-inline-spinner" aria-hidden="true"></div>
+                            <div>
+                                <strong>Importando Excel master</strong>
+                                <span>Estamos guardando catálogos, requisitos, asignaciones de trabajadores existentes, exámenes, intentos y estados. No cierres esta ventana hasta que termine.</span>
+                            </div>
+                        </div>
                     </form>
                 @endif
-            </div>
-        </dialog>
-
-        <dialog id="modal-recalcular" class="mine-dialog is-compact">
-            <div class="mine-dialog-header">
-                <div class="mine-dialog-title">
-                    <span class="mine-dialog-kicker">Revisión automática</span>
-                    <strong>Recalcular estados</strong>
-                    <p class="mine-dialog-subtitle">Úsalo cuando se hayan cambiado requisitos, resultados o datos importados.</p>
-                </div>
-                <button type="button" class="mine-dialog-close" onclick="closeDialog(this)" aria-label="Cerrar">X</button>
-            </div>
-
-            <div class="mine-dialog-body">
-                <div class="mine-helper-card">
-                    <strong>Qué revisa:</strong>
-                    <span>Genera exámenes faltantes, actualiza vencimientos, corrige habilitados sin respaldo y vuelve a calcular el estado de cada asignación.</span>
-                </div>
-
-                <form method="POST" action="{{ route('personal.habilitacion-minera.sync-current', $currentQuery) }}" class="mine-form-section" data-loading-message="Recalculando habilitaciones. Puede tardar si hay muchos trabajadores...">
-                    @csrf
-                    <div class="mine-form-actions">
-                        <button type="button" class="btn btn-outline btn-sm" onclick="closeDialog(this)">Cancelar</button>
-                        <button type="submit" class="btn btn-primary btn-sm">Recalcular ahora</button>
-                    </div>
-                </form>
             </div>
         </dialog>
 
@@ -2049,6 +3267,14 @@
                         window.sessionStorage?.setItem('mineExcelImportModalOpen', '1');
                         dialog.showModal();
                     }
+                });
+            </script>
+        @endif
+
+        @if(session('habilitacion_mina_import_completed'))
+            <script>
+                window.addEventListener('DOMContentLoaded', function () {
+                    window.sessionStorage?.removeItem('mineExcelImportModalOpen');
                 });
             </script>
         @endif
@@ -2178,18 +3404,31 @@ function escHtml(value) {
     return div.innerHTML;
 }
 
+function escAttr(value) {
+    return escHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
 document.addEventListener('click', function(event) {
     if (!event.target.closest('.mine-actions-menu')) {
         closeActionsMenu();
+    }
+
+    const actionButton = event.target.closest('[data-exam-action-toggle]');
+    if (actionButton) {
+        const card = actionButton.closest('[data-worker-exam-card]');
+        const target = actionButton.dataset.examActionToggle;
+        if (!card || !target) return;
+
+        card.querySelectorAll('[data-exam-action-panel]').forEach(function(panel) {
+            panel.classList.toggle('is-open', panel.dataset.examActionPanel === target && !panel.classList.contains('is-open'));
+        });
     }
 });
 
 document.querySelectorAll('dialog.mine-dialog').forEach(function(dialog) {
     dialog.addEventListener('click', function(event) {
         if (event.target === dialog) {
-            if (dialog.dataset.persistentModal === 'true') {
-                return;
-            }
+            persistDialogOpenState(dialog, false);
             dialog.close();
         }
     });
@@ -2316,7 +3555,59 @@ initMineTextFilter('mineConfigSearch', '[data-mine-config-row]');
             submitForm(0);
         });
     });
+
+    document.querySelectorAll('[data-external-filter-change][form="' + form.id + '"]').forEach(function(select) {
+        select.addEventListener('change', function() {
+            submitForm(0);
+        });
+    });
 })();
+
+(function initMatrixFilters() {
+    const form = document.getElementById('matrixFilterForm');
+    if (!form) return;
+
+    let submitting = false;
+    const submitForm = function() {
+        if (submitting) return;
+        submitting = true;
+        const url = new URL(form.action, window.location.origin);
+        url.searchParams.delete('page');
+        form.action = url.pathname + url.search;
+        form.submit();
+    };
+
+    const updateActiveState = function(field) {
+        if (!field || field.dataset.ignoreActive === 'true') return;
+
+        const group = field.closest('.mine-filter-group');
+        if (!group) return;
+
+        group.classList.toggle('is-active', String(field.value || '').trim() !== '');
+    };
+
+    form.querySelectorAll('[data-filter-field], [data-filter-change]').forEach(updateActiveState);
+    form.querySelectorAll('select[data-filter-change]').forEach(function(select) {
+        select.addEventListener('change', function() {
+            updateActiveState(select);
+            submitForm();
+        });
+    });
+
+    document.querySelectorAll('[data-external-filter-change][form="' + form.id + '"]').forEach(function(select) {
+        select.addEventListener('change', submitForm);
+    });
+})();
+
+window.addEventListener('DOMContentLoaded', function() {
+    if (@json((bool) request('open_assign'))) {
+        openDialog('modal-asignar-mina');
+    }
+
+    if (@json((bool) request('open_manage'))) {
+        openDialog('modal-gestionar-worker');
+    }
+});
 
 (function initConditionalFields() {
     function syncCheckbox(checkbox) {
@@ -2340,9 +3631,11 @@ initMineTextFilter('mineConfigSearch', '[data-mine-config-row]');
 const mineRequirementsData = @json($mineReqsJson);
 const assignmentsData = @json($assignmentsJson);
 const attemptsUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.store', ['workerExamId' => '__EXAM__']));
+const completeAttemptUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.complete', ['attemptId' => '__ATTEMPT__']));
 const noAplicaUrlTemplate = @json(route('personal.habilitacion-minera.exam.not-applicable', ['workerExamId' => '__EXAM__']));
 const convalidateUrlTemplate = @json(route('personal.habilitacion-minera.exam.convalidate', ['workerExamId' => '__EXAM__']));
 const csrfToken = @json(csrf_token());
+const canManageMining = @json($canManage);
 const examStateLabels = @json($examStateOptions);
 const attemptResultLabels = @json($attemptResultOptions);
 
@@ -2393,7 +3686,251 @@ function openMineExams(tile) {
     document.getElementById('modal-mine-exams').showModal();
 }
 
-function openWorkerExams(assignmentId, workerName, mineName) {
+function parseDisplayDate(value) {
+    if (!value) return null;
+
+    const parts = String(value).split('/');
+    if (parts.length !== 3) return null;
+
+    const day = Number(parts[0]);
+    const month = Number(parts[1]) - 1;
+    const year = Number(parts[2]);
+    if (!day || month < 0 || !year) return null;
+
+    return new Date(year, month, day);
+}
+
+function daysUntilDisplayDate(value) {
+    const target = parseDisplayDate(value);
+    if (!target) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+
+    return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+}
+
+function examBadgeClass(exam) {
+    const attemptsUsed = Number(exam.attempt_count || 0);
+    const attemptsMax = Number(exam.max_intentos || 1);
+
+    if (['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA'].includes(exam.estado)) return 'ok';
+    if (exam.estado === 'POR_VENCER' || exam.estado === 'PROGRAMADO') return 'warn';
+    if (exam.estado === 'OBSERVADO') return 'orange';
+    if (exam.estado === 'DESAPROBADO') return attemptsUsed < attemptsMax ? 'orange' : 'danger';
+    if (exam.estado === 'VENCIDO') return 'danger';
+
+    return 'neutral';
+}
+
+function expirationTextForExam(exam) {
+    if (!exam.fecha_vencimiento) {
+        if (['APROBADO', 'VIGENTE', 'CONVALIDADO'].includes(exam.estado)) {
+            return 'Aprobado sin vencimiento';
+        }
+        if (exam.estado === 'NO_APLICA') {
+            return 'No aplica para este trabajador';
+        }
+
+        return '';
+    }
+
+    const days = daysUntilDisplayDate(exam.fecha_vencimiento);
+    if (exam.estado === 'VENCIDO' || (days !== null && days < 0)) {
+        return 'Examen vencido el ' + exam.fecha_vencimiento;
+    }
+    if (exam.estado === 'POR_VENCER' || (days !== null && days <= 30)) {
+        return 'Por vencer en ' + Math.max(0, days || 0) + ' dias (' + exam.fecha_vencimiento + ')';
+    }
+
+    return 'Vigente hasta ' + exam.fecha_vencimiento;
+}
+
+function todayInputDate() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today.toISOString().slice(0, 10);
+}
+
+function resultOptionsHtml(includePending) {
+    let html = '';
+    Object.entries(attemptResultLabels || {}).forEach(function(entry) {
+        const key = entry[0];
+        const label = entry[1];
+        if (!includePending && key === 'PENDIENTE') return;
+        html += '<option value="' + escAttr(key) + '">' + escHtml(label) + '</option>';
+    });
+
+    return html;
+}
+
+function formField(label, html, className) {
+    return '<label' + (className ? ' class="' + escAttr(className) + '"' : '') + '>' + escHtml(label) + html + '</label>';
+}
+
+function renderScheduleForm(exam, canSchedule) {
+    if (!canSchedule) {
+        return '<div class="mine-exam-empty-panel">No se puede programar otro intento para este examen. Revisa si ya tiene una programación pendiente, si ya fue resuelto o si agotó intentos.</div>';
+    }
+
+    let html = '<form method="POST" action="' + attemptsUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Programando examen...">';
+    html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
+    html += '<input type="hidden" name="resultado" value="PENDIENTE">';
+    html += formField('Fecha de programación', '<input type="date" name="fecha_programacion" required>');
+    html += formField('Observación', '<input type="text" name="observacion" placeholder="Opcional">', 'is-wide');
+    html += '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Guardar programación</button>';
+    html += '</form>';
+
+    return html;
+}
+
+function renderCompleteScheduledForm(attempt) {
+    let html = '<form method="POST" enctype="multipart/form-data" action="' + completeAttemptUrlTemplate.replace('__ATTEMPT__', attempt.id) + '" class="mine-form" data-loading-message="Registrando resultado programado...">';
+    html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
+    html += formField('Realización', '<input type="date" name="fecha_realizacion" value="' + todayInputDate() + '" required>');
+    html += formField('Resultado', '<select name="resultado" required>' + resultOptionsHtml(false) + '</select>');
+    html += formField('Nota', '<input type="number" name="nota" step="0.01">');
+    html += formField('Vencimiento manual', '<input type="date" name="fecha_vencimiento">');
+    html += formField('Archivo', '<input type="file" name="archivo">');
+    html += formField('Observación', '<input type="text" name="observacion">', 'is-wide');
+    html += '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Registrar resultado</button>';
+    html += '</form>';
+
+    return html;
+}
+
+function renderProgrammedPanel(exam, scheduledAttempts) {
+    if (!scheduledAttempts.length) {
+        return '<div class="mine-exam-empty-panel">Este examen no tiene programaciones pendientes.</div>';
+    }
+
+    let html = '<div class="mine-programmed-list">';
+    scheduledAttempts.forEach(function(attempt) {
+        const days = daysUntilDisplayDate(attempt.fecha_programacion);
+        const isDue = days !== null && days <= 0;
+        const dueText = isDue
+            ? 'Ya corresponde registrar resultado'
+            : 'Faltan ' + escHtml(days) + ' día(s)';
+
+        html += '<div class="mine-programmed-item' + (isDue ? '' : ' is-future') + '">';
+        html += '<div class="mine-programmed-head">';
+        html += '<strong>Programado: ' + escHtml(attempt.fecha_programacion || '-') + '</strong>';
+        html += '<span class="mine-badge ' + (isDue ? 'warn' : 'info') + '">' + dueText + '</span>';
+        html += '</div>';
+
+        if (attempt.observacion) {
+            html += '<span class="mine-muted">' + escHtml(attempt.observacion) + '</span>';
+        }
+
+        if (isDue && canManageMining) {
+            html += renderCompleteScheduledForm(attempt);
+        } else if (!isDue) {
+            html += '<span class="mine-muted">Aún no se habilita la carga de resultado porque la fecha programada no ha pasado.</span>';
+        } else {
+            html += '<span class="mine-muted">No tienes permiso para registrar resultados.</span>';
+        }
+
+        html += '</div>';
+    });
+    html += '</div>';
+
+    return html;
+}
+
+function renderPerformedForm(exam, canRegister) {
+    if (!canRegister) {
+        return '<div class="mine-exam-empty-panel">No se puede registrar otro resultado para este examen. Puede estar resuelto o sin intentos disponibles.</div>';
+    }
+
+    let html = '<form method="POST" enctype="multipart/form-data" action="' + attemptsUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Registrando examen realizado...">';
+    html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
+    html += formField('Realización', '<input type="date" name="fecha_realizacion" value="' + todayInputDate() + '" required>');
+    html += formField('Resultado', '<select name="resultado" required>' + resultOptionsHtml(false) + '</select>');
+    html += formField('Nota', '<input type="number" name="nota" step="0.01">');
+    html += formField('Vencimiento manual', '<input type="date" name="fecha_vencimiento">');
+    html += formField('Archivo', '<input type="file" name="archivo">');
+    html += formField('Observación', '<input type="text" name="observacion">', 'is-wide');
+    html += '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Registrar examen realizado</button>';
+    html += '</form>';
+
+    return html;
+}
+
+function renderWorkerExamCard(exam, focusExamId) {
+    const attemptsUsed = Number(exam.attempt_count || 0);
+    const attemptsMax = Number(exam.max_intentos || 1);
+    const attemptsAvailable = attemptsUsed < attemptsMax;
+    const resolvedStates = ['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA'];
+    const resolved = resolvedStates.includes(exam.estado);
+    const canRegisterAttempt = canManageMining && !resolved && attemptsAvailable;
+    const scheduledAttempts = (exam.intentos || []).filter(function(attempt) {
+        return attempt.fecha_programacion && attempt.resultado === 'PENDIENTE';
+    });
+    const canSchedule = canRegisterAttempt && scheduledAttempts.length === 0;
+    const badgeClass = examBadgeClass(exam);
+    const stateLabel = examStateLabels[exam.estado] || exam.estado;
+    const expirationLabel = expirationTextForExam(exam);
+    const details = [];
+    const focused = focusExamId && String(exam.id) === String(focusExamId);
+
+    if (exam.lugar) details.push('Lugar: ' + exam.lugar);
+    if (exam.precio !== null && exam.precio !== undefined) details.push('Precio: ' + exam.precio);
+    if (exam.fecha_programacion) details.push('Última programación: ' + exam.fecha_programacion);
+    if (exam.fecha_realizacion) details.push('Última realización: ' + exam.fecha_realizacion);
+    if (expirationLabel) details.push(expirationLabel);
+
+    let html = '<div class="mine-exam-item' + (focused ? ' is-focused' : '') + '" data-worker-exam-card="' + escAttr(exam.id) + '">';
+    html += '<div class="mine-exam-head">';
+    html += '<div class="mine-exam-titleline"><strong>' + escHtml(exam.nombre) + '</strong><span class="mine-badge ' + badgeClass + '">' + escHtml(stateLabel) + '</span></div>';
+    html += '<span class="mine-muted">Intentos: ' + escHtml(attemptsUsed) + '/' + escHtml(attemptsMax) + '</span>';
+    html += '</div>';
+    html += '<div class="mine-muted">' + escHtml(details.join(' · ')) + '</div>';
+    html += '<div class="mine-exam-action-row">';
+    html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="schedule">Programar examen</button>';
+    html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="scheduled">Ver programados' + (scheduledAttempts.length ? ' (' + scheduledAttempts.length + ')' : '') + '</button>';
+    html += '<button type="button" class="btn btn-primary btn-xs" data-exam-action-toggle="performed">Registrar examen realizado</button>';
+    html += '</div>';
+    html += '<div class="mine-exam-panel" data-exam-action-panel="schedule">' + renderScheduleForm(exam, canSchedule) + '</div>';
+    html += '<div class="mine-exam-panel" data-exam-action-panel="scheduled">' + renderProgrammedPanel(exam, scheduledAttempts) + '</div>';
+    html += '<div class="mine-exam-panel" data-exam-action-panel="performed">' + renderPerformedForm(exam, canRegisterAttempt) + '</div>';
+
+    if (exam.intentos && exam.intentos.length) {
+        html += '<div class="mine-attempt-list">';
+        exam.intentos.forEach(function(attempt) {
+            const result = attemptResultLabels[attempt.resultado] || attempt.resultado || '-';
+            const parts = ['Intento ' + attempt.numero + ': ' + result];
+
+            if (attempt.fecha_programacion) parts.push('Prog. ' + attempt.fecha_programacion);
+            if (attempt.fecha_realizacion) parts.push('Real. ' + attempt.fecha_realizacion);
+            if (attempt.nota !== null && attempt.nota !== undefined) parts.push('Nota: ' + attempt.nota);
+            if (attempt.observacion) parts.push(attempt.observacion);
+
+            html += '<div class="mine-muted">' + escHtml(parts.join(' · ')) + '</div>';
+            if (attempt.archivo_url) {
+                html += '<a class="btn btn-outline btn-xs" href="' + escHtml(attempt.archivo_url) + '">Descargar archivo</a>';
+            }
+        });
+        html += '</div>';
+    }
+
+    if (exam.estado !== 'NO_APLICA' && exam.estado !== 'CONVALIDADO') {
+        html += '<details class="mine-details-card">';
+        html += '<summary><span>Marcar no aplica</span><span class="mine-badge info">Por área</span></summary>';
+        html += '<form method="POST" action="' + noAplicaUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Marcando examen como no aplica...">';
+        html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
+        html += formField('Observación no aplica', '<input type="text" name="observacion">', 'is-wide');
+        html += '<button type="submit" class="btn btn-outline btn-xs" style="grid-column:1/-1;">Marcar no aplica</button>';
+        html += '</form>';
+        html += '</details>';
+    }
+
+    html += '</div>';
+
+    return html;
+}
+
+function openWorkerExams(assignmentId, workerName, mineName, focusExamId) {
     const modalTitle = document.getElementById('workerExamModalTitle');
     const modalBody = document.getElementById('workerExamModalBody');
 
@@ -2405,8 +3942,28 @@ function openWorkerExams(assignmentId, workerName, mineName) {
 
     let html = '';
 
-    if (!data || !data.examenes || !data.examenes.length) {
-        html = '<span class="mine-muted">No tiene exámenes generados para esta mina.</span>';
+    if (!data) {
+        html = '<div class="mine-exam-item">';
+        html += '<div class="mine-exam-head">';
+        html += '<div class="mine-exam-titleline"><strong>Asignacion no encontrada en la vista</strong><span class="mine-badge warn">Actualizar</span></div>';
+        html += '<span class="mine-muted">No se pudo cargar el detalle de esta mina. Actualiza la pagina o vuelve a seleccionar el trabajador.</span>';
+        html += '</div>';
+        html += '</div>';
+    } else if (!data.examenes || !data.examenes.length) {
+        html = '<div class="mine-exam-item">';
+        html += '<div class="mine-exam-head">';
+        html += '<div class="mine-exam-titleline"><strong>Sin examenes generados</strong><span class="mine-badge info">Pendiente de inicio</span></div>';
+        html += '<span class="mine-muted">La mina ya esta asignada, pero todavia no tiene sus examenes creados para gestionar programacion, resultados o no aplica.</span>';
+        html += '</div>';
+        if (canManageMining && data.generate_exams_url) {
+            html += '<form method="POST" action="' + escAttr(data.generate_exams_url) + '" class="mine-form" data-loading-message="Generando examenes requeridos...">';
+            html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
+            html += '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Generar examenes requeridos</button>';
+            html += '</form>';
+        } else {
+            html += '<span class="mine-muted">No tienes permiso para generar examenes desde esta vista.</span>';
+        }
+        html += '</div>';
     } else {
         const total = data.examenes.length;
         const resolvedStates = ['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA', 'POR_VENCER'];
@@ -2443,83 +4000,7 @@ function openWorkerExams(assignmentId, workerName, mineName) {
         html += '<div class="mine-exam-grid">';
 
         data.examenes.forEach(function(exam) {
-            let badgeClass = 'warn';
-
-            if (['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA'].includes(exam.estado)) {
-                badgeClass = 'ok';
-            } else if (['DESAPROBADO', 'VENCIDO'].includes(exam.estado)) {
-                badgeClass = 'danger';
-            }
-
-            const stateLabel = examStateLabels[exam.estado] || exam.estado;
-            const showAttemptForm = ['PENDIENTE', 'PROGRAMADO', 'DESAPROBADO', 'VENCIDO'].includes(exam.estado);
-            let nextAction = 'Revisar';
-            if (exam.estado === 'PENDIENTE') nextAction = 'Programar';
-            if (exam.estado === 'PROGRAMADO') nextAction = 'Registrar resultado';
-            if (exam.estado === 'DESAPROBADO' && Number(exam.attempt_count || 0) < Number(exam.max_intentos || 1)) nextAction = 'Registrar segundo intento';
-            if (exam.estado === 'DESAPROBADO' && Number(exam.attempt_count || 0) >= Number(exam.max_intentos || 1)) nextAction = 'Sin intentos disponibles';
-            if (exam.estado === 'VENCIDO') nextAction = 'Reprogramar o registrar nuevo resultado';
-            if (['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA', 'POR_VENCER'].includes(exam.estado)) nextAction = 'Resuelto';
-            const details = [];
-
-            if (exam.lugar) details.push('Lugar: ' + exam.lugar);
-            if (exam.precio !== null && exam.precio !== undefined) details.push('Precio: ' + exam.precio);
-            details.push('Prog.: ' + (exam.fecha_programacion || '-'));
-            details.push('Real.: ' + (exam.fecha_realizacion || '-'));
-            details.push('Vence: ' + (exam.fecha_vencimiento || '-'));
-
-            html += '<div class="mine-exam-item">';
-            html += '<div class="mine-exam-head">';
-            html += '<div class="mine-exam-titleline"><strong>' + escHtml(exam.nombre) + '</strong><span class="mine-badge ' + badgeClass + '">' + escHtml(stateLabel) + '</span></div>';
-            html += '<span class="mine-muted">Intentos: ' + escHtml(exam.attempt_count || 0) + '/' + escHtml(exam.max_intentos || 1) + '</span>';
-            html += '</div>';
-            html += '<span class="mine-action-hint">Acción siguiente: ' + escHtml(nextAction) + '</span>';
-            html += '<div class="mine-muted">' + escHtml(details.join(' · ')) + '</div>';
-
-            if (exam.intentos && exam.intentos.length) {
-                html += '<div class="mine-attempt-list">';
-                exam.intentos.forEach(function(attempt) {
-                    const result = attemptResultLabels[attempt.resultado] || attempt.resultado || '-';
-                    let line = 'Intento ' + attempt.numero + ': ' + result;
-
-                    if (attempt.nota !== null && attempt.nota !== undefined) line += ' · Nota: ' + attempt.nota;
-                    if (attempt.observacion) line += ' · ' + attempt.observacion;
-
-                    html += '<div class="mine-muted">' + escHtml(line) + '</div>';
-                    if (attempt.archivo_url) {
-                        html += '<a class="btn btn-outline btn-xs" href="' + escHtml(attempt.archivo_url) + '">Descargar archivo</a>';
-                    }
-                });
-                html += '</div>';
-            }
-
-            if (showAttemptForm) {
-                html += '<form method="POST" enctype="multipart/form-data" action="' + attemptsUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Registrando intento del examen...">';
-                html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
-                html += '<label>Programación<input type="date" name="fecha_programacion"></label>';
-                html += '<label>Realización<input type="date" name="fecha_realizacion"></label>';
-                html += '<label>Resultado<select name="resultado" required>';
-                @foreach($attemptResultOptions as $key => $label)
-                    html += '<option value="{{ $key }}">{{ $label }}</option>';
-                @endforeach
-                html += '</select></label>';
-                html += '<label>Nota<input type="number" name="nota" step="0.01"></label>';
-                html += '<label>Vencimiento manual<input type="date" name="fecha_vencimiento"></label>';
-                html += '<label>Archivo<input type="file" name="archivo"></label>';
-                html += '<label>Observación<input type="text" name="observacion"></label>';
-                html += '<button type="submit" class="btn btn-outline btn-xs" style="grid-column:1/-1;">Registrar intento</button>';
-                html += '</form>';
-            }
-
-            if (exam.estado !== 'NO_APLICA' && exam.estado !== 'CONVALIDADO') {
-                html += '<form method="POST" action="' + noAplicaUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Marcando examen como no aplica...">';
-                html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
-                html += '<label>Observación no aplica<input type="text" name="observacion" required></label>';
-                html += '<button type="submit" class="btn btn-outline btn-xs">Marcar no aplica</button>';
-                html += '</form>';
-            }
-
-            html += '</div>';
+            html += renderWorkerExamCard(exam, focusExamId);
         });
 
         html += '</div>';
@@ -2527,6 +4008,15 @@ function openWorkerExams(assignmentId, workerName, mineName) {
 
     modalBody.innerHTML = html;
     document.getElementById('modal-worker-exams').showModal();
+
+    if (focusExamId) {
+        const focusedItem = modalBody.querySelector('.mine-exam-item.is-focused');
+        if (focusedItem) {
+            window.setTimeout(function() {
+                focusedItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 50);
+        }
+    }
 }
 </script>
 @endpush

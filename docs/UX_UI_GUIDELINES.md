@@ -74,6 +74,32 @@ Los colores deben ir acompanados de texto; no depender solo del color.
 
 La misma informacion no siempre debe verse igual para todas las areas.
 
+## Habilitacion minera
+
+- La vista principal debe ser operativa: trabajador, mina, examenes, intentos,
+  resultado y estado.
+- No mostrar formularios administrativos abiertos al entrar. Deben vivir dentro
+  de Acciones o modales: agregar examen, editar examen, configurar examenes por
+  mina, importar Excel master, recalcular estados, historial de precios y revisar
+  equivalencias.
+- Separar estado general de accion siguiente. Ejemplo: "programar examen" se
+  muestra como tarea pendiente, mientras la habilitacion sigue `EN_PROCESO`.
+- Cuando se agotan intentos, mostrar `NO_HABILITADO` como estado visible de la
+  mina, con motivo claro. No usar `OBSERVADO` para ese caso.
+- Minas bloqueadas por desaprobacion de un examen requerido deben verse grises o
+  bloqueadas, con motivo legible.
+- `NO_APLICA` debe ser una accion directa, sin obligar observacion. La
+  observacion puede quedar disponible como opcional.
+- Convalidacion debe verse como sugerencia que el usuario confirma, no como
+  cambio silencioso.
+- Importar Excel master siempre debe usar preview, carga visible y confirmacion.
+  Si hay trabajadores no encontrados, mostrarlos como pendientes de registro
+  manual, no como creados automaticamente.
+- "Recalcular estados" debe explicar que revisara asignaciones, generara
+  examenes faltantes, corregira estados y mostrara resumen.
+- No usar nombres propios de personas, minas o examenes como reglas fijas en
+  textos genericos del sistema.
+
 ## Historial y archivado
 
 - Mostrar historial como timeline o lista cronologica, no como tabla tecnica

@@ -26,6 +26,22 @@ Reglas de negocio que no se deben romper:
 - La habilitacion minera no cambia estado laboral ni contratos.
 - Habilitacion minera sigue la cadena trabajador -> mina -> requisitos/examenes
   -> intentos -> resultado -> estado de habilitacion.
+- En habilitacion minera, textos de Excel como `PROGRAMAR EMO` no son estados
+  finales: se separan en estado general (`EN_PROCESO`) y accion pendiente.
+- Ninguna mina puede quedar `HABILITADO` sin examenes configurados, generados y
+  resueltos para el trabajador-mina.
+- Los examenes mineros permiten maximo 1 o 2 intentos; nunca crear ni permitir
+  tercer intento.
+- Si el trabajador agota intentos o desaprueba el ultimo intento requerido,
+  mostrar funcionalmente `NO_HABILITADO` para esa mina.
+- `NO_APLICA` cuenta como requisito resuelto y no exige observacion obligatoria.
+- La convalidacion de examenes debe ser sugerida y confirmada por usuario, no
+  aplicada automaticamente.
+- El master Excel de habilitacion es apoyo operativo, no fuente absoluta de
+  verdad; no debe crear trabajadores nuevos automaticamente ni sobrescribir
+  cargo, contrato, estado laboral, supervisor o datos sensibles sin confirmacion.
+- Precios de intentos mineros deben guardarse como snapshot y no cambiar cuando
+  se modifica el precio del examen.
 - Documentos personales usan estados `PENDIENTE`, `CARGADO`, `OBSERVADO`,
   `APROBADO`, `NO_APLICA`.
 - La descarga documental masiva debe mantener carpetas por trabajador.

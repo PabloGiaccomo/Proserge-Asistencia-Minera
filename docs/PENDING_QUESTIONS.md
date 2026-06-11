@@ -35,14 +35,33 @@
 
 ## Habilitacion minera
 
-- El master Excel es fuente de verdad o solo apoyo de importacion?
-- Si Excel contradice datos del sistema, quien gana?
-- Que examenes son criticos por mina?
-- Que examenes se pueden convalidar entre minas?
-- El precio de examen aplica por fecha de programacion o fecha de realizacion?
+Preguntas respondidas:
+
+- El master Excel es apoyo de importacion con preview y confirmacion, no fuente
+  absoluta de verdad.
+- Si Excel contradice datos sensibles del sistema, no debe sobrescribir cargo,
+  contrato, estado laboral, supervisor ni datos personales sin confirmacion.
+- El master Excel no crea trabajadores nuevos automaticamente; DNIs no
+  encontrados quedan pendientes para registro manual o regularizacion.
+- Estados del Excel que son tareas pendientes, como `PROGRAMAR EMO`, se
+  interpretan como `EN_PROCESO` mas accion pendiente.
+- Si se agotan intentos o se desaprueba el ultimo intento, la mina debe mostrarse
+  como `NO_HABILITADO`.
+- `NO_APLICA` cuenta como requisito resuelto y no exige observacion obligatoria.
+- La convalidacion es sugerida y confirmada por usuario, no automatica.
+- El precio del intento aplica por prioridad: fecha de registro del intento,
+  fecha de programacion, fecha de realizacion y fecha actual si no existe otra.
+- No puede existir `HABILITADO` sin examenes configurados, generados y resueltos.
+
+Preguntas aun pendientes:
+
+- Que examenes son criticos por cada mina en la operacion real?
+- Que examenes permiten convalidacion entre minas y bajo que equivalencias
+  exactas?
 - Que ocurre si un trabajador esta cesado pero aparece habilitado en el master?
-- Que estados usa SSOMA realmente para "apto", "observado", "vencido" o
-  "bloqueado"?
+- Que estados usa SSOMA realmente para "apto", "observado", "vencido",
+  "programar", "bloqueado" u otros textos historicos que deban mapearse?
+- Que usuarios pueden confirmar convalidaciones y marcar `NO_APLICA`?
 
 ## RQ Mina, operaciones y herramientas
 
@@ -62,7 +81,10 @@
 
 ## Importaciones y archivos historicos
 
-- Un Excel debe crear trabajadores o solo actualizar existentes?
+- Para master Excel de habilitacion, ya esta respondido: solo actualiza
+  trabajadores existentes y no crea nuevos automaticamente.
+- Para otros Excel fuera de habilitacion minera, definir si deben crear
+  trabajadores o solo actualizar existentes.
 - Si falta DNI, se omite, se crea como pendiente o se pide correccion?
 - Que formatos Excel/PDF son oficiales y cuales son copias informales?
 - Que nombres de columnas historicos deben conservarse para adopcion?

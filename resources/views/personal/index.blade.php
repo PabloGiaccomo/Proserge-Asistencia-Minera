@@ -1144,6 +1144,37 @@
     flex-wrap: wrap;
 }
 
+.personal-page .personal-pagination-controls.is-top {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.personal-page .personal-page-size,
+.personal-page .personal-pagination-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 13px;
+}
+
+.personal-page .personal-pagination-info {
+    color: #64748b;
+}
+
+.personal-page .personal-page-size-select {
+    min-width: 68px;
+    height: 34px;
+    border: 1px solid #dbe4f0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #0f172a;
+    padding: 0 10px;
+}
+
 .worker-detail-modal .detail-footer {
     display: flex;
     flex-wrap: wrap;
@@ -2029,6 +2060,15 @@
                 </div>
             @else
                 <div class="personal-grid-shell" id="personalGridShell">
+                    <div class="personal-pagination-controls is-top" aria-label="Resumen superior de paginacion">
+                        <div class="personal-page-size">
+                            Mostrar
+                            <select id="personalPageSizeTop" class="personal-page-size-select">
+                            </select>
+                            trabajadores
+                        </div>
+                        <div class="personal-pagination-info" id="personalPaginationInfoTop"></div>
+                    </div>
                     <div class="personal-grid-scroll-top" id="personalTopScrollbar" aria-hidden="true">
                         <div class="personal-grid-scroll-top-inner" id="personalTopScrollbarInner"></div>
                     </div>
@@ -3669,7 +3709,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const tableWrap = document.getElementById('personalTableWrap');
     const dataGrid = document.getElementById('personalDataGrid');
     const pageSizeSelect = document.getElementById('personalPageSize');
+    const pageSizeSelectTop = document.getElementById('personalPageSizeTop');
+    const pageSizeSelects = [pageSizeSelect, pageSizeSelectTop].filter(Boolean);
     const paginationInfo = document.getElementById('personalPaginationInfo');
+    const paginationInfoTop = document.getElementById('personalPaginationInfoTop');
+    const paginationInfos = [paginationInfo, paginationInfoTop].filter(Boolean);
     const paginationWrap = document.getElementById('personalPagination');
     const countBadge = document.getElementById('personalCount');
     const searchInput = document.getElementById('personal-search');
@@ -3940,7 +3984,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const buildPageSizeOptions = function (totalCount) {
-        if (!pageSizeSelect) return;
+        if (pageSizeSelects.length === 0) return;
         const total = Math.max(1, Number(totalCount || rows.length || 1));
         const base = [10, 50, 100, 200, 300, total];
         const values = Array.from(new Set(base.filter(function (value) {
@@ -3953,28 +3997,35 @@ document.addEventListener('DOMContentLoaded', function () {
             values.push(total || 1);
         }
 
-        pageSizeSelect.innerHTML = values.map(function (value) {
+        const html = values.map(function (value) {
             return '<option value="' + value + '">' + value + '</option>';
         }).join('');
+
+        pageSizeSelects.forEach(function (select) {
+            select.innerHTML = html;
+        });
     };
 
     const syncPageSizeOptions = function (totalCount, preferredValue) {
-        if (!pageSizeSelect) return;
+        if (pageSizeSelects.length === 0) return;
 
         buildPageSizeOptions(totalCount);
 
-        const optionValues = Array.from(pageSizeSelect.options).map(function (option) {
+        const primarySelect = pageSizeSelect || pageSizeSelectTop;
+        const optionValues = Array.from(primarySelect.options).map(function (option) {
             return String(option.value);
         });
-        const preferred = String(preferredValue || pageSize || pageSizeSelect.value || '');
+        const preferred = String(preferredValue || pageSize || primarySelect.value || '');
+        let nextValue = optionValues[optionValues.length - 1] || '10';
 
         if (preferred && optionValues.indexOf(preferred) !== -1) {
-            pageSizeSelect.value = preferred;
-        } else if (optionValues.length > 0) {
-            pageSizeSelect.value = optionValues[optionValues.length - 1];
+            nextValue = preferred;
         }
 
-        pageSize = Number(pageSizeSelect.value || optionValues[0] || 10);
+        pageSizeSelects.forEach(function (select) {
+            select.value = nextValue;
+        });
+        pageSize = Number(nextValue || optionValues[0] || 10);
     };
 
     const syncTopScrollbar = function () {
@@ -4225,7 +4276,7 @@ document.addEventListener('DOMContentLoaded', function () {
     populateSelect(contratoFilter, rows.map(r => r.dataset.contrato || ''));
 
     let currentPage = 1;
-    let pageSize = Number(pageSizeSelect?.value || 9);
+    let pageSize = Number((pageSizeSelect || pageSizeSelectTop)?.value || 9);
     const savedState = readViewState();
     setBootProgress(18, 'Cargando preferencias...');
 
@@ -4235,15 +4286,22 @@ document.addEventListener('DOMContentLoaded', function () {
         searchInput.value = savedState.search;
     }
 
-    if (pageSizeSelect) {
-        const optionValues = Array.from(pageSizeSelect.options).map(function (option) {
+    if (pageSizeSelects.length > 0) {
+        const primarySelect = pageSizeSelect || pageSizeSelectTop;
+        const optionValues = Array.from(primarySelect.options).map(function (option) {
             return String(option.value);
         });
         const preferredPageSize = String(savedState.pageSize || '');
+        let nextPageSize = optionValues[0] || '10';
+
         if (preferredPageSize && optionValues.indexOf(preferredPageSize) !== -1) {
-            pageSizeSelect.value = preferredPageSize;
+            nextPageSize = preferredPageSize;
         }
-        pageSize = Number(pageSizeSelect.value || optionValues[0] || 10);
+
+        pageSizeSelects.forEach(function (select) {
+            select.value = nextPageSize;
+        });
+        pageSize = Number(nextPageSize || 10);
     }
 
     if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
@@ -4394,11 +4452,12 @@ document.addEventListener('DOMContentLoaded', function () {
         rows.forEach(r => r.style.display = 'none');
         visibleRows.forEach(r => r.style.display = 'table-row');
 
-        if (paginationInfo) {
-            paginationInfo.textContent = total === 0
-                ? '0 resultados'
-                : 'Mostrando ' + (start + 1) + '-' + (start + visibleRows.length) + ' de ' + total;
-        }
+        const paginationText = total === 0
+            ? '0 resultados'
+            : 'Mostrando ' + (start + 1) + '-' + (start + visibleRows.length) + ' de ' + total;
+        paginationInfos.forEach(function (node) {
+            node.textContent = paginationText;
+        });
         if (countBadge) {
             countBadge.textContent = total + ' trabajadores';
         }
@@ -4453,12 +4512,15 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!el) return;
         el.addEventListener('change', function () { renderGrid(true); });
     });
-    if (pageSizeSelect) {
-        pageSizeSelect.addEventListener('change', function () {
-            pageSize = Number(pageSizeSelect.value || 9);
+    pageSizeSelects.forEach(function (select) {
+        select.addEventListener('change', function () {
+            pageSize = Number(select.value || 9);
+            pageSizeSelects.forEach(function (otherSelect) {
+                otherSelect.value = String(pageSize);
+            });
             renderGrid(true);
         });
-    }
+    });
 
     columnCheckboxes.forEach(function (input) {
         input.addEventListener('change', function () {

@@ -26,9 +26,25 @@ Usar esta lista antes de cada nueva tarea.
 - [ ] Contratos historicos no se editan ni eliminan fisicamente.
 - [ ] Renovaciones crean contrato nuevo.
 - [ ] Habilitacion minera no cambia estado laboral ni contratos.
+- [ ] Habilitacion minera tampoco cambia cargo, supervisor, ficha, documentos
+      personales ni renovaciones.
+- [ ] En habilitacion minera separe estado general de accion pendiente cuando
+      venga texto operativo desde Excel.
+- [ ] No deje `HABILITADO` sin examenes configurados, generados y resueltos.
+- [ ] No permita tercer intento de examen minero.
+- [ ] Si se agotan intentos, use `NO_HABILITADO` como estado visible principal
+      de la mina.
+- [ ] `NO_APLICA` cuenta como resuelto y no exige observacion obligatoria.
+- [ ] Convalidacion minera requiere sugerencia, validacion y confirmacion de
+      usuario.
 - [ ] Documentos respetan estados documentales.
 - [ ] Personal antiguo no se duplica por DNI/documento.
 - [ ] Importaciones no sobrescriben sin preview/confirmacion.
+- [ ] Excel master de habilitacion no crea trabajadores nuevos automaticamente.
+- [ ] Excel master de habilitacion no sobrescribe cargo, contrato, estado
+      laboral, supervisor ni datos sensibles sin confirmacion.
+- [ ] Intentos de examenes mineros guardan snapshot de precio y no dependen de
+      cambios futuros del catalogo.
 
 ## Permisos y seguridad
 

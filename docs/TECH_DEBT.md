@@ -80,6 +80,32 @@ Priorizar extraccion a componentes, partials y view models.
 - Exportaciones y ZIP masivos deben tener limites, jobs o procesamiento por
   lotes.
 
+## Habilitacion minera: reglas a reforzar en codigo
+
+Estas reglas ya estan definidas por negocio y deben verificarse antes de nuevas
+modificaciones del modulo:
+
+- Separar estado general de accion pendiente al leer Excel. Textos como
+  `PROGRAMAR EMO` no deben convertirse en estados finales.
+- El master Excel no debe crear trabajadores nuevos automaticamente. DNIs no
+  encontrados deben quedar en preview como pendientes de registro manual o
+  regularizacion.
+- El master Excel no debe sobrescribir cargo, contrato, estado laboral,
+  supervisor ni datos sensibles sin confirmacion explicita.
+- Priorizar `NO_HABILITADO` como estado visible cuando un trabajador desaprueba
+  el ultimo intento o agota intentos.
+- No permitir tercer intento de examen.
+- Bloquear o mostrar gris otra mina si requiere un examen que el trabajador ya
+  desaprobo sin intentos disponibles.
+- No permitir `HABILITADO` sin examenes configurados, generados y resueltos.
+- Convalidacion debe ser sugerida y confirmada, no automatica.
+- `NO_APLICA` debe contar como resuelto y no exigir observacion obligatoria.
+- Precios de intentos deben guardar snapshot y no recalcularse por cambios
+  futuros del catalogo.
+
+Riesgo: parte de estas reglas vive en servicios grandes y en importacion Excel.
+Se recomiendan tests focalizados antes de refactor o cambios funcionales.
+
 ## Almacenamiento documental
 
 - Archivos privados crecen con fichas, documentos, contratos y examenes.

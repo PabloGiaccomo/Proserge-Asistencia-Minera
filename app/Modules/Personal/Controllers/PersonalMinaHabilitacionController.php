@@ -33,8 +33,10 @@ class PersonalMinaHabilitacionController extends WebPageController
             'worker_id' => $request->input('worker_id', ''),
             'estado_habilitacion' => $request->input('estado_habilitacion', ''),
             'estado_laboral' => $request->input('estado_laboral', ''),
+            'estado_examen' => $request->input('estado_examen', ''),
             'per_page' => $request->input('per_page', 15),
             'worker_limit' => (int) $request->input('worker_limit', 20),
+            'worker_page' => max(1, (int) $request->input('worker_page', 1)),
         ];
         $filters['per_page'] = $this->service->perPageFromFilters($filters);
         $allowedWorkerLimits = [10, 20, 50, 80, 200];
@@ -49,7 +51,8 @@ class PersonalMinaHabilitacionController extends WebPageController
             'allExams' => $this->service->listAllMiningExams(),
             'priceHistory' => $this->service->listPriceHistory(),
             'mines' => $this->service->activeMines(),
-            'workers' => $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit']),
+            'workers' => $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit'], $filters['worker_page']),
+            'workersTotal' => $this->service->workerOptionsTotal($filters['trabajador'] ?: null),
             'selectedWorker' => $selectedWorker,
             'stateOptions' => $this->service->habilitationStateOptions(),
             'examStateOptions' => $this->service->examStateOptions(),
@@ -196,7 +199,7 @@ class PersonalMinaHabilitacionController extends WebPageController
         ]);
 
         try {
-            $this->service->storeRequirement($validated);
+            $this->service->storeRequirement($validated, $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
@@ -287,7 +290,7 @@ class PersonalMinaHabilitacionController extends WebPageController
         $requirement = MinaRequisito::query()->find($requirementId);
         abort_if(!$requirement, 404);
 
-        $this->service->deactivateRequirement($requirement);
+        $this->service->deactivateRequirement($requirement, $this->requireAuthenticatedUser());
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
@@ -335,13 +338,41 @@ class PersonalMinaHabilitacionController extends WebPageController
             ->with('success', 'Intento registrado correctamente.');
     }
 
+    public function completeScheduledAttempt(Request $request, string $attemptId): RedirectResponse
+    {
+        $attempt = PersonalMinaExamenIntento::query()->find($attemptId);
+        abort_if(!$attempt, 404);
+
+        $validated = $request->validate([
+            'fecha_realizacion' => ['required', 'date'],
+            'fecha_vencimiento' => ['nullable', 'date'],
+            'resultado' => ['required', 'string', 'max:40'],
+            'nota' => ['nullable', 'numeric'],
+            'archivo' => ['nullable', 'file', 'max:10240'],
+            'observacion' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        try {
+            $this->service->completeScheduledAttempt($attempt, $validated, $request->file('archivo'), $this->requireAuthenticatedUser());
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.habilitacion-minera.index', $request->query())
+                ->withInput()
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo registrar el resultado programado.');
+        }
+
+        return redirect()
+            ->route('personal.habilitacion-minera.index', $request->query())
+            ->with('success', 'Resultado del examen programado registrado correctamente.');
+    }
+
     public function notApplicable(Request $request, string $workerExamId): RedirectResponse
     {
         $workerExam = PersonalMinaExamen::query()->find($workerExamId);
         abort_if(!$workerExam, 404);
 
         $validated = $request->validate([
-            'observacion' => ['required', 'string', 'max:5000'],
+            'observacion' => ['nullable', 'string', 'max:5000'],
         ]);
 
         try {
@@ -397,7 +428,7 @@ class PersonalMinaHabilitacionController extends WebPageController
     public function previewImport(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'archivo' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:20480'],
+            'archivo' => ['required', 'file', 'mimes:xlsx,xls,xlsm,csv', 'max:20480'],
         ]);
 
         try {
@@ -438,7 +469,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
-            ->with('success', 'Importacion confirmada: ' . collect($result)->map(fn ($value, $key) => $key . ': ' . $value)->implode(', '));
+            ->with('success', 'Importacion confirmada: ' . collect($result)->map(fn ($value, $key) => $key . ': ' . $value)->implode(', '))
+            ->with('habilitacion_mina_import_completed', true);
     }
 
     public function syncCurrent(Request $request): RedirectResponse
