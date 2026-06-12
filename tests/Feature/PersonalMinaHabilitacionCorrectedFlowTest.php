@@ -414,8 +414,8 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertStringNotContainsString('name="estado_laboral"', $workerForm);
         $this->assertStringNotContainsString('name="estado_examen"', $workerForm);
         $this->assertStringContainsString('name="mina_id"', $matrixForm);
-        $this->assertStringContainsString('name="estado_habilitacion"', $matrixForm);
-        $this->assertStringContainsString('name="estado_laboral"', $matrixForm);
+        $this->assertStringNotContainsString('name="estado_habilitacion"', $matrixForm);
+        $this->assertStringNotContainsString('name="estado_laboral"', $matrixForm);
         $this->assertStringContainsString('name="estado_examen"', $matrixForm);
     }
 
@@ -670,6 +670,55 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertSee('Intento 1/2')
             ->assertSee('mine-exam-cell ok', false)
             ->assertSee('data-visual-state="' . PersonalMina::ESTADO_HABILITADO . '"', false);
+    }
+
+    public function test_filtro_de_estado_examen_limita_trabajadores_y_columnas_de_la_matriz(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina filtro examen');
+        $approvedExam = $this->createExam('Examen aprobado filtro');
+        $pendingExam = $this->createExam('Examen pendiente filtro');
+
+        foreach ([$approvedExam, $pendingExam] as $exam) {
+            $service->storeRequirement([
+                'mina_id' => $mine->id,
+                'examen_id' => $exam->id,
+                'obligatorio' => true,
+            ]);
+        }
+
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        PersonalMinaExamen::query()
+            ->where('personal_mina_id', $assignment->id)
+            ->where('examen_id', $approvedExam->id)
+            ->update(['estado' => PersonalMinaExamen::ESTADO_APROBADO]);
+
+        PersonalMinaExamen::query()
+            ->where('personal_mina_id', $assignment->id)
+            ->where('examen_id', $pendingExam->id)
+            ->update(['estado' => PersonalMinaExamen::ESTADO_PENDIENTE]);
+
+        $response = $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', [
+                'mina_id' => $mine->id,
+                'estado_examen' => PersonalMinaExamen::ESTADO_APROBADO,
+            ]))
+            ->assertOk()
+            ->assertSee('name="estado_examen"', false)
+            ->assertDontSee('name="estado_habilitacion"', false)
+            ->assertDontSee('name="estado_laboral"', false);
+
+        $matrix = Str::betweenFirst($response->getContent(), 'data-testid="mine-operational-matrix"', '</table>');
+
+        $this->assertStringContainsString($approvedExam->nombre, $matrix);
+        $this->assertStringNotContainsString($pendingExam->nombre, $matrix);
     }
 
     public function test_vista_no_muestra_habilitado_visual_sin_examenes_configurados_o_generados(): void

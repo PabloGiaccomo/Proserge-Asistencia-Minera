@@ -2418,50 +2418,11 @@
                         </select>
                     </label>
 
-                    <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_habilitacion'] ?? request('estado_habilitacion'))])>
-                        <span class="mine-filter-label">Estado habilitacion</span>
-                        <select name="estado_habilitacion" class="mine-filter-control" data-filter-change data-filter-field>
-                            <option value="">Todos</option>
-                            @foreach($stateOptions as $key => $label)
-                                <option value="{{ $key }}" @selected(($filters['estado_habilitacion'] ?? '') === $key)>
-                                    {{ $label }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
-                    <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_laboral'] ?? request('estado_laboral'))])>
-                        <span class="mine-filter-label">Estado laboral</span>
-                        <select name="estado_laboral" class="mine-filter-control" data-filter-change data-filter-field>
-                            <option value="">Todos</option>
-                            @foreach([
-                                'ACTIVO' => 'Activo',
-                                'FALTA_CONTRATO' => 'Falta contrato',
-                                'CESADO' => 'Cesado',
-                                'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente ficha',
-                                'FICHA_ENVIADA' => 'Ficha enviada',
-                                'OBSERVADO' => 'Observado'
-                            ] as $key => $label)
-                                <option value="{{ $key }}" @selected(($filters['estado_laboral'] ?? '') === $key)>
-                                    {{ $label }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </label>
-
                     <label @class(['mine-filter-group', 'is-active' => filled($filters['estado_examen'] ?? request('estado_examen'))])>
                         <span class="mine-filter-label">Estado examen</span>
                         <select name="estado_examen" class="mine-filter-control" data-filter-change data-filter-field>
                             <option value="">Todos</option>
-                            @foreach([
-                                \App\Models\PersonalMinaExamen::ESTADO_VENCIDO => 'Vencidos',
-                                \App\Models\PersonalMinaExamen::ESTADO_POR_VENCER => 'Por vencer',
-                                \App\Models\PersonalMinaExamen::ESTADO_PENDIENTE => 'Pendientes',
-                                \App\Models\PersonalMinaExamen::ESTADO_PROGRAMADO => 'Programados',
-                                \App\Models\PersonalMinaExamen::ESTADO_DESAPROBADO => 'Desaprobados',
-                                \App\Models\PersonalMinaExamen::ESTADO_OBSERVADO => 'Observados',
-                                \App\Models\PersonalMinaExamen::ESTADO_NO_APLICA => 'No aplica',
-                            ] as $key => $label)
+                            @foreach($examStateOptions as $key => $label)
                                 <option value="{{ $key }}" @selected(($filters['estado_examen'] ?? '') === $key)>
                                     {{ $label }}
                                 </option>
@@ -2500,10 +2461,52 @@
             </div>
 
             @if($isMineMatrix)
+                @php
+                    $matrixExamState = strtoupper(trim((string) ($filters['estado_examen'] ?? request('estado_examen', ''))));
+                    $matrixRequirements = $selectedMineRequirements;
+
+                    if ($matrixExamState !== '' && array_key_exists($matrixExamState, $examStateOptions)) {
+                        $matchingRequirementIds = collect();
+                        $matchingExamIds = collect();
+
+                        foreach ($assignments as $workerAssignments) {
+                            foreach ($workerAssignments as $workerAssignment) {
+                                foreach ($workerAssignment->examenes as $exam) {
+                                    if ($exam->estado !== $matrixExamState) {
+                                        continue;
+                                    }
+
+                                    if ($exam->mina_requisito_id) {
+                                        $matchingRequirementIds->push((string) $exam->mina_requisito_id);
+                                    }
+
+                                    if ($exam->examen_id) {
+                                        $matchingExamIds->push((string) $exam->examen_id);
+                                    }
+                                }
+                            }
+                        }
+
+                        $matchingRequirementIds = $matchingRequirementIds->unique()->values();
+                        $matchingExamIds = $matchingExamIds->unique()->values();
+                        $matrixRequirements = $selectedMineRequirements
+                            ->filter(function ($requirement) use ($matchingRequirementIds, $matchingExamIds) {
+                                return $matchingRequirementIds->contains((string) $requirement->id)
+                                    || ($requirement->examen_id && $matchingExamIds->contains((string) $requirement->examen_id));
+                            })
+                            ->values();
+                    }
+                @endphp
+
                 @if($selectedMineRequirements->isEmpty())
                     <div class="mine-operational-note">
                         <strong>Sin examenes configurados para esta mina.</strong>
                         <span>Usa Acciones &gt; Configurar examenes por mina para crear las reglas. Ningun trabajador se mostrara visualmente como habilitado mientras no existan examenes configurados y generados.</span>
+                    </div>
+                @elseif($matrixExamState !== '' && $matrixRequirements->isEmpty())
+                    <div class="mine-operational-note">
+                        <strong>Sin examenes con estado {{ $examStateLabel($matrixExamState) }}.</strong>
+                        <span>Cambia el filtro de estado de examen para ver otras columnas de la matriz.</span>
                     </div>
                 @endif
 
@@ -2518,7 +2521,7 @@
                                 <th class="mine-col-state">Estado habilitacion</th>
                                 <th class="mine-col-progress">Avance</th>
                                 <th class="mine-col-action">Accion siguiente</th>
-                                @foreach($selectedMineRequirements as $requirement)
+                                @foreach($matrixRequirements as $requirement)
                                     <th>
                                         <span class="mine-matrix-exam-head">
                                             <strong>{{ $requirement->examen?->nombre ?: $requirement->nombre }}</strong>
@@ -2566,7 +2569,7 @@
                                     </td>
                                     <td><span class="mine-next-action {{ $displayBadge }}">{{ $nextAction }}</span></td>
 
-                                    @foreach($selectedMineRequirements as $requirement)
+                                    @foreach($matrixRequirements as $requirement)
                                         @php
                                             $workerExam = $assignment?->examenes->first(function ($exam) use ($requirement) {
                                                 return (string) $exam->mina_requisito_id === (string) $requirement->id
@@ -2627,7 +2630,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="{{ 7 + $selectedMineRequirements->count() }}" class="mine-empty-state">
+                                    <td colspan="{{ 7 + $matrixRequirements->count() }}" class="mine-empty-state">
                                         No hay trabajadores asignados a esta mina con los filtros actuales.
                                     </td>
                                 </tr>
