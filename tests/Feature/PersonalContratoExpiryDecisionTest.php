@@ -73,6 +73,29 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         $this->assertSame($targetContract->id, $result->first()->id);
     }
 
+    public function test_filtro_por_trabajador_ignora_mes_anio_y_muestra_todo_su_historial(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $target = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Busqueda Contratos Trabajador']);
+        $other = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Otro Historial Trabajador']);
+        $first = $this->insertContract($target, '2026-01-01', '2026-03-31', true, ['estado' => PersonalContrato::ESTADO_CERRADO, 'puesto' => 'Ayudante']);
+        $second = $this->insertContract($target, '2026-04-01', '2026-06-30', true, ['puesto' => 'Operador']);
+        $third = $this->insertContract($target, '2026-07-01', '2026-12-31', true, ['puesto' => 'Supervisor']);
+        $this->insertContract($other, '2026-01-01', '2026-06-30', true, ['puesto' => 'Operario']);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts([
+            'mes' => 6,
+            'anio' => 2026,
+            'trabajador' => 'Trabajador Busqueda',
+            'cargo' => 'No coincide',
+            'estado_laboral' => 'CESADO',
+            'tipo_contrato' => 'OTRO',
+        ]);
+
+        $this->assertSame([$first->id, $second->id, $third->id], $result->pluck('id')->values()->all());
+    }
+
     public function test_vista_de_vencimientos_usa_filtros_automaticos_y_solo_los_operativos(): void
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
@@ -86,6 +109,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ->assertOk()
             ->assertSee('name="mes"', false)
             ->assertSee('name="anio"', false)
+            ->assertSee('name="trabajador"', false)
             ->assertSee('name="cargo"', false)
             ->assertSee('name="estado_laboral"', false)
             ->assertSee('name="tipo_contrato"', false)
@@ -96,11 +120,32 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ->assertDontSee('>Filtrar<', false);
     }
 
+    public function test_vista_bloquea_mes_y_anio_cuando_se_busca_trabajador(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Filtro Trabajador Vista']);
+        $this->insertContract($personal, '2026-01-01', '2026-03-31', true, ['estado' => PersonalContrato::ESTADO_CERRADO]);
+        $this->insertContract($personal, '2026-04-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026, 'trabajador' => 'Filtro Trabajador']))
+            ->assertOk()
+            ->assertSee('Historial de contratos del trabajador buscado.')
+            ->assertSee('name="mes" data-auto-filter data-date-filter disabled', false)
+            ->assertSee('name="anio" min="2000" max="2100" value="2026" data-auto-filter data-date-filter disabled', false)
+            ->assertSee('name="trabajador"', false)
+            ->assertSee('Filtro Trabajador Vista')
+            ->assertSee('Contrato #1')
+            ->assertSee('Contrato #2');
+    }
+
     public function test_vista_de_vencimientos_permite_seleccionar_y_descargar_formato_de_renovacion(): void
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $permissions = ['personal' => ['ver', 'exportar']];
+        $permissions = ['personal' => ['ver', 'exportar', 'actualizar']];
         $userId = $this->createUser($permissions);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Formato Renovacion']);
         $this->insertContract($personal, '2026-01-01', '2026-06-20', true, ['tipo_contrato' => 'FIJO']);
@@ -111,9 +156,53 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ->assertSee('id="expirySelectAllWorkers"', false)
             ->assertSee('js-expiry-contract-worker-check', false)
             ->assertSee('Renovacion de contrato')
+            ->assertSee('id="expiryDecisionModal"', false)
+            ->assertSee('js-expiry-open-decision', false)
+            ->assertSee('Tipo de contrato')
+            ->assertDontSee('<summary>Registrar decision</summary>', false)
             ->assertSee('id="contractFormatModal"', false)
             ->assertSee(route('personal.contrato-formatos.download'), false)
             ->assertSee('Formato Renovacion');
+    }
+
+    public function test_vencimientos_muestra_historial_anterior_al_pasar_por_trabajador(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $permissions = ['personal' => ['ver', 'actualizar']];
+        $userId = $this->createUser($permissions);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Historial Hover']);
+        $this->insertContract($personal, '2026-01-01', '2026-03-31', true, [
+            'estado' => PersonalContrato::ESTADO_CERRADO,
+            'puesto' => 'Ayudante Mina',
+            'remuneracion' => '1899.75',
+            'costo_hora' => '17.25',
+        ]);
+        $current = $this->insertContract($personal, '2026-04-01', '2026-06-30', true, [
+            'puesto' => 'Operador Mina',
+            'remuneracion' => '2200',
+            'costo_hora' => '20',
+        ]);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts([
+            'mes' => 6,
+            'anio' => 2026,
+        ]);
+        $summary = $result->firstWhere('id', $current->id)->getAttribute('previous_contracts_summary');
+
+        $this->assertCount(1, $summary);
+        $this->assertSame('Ayudante Mina', $summary->first()['puesto']);
+        $this->assertSame('1899.75', $summary->first()['remuneracion']);
+        $this->assertSame('17.25', $summary->first()['costo_hora']);
+
+        $this->withSession($this->sessionFor($userId, $permissions))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Historial Hover')
+            ->assertSee('js-expiry-worker-history', false)
+            ->assertSee('Ayudante Mina')
+            ->assertSee('1899.75')
+            ->assertSee('17.25');
     }
 
     public function test_no_renovar_requiere_motivo_y_otro_requiere_observacion(): void
@@ -215,14 +304,15 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         }
     }
 
-    public function test_contrato_historico_no_aparece_ni_acepta_decision_activa(): void
+    public function test_contrato_historico_aparece_en_su_mes_pero_no_acepta_decision_activa(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
         $personal = $this->createPersonal('CESADO');
         $closed = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['estado' => PersonalContrato::ESTADO_CERRADO]);
 
         $result = app(PersonalContratoService::class)->listExpiringContracts(['mes' => 6, 'anio' => 2026]);
-        $this->assertFalse($result->contains('id', $closed->id));
+        $this->assertTrue($result->contains('id', $closed->id));
+        $this->assertFalse((bool) $result->firstWhere('id', $closed->id)->getAttribute('can_register_decision'));
 
         try {
             app(PersonalContratoService::class)->registerRenewalDecision($closed, [
@@ -232,6 +322,71 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         } catch (ValidationException $exception) {
             $this->assertSame('Solo se puede registrar decision sobre contratos vigentes activos.', collect($exception->errors())->flatten()->first());
         }
+    }
+
+    public function test_decision_se_infiere_como_renovar_si_existe_contrato_posterior(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Inferencia Renovacion']);
+        $base = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['estado' => PersonalContrato::ESTADO_CERRADO]);
+        $this->insertContract($personal, '2026-07-01', '2026-12-31', true, [
+            'estado' => PersonalContrato::ESTADO_ACTIVO,
+            'origen_contrato_id' => $base->id,
+        ]);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts(['mes' => 6, 'anio' => 2026]);
+        $contract = $result->firstWhere('id', $base->id);
+
+        $this->assertNotNull($contract);
+        $this->assertSame(PersonalContrato::DECISION_RENOVAR, $contract->getAttribute('decision_visual'));
+        $this->assertTrue((bool) $contract->getAttribute('decision_visual_inferida'));
+        $this->assertSame('RENOVADO', $contract->getAttribute('estado_visual'));
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Inferencia Renovacion')
+            ->assertSee('Renovado')
+            ->assertSee('Tiene contrato posterior.');
+    }
+
+    public function test_ruta_masiva_registra_decision_y_prepara_renovacion(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+        Storage::fake('local');
+
+        $permissions = ['personal' => ['ver', 'actualizar', 'editar']];
+        $userId = $this->createUser($permissions);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Masivo Renovacion']);
+        $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['tipo_contrato' => 'FIJO']);
+
+        $response = $this->withSession($this->sessionFor($userId, $permissions))
+            ->postJson(route('personal.contratos.bulk-decision'), [
+                'contract_ids' => [$contract->id],
+                'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVAR,
+                'fecha_inicio' => '2026-07-01',
+                'fecha_fin' => '2026-12-31',
+                'observacion_renovacion' => 'Preparada desde seleccion masiva.',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('summary.procesados', 1)
+            ->assertJsonPath('summary.renovaciones', 1);
+
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $contract->id,
+            'estado' => PersonalContrato::ESTADO_ACTIVO,
+            'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVACION_PREPARADA,
+            'decision_final' => PersonalContrato::DECISION_RENOVAR,
+        ]);
+        $this->assertDatabaseHas('personal_contratos', [
+            'personal_id' => $personal->id,
+            'origen_contrato_id' => $contract->id,
+            'estado' => PersonalContrato::ESTADO_PREPARACION,
+            'fecha_inicio' => '2026-07-01',
+            'fecha_fin' => '2026-12-31',
+        ]);
+        $this->assertSame('ACTIVO', $personal->fresh()->estado);
     }
 
     public function test_rutas_respetan_permiso_actualizar(): void

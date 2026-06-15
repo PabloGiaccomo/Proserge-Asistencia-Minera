@@ -77,6 +77,23 @@
     margin-top: 4px;
     overflow-wrap: anywhere;
 }
+.contract-detail-note {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.35;
+}
+.contract-signed-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #0f766e;
+    font-weight: 800;
+    text-decoration: none;
+}
+.contract-signed-link:hover {
+    text-decoration: underline;
+}
 .contract-section {
     display: grid;
     gap: 12px;
@@ -141,19 +158,24 @@
             <span class="card-title">Resumen del contrato</span>
         </div>
         <div class="card-body contract-detail-grid">
+            @if($signedContractFileExists ?? false)
+                <div class="contract-detail-item">
+                    <div class="contract-detail-label">Documento de contrato firmado</div>
+                    <div class="contract-detail-value">
+                        <a
+                            href="{{ route('personal.contratos.signed.download', [$personal->id, $contrato->id]) }}"
+                            class="contract-signed-link"
+                            target="_blank"
+                            rel="noopener">
+                            {{ $contrato->signed_contract_original_name ?: 'Contrato firmado.pdf' }}
+                        </a>
+                        <div class="contract-detail-note">Firmado: {{ $formatDateTime($contrato->signed_at) }}</div>
+                    </div>
+                </div>
+            @endif
             <div class="contract-detail-item">
                 <div class="contract-detail-label">Estado</div>
                 <div class="contract-detail-value">{{ ucfirst(strtolower($contrato->estado)) }}</div>
-            </div>
-            <div class="contract-detail-item">
-                <div class="contract-detail-label">Contrato firmado</div>
-                <div class="contract-detail-value">
-                    @if($contrato->hasSignedFile())
-                        {{ $contrato->signed_contract_original_name ?: 'Contrato firmado.pdf' }} - {{ $formatDateTime($contrato->signed_at) }}
-                    @else
-                        {{ $contrato->archivo_pendiente_regularizacion ? 'Pendiente de regularizacion' : 'No registrado en este contrato' }}
-                    @endif
-                </div>
             </div>
             <div class="contract-detail-item">
                 <div class="contract-detail-label">Inicio</div>

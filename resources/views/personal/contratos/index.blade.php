@@ -34,7 +34,17 @@
         ->first();
     $hasPreparation = $preparingContract !== null;
     $isRenewalPreparation = strtoupper((string) ($preparingContract?->tipo_movimiento ?? '')) === 'RENOVACION';
-    $hasActiveContract = $contratos->contains(fn ($contrato): bool => strtoupper((string) $contrato->estado) === 'ACTIVO');
+    $activeContract = $contratos
+        ->filter(fn ($contrato): bool => strtoupper((string) $contrato->estado) === 'ACTIVO')
+        ->sortByDesc(fn ($contrato) => (int) ($contrato->contrato_numero ?? 0))
+        ->first();
+    $hasActiveContract = $activeContract !== null;
+    $renewalDefaultStart = $activeContract?->fecha_fin
+        ? \Illuminate\Support\Carbon::parse($activeContract->fecha_fin)->addDay()->toDateString()
+        : now()->toDateString();
+    $renewalsByOrigin = $contratos
+        ->filter(fn ($contrato): bool => filled($contrato->origen_contrato_id))
+        ->groupBy('origen_contrato_id');
 @endphp
 
 <style>
@@ -145,6 +155,21 @@
     background: #fee2e2;
     color: #991b1b;
 }
+.contract-upload-btn {
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    background: #fff;
+}
+.contract-upload-btn.has-file {
+    border-color: #bbf7d0;
+    color: #166534;
+    background: #f0fdf4;
+}
+.contract-upload-btn:hover {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    color: #1e40af;
+}
 .contract-delete-modal {
     position: fixed;
     inset: 0;
@@ -158,8 +183,29 @@
 .contract-delete-modal.is-open {
     display: flex;
 }
+.contract-upload-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 82;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(15, 23, 42, .38);
+}
+.contract-upload-modal.is-open {
+    display: flex;
+}
 .contract-delete-dialog {
     width: min(420px, 100%);
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, .18);
+    padding: 18px;
+}
+.contract-upload-dialog {
+    width: min(460px, 100%);
     border-radius: 10px;
     background: #fff;
     border: 1px solid #e2e8f0;
@@ -177,6 +223,13 @@
     color: #475569;
     line-height: 1.45;
     font-size: 14px;
+}
+.contract-upload-file {
+    margin-top: 12px;
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 10px;
 }
 .contract-delete-reason {
     margin-top: 12px;
@@ -303,8 +356,8 @@
                     <div>
                         <h2 class="contract-flow-title">{{ $isRenewalPreparation ? 'Renovacion en preparacion' : 'Contrato en preparacion' }}</h2>
                         <p class="contract-flow-text">
-                            @if($isRenewalPreparation && $estadoPersonal === 'ACTIVO')
-                                El trabajador sigue activo por su contrato vigente firmado. Esta renovacion queda pendiente hasta subir su propio PDF firmado.
+                            @if($isRenewalPreparation)
+                                Ya existe una renovacion preparada para este trabajador. Esta renovacion queda pendiente hasta subir su propio PDF firmado.
                             @else
                                 Ya existe un contrato editable para este trabajador. Actualiza sus datos o sube el PDF firmado antes de crear otro movimiento.
                             @endif
@@ -312,6 +365,33 @@
                     </div>
                     <a href="{{ route('personal.contrato-datos.edit', $personal->id) }}" class="btn btn-primary btn-sm">Editar contrato en preparacion</a>
                 </div>
+            @elseif($hasActiveContract)
+                <div class="contract-flow-head">
+                    <div>
+                        <h2 class="contract-flow-title">Renovar contrato</h2>
+                        <p class="contract-flow-text">
+                            Crea un nuevo contrato en preparacion copiando los datos del contrato activo del historial. El estado laboral del trabajador no bloquea esta renovacion.
+                        </p>
+                    </div>
+                </div>
+                <form method="POST" action="{{ route('personal.contratos.renew', $personal->id) }}" class="contract-flow-form">
+                    @csrf
+                    <label>
+                        Inicio del nuevo contrato
+                        <input type="date" name="fecha_inicio" value="{{ old('fecha_inicio', $renewalDefaultStart) }}" required>
+                    </label>
+                    <label>
+                        Fin del nuevo contrato
+                        <input type="date" name="fecha_fin" value="{{ old('fecha_fin') }}">
+                    </label>
+                    <label class="form-group-wide">
+                        Observacion de renovacion
+                        <textarea name="observacion_renovacion" maxlength="5000" placeholder="Referencia interna de la renovacion">{{ old('observacion_renovacion') }}</textarea>
+                    </label>
+                    <div class="contract-flow-actions">
+                        <button type="submit" class="btn btn-primary btn-sm">Renovar contrato</button>
+                    </div>
+                </form>
             @elseif($estadoPersonal === 'CESADO')
                 <div class="contract-flow-head">
                     <div>
@@ -337,36 +417,11 @@
                         <button type="submit" class="btn btn-primary btn-sm">Reingresar trabajador</button>
                     </div>
                 </form>
-            @elseif($estadoPersonal === 'ACTIVO' && $hasActiveContract)
-                <div class="contract-flow-head">
-                    <div>
-                        <h2 class="contract-flow-title">Renovar contrato</h2>
-                        <p class="contract-flow-text">Crea un nuevo contrato en preparacion copiando los datos del contrato vigente. El PDF anterior no activara esta renovacion.</p>
-                    </div>
-                </div>
-                <form method="POST" action="{{ route('personal.contratos.renew', $personal->id) }}" class="contract-flow-form">
-                    @csrf
-                    <label>
-                        Inicio del nuevo contrato
-                        <input type="date" name="fecha_inicio" value="{{ old('fecha_inicio') }}" required>
-                    </label>
-                    <label>
-                        Fin del nuevo contrato
-                        <input type="date" name="fecha_fin" value="{{ old('fecha_fin') }}">
-                    </label>
-                    <label class="form-group-wide">
-                        Observacion de renovacion
-                        <textarea name="observacion_renovacion" maxlength="5000" placeholder="Referencia interna de la renovacion">{{ old('observacion_renovacion') }}</textarea>
-                    </label>
-                    <div class="contract-flow-actions">
-                        <button type="submit" class="btn btn-primary btn-sm">Renovar contrato</button>
-                    </div>
-                </form>
             @else
                 <div class="contract-flow-head">
                     <div>
                         <h2 class="contract-flow-title">Movimiento contractual no disponible</h2>
-                        <p class="contract-flow-text">Para renovar debe existir un contrato vigente firmado. Para reingresar, el trabajador debe estar cesado.</p>
+                        <p class="contract-flow-text">Para renovar debe existir un contrato activo en el historial. Para reingresar sin contrato activo, el trabajador debe estar cesado.</p>
                     </div>
                 </div>
             @endif
@@ -403,7 +458,9 @@
                                     $cerradoPor = $contrato->cerradoPor?->personal?->nombre_completo ?: $contrato->cerradoPor?->email ?: 'No registrado';
                                     $estadoContrato = strtoupper((string) $contrato->estado);
                                     $canAnnul = $estadoContrato === 'PREPARACION';
+                                    $canUploadSignedContract = $canManageContracts && $contratoService->canUploadSignedFileForContract($contrato);
                                     $contractLabel = 'Contrato #' . $contrato->contrato_numero . ' - ' . $inicio . ' al ' . $fin;
+                                    $relatedRenewals = $renewalsByOrigin->get($contrato->id, collect());
                                 @endphp
                                 <tr>
                                     <td>
@@ -416,6 +473,12 @@
                                         @endif
                                         @if(($contrato->origen_registro ?? '') === 'ANTIGUO')
                                             <div class="text-muted">Registro antiguo</div>
+                                        @endif
+                                        @if($relatedRenewals->isNotEmpty())
+                                            <div class="text-muted">
+                                                Renovacion generada:
+                                                {{ $relatedRenewals->map(fn ($renovacion) => 'Contrato #' . $renovacion->contrato_numero)->join(', ') }}
+                                            </div>
                                         @endif
                                     </td>
                                     <td>
@@ -446,6 +509,22 @@
                                                     <path d="m13 16 2 2"/>
                                                 </svg>
                                             </a>
+                                            @if($canUploadSignedContract)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs contract-icon-btn contract-upload-btn js-contract-upload"
+                                                    title="Subir PDF firmado"
+                                                    aria-label="Subir PDF firmado del {{ $contractLabel }}"
+                                                    data-upload-url="{{ route('personal.contratos.signed', [$personal->id, $contrato->id]) }}"
+                                                    data-contract-label="{{ $contractLabel }}"
+                                                    data-current-file="">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                        <path d="M17 8 12 3 7 8"/>
+                                                        <path d="M12 3v12"/>
+                                                    </svg>
+                                                </button>
+                                            @endif
                                             @if($canAnnul)
                                                 <button
                                                     type="button"
@@ -492,6 +571,24 @@
         </form>
     </div>
 </div>
+
+<div class="contract-upload-modal" id="contractUploadModal" aria-hidden="true">
+    <div class="contract-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="contractUploadTitle">
+        <h2 class="contract-delete-title" id="contractUploadTitle">Subir contrato firmado</h2>
+        <p class="contract-delete-text">
+            Se adjuntara el PDF firmado a <strong id="contractUploadLabel">este contrato</strong>.
+        </p>
+        <p class="contract-delete-text" id="contractUploadCurrentFile"></p>
+        <form method="POST" id="contractUploadForm" enctype="multipart/form-data">
+            @csrf
+            <input type="file" name="contrato_pdf" class="contract-upload-file" accept="application/pdf" required>
+            <div class="contract-delete-actions">
+                <button type="button" class="btn btn-outline btn-sm" data-contract-upload-cancel>Cancelar</button>
+                <button type="submit" class="btn btn-primary btn-sm">Subir PDF</button>
+            </div>
+        </form>
+    </div>
+</div>
 @endsection
 
 @push('scripts')
@@ -501,12 +598,25 @@ document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('contractDeleteForm');
     const label = document.getElementById('contractDeleteLabel');
     const cancelButton = modal?.querySelector('[data-contract-delete-cancel]');
+    const uploadModal = document.getElementById('contractUploadModal');
+    const uploadForm = document.getElementById('contractUploadForm');
+    const uploadLabel = document.getElementById('contractUploadLabel');
+    const uploadCurrentFile = document.getElementById('contractUploadCurrentFile');
+    const uploadCancelButton = uploadModal?.querySelector('[data-contract-upload-cancel]');
 
     const closeModal = function () {
         if (!modal || !form) return;
         modal.classList.remove('is-open');
         modal.setAttribute('aria-hidden', 'true');
         form.removeAttribute('action');
+    };
+
+    const closeUploadModal = function () {
+        if (!uploadModal || !uploadForm) return;
+        uploadModal.classList.remove('is-open');
+        uploadModal.setAttribute('aria-hidden', 'true');
+        uploadForm.removeAttribute('action');
+        uploadForm.reset();
     };
 
     document.querySelectorAll('.js-contract-delete').forEach(function (button) {
@@ -519,15 +629,35 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    document.querySelectorAll('.js-contract-upload').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (!uploadModal || !uploadForm || !uploadLabel || !uploadCurrentFile) return;
+            uploadForm.setAttribute('action', button.dataset.uploadUrl || '');
+            uploadLabel.textContent = button.dataset.contractLabel || 'este contrato';
+            uploadCurrentFile.textContent = button.dataset.currentFile
+                ? 'Archivo actual: ' + button.dataset.currentFile
+                : 'No hay PDF firmado registrado para este contrato.';
+            uploadModal.classList.add('is-open');
+            uploadModal.setAttribute('aria-hidden', 'false');
+        });
+    });
+
     cancelButton?.addEventListener('click', closeModal);
+    uploadCancelButton?.addEventListener('click', closeUploadModal);
     modal?.addEventListener('click', function (event) {
         if (event.target === modal) {
             closeModal();
         }
     });
+    uploadModal?.addEventListener('click', function (event) {
+        if (event.target === uploadModal) {
+            closeUploadModal();
+        }
+    });
     document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') {
             closeModal();
+            closeUploadModal();
         }
     });
 });

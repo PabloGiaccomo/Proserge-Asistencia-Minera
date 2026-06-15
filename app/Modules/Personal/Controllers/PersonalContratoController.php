@@ -7,8 +7,11 @@ use App\Models\PersonalContrato;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -30,6 +33,7 @@ class PersonalContratoController extends WebPageController
         $filters = [
             'mes' => $month,
             'anio' => $year,
+            'trabajador' => $request->input('trabajador', ''),
             'cargo' => $request->input('cargo', ''),
             'estado_laboral' => $request->input('estado_laboral', ''),
             'tipo_contrato' => $request->input('tipo_contrato', ''),
@@ -72,7 +76,61 @@ class PersonalContratoController extends WebPageController
             'contrato' => $contrato,
             'snapshot' => $contrato->snapshot_json ?: ($contrato->snapshot_inicial_json ?: []),
             'contratoService' => $this->contratoService,
+            'signedContractFileExists' => $contrato->hasSignedFile()
+                && Storage::disk('local')->exists($contrato->signed_contract_path),
         ]);
+    }
+
+    public function downloadSignedContract(string $id, string $contractId): Response
+    {
+        $personal = $this->personalService->find($id);
+        abort_if(!$personal, 404);
+
+        $contract = $this->contratoService->findForPersonal($personal, $contractId);
+        abort_if(!$contract, 404);
+        abort_unless($contract->hasSignedFile() && Storage::disk('local')->exists($contract->signed_contract_path), 404);
+
+        $filename = $contract->signed_contract_original_name
+            ?: 'contrato_firmado_' . $contract->contrato_numero . '.pdf';
+
+        return response(Storage::disk('local')->get($contract->signed_contract_path), 200, [
+            'Content-Type' => $contract->signed_contract_mime ?: 'application/pdf',
+            'Content-Disposition' => 'inline; filename="' . str_replace('"', '', $filename) . '"',
+        ]);
+    }
+
+    public function uploadSignedContract(Request $request, string $id, string $contractId): RedirectResponse
+    {
+        $personal = $this->personalService->find($id);
+        abort_if(!$personal, 404);
+
+        $contract = $this->contratoService->findForPersonal($personal, $contractId);
+        abort_if(!$contract, 404);
+
+        $validated = $request->validate([
+            'contrato_pdf' => ['required', 'file', 'mimes:pdf', 'max:20480'],
+        ], [
+            'contrato_pdf.required' => 'Sube el contrato firmado en PDF.',
+            'contrato_pdf.mimes' => 'El contrato firmado debe ser PDF.',
+            'contrato_pdf.max' => 'El PDF no debe superar 20 MB.',
+        ]);
+
+        try {
+            $this->contratoService->uploadSignedFileForContract(
+                $personal,
+                $contract,
+                $validated['contrato_pdf'],
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.contratos.index', $personal->id)
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo subir el contrato firmado.');
+        }
+
+        return redirect()
+            ->route('personal.contratos.index', $personal->id)
+            ->with('success', 'Contrato firmado subido correctamente.');
     }
 
     public function renew(Request $request, string $id): RedirectResponse
@@ -154,6 +212,44 @@ class PersonalContratoController extends WebPageController
         return redirect()
             ->route('personal.contratos.expiring', $request->query())
             ->with('success', 'Decision registrada correctamente.');
+    }
+
+    public function bulkDecision(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'contract_ids' => ['required', 'array', 'min:1'],
+            'contract_ids.*' => ['required', 'string'],
+            'estado_decision_renovacion' => ['required', 'string', 'max:40'],
+            'motivo_no_renovacion' => ['nullable', 'string', 'max:80'],
+            'observacion_decision' => ['nullable', 'string', 'max:5000'],
+            'fecha_inicio' => ['nullable', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'observacion_renovacion' => ['nullable', 'string', 'max:5000'],
+        ], [
+            'contract_ids.required' => 'Selecciona al menos un contrato.',
+            'contract_ids.min' => 'Selecciona al menos un contrato.',
+            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+        ]);
+
+        try {
+            $summary = $this->contratoService->registerBulkRenewalDecision(
+                $validated['contract_ids'],
+                $validated,
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            return response()->json([
+                'message' => collect($exception->errors())->flatten()->first() ?: 'No se pudo registrar la decision.',
+                'errors' => $exception->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => $summary['renovaciones'] > 0
+                ? 'Decision registrada y renovacion preparada correctamente.'
+                : 'Decision registrada correctamente.',
+            'summary' => $summary,
+        ]);
     }
 
     public function prepareFromDecision(Request $request, string $contractId): RedirectResponse

@@ -58,6 +58,8 @@ class PersonalContratoRenewalTest extends TestCase
             'estado' => PersonalContrato::ESTADO_ACTIVO,
             'fecha_fin' => '2026-06-30',
             'signed_contract_original_name' => 'contrato-base.pdf',
+            'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVACION_PREPARADA,
+            'decision_final' => PersonalContrato::DECISION_RENOVAR,
         ]);
         $this->assertDatabaseHas('personal', [
             'id' => $personal->id,
@@ -141,6 +143,90 @@ class PersonalContratoRenewalTest extends TestCase
         $this->assertSame('ACTIVO', $personal->fresh()->estado);
     }
 
+    public function test_pdf_firmado_no_puede_adjuntarse_a_contrato_ya_registrado_en_historial(): void
+    {
+        Storage::fake('local');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO');
+        $cerrado = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-05-31', false);
+
+        try {
+            app(PersonalContratoService::class)->uploadSignedFileForContract(
+                $personal,
+                $cerrado,
+                UploadedFile::fake()->create('contrato-antiguo.pdf', 24, 'application/pdf'),
+                $actor,
+            );
+            $this->fail('No debio permitir modificar un contrato cerrado del historial.');
+        } catch (ValidationException $exception) {
+            $this->assertSame('El contrato ya esta registrado en el historial y no puede modificarse.', collect($exception->errors())->flatten()->first());
+        }
+
+        $cerrado->refresh();
+        $this->assertNull($cerrado->signed_contract_path);
+        $this->assertSame('CESADO', $personal->fresh()->estado);
+    }
+
+    public function test_historial_solo_muestra_boton_de_subir_pdf_para_contrato_en_preparacion(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $personal = $this->createPersonal('ACTIVO');
+        $cerrado = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
+        $activo = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
+        $preparacion = $this->insertContract($personal, PersonalContrato::ESTADO_PREPARACION, '2026-07-01', '2026-12-31', false);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.index', $personal->id))
+            ->assertOk()
+            ->assertDontSee(route('personal.contratos.signed', [$personal->id, $cerrado->id]), false)
+            ->assertDontSee(route('personal.contratos.signed', [$personal->id, $activo->id]), false)
+            ->assertSee(route('personal.contratos.signed', [$personal->id, $preparacion->id]), false);
+    }
+
+    public function test_detalle_de_contrato_muestra_documento_firmado_solo_si_existe_pdf(): void
+    {
+        Storage::fake('local');
+
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $personal = $this->createPersonal('ACTIVO');
+        $unsigned = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
+        $signed = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.show', [$personal->id, $unsigned->id]))
+            ->assertOk()
+            ->assertDontSee('Documento de contrato firmado')
+            ->assertDontSee('No registrado en este contrato');
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.show', [$personal->id, $signed->id]))
+            ->assertOk()
+            ->assertSee('Documento de contrato firmado')
+            ->assertSee('contrato-base.pdf')
+            ->assertSee(route('personal.contratos.signed.download', [$personal->id, $signed->id]), false);
+    }
+
+    public function test_descarga_documento_firmado_del_contrato_historico_exacto(): void
+    {
+        Storage::fake('local');
+
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $personal = $this->createPersonal('ACTIVO');
+        $unsigned = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
+        $signed = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.signed.download', [$personal->id, $unsigned->id]))
+            ->assertNotFound();
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.signed.download', [$personal->id, $signed->id]))
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'inline; filename="contrato-base.pdf"')
+            ->assertSee('contrato', false);
+    }
+
     public function test_bloquea_doble_preparacion_anulado_y_renovacion_sin_base(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
@@ -176,14 +262,43 @@ class PersonalContratoRenewalTest extends TestCase
         }
 
         $sinFirma = $this->createPersonal('ACTIVO');
-        $this->insertContract($sinFirma, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', null, false);
+        $baseSinFirma = $this->insertContract($sinFirma, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', null, false);
 
-        try {
-            app(PersonalContratoService::class)->prepareRenewal($sinFirma, ['fecha_inicio' => '2026-07-01'], $actor);
-            $this->fail('No debio renovar contrato vigente sin firma.');
-        } catch (ValidationException $exception) {
-            $this->assertSame('El contrato base no tiene PDF firmado vigente. Regularizalo antes de renovar.', collect($exception->errors())->flatten()->first());
-        }
+        $renovacion = app(PersonalContratoService::class)->prepareRenewal($sinFirma, ['fecha_inicio' => '2026-07-01'], $actor);
+
+        $this->assertSame(PersonalContrato::ESTADO_PREPARACION, $renovacion->estado);
+        $this->assertSame($baseSinFirma->id, $renovacion->origen_contrato_id);
+        $this->assertNull($renovacion->signed_contract_path);
+    }
+
+    public function test_trabajador_cesado_puede_renovar_contrato_activo_del_historial(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO', [
+            'fecha_cese' => '2026-06-30',
+            'motivo_cese' => 'Cese administrativo previo',
+        ]);
+        $base = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', false, [
+            'puesto' => 'Operador',
+            'tipo_contrato' => 'FIJO',
+        ]);
+
+        $renovacion = app(PersonalContratoService::class)->prepareRenewal($personal, [
+            'fecha_inicio' => '2026-07-01',
+            'fecha_fin' => '2026-12-31',
+        ], $actor);
+
+        $this->assertSame(PersonalContrato::ESTADO_PREPARACION, $renovacion->estado);
+        $this->assertSame(PersonalContrato::MOVIMIENTO_RENOVACION, $renovacion->tipo_movimiento);
+        $this->assertSame($base->id, $renovacion->origen_contrato_id);
+        $this->assertSame('Operador', $renovacion->puesto);
+        $this->assertSame('CESADO', $personal->fresh()->estado);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $base->id,
+            'estado' => PersonalContrato::ESTADO_ACTIVO,
+            'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVACION_PREPARADA,
+            'decision_final' => PersonalContrato::DECISION_RENOVAR,
+        ]);
     }
 
     public function test_reingreso_de_cesado_crea_preparacion_y_no_activa_hasta_pdf_firmado(): void

@@ -150,6 +150,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/fichas/exportar/pdf/{jobId}/descargar', [PersonalFichaController::class, 'downloadPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.download');
     Route::post('/personal/documentos/descargar', [PersonalDocumentoController::class, 'downloadBulk'])->middleware('web.permission:personal,ver')->name('personal.documentos.download-bulk');
     Route::get('/personal/contratos/vencimientos', [PersonalContratoController::class, 'expiring'])->middleware('web.permission:personal,ver')->name('personal.contratos.expiring');
+    Route::post('/personal/contratos/decisiones/registrar', [PersonalContratoController::class, 'bulkDecision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.bulk-decision');
     Route::post('/personal/contratos/{contractId}/decision', [PersonalContratoController::class, 'decision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.decision');
     Route::post('/personal/contratos/{contractId}/preparar-renovacion', [PersonalContratoController::class, 'prepareFromDecision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.prepare-from-decision');
     Route::post('/personal/contratos/{contractId}/cerrar-no-renovado', [PersonalContratoController::class, 'closeNotRenewed'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.close-not-renewed');
@@ -174,6 +175,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/{id}/contratos', [PersonalContratoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.contratos.index');
     Route::post('/personal/{id}/contratos/renovar', [PersonalContratoController::class, 'renew'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.renew');
     Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.reentry');
+    Route::get('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'downloadSignedContract'])->middleware('web.permission:personal,ver')->name('personal.contratos.signed.download');
+    Route::post('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'uploadSignedContract'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.signed');
     Route::get('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'show'])->middleware('web.permission:personal,ver')->name('personal.contratos.show');
     Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
     Route::get('/personal/{id}/documentos', [PersonalDocumentoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.documentos.index');
