@@ -8,7 +8,9 @@ use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class MinaCatalogService
 {
@@ -101,6 +103,87 @@ class MinaCatalogService
 
             return $mina->load('paraderos');
         });
+    }
+
+    public function delete(Mina $mina): void
+    {
+        $blockers = $this->deleteBlockers($mina);
+
+        if (!empty($blockers)) {
+            throw ValidationException::withMessages([
+                'mina' => 'No se puede eliminar esta mina porque ya tiene movimientos asociados: ' . implode(', ', $blockers) . '. Puedes inactivarla para que ya no se use.',
+            ]);
+        }
+
+        DB::transaction(function () use ($mina): void {
+            if (Schema::hasTable('mina_paraderos')) {
+                MinaParadero::query()->where('mina_id', $mina->id)->delete();
+            }
+
+            if (Schema::hasTable('usuario_mina_scope')) {
+                DB::table('usuario_mina_scope')->where('mina_id', $mina->id)->delete();
+            }
+
+            if (Schema::hasTable('mina_requisitos')) {
+                DB::table('mina_requisitos')->where('mina_id', $mina->id)->delete();
+            }
+
+            $mina->delete();
+        });
+    }
+
+    private function deleteBlockers(Mina $mina): array
+    {
+        $id = (string) $mina->id;
+        $checks = [
+            'RQ Mina' => fn (): int => $this->countMineUsage('rq_mina', $id, includeDestination: true),
+            'RQ Proserge' => fn (): int => $this->countMineUsage('rq_proserge', $id),
+            'Personal habilitado/asignado' => fn (): int => $this->countMineUsage('personal_mina', $id),
+            'Asistencias' => fn (): int => $this->countMineUsage('asistencia_encabezado', $id, includeDestination: true),
+            'Evaluaciones de desempeño' => fn (): int => $this->countMineUsage('evaluacion_desempeno', $id, includeDestination: true),
+            'Evaluaciones de supervisor' => fn (): int => $this->countMineUsage('evaluacion_supervisor', $id, includeDestination: true),
+            'Evaluaciones de residente' => fn (): int => $this->countMineUsage('evaluacion_residente', $id, includeDestination: true),
+        ];
+
+        $blockers = [];
+        foreach ($checks as $label => $resolver) {
+            if ($resolver() > 0) {
+                $blockers[] = $label;
+            }
+        }
+
+        return $blockers;
+    }
+
+    private function countMineUsage(string $table, string $mineId, bool $includeDestination = false): int
+    {
+        if (!Schema::hasTable($table)) {
+            return 0;
+        }
+
+        $hasMineId = Schema::hasColumn($table, 'mina_id');
+        $hasDestination = $includeDestination && Schema::hasColumn($table, 'destino_tipo') && Schema::hasColumn($table, 'destino_id');
+
+        if (!$hasMineId && !$hasDestination) {
+            return 0;
+        }
+
+        $query = DB::table($table)->where(function ($usage) use ($hasMineId, $hasDestination, $mineId): void {
+            if ($hasMineId) {
+                $usage->where('mina_id', $mineId);
+            }
+
+            if ($hasDestination) {
+                $method = $hasMineId ? 'orWhere' : 'where';
+                $usage->{$method}(function ($destination) use ($mineId): void {
+                    $destination
+                    ->where('destino_tipo', 'mina')
+                    ->where('destino_id', $mineId);
+                });
+            }
+        });
+
+        return (int) $query->count();
     }
 
     private function syncParaderos(Mina $mina, array $paraderos): void

@@ -157,8 +157,8 @@ class RQMinaApiTest extends TestCase
                             'detalle_trabajos_relevantes' => 'Cambio de liners',
                             'supervisor_campo_dia' => 'Supervisor Dia',
                             'turnos' => [
-                                ['fecha' => '2026-04-13', 'dia_label' => 'Lun 13/04', 'turno_a' => 'X', 'turno_b' => '', 'real' => ''],
-                                ['fecha' => '2026-04-14', 'dia_label' => 'Mar 14/04', 'turno_a' => '', 'turno_b' => 'X', 'real' => 'OK'],
+                                ['fecha' => '2026-04-13', 'dia_label' => 'Lun 13/04', 'turno_a' => 'X', 'real_turno_a' => '8', 'turno_b' => '', 'real_turno_b' => ''],
+                                ['fecha' => '2026-04-14', 'dia_label' => 'Mar 14/04', 'turno_a' => '', 'real_turno_a' => '', 'turno_b' => 'X', 'real_turno_b' => 'OK'],
                             ],
                         ],
                     ],
@@ -177,6 +177,8 @@ class RQMinaApiTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('data.plan_operativo.0.area_operativa', 'C1')
             ->assertJsonPath('data.plan_operativo.0.actividades.0.sait', 'SAIT-100')
+            ->assertJsonPath('data.plan_operativo.0.actividades.0.turnos.0.real_turno_a', '8')
+            ->assertJsonPath('data.plan_operativo.0.actividades.0.turnos.1.real_turno_b', 'OK')
             ->assertJsonPath('data.detalle.0.cantidad', 1);
 
         $this->assertDatabaseHas('rq_mina_actividad_grupos', [
@@ -190,7 +192,13 @@ class RQMinaApiTest extends TestCase
         $this->assertDatabaseHas('rq_mina_actividad_turnos', [
             'fecha' => '2026-04-14',
             'turno_b' => 'X',
+            'real_turno_b' => 'OK',
             'real' => 'OK',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividad_turnos', [
+            'fecha' => '2026-04-13',
+            'turno_a' => 'X',
+            'real_turno_a' => '8',
         ]);
         $this->assertDatabaseHas('rq_mina_actividad_transportes', [
             'unidad_carga' => 'Grua 80T',

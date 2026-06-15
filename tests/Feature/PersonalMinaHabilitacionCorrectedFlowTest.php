@@ -572,6 +572,42 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertSee('openWorkerExams', false);
     }
 
+    public function test_desasignar_mina_desde_habilitacion_la_deja_disponible_para_el_trabajador(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonal();
+        $mine = $this->createMine('Mina desasignable');
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['worker_id' => $worker->id]))
+            ->assertOk()
+            ->assertSee('Desasignar')
+            ->assertSee(route('personal.habilitacion-minera.deactivate', ['assignmentId' => $assignment->id]), false);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->post(route('personal.habilitacion-minera.deactivate', ['assignmentId' => $assignment->id, 'worker_id' => $worker->id]), [
+                'observacion' => 'Ya no corresponde a esta mina.',
+            ])
+            ->assertRedirect(route('personal.habilitacion-minera.index', ['worker_id' => $worker->id]));
+
+        $this->assertDatabaseHas('personal_mina', [
+            'id' => $assignment->id,
+            'activo' => false,
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['worker_id' => $worker->id]))
+            ->assertOk()
+            ->assertSee('Disponible para asignar')
+            ->assertDontSee('Ya asignada');
+    }
+
     public function test_matriz_diferencia_desaprobado_con_reintento_de_desaprobado_definitivo(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));

@@ -11,6 +11,7 @@ use App\Models\PersonalFicha;
 use App\Models\PersonalFichaFamiliar;
 use App\Models\PersonalFichaLink;
 use App\Models\PersonalMina;
+use App\Models\PersonalPuesto;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,10 @@ class PersonalService
     public function list(array $filters): Collection
     {
         $query = $this->buildFilteredQuery($filters)->with(['minas']);
+
+        if (Schema::hasTable('personal_puestos') && Schema::hasColumn('personal', 'puesto_id')) {
+            $query->with('puestoCatalogo');
+        }
 
         if (Schema::hasTable('personal_fichas')) {
             $query->with('fichaColaborador.link');
@@ -164,6 +169,10 @@ class PersonalService
     {
         $query = Personal::query()->with('minas');
 
+        if (Schema::hasTable('personal_puestos') && Schema::hasColumn('personal', 'puesto_id')) {
+            $query->with('puestoCatalogo');
+        }
+
         if (Schema::hasTable('personal_fichas')) {
             $query->with('fichaColaborador.link');
         }
@@ -258,11 +267,14 @@ class PersonalService
             $documentType = PersonalNormalizer::documentType($payload['tipo_documento'] ?? 'DNI', $documentNumber);
             $legacyDni = $documentType === 'DNI' ? PersonalNormalizer::dni($documentNumber) : $documentNumber;
 
+            $puestoText = PersonalNormalizer::text($payload['puesto'] ?? '');
+            $puestoCatalogo = $this->resolvePuestoCatalogo($puestoText);
+
             $data = [
                 'id' => (string) Str::uuid(),
                 'dni' => $legacyDni,
                 'nombre_completo' => PersonalNormalizer::text($payload['nombre_completo'] ?? ''),
-                'puesto' => PersonalNormalizer::text($payload['puesto'] ?? ''),
+                'puesto' => $puestoCatalogo?->nombre ?: $puestoText,
                 'ocupacion' => PersonalNormalizer::text($payload['ocupacion'] ?? '') ?: null,
                 'contrato' => PersonalNormalizer::contract($payload['contrato'] ?? null),
                 'es_supervisor' => $this->resolveSupervisor($payload),
@@ -273,6 +285,10 @@ class PersonalService
 
             if (Schema::hasColumn('personal', 'tipo_documento')) {
                 $data['tipo_documento'] = $documentType;
+            }
+
+            if (Schema::hasColumn('personal', 'puesto_id')) {
+                $data['puesto_id'] = $puestoCatalogo?->id;
             }
 
             if (Schema::hasColumn('personal', 'numero_documento')) {
@@ -330,10 +346,13 @@ class PersonalService
             $documentType = PersonalNormalizer::documentType($payload['tipo_documento'] ?? $personal->tipo_documento ?? 'DNI', $documentNumber);
             $legacyDni = $documentType === 'DNI' ? PersonalNormalizer::dni($documentNumber) : $documentNumber;
 
+            $puestoText = PersonalNormalizer::text($payload['puesto'] ?? '');
+            $puestoCatalogo = $this->resolvePuestoCatalogo($puestoText);
+
             $data = [
                 'dni' => $legacyDni,
                 'nombre_completo' => PersonalNormalizer::text($payload['nombre_completo'] ?? ''),
-                'puesto' => PersonalNormalizer::text($payload['puesto'] ?? ''),
+                'puesto' => $puestoCatalogo?->nombre ?: $puestoText,
                 'ocupacion' => PersonalNormalizer::text($payload['ocupacion'] ?? '') ?: null,
                 'contrato' => PersonalNormalizer::contract($payload['contrato'] ?? null),
                 'es_supervisor' => $this->resolveSupervisor($payload),
@@ -343,6 +362,10 @@ class PersonalService
 
             if (Schema::hasColumn('personal', 'tipo_documento')) {
                 $data['tipo_documento'] = $documentType;
+            }
+
+            if (Schema::hasColumn('personal', 'puesto_id')) {
+                $data['puesto_id'] = $puestoCatalogo?->id;
             }
 
             if (Schema::hasColumn('personal', 'numero_documento')) {
@@ -670,6 +693,23 @@ class PersonalService
         return in_array($origin, ['NUEVO', 'ANTIGUO', 'IMPORTADO', 'HISTORICO'], true)
             ? $origin
             : 'NUEVO';
+    }
+
+    private function resolvePuestoCatalogo(string $puesto): ?PersonalPuesto
+    {
+        if (!Schema::hasTable('personal_puestos') || !Schema::hasColumn('personal', 'puesto_id')) {
+            return null;
+        }
+
+        $nombre = mb_substr(trim($puesto), 0, 191);
+        if ($nombre === '') {
+            return null;
+        }
+
+        return PersonalPuesto::query()
+            ->where('nombre', $nombre)
+            ->where('activo', true)
+            ->first();
     }
 
     private function resolveState(mixed $value): string

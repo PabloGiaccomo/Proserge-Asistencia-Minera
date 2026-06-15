@@ -315,6 +315,57 @@
         overflow-x: hidden;
     }
 
+    .mine-page.is-ajax-loading .mine-mines-card,
+    .mine-page.is-ajax-loading .mine-assignments-card {
+        opacity: 0.58;
+        pointer-events: none;
+        transition: opacity 0.16s ease;
+    }
+
+    .mine-page.is-ajax-loading .mine-worker-card {
+        opacity: 0.92;
+        transition: opacity 0.16s ease;
+    }
+
+    .mine-ajax-status {
+        position: sticky;
+        top: 8px;
+        z-index: 30;
+        display: none;
+        justify-self: end;
+        width: fit-content;
+        padding: 7px 12px;
+        border: 1px solid #bae6fd;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #075985;
+        font-size: 12px;
+        font-weight: 800;
+        box-shadow: 0 10px 26px rgba(15, 23, 42, 0.10);
+    }
+
+    .mine-page.is-ajax-loading .mine-ajax-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .mine-ajax-status::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border: 2px solid #7dd3fc;
+        border-top-color: #0f766e;
+        border-radius: 999px;
+        animation: mineSpin 0.8s linear infinite;
+    }
+
+    @keyframes mineSpin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
     .mine-worker-card {
         order: 2;
     }
@@ -1068,6 +1119,11 @@
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
+    }
+
+    .mine-inline-form {
+        display: inline-flex;
+        margin: 0;
     }
 
     .mine-worker-actions {
@@ -2011,6 +2067,14 @@
 </style>
 
 <div class="module-page mine-page">
+    <script type="application/json" id="mineRuntimeData">
+        @json(['requirements' => $mineReqsJson, 'assignments' => $assignmentsJson])
+    </script>
+
+    <div class="mine-ajax-status" id="mineAjaxStatus" role="status" aria-live="polite">
+        Actualizando vista...
+    </div>
+
     <div class="page-header">
         <div class="mine-toolbar">
             <div>
@@ -2070,6 +2134,21 @@
                 <span class="card-title">Minas disponibles {{ $selectedWorker ? 'para ' . $selectedWorker->nombre_completo : '' }}</span>
                 <p class="mine-header-copy">Haz clic en una mina para ver los exámenes requeridos. Si seleccionas un trabajador, podrás asignarlo directamente.</p>
             </div>
+
+            @if($selectedWorker)
+                @php
+                    $deselectWorkerQuery = collect($currentQuery)
+                        ->except(['worker_id', 'open_assign', 'open_manage'])
+                        ->all();
+                @endphp
+                <a
+                    href="{{ route('personal.habilitacion-minera.index', $deselectWorkerQuery) }}"
+                    class="btn btn-outline btn-sm"
+                    data-mine-deselect-worker
+                >
+                    Deseleccionar trabajador
+                </a>
+            @endif
         </div>
 
         <div class="card-body">
@@ -2151,13 +2230,28 @@
                         <span class="mine-action-hint">{{ $tileAction }}</span>
 
                         @if($canManage && $selectedWorker && $state !== 'BLOQUEADA' && !$assignment)
-                            <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" onclick="event.stopPropagation()" data-loading-message="Asignando trabajador a mina...">
-                                @csrf
-                                <input type="hidden" name="personal_id" value="{{ $selectedWorker->id }}">
-                                <input type="hidden" name="mina_id" value="{{ $tile['mine']->id }}">
-                                <input type="hidden" name="estado_habilitacion" value="{{ \App\Models\PersonalMina::ESTADO_EN_PROCESO }}">
-                                <button type="submit" class="btn btn-outline btn-xs">Asignar</button>
-                            </form>
+                            <div class="mine-tile-actions" onclick="event.stopPropagation()">
+                                <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" data-loading-message="Asignando trabajador a mina...">
+                                    @csrf
+                                    <input type="hidden" name="personal_id" value="{{ $selectedWorker->id }}">
+                                    <input type="hidden" name="mina_id" value="{{ $tile['mine']->id }}">
+                                    <input type="hidden" name="estado_habilitacion" value="{{ \App\Models\PersonalMina::ESTADO_EN_PROCESO }}">
+                                    <button type="submit" class="btn btn-outline btn-xs">Asignar</button>
+                                </form>
+                            </div>
+                        @elseif($canManage && $selectedWorker && $assignment)
+                            <div class="mine-tile-actions" onclick="event.stopPropagation()">
+                                <form
+                                    method="POST"
+                                    action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
+                                    data-loading-message="Desasignando mina del trabajador..."
+                                    onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                >
+                                    @csrf
+                                    <input type="hidden" name="observacion" value="Desasignado manualmente desde habilitacion minera.">
+                                    <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
+                                </form>
+                            </div>
                         @endif
                     </div>
                 @endforeach
@@ -2567,7 +2661,24 @@
                                             <span class="mine-progress-text">{{ $progress['done'] }}/{{ $progress['total'] }} examenes</span>
                                         </div>
                                     </td>
-                                    <td><span class="mine-next-action {{ $displayBadge }}">{{ $nextAction }}</span></td>
+                                    <td>
+                                        <div class="mine-general-grid">
+                                            <span class="mine-next-action {{ $displayBadge }}">{{ $nextAction }}</span>
+                                            @if($canManage && $assignment)
+                                                <form
+                                                    method="POST"
+                                                    action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $worker?->id, 'mina_id' => $assignment->mina_id])) }}"
+                                                    class="mine-inline-form"
+                                                    data-loading-message="Desasignando mina del trabajador..."
+                                                    onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                                >
+                                                    @csrf
+                                                    <input type="hidden" name="observacion" value="Desasignado manualmente desde matriz operativa.">
+                                                    <button type="submit" class="btn btn-outline btn-xs">Desasignar mina</button>
+                                                </form>
+                                            @endif
+                                        </div>
+                                    </td>
 
                                     @foreach($matrixRequirements as $requirement)
                                         @php
@@ -2690,6 +2801,19 @@
                                             >
                                                 {{ $wa->mina?->nombre }} ({{ $wProgress['done'] }}/{{ $wProgress['total'] }})
                                             </button>
+                                            @if($canManage)
+                                                <form
+                                                    method="POST"
+                                                    action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $wa->id], $currentQuery, ['worker_id' => $worker?->id, 'mina_id' => $wa->mina_id])) }}"
+                                                    class="mine-inline-form"
+                                                    data-loading-message="Desasignando mina del trabajador..."
+                                                    onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                                >
+                                                    @csrf
+                                                    <input type="hidden" name="observacion" value="Desasignado manualmente desde listado de habilitacion minera.">
+                                                    <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
+                                                </form>
+                                            @endif
                                         @endforeach
                                     </div>
                                 </td>
@@ -2823,9 +2947,21 @@
                                     <button type="submit" class="btn btn-primary btn-xs">Asignar</button>
                                 </form>
                             @elseif($assignment)
-                                <button type="button" class="btn btn-outline btn-xs" onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($selectedWorker->nombre_completo) }}, {{ \Illuminate\Support\Js::from($tile['mine']->nombre) }})">
-                                    Gestionar examenes
-                                </button>
+                                <div class="mine-tile-actions">
+                                    <button type="button" class="btn btn-outline btn-xs" onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($selectedWorker->nombre_completo) }}, {{ \Illuminate\Support\Js::from($tile['mine']->nombre) }})">
+                                        Gestionar examenes
+                                    </button>
+                                    <form
+                                        method="POST"
+                                        action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
+                                        data-loading-message="Desasignando mina del trabajador..."
+                                        onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                    >
+                                        @csrf
+                                        <input type="hidden" name="observacion" value="Desasignado manualmente desde asignacion individual.">
+                                        <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
+                                    </form>
+                                </div>
                             @else
                                 <span class="mine-muted">No disponible para asignar.</span>
                             @endif
@@ -2877,6 +3013,19 @@
                                         <form method="POST" action="{{ route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $assignment->id], $currentQuery)) }}" data-loading-message="Generando examenes requeridos...">
                                             @csrf
                                             <button type="submit" class="btn btn-primary btn-xs">Generar examenes</button>
+                                        </form>
+                                    @endif
+
+                                    @if($canManage)
+                                        <form
+                                            method="POST"
+                                            action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
+                                            data-loading-message="Desasignando mina del trabajador..."
+                                            onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                        >
+                                            @csrf
+                                            <input type="hidden" name="observacion" value="Desasignado manualmente desde gestion de examenes.">
+                                            <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
                                         </form>
                                     @endif
                                 </div>
@@ -3428,14 +3577,21 @@ document.addEventListener('click', function(event) {
     }
 });
 
-document.querySelectorAll('dialog.mine-dialog').forEach(function(dialog) {
-    dialog.addEventListener('click', function(event) {
-        if (event.target === dialog) {
-            persistDialogOpenState(dialog, false);
-            dialog.close();
-        }
+function bindMineDialogBackdrop(scope) {
+    (scope || document).querySelectorAll('dialog.mine-dialog').forEach(function(dialog) {
+        if (dialog.dataset.backdropBound === 'true') return;
+
+        dialog.dataset.backdropBound = 'true';
+        dialog.addEventListener('click', function(event) {
+            if (event.target === dialog) {
+                persistDialogOpenState(dialog, false);
+                dialog.close();
+            }
+        });
     });
-});
+}
+
+bindMineDialogBackdrop(document);
 
 function restorePersistentDialogs() {
     document.querySelectorAll('dialog.mine-dialog[data-modal-storage-key]').forEach(function(dialog) {
@@ -3508,99 +3664,254 @@ function initMineTextFilter(inputId, itemSelector) {
 initMineTextFilter('examEditSearch', '[data-exam-edit-card]');
 initMineTextFilter('mineConfigSearch', '[data-mine-config-row]');
 
-(function initAutoFilters() {
-    const form = document.getElementById('workerSearchForm');
-    if (!form) return;
+let mineAjaxController = null;
+let mineAjaxTimer = null;
 
-    const searchInput = document.getElementById('trabajadorInput');
-    let timer = null;
-    let submitting = false;
+function setMineAjaxLoading(isLoading) {
+    const page = document.querySelector('.mine-page');
+    const status = document.getElementById('mineAjaxStatus');
 
-    const updateActiveState = function(field) {
-        if (!field || field.dataset.ignoreActive === 'true') return;
-
-        const group = field.closest('.mine-filter-group');
-        if (!group) return;
-
-        const hasValue = String(field.value || '').trim() !== '';
-        group.classList.toggle('is-active', hasValue);
-    };
-
-    const removePageBeforeSubmit = function() {
-        const url = new URL(form.action, window.location.origin);
-        url.searchParams.delete('page');
-        form.action = url.pathname + url.search;
-    };
-
-    const submitForm = function(delay) {
-        clearTimeout(timer);
-
-        timer = setTimeout(function() {
-            if (submitting) return;
-            submitting = true;
-            removePageBeforeSubmit();
-            form.submit();
-        }, delay);
-    };
-
-    form.querySelectorAll('[data-filter-field], [data-filter-change]').forEach(updateActiveState);
-
-    if (searchInput) {
-        searchInput.addEventListener('input', function() {
-            updateActiveState(searchInput);
-            submitForm(450);
-        });
+    if (page) {
+        page.classList.toggle('is-ajax-loading', isLoading);
     }
 
-    form.querySelectorAll('select[data-filter-change]').forEach(function(select) {
-        select.addEventListener('change', function() {
-            updateActiveState(select);
-            submitForm(0);
-        });
-    });
+    if (status) {
+        status.hidden = !isLoading;
+    }
+}
 
-    document.querySelectorAll('[data-external-filter-change][form="' + form.id + '"]').forEach(function(select) {
-        select.addEventListener('change', function() {
-            submitForm(0);
-        });
-    });
-})();
+function updateMineRuntimeData(sourceDocument) {
+    const source = sourceDocument.getElementById('mineRuntimeData');
+    const target = document.getElementById('mineRuntimeData');
 
-(function initMatrixFilters() {
-    const form = document.getElementById('matrixFilterForm');
-    if (!form) return;
+    if (source && target) {
+        target.textContent = source.textContent;
+    }
 
-    let submitting = false;
-    const submitForm = function() {
-        if (submitting) return;
-        submitting = true;
-        const url = new URL(form.action, window.location.origin);
-        url.searchParams.delete('page');
-        form.action = url.pathname + url.search;
-        form.submit();
-    };
+    try {
+        const data = JSON.parse((target || source)?.textContent || '{}');
+        mineRequirementsData = data.requirements || {};
+        assignmentsData = data.assignments || [];
+    } catch (error) {
+        console.warn('No se pudo actualizar la data de habilitacion minera.', error);
+    }
+}
 
-    const updateActiveState = function(field) {
+function updateMineActiveFilters(scope) {
+    (scope || document).querySelectorAll('[data-filter-field], [data-filter-change]').forEach(function(field) {
         if (!field || field.dataset.ignoreActive === 'true') return;
 
         const group = field.closest('.mine-filter-group');
         if (!group) return;
 
         group.classList.toggle('is-active', String(field.value || '').trim() !== '');
+    });
+}
+
+function captureMineFocusState() {
+    const active = document.activeElement;
+
+    if (!active || !active.matches('input, textarea, select')) {
+        return null;
+    }
+
+    const form = active.closest('form');
+    if (!form || !['workerSearchForm', 'matrixFilterForm'].includes(form.id)) {
+        return null;
+    }
+
+    return {
+        formId: form.id,
+        id: active.id || '',
+        name: active.name || '',
+        value: active.value,
+        selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        preserveValue: active.id === 'trabajadorInput',
     };
+}
 
-    form.querySelectorAll('[data-filter-field], [data-filter-change]').forEach(updateActiveState);
-    form.querySelectorAll('select[data-filter-change]').forEach(function(select) {
-        select.addEventListener('change', function() {
-            updateActiveState(select);
-            submitForm();
+function restoreMineFocusState(state) {
+    if (!state) return;
+
+    const form = document.getElementById(state.formId);
+    if (!form) return;
+
+    let field = state.id ? document.getElementById(state.id) : null;
+    if (!field && state.name) {
+        field = Array.from(form.elements).find(function(item) {
+            return item.name === state.name;
+        }) || null;
+    }
+
+    if (!field || typeof field.focus !== 'function') return;
+
+    if (state.preserveValue && 'value' in field && field.value !== state.value) {
+        field.value = state.value;
+        updateMineActiveFilters(form);
+    }
+
+    field.focus({ preventScroll: true });
+
+    if (
+        state.selectionStart !== null
+        && state.selectionEnd !== null
+        && typeof field.setSelectionRange === 'function'
+    ) {
+        field.setSelectionRange(state.selectionStart, state.selectionEnd);
+    }
+}
+
+function replaceMineAjaxSections(sourceDocument, focusState) {
+    ['.mine-mines-card', '.mine-worker-card', '.mine-assignments-card'].forEach(function(selector) {
+        const next = sourceDocument.querySelector(selector);
+        const current = document.querySelector(selector);
+
+        if (next && current) {
+            current.replaceWith(next);
+        }
+    });
+
+    ['modal-asignar-mina', 'modal-gestionar-worker'].forEach(function(id) {
+        const next = sourceDocument.getElementById(id);
+        const current = document.getElementById(id);
+
+        if (next && current && !current.open) {
+            current.replaceWith(next);
+        }
+    });
+
+    updateMineRuntimeData(sourceDocument);
+    updateMineActiveFilters(document);
+    bindMineDialogBackdrop(document);
+    restoreMineFocusState(focusState);
+}
+
+function mineUrlFromForm(form, resetPagination) {
+    const url = new URL(form.action || window.location.href, window.location.origin);
+    const params = new URLSearchParams(new FormData(form));
+
+    if (resetPagination) {
+        params.delete('page');
+        params.delete('worker_page');
+    }
+
+    Array.from(params.keys()).forEach(function(key) {
+        if (String(params.get(key) || '').trim() === '') {
+            params.delete(key);
+        }
+    });
+
+    url.search = params.toString();
+
+    return url;
+}
+
+function navigateMineAjax(url, options) {
+    const nextUrl = url instanceof URL ? url : new URL(url, window.location.origin);
+    const opts = options || {};
+    const focusState = captureMineFocusState();
+
+    if (mineAjaxController) {
+        mineAjaxController.abort();
+    }
+
+    mineAjaxController = new AbortController();
+    const currentController = mineAjaxController;
+    setMineAjaxLoading(true);
+
+    return fetch(nextUrl.toString(), {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+        },
+        signal: currentController.signal,
+    })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            return response.text();
+        })
+        .then(function(html) {
+            const sourceDocument = new DOMParser().parseFromString(html, 'text/html');
+            replaceMineAjaxSections(sourceDocument, captureMineFocusState() || focusState);
+
+            if (opts.push !== false) {
+                window.history.pushState({ mineAjax: true }, '', nextUrl.pathname + nextUrl.search);
+            }
+
+            if (nextUrl.searchParams.get('open_assign')) {
+                openDialog('modal-asignar-mina');
+            }
+
+            if (nextUrl.searchParams.get('open_manage')) {
+                openDialog('modal-gestionar-worker');
+            }
+        })
+        .catch(function(error) {
+            if (error.name === 'AbortError') return;
+            window.location.href = nextUrl.toString();
+        })
+        .finally(function() {
+            if (mineAjaxController === currentController) {
+                mineAjaxController = null;
+                setMineAjaxLoading(false);
+            }
         });
-    });
+}
 
-    document.querySelectorAll('[data-external-filter-change][form="' + form.id + '"]').forEach(function(select) {
-        select.addEventListener('change', submitForm);
-    });
-})();
+function submitMineFilterForm(form, delay) {
+    clearTimeout(mineAjaxTimer);
+    mineAjaxTimer = setTimeout(function() {
+        navigateMineAjax(mineUrlFromForm(form, true));
+    }, delay || 0);
+}
+
+document.addEventListener('input', function(event) {
+    const field = event.target;
+    if (!field || field.id !== 'trabajadorInput') return;
+
+    const form = field.closest('form');
+    if (!form) return;
+
+    updateMineActiveFilters(form);
+    submitMineFilterForm(form, 450);
+});
+
+document.addEventListener('change', function(event) {
+    const field = event.target;
+    if (!field) return;
+
+    const formId = field.getAttribute('form');
+    const form = field.closest('form') || (formId ? document.getElementById(formId) : null);
+    const isFilterField = field.matches('select[data-filter-change], [data-external-filter-change]');
+
+    if (!form || !isFilterField || !['workerSearchForm', 'matrixFilterForm'].includes(form.id)) return;
+
+    updateMineActiveFilters(form);
+    submitMineFilterForm(form, 0);
+});
+
+document.addEventListener('click', function(event) {
+    const link = event.target.closest('.mine-mines-card a[href], .mine-worker-card a[href], .mine-assignments-card a[href]');
+    if (!link || link.target || link.hasAttribute('download')) return;
+
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin || url.pathname !== window.location.pathname) return;
+
+    event.preventDefault();
+    navigateMineAjax(url);
+});
+
+window.addEventListener('popstate', function() {
+    navigateMineAjax(new URL(window.location.href), { push: false });
+});
+
+updateMineActiveFilters(document);
 
 window.addEventListener('DOMContentLoaded', function() {
     if (@json((bool) request('open_assign'))) {
@@ -3631,8 +3942,8 @@ window.addEventListener('DOMContentLoaded', function() {
     });
 })();
 
-const mineRequirementsData = @json($mineReqsJson);
-const assignmentsData = @json($assignmentsJson);
+let mineRequirementsData = @json($mineReqsJson);
+let assignmentsData = @json($assignmentsJson);
 const attemptsUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.store', ['workerExamId' => '__EXAM__']));
 const completeAttemptUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.complete', ['attemptId' => '__ATTEMPT__']));
 const noAplicaUrlTemplate = @json(route('personal.habilitacion-minera.exam.not-applicable', ['workerExamId' => '__EXAM__']));

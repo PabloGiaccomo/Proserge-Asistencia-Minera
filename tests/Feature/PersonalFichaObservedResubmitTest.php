@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaLink;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
@@ -600,7 +601,7 @@ class PersonalFichaObservedResubmitTest extends TestCase
 
     private function fichaData(array $overrides = []): array
     {
-        return [
+        $data = [
             ...PersonalFichaCatalog::emptyData(),
             'nombres' => 'Trabajador',
             'apellido_paterno' => 'Observado',
@@ -630,5 +631,26 @@ class PersonalFichaObservedResubmitTest extends TestCase
             'grado_instruccion' => 'Secundaria completa',
             ...$overrides,
         ];
+
+        $this->ensurePuestoCatalogo($data['puesto'] ?? null);
+
+        return $data;
+    }
+
+    private function ensurePuestoCatalogo(?string $nombre): void
+    {
+        $nombre = trim((string) $nombre);
+        if ($nombre === '') {
+            return;
+        }
+
+        PersonalPuesto::query()->firstOrCreate(
+            ['nombre' => $nombre],
+            [
+                'id' => (string) Str::uuid(),
+                'funciones' => null,
+                'activo' => true,
+            ]
+        );
     }
 }

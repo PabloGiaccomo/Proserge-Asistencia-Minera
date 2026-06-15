@@ -5,6 +5,7 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
 use App\Models\Oficina;
+use App\Models\PersonalPuesto;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
@@ -19,7 +20,9 @@ use App\Modules\Personal\Support\PersonalNormalizer;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Throwable;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -216,6 +219,7 @@ class PersonalPageController extends WebPageController
         return view('personal.create', array_merge($this->getLocationCatalogs(), [
             'sections' => PersonalFichaCatalog::sections(),
             'initialFields' => PersonalFichaCatalog::emptyData(),
+            'puestoOptions' => $this->puestoOptions(),
         ]));
     }
 
@@ -253,7 +257,9 @@ class PersonalPageController extends WebPageController
 
     public function createAntiguo(): View
     {
-        return view('personal.antiguo.create');
+        return view('personal.antiguo.create', [
+            'puestoOptions' => $this->puestoOptions(),
+        ]);
     }
 
     public function storeAntiguo(Request $request): RedirectResponse
@@ -393,6 +399,7 @@ class PersonalPageController extends WebPageController
             'missingRequiredDocuments' => $this->fichaService->missingRequiredDocumentKeys($ficha),
             'missingRequiredFichaFields' => $regularizationSummary['missing_fields'],
             'regularizationSummary' => $regularizationSummary,
+            'puestoOptions' => $this->puestoOptions(),
         ]));
     }
 
@@ -501,7 +508,7 @@ class PersonalPageController extends WebPageController
             'tipo_documento' => ['nullable', 'string', 'max:40'],
             'numero_documento' => ['nullable', 'string', 'max:40'],
             'nombre' => ['required', 'string', 'max:191'],
-            'puesto' => ['required', 'string', 'max:120'],
+            'puesto' => ['required', 'string', 'max:120', Rule::exists('personal_puestos', 'nombre')],
             'telefono' => ['nullable', 'string', 'max:30'],
             'telefono_1' => ['nullable', 'string', 'max:30'],
             'telefono_2' => ['nullable', 'string', 'max:30'],
@@ -671,6 +678,7 @@ class PersonalPageController extends WebPageController
         $rules['fields.apellido_materno'] = ['required', 'string', 'max:191'];
         $rules['fields.telefono'] = ['required', 'string', 'max:30'];
         $rules['fields.correo'] = ['required', 'email', 'max:191'];
+        $rules['fields.puesto'] = ['nullable', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')];
         $rules['familiares'] = ['nullable', 'array'];
         $rules['familiares.*.nombres_apellidos'] = ['nullable', 'string', 'max:191'];
         $rules['familiares.*.parentesco'] = ['nullable', 'string', 'max:80'];
@@ -700,7 +708,7 @@ class PersonalPageController extends WebPageController
             'apellido_materno' => ['required', 'string', 'max:191'],
             'telefono' => ['nullable', 'string', 'max:30'],
             'correo' => ['nullable', 'email', 'max:191'],
-            'puesto' => ['required', 'string', 'max:191'],
+            'puesto' => ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')],
             'ocupacion' => ['nullable', 'string', 'max:191'],
             'contrato' => ['required', 'string', 'in:REG,FIJO,INTER,INDET'],
             'estado_laboral' => ['required', 'string', 'in:ACTIVO,FALTA_CONTRATO,CESADO'],
@@ -742,10 +750,26 @@ class PersonalPageController extends WebPageController
 
     private function editFichaRules(): array
     {
-        return [
-            ...$this->manualCreateRules(),
-            'estado' => ['required', 'in:ACTIVO,FALTA_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'],
-        ];
+        $rules = $this->manualCreateRules();
+        $rules['fields.puesto'] = ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')];
+        $rules['estado'] = ['required', 'in:ACTIVO,FALTA_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'];
+
+        return $rules;
+    }
+
+    private function puestoOptions(): array
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            return [];
+        }
+
+        return PersonalPuesto::query()
+            ->where('activo', true)
+            ->orderBy('nombre')
+            ->pluck('nombre')
+            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
+            ->values()
+            ->all();
     }
 
     private function buildMinePayload(array $validated): array

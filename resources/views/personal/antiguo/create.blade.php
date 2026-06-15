@@ -96,7 +96,15 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cargo / puesto</label>
-                    <input type="text" name="puesto" class="form-control" value="{{ old('puesto') }}" required maxlength="191">
+                    @include('personal.partials.puesto-autocomplete', [
+                        'name' => 'puesto',
+                        'value' => old('puesto'),
+                        'inputId' => 'legacy_puesto',
+                        'listId' => 'puestos_catalogo_antiguo',
+                        'class' => 'form-control',
+                        'required' => true,
+                        'options' => $puestoOptions ?? [],
+                    ])
                 </div>
                 <div class="form-group">
                     <label class="form-label">Ocupacion</label>

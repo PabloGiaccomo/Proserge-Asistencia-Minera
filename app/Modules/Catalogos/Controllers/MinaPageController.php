@@ -7,6 +7,7 @@ use App\Models\Mina;
 use App\Modules\Catalogos\Services\MinaCatalogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class MinaPageController extends Controller
@@ -113,6 +114,22 @@ class MinaPageController extends Controller
         $this->service->inactivate($mina);
 
         return redirect()->route('catalogos.minas.index')->with('success', 'Mina inactivada correctamente.');
+    }
+
+    public function destroy(string $id): RedirectResponse
+    {
+        $mina = $this->service->find($id);
+        if (!$mina) {
+            abort(404);
+        }
+
+        try {
+            $this->service->delete($mina);
+        } catch (ValidationException $exception) {
+            return back()->with('error', $exception->validator->errors()->first('mina') ?: 'No se pudo eliminar la mina.');
+        }
+
+        return redirect()->route('catalogos.minas.index')->with('success', 'Mina eliminada correctamente.');
     }
 
     private function toViewItem(Mina $mina): array

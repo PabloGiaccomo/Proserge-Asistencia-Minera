@@ -78,8 +78,10 @@ class RQMinaResource extends JsonResource
                             'fecha' => optional($turno->fecha)->toDateString(),
                             'dia_label' => $turno->dia_label,
                             'turno_a' => $turno->turno_a,
+                            'real_turno_a' => $turno->real_turno_a,
                             'turno_b' => $turno->turno_b,
-                            'real' => $turno->real,
+                            'real_turno_b' => $turno->real_turno_b ?? $turno->real,
+                            'real' => $turno->real_turno_b ?? $turno->real,
                         ])->values()->all(),
                     ])->values()->all(),
                     'transportes' => $group->transportes->map(fn ($transport): array => [

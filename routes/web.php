@@ -11,6 +11,7 @@ use App\Modules\Personal\Controllers\PersonalContratoController;
 use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
 use App\Modules\Personal\Controllers\PersonalContratoDatoController;
 use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
+use App\Modules\Personal\Controllers\PersonalPuestoController;
 use App\Modules\Personal\Controllers\PublicPersonalFichaController;
 use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
@@ -110,6 +111,10 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/formatos-contrato/personal', [PersonalContratoFormatoController::class, 'searchWorkers'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.personal');
     Route::post('/personal/formatos-contrato/preview', [PersonalContratoFormatoController::class, 'preview'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.preview');
     Route::post('/personal/formatos-contrato/descargar', [PersonalContratoFormatoController::class, 'download'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.download');
+    Route::get('/personal/puestos', [PersonalPuestoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.puestos.index');
+    Route::post('/personal/puestos', [PersonalPuestoController::class, 'store'])->middleware('web.permission:personal,actualizar')->name('personal.puestos.store');
+    Route::put('/personal/puestos/{id}', [PersonalPuestoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.puestos.update');
+    Route::delete('/personal/puestos/{id}', [PersonalPuestoController::class, 'destroy'])->middleware('web.permission:personal,actualizar')->name('personal.puestos.destroy');
     Route::get('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.contrato-datos.edit');
     Route::put('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.contrato-datos.update');
     Route::post('/personal/{id}/contrato-firmado', [PersonalContratoDatoController::class, 'signedContract'])->middleware('web.permission:personal,actualizar')->name('personal.contrato-datos.signed');
@@ -283,6 +288,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/catalogos/minas/{id}/editar', [MinaPageController::class, 'edit'])->middleware('web.permission:minas,editar')->name('catalogos.minas.edit');
     Route::put('/catalogos/minas/{id}', [MinaPageController::class, 'update'])->middleware('web.permission:minas,actualizar')->name('catalogos.minas.update');
     Route::post('/catalogos/minas/{id}/inactivar', [MinaPageController::class, 'inactivate'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.inactivate');
+    Route::post('/catalogos/minas/{id}/eliminar', [MinaPageController::class, 'destroy'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.destroy');
     Route::get('/catalogos/talleres', [TallerPageController::class, 'index'])->middleware('web.permission:talleres,ver')->name('catalogos.talleres.index');
     Route::get('/catalogos/talleres/crear', [TallerPageController::class, 'create'])->middleware('web.permission:talleres,crear')->name('catalogos.talleres.create');
     Route::post('/catalogos/talleres', [TallerPageController::class, 'store'])->middleware('web.permission:talleres,crear')->name('catalogos.talleres.store');

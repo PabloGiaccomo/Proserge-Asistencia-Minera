@@ -19,7 +19,9 @@ class RQMinaActividadTurno extends Model
         'fecha',
         'dia_label',
         'turno_a',
+        'real_turno_a',
         'turno_b',
+        'real_turno_b',
         'real',
         'orden',
     ];

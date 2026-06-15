@@ -249,8 +249,9 @@
                                                         @php
                                                             $parts = array_filter([
                                                                 !empty($turno['turno_a']) ? 'A: '.$turno['turno_a'] : null,
+                                                                !empty($turno['real_turno_a']) ? 'Real A: '.$turno['real_turno_a'] : null,
                                                                 !empty($turno['turno_b']) ? 'B: '.$turno['turno_b'] : null,
-                                                                !empty($turno['real']) ? 'Real: '.$turno['real'] : null,
+                                                                !empty($turno['real_turno_b'] ?? $turno['real'] ?? null) ? 'Real B: '.($turno['real_turno_b'] ?? $turno['real']) : null,
                                                             ]);
                                                         @endphp
                                                         <span>{{ $turno['dia_label'] ?: ($turno['fecha'] ?? '-') }} {{ $parts ? '- '.implode(' | ', $parts) : '' }}</span>

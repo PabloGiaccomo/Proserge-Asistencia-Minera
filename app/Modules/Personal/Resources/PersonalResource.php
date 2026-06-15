@@ -349,6 +349,9 @@ class PersonalResource extends JsonResource
             ];
         };
 
+        $puestoCatalogo = $this->puestoCatalogo ?? null;
+        $puestoNombre = trim((string) ($puestoCatalogo?->nombre ?: $this->puesto));
+
         return [
             'id' => $this->id,
             'dni' => $this->dni,
@@ -356,7 +359,9 @@ class PersonalResource extends JsonResource
             'numero_documento' => $this->numero_documento ?? $this->dni,
             'nombre' => $this->nombre_completo,
             'nombre_completo' => $this->nombre_completo,
-            'puesto' => $this->puesto,
+            'puesto' => $puestoNombre,
+            'puesto_id' => (string) ($this->puesto_id ?? ''),
+            'puesto_funciones' => (string) ($puestoCatalogo?->funciones ?? ''),
             'ocupacion' => $this->ocupacion,
             'contrato' => $contrato,
             'tipo_contrato' => PersonalNormalizer::contractLabel($contrato),

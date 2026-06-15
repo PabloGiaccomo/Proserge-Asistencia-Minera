@@ -3,12 +3,15 @@
 namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalContratoDatoService;
 use App\Modules\Personal\Services\PersonalService;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -43,6 +46,7 @@ class PersonalContratoDatoController extends WebPageController
             'personal' => $personal,
             'datos' => $datos,
             'contrato' => $contrato,
+            'puestoOptions' => $this->puestoOptions(),
         ]);
     }
 
@@ -105,9 +109,24 @@ class PersonalContratoDatoController extends WebPageController
             'funciones' => ['nullable', 'string', 'max:5000'],
             'sueldo_num' => ['nullable', 'string', 'max:80'],
             'sueldo_texto' => ['nullable', 'string', 'max:191'],
-            'puesto' => ['nullable', 'string', 'max:191'],
+            'puesto' => ['nullable', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')],
             'fecha_firma' => ['nullable', 'date'],
         ];
+    }
+
+    private function puestoOptions(): array
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            return [];
+        }
+
+        return PersonalPuesto::query()
+            ->where('activo', true)
+            ->orderBy('nombre')
+            ->pluck('nombre')
+            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
+            ->values()
+            ->all();
     }
 
     private function dateString(mixed $value): ?string

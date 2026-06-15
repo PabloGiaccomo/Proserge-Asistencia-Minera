@@ -5,11 +5,13 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaLink;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
@@ -40,6 +42,7 @@ class PublicPersonalFichaController extends Controller
             'declarationCheckboxes' => PersonalFichaCatalog::declarationCheckboxes(),
             'firmaBase64' => $ficha?->firma_base64,
             'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha?->huella_path),
+            'puestoOptions' => $this->puestoOptions(),
         ]);
     }
 
@@ -158,6 +161,7 @@ class PublicPersonalFichaController extends Controller
         $validated = $request->validate([
             'fields' => ['nullable', 'array'],
             'fields.*' => ['nullable', 'string', 'max:12000'],
+            'fields.puesto' => ['nullable', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')],
             'familiares' => ['nullable', 'array'],
             'familiares.*.nombres_apellidos' => ['nullable', 'string', 'max:191'],
             'familiares.*.parentesco' => ['nullable', 'string', 'max:80'],
@@ -258,6 +262,7 @@ class PublicPersonalFichaController extends Controller
 
         $rules['fields.tipo_documento'] = ['required', 'string', 'max:40'];
         $rules['fields.numero_documento'] = ['required', 'string', 'max:40'];
+        $rules['fields.puesto'] = ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')];
         $rules['fields.estado_civil_otro'] = ['required_if:fields.estado_civil,Otro', 'nullable', 'string', 'max:120'];
         $rules['fields.nacionalidad_otra'] = ['required_if:fields.nacionalidad,Otra', 'nullable', 'string', 'max:120'];
         $rules['fields.pais_nacimiento_otro'] = ['required_if:fields.pais_nacimiento,Otro', 'nullable', 'string', 'max:120'];
@@ -317,6 +322,7 @@ class PublicPersonalFichaController extends Controller
     {
         return [
             'fields.*.required' => 'Completa este campo obligatorio.',
+            'fields.puesto.exists' => 'Selecciona un cargo o puesto de la lista.',
             'firma_base64.required' => 'La firma digital es obligatoria.',
             'huella.required' => 'La foto de huella es obligatoria.',
             'huella.image' => 'La huella debe ser una imagen nitida.',
@@ -352,6 +358,21 @@ class PublicPersonalFichaController extends Controller
             ->filter(function (array $item): bool {
                 return $item['nombres_apellidos'] !== '' && $item['fecha_nacimiento'] !== '';
             })
+            ->values()
+            ->all();
+    }
+
+    private function puestoOptions(): array
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            return [];
+        }
+
+        return PersonalPuesto::query()
+            ->where('activo', true)
+            ->orderBy('nombre')
+            ->pluck('nombre')
+            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
             ->values()
             ->all();
     }

@@ -12,11 +12,23 @@ CREATE TABLE IF NOT EXISTS roles (
   UNIQUE KEY uq_roles_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS personal_puestos (
+  id CHAR(36) NOT NULL,
+  nombre VARCHAR(191) NOT NULL,
+  funciones TEXT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_personal_puestos_nombre (nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS personal (
   id CHAR(36) NOT NULL,
   dni VARCHAR(20) NOT NULL,
   nombre_completo VARCHAR(191) NOT NULL,
   puesto VARCHAR(120) NOT NULL,
+  puesto_id CHAR(36) NULL,
   ocupacion VARCHAR(120) NULL,
   contrato VARCHAR(40) NULL,
   es_supervisor TINYINT(1) NOT NULL DEFAULT 0,
@@ -31,7 +43,9 @@ CREATE TABLE IF NOT EXISTS personal (
   UNIQUE KEY uq_personal_dni (dni),
   UNIQUE KEY uq_personal_qr (qr_code),
   KEY idx_personal_estado (estado),
-  KEY idx_personal_supervisor (es_supervisor)
+  KEY idx_personal_supervisor (es_supervisor),
+  KEY idx_personal_puesto_id (puesto_id),
+  CONSTRAINT fk_personal_puesto FOREIGN KEY (puesto_id) REFERENCES personal_puestos(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS usuarios (

@@ -133,7 +133,14 @@
                                         <input class="ficha-input ficha-compact-control" type="date" name="items[{{ $index }}][fields][fecha_ingreso]" value="{{ $fields['fecha_ingreso'] ?? '' }}">
                                     </td>
                                     <td>
-                                        <input class="ficha-input ficha-compact-control" name="items[{{ $index }}][fields][puesto]" value="{{ $fields['puesto'] ?? '' }}" placeholder="Puesto">
+                                        @include('personal.partials.puesto-autocomplete', [
+                                            'name' => 'items[' . $index . '][fields][puesto]',
+                                            'value' => $fields['puesto'] ?? '',
+                                            'inputId' => 'batch_puesto_' . $index,
+                                            'listId' => 'puestos_catalogo_batch_' . $index,
+                                            'class' => 'ficha-input ficha-compact-control',
+                                            'options' => $puestoOptions ?? [],
+                                        ])
                                         <select class="ficha-select ficha-compact-control" name="items[{{ $index }}][fields][contrato]">
                                             @foreach(($fieldDefinitions['contrato']['options'] ?? []) as $value => $label)
                                                 <option value="{{ $value }}" @selected(($fields['contrato'] ?? 'REG') === $value)>{{ $label }}</option>

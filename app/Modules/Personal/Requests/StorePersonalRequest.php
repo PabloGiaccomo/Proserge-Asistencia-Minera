@@ -3,6 +3,7 @@
 namespace App\Modules\Personal\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StorePersonalRequest extends FormRequest
 {
@@ -18,7 +19,7 @@ class StorePersonalRequest extends FormRequest
             'tipo_documento' => ['nullable', 'string', 'max:40'],
             'numero_documento' => ['nullable', 'string', 'max:40'],
             'nombre_completo' => ['required', 'string', 'max:191'],
-            'puesto' => ['required', 'string', 'max:120'],
+            'puesto' => ['required', 'string', 'max:120', Rule::exists('personal_puestos', 'nombre')],
             'telefono' => ['nullable', 'string', 'max:30'],
             'telefono_1' => ['nullable', 'string', 'max:30'],
             'telefono_2' => ['nullable', 'string', 'max:30'],

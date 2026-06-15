@@ -5,6 +5,7 @@ namespace App\Modules\Personal\Services;
 use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalContratoDato;
+use App\Models\PersonalPuesto;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
@@ -52,7 +53,12 @@ class PersonalContratoDatoService
             $record->forceFill($data)->save();
 
             if (array_key_exists('puesto', $data) && trim((string) $data['puesto']) !== '') {
-                $personal->forceFill(['puesto' => trim((string) $data['puesto'])])->save();
+                $puestoCatalogo = $this->resolvePuestoCatalogo((string) $data['puesto']);
+                $personalData = ['puesto' => $puestoCatalogo?->nombre ?: trim((string) $data['puesto'])];
+                if ($puestoCatalogo && Schema::hasColumn('personal', 'puesto_id')) {
+                    $personalData['puesto_id'] = $puestoCatalogo->id;
+                }
+                $personal->forceFill($personalData)->save();
             }
 
             $record = $record->fresh();
@@ -135,6 +141,23 @@ class PersonalContratoDatoService
         $text = trim((string) $value);
 
         return $text === '' ? null : mb_substr($text, 0, $limit);
+    }
+
+    private function resolvePuestoCatalogo(string $puesto): ?PersonalPuesto
+    {
+        if (!Schema::hasTable('personal_puestos') || !Schema::hasColumn('personal', 'puesto_id')) {
+            return null;
+        }
+
+        $nombre = mb_substr(trim($puesto), 0, 191);
+        if ($nombre === '') {
+            return null;
+        }
+
+        return PersonalPuesto::query()
+            ->where('nombre', $nombre)
+            ->where('activo', true)
+            ->first();
     }
 
     private function isSignedPathReferencedByContract(string $path): bool

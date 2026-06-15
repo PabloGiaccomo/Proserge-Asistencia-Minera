@@ -24,10 +24,24 @@
                     <button type="submit" class="btn btn-outline" style="color:#B91C1C; border-color:#FCA5A5;">Inactivar</button>
                 </form>
             @endif
+            @if($canDelete)
+                <form method="POST" action="{{ route('catalogos.minas.destroy', $item['id']) }}" style="display:inline-block;" onsubmit="return confirm('Deseas eliminar definitivamente esta mina? Solo se eliminara si no tiene movimientos asociados.');">
+                    @csrf
+                    <button type="submit" class="btn btn-outline" style="color:#7F1D1D; border-color:#FCA5A5;">Eliminar</button>
+                </form>
+            @endif
             <a href="{{ route('catalogos.minas.index') }}" class="btn btn-outline">Volver</a>
         </div>
     </div>
 </div>
+
+@if(session('success'))
+    <div class="alert alert-success" style="margin-bottom:16px;">{{ session('success') }}</div>
+@endif
+
+@if(session('error'))
+    <div class="alert alert-danger" style="margin-bottom:16px;">{{ session('error') }}</div>
+@endif
 
 @if($item)
 <div class="grid grid-2">

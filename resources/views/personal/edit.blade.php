@@ -242,7 +242,18 @@
                                         @endif
                                     </label>
 
-                                    @if($type === 'select')
+                                    @if($key === 'puesto')
+                                        @include('personal.partials.puesto-autocomplete', [
+                                            'name' => 'fields[' . $key . ']',
+                                            'value' => $value,
+                                            'inputId' => 'field_' . $key,
+                                            'listId' => 'puestos_catalogo_edicion',
+                                            'class' => 'ficha-input',
+                                            'required' => !$conditionalHidden && (bool) ($field['required'] ?? false),
+                                            'disabled' => $conditionalHidden,
+                                            'options' => $puestoOptions ?? [],
+                                        ])
+                                    @elseif($type === 'select')
                                         <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $conditionalHidden ? 'disabled' : '' }}>
                                             <option value="">Seleccionar</option>
                                             @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)

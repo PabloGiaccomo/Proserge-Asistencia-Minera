@@ -6,6 +6,7 @@ use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalMina;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
@@ -333,7 +334,11 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                     }
 
                     if ($puestoImportado !== '' && $personal->puesto !== $puesto) {
-                        $updates['puesto'] = $puesto;
+                        $puestoCatalogo = $this->resolvePuestoCatalogo($puesto);
+                        $updates['puesto'] = $puestoCatalogo?->nombre ?: $puesto;
+                        if ($puestoCatalogo && Schema::hasColumn('personal', 'puesto_id')) {
+                            $updates['puesto_id'] = $puestoCatalogo->id;
+                        }
                         $mergedFichaData['puesto'] = $puesto;
                         $stats['puestosActualizados']++;
                         $this->registerFieldChange($workerChanges, $stats, 'puesto', 'Cargo/Puesto', $personal->puesto, $puesto);
@@ -419,11 +424,13 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
                         }
                     }
                 } else {
+                    $puestoCatalogo = $this->resolvePuestoCatalogo($puesto);
+
                     $newData = [
                         'id' => (string) Str::uuid(),
                         'dni' => $dni,
                         'nombre_completo' => $nombre,
-                        'puesto' => $puesto,
+                        'puesto' => $puestoCatalogo?->nombre ?: $puesto,
                         'ocupacion' => $ocupacion ?: null,
                         'contrato' => $contrato,
                         'es_supervisor' => $isSupervisor,
@@ -434,6 +441,10 @@ $phoneData = PersonalNormalizer::normalizePhonePayload($phoneRaw);
 
                     if (Schema::hasColumn('personal', 'tipo_documento')) {
                         $newData['tipo_documento'] = 'DNI';
+                    }
+
+                    if ($puestoCatalogo && Schema::hasColumn('personal', 'puesto_id')) {
+                        $newData['puesto_id'] = $puestoCatalogo->id;
                     }
 
                     if (Schema::hasColumn('personal', 'numero_documento')) {
@@ -610,7 +621,11 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
                     $hasNotUpdatedDetail = false;
 
                     if ($puesto !== '' && (string) $personal->puesto !== $puesto) {
-                        $updates['puesto'] = $puesto;
+                        $puestoCatalogo = $this->resolvePuestoCatalogo($puesto);
+                        $updates['puesto'] = $puestoCatalogo?->nombre ?: $puesto;
+                        if ($puestoCatalogo && Schema::hasColumn('personal', 'puesto_id')) {
+                            $updates['puesto_id'] = $puestoCatalogo->id;
+                        }
                         $mergedFichaData['puesto'] = $puesto;
                         $stats['puestosActualizados']++;
                         $this->registerFieldChange($workerChanges, $stats, 'puesto', 'Cargo/Puesto', $personal->puesto, $puesto);
@@ -867,6 +882,23 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
         }
 
         return ['nombres' => $nombreCompleto];
+    }
+
+    private function resolvePuestoCatalogo(string $puesto): ?PersonalPuesto
+    {
+        if (!Schema::hasTable('personal_puestos') || !Schema::hasColumn('personal', 'puesto_id')) {
+            return null;
+        }
+
+        $nombre = mb_substr(trim($puesto), 0, self::MAX_PUESTO_LENGTH);
+        if ($nombre === '') {
+            return null;
+        }
+
+        return PersonalPuesto::query()
+            ->where('nombre', $nombre)
+            ->where('activo', true)
+            ->first();
     }
 
     private function resolveHeadersAndDataRows(array $rows): array

@@ -132,8 +132,9 @@ function initRQMinaPlanEditor(root) {
                     '<input type="hidden" name="' + sp + '[dia_label]" value="' + escapeHtml(day.dia_label || '') + '">' +
                 '</th>' +
                 '<td>' + input(sp + '[turno_a]', saved.turno_a || '', 'Turno A', '', 'rq_mina.plan.turno_a') + '</td>' +
+                '<td>' + input(sp + '[real_turno_a]', saved.real_turno_a || '', 'Real turno A', '', 'rq_mina.plan.real_turno_a') + '</td>' +
                 '<td>' + input(sp + '[turno_b]', saved.turno_b || '', 'Turno B', '', 'rq_mina.plan.turno_b') + '</td>' +
-                '<td>' + input(sp + '[real]', saved.real || '', 'Real', '', 'rq_mina.plan.real') + '</td>' +
+                '<td>' + input(sp + '[real_turno_b]', saved.real_turno_b || saved.real || '', 'Real turno B', '', 'rq_mina.plan.real_turno_b') + '</td>' +
             '</tr>';
         }).join('');
 
@@ -152,7 +153,7 @@ function initRQMinaPlanEditor(root) {
                 '<div class="rq-plan-field"><label>Sup. seguridad dia</label>' + input(prefix + '[supervisor_seguridad_dia]', activity.supervisor_seguridad_dia || '', 'Buscar personal', '', '', true) + '</div>' +
                 '<div class="rq-plan-field"><label>Sup. seguridad noche</label>' + input(prefix + '[supervisor_seguridad_noche]', activity.supervisor_seguridad_noche || '', 'Buscar personal', '', '', true) + '</div>' +
             '</div>' +
-            '<div class="rq-plan-schedule"><table><thead><tr><th>Dia</th><th>Turno A / Dia</th><th>Turno B / Noche</th><th>Real</th></tr></thead><tbody>' + scheduleRows + '</tbody></table></div>' +
+            '<div class="rq-plan-schedule"><table><thead><tr><th>Dia</th><th>Turno A / Dia</th><th>Real turno A</th><th>Turno B / Noche</th><th>Real turno B</th></tr></thead><tbody>' + scheduleRows + '</tbody></table></div>' +
             '<div style="margin-top:8px;text-align:right;"><button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button></div>' +
         '</div>';
     }
@@ -245,8 +246,10 @@ function initRQMinaPlanEditor(root) {
                         fecha: fieldValue(row, '[fecha]'),
                         dia_label: fieldValue(row, '[dia_label]'),
                         turno_a: fieldValue(row, '[turno_a]'),
+                        real_turno_a: fieldValue(row, '[real_turno_a]'),
                         turno_b: fieldValue(row, '[turno_b]'),
-                        real: fieldValue(row, '[real]'),
+                        real_turno_b: fieldValue(row, '[real_turno_b]'),
+                        real: fieldValue(row, '[real_turno_b]'),
                     });
                 });
 

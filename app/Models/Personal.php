@@ -23,6 +23,7 @@ class Personal extends Model
         'numero_documento',
         'nombre_completo',
         'puesto',
+        'puesto_id',
         'ocupacion',
         'contrato',
         'es_supervisor',
@@ -61,7 +62,11 @@ class Personal extends Model
     public function minas(): BelongsToMany
     {
         return $this->belongsToMany(Mina::class, 'personal_mina', 'personal_id', 'mina_id')
-            ->withPivot(['id', 'estado'])
+            ->withPivot(['id', 'estado', 'activo'])
+            ->where(function ($query): void {
+                $query->where('personal_mina.activo', true)
+                    ->orWhereNull('personal_mina.activo');
+            })
             ->withTimestamps();
     }
 
@@ -78,6 +83,11 @@ class Personal extends Model
     public function cesadoPor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'cesado_by_usuario_id');
+    }
+
+    public function puestoCatalogo(): BelongsTo
+    {
+        return $this->belongsTo(PersonalPuesto::class, 'puesto_id');
     }
 
     public function bloqueos(): HasMany

@@ -173,7 +173,21 @@
                                             <input type="hidden" name="fields[{{ $key }}]" value="{{ $value }}">
                                         @endif
 
-                                        @if($type === 'select')
+                                        @if($key === 'puesto')
+                                            @include('personal.partials.puesto-autocomplete', [
+                                                'name' => 'fields[' . $key . ']',
+                                                'value' => $value,
+                                                'inputId' => 'field_' . $key,
+                                                'listId' => 'puestos_catalogo_publico',
+                                                'class' => 'ficha-input',
+                                                'required' => (!$fieldDisabled && $isRequired && !$locked),
+                                                'disabled' => $fieldDisabled,
+                                                'options' => $puestoOptions ?? [],
+                                            ])
+                                            @if($fieldReadonly && !$locked)
+                                                <input type="hidden" name="fields[{{ $key }}]" value="{{ $value }}">
+                                            @endif
+                                        @elseif($type === 'select')
                                             <select class="ficha-select" id="field_{{ $key }}" name="fields[{{ $key }}]" data-ficha-key="{{ $key }}" data-current-value="{{ $value }}" {{ $fieldDisabled ? 'disabled' : '' }} {{ (!$fieldDisabled && $isRequired && !$locked) ? 'required' : '' }}>
                                                 <option value="">Seleccionar</option>
                                                 @foreach(($field['options'] ?? []) as $optionValue => $optionLabel)

@@ -459,8 +459,9 @@ class RQMinaService
 
                 foreach (($activity['turnos'] ?? []) as $turno) {
                     $this->rememberFieldOption($usuario, 'rq_mina.plan.turno_a', $turno['turno_a'] ?? null);
+                    $this->rememberFieldOption($usuario, 'rq_mina.plan.real_turno_a', $turno['real_turno_a'] ?? null);
                     $this->rememberFieldOption($usuario, 'rq_mina.plan.turno_b', $turno['turno_b'] ?? null);
-                    $this->rememberFieldOption($usuario, 'rq_mina.plan.real', $turno['real'] ?? null);
+                    $this->rememberFieldOption($usuario, 'rq_mina.plan.real_turno_b', $turno['real_turno_b'] ?? $turno['real'] ?? null);
                 }
             }
 
@@ -804,8 +805,10 @@ class RQMinaService
                         'fecha' => $turno['fecha'],
                         'dia_label' => $turno['dia_label'],
                         'turno_a' => $turno['turno_a'],
+                        'real_turno_a' => $turno['real_turno_a'],
                         'turno_b' => $turno['turno_b'],
-                        'real' => $turno['real'],
+                        'real_turno_b' => $turno['real_turno_b'],
+                        'real' => $turno['real_turno_b'],
                         'orden' => $turnIndex + 1,
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -939,10 +942,11 @@ class RQMinaService
             $fecha = trim((string) ($item['fecha'] ?? ''));
             $diaLabel = trim((string) ($item['dia_label'] ?? ''));
             $turnoA = trim((string) ($item['turno_a'] ?? ''));
+            $realTurnoA = trim((string) ($item['real_turno_a'] ?? ''));
             $turnoB = trim((string) ($item['turno_b'] ?? ''));
-            $real = trim((string) ($item['real'] ?? ''));
+            $realTurnoB = trim((string) ($item['real_turno_b'] ?? $item['real'] ?? ''));
 
-            if ($fecha === '' && $diaLabel === '' && $turnoA === '' && $turnoB === '' && $real === '') {
+            if ($fecha === '' && $diaLabel === '' && $turnoA === '' && $realTurnoA === '' && $turnoB === '' && $realTurnoB === '') {
                 continue;
             }
 
@@ -950,8 +954,10 @@ class RQMinaService
                 'fecha' => $fecha !== '' ? $fecha : null,
                 'dia_label' => $diaLabel !== '' ? $diaLabel : null,
                 'turno_a' => $turnoA !== '' ? $turnoA : null,
+                'real_turno_a' => $realTurnoA !== '' ? $realTurnoA : null,
                 'turno_b' => $turnoB !== '' ? $turnoB : null,
-                'real' => $real !== '' ? $real : null,
+                'real_turno_b' => $realTurnoB !== '' ? $realTurnoB : null,
+                'real' => $realTurnoB !== '' ? $realTurnoB : null,
             ];
         }
 

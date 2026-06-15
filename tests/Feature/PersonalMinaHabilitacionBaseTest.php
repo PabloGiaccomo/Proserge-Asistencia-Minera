@@ -260,6 +260,7 @@ class PersonalMinaHabilitacionBaseTest extends TestCase
         $this->assertDatabaseHas('personal_mina_historial', [
             'personal_mina_id' => $assignment->id,
         ]);
+        $this->assertCount(0, $worker->fresh('minas')->minas);
     }
 
     public function test_no_se_agregan_nombres_propios_en_archivos_de_la_etapa(): void

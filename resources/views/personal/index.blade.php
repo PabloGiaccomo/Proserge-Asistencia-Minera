@@ -1836,6 +1836,17 @@
                                 Descargar formato de contrato
                             </button>
                         @endif
+                        @if($canUpdatePersonal)
+                            <a href="{{ route('personal.puestos.index') }}" class="accion-item">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                                    <rect x="8" y="2" width="8" height="4" rx="1"/>
+                                    <path d="M9 12h6"/>
+                                    <path d="M9 16h6"/>
+                                </svg>
+                                Puestos
+                            </a>
+                        @endif
                      </div>
                 </div>
                 
@@ -2880,6 +2891,28 @@ function contractWorkerSummary(worker) {
     };
 }
 
+function contractWorkersFromSelectedRows() {
+    return documentDownloadSelectedChecks().map(function (input) {
+        const row = input.closest('tr');
+        let worker = {};
+
+        try {
+            worker = row ? JSON.parse(row.dataset.worker || '{}') : {};
+        } catch (error) {
+            worker = {};
+        }
+
+        worker.id = worker.id || input.value;
+        worker.nombre = worker.nombre || worker.nombre_completo || input.dataset.workerName || 'Trabajador';
+        worker.documento = worker.documento || worker.numero_documento || worker.dni || row?.dataset.dni || '';
+        worker.puesto = worker.puesto || row?.dataset.puesto || '';
+
+        return contractWorkerSummary(worker);
+    }).filter(function (worker) {
+        return worker.id;
+    });
+}
+
 async function openContractFormatModal(worker) {
     if (!canDownloadContractFormats) return;
 
@@ -2888,6 +2921,10 @@ async function openContractFormatModal(worker) {
     const initialWorker = contractWorkerSummary(worker || {});
     if (initialWorker.id) {
         contractFormatSelectedWorkers.set(initialWorker.id, initialWorker);
+    } else {
+        contractWorkersFromSelectedRows().forEach(function (selectedWorker) {
+            contractFormatSelectedWorkers.set(selectedWorker.id, selectedWorker);
+        });
     }
 
     const search = document.getElementById('contractWorkerSearch');
@@ -3983,10 +4020,16 @@ document.addEventListener('DOMContentLoaded', function () {
         gridShell.style.removeProperty('--personal-grid-expanded-width');
     };
 
-    const buildPageSizeOptions = function (totalCount) {
+    const buildPageSizeOptions = function (totalCount, preferredValue) {
         if (pageSizeSelects.length === 0) return;
         const total = Math.max(1, Number(totalCount || rows.length || 1));
+        const preferred = Number(preferredValue || 0);
         const base = [10, 50, 100, 200, 300, total];
+
+        if (Number.isFinite(preferred) && preferred > 0 && preferred <= total) {
+            base.push(preferred);
+        }
+
         const values = Array.from(new Set(base.filter(function (value) {
             return Number.isFinite(value) && value > 0 && value <= total;
         }))).sort(function (a, b) {
@@ -4009,14 +4052,16 @@ document.addEventListener('DOMContentLoaded', function () {
     const syncPageSizeOptions = function (totalCount, preferredValue) {
         if (pageSizeSelects.length === 0) return;
 
-        buildPageSizeOptions(totalCount);
+        buildPageSizeOptions(totalCount, preferredValue);
 
         const primarySelect = pageSizeSelect || pageSizeSelectTop;
         const optionValues = Array.from(primarySelect.options).map(function (option) {
             return String(option.value);
         });
         const preferred = String(preferredValue || pageSize || primarySelect.value || '');
-        let nextValue = optionValues[optionValues.length - 1] || '10';
+        let nextValue = optionValues.indexOf('10') !== -1
+            ? '10'
+            : (optionValues[0] || '10');
 
         if (preferred && optionValues.indexOf(preferred) !== -1) {
             nextValue = preferred;
@@ -4280,7 +4325,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const savedState = readViewState();
     setBootProgress(18, 'Cargando preferencias...');
 
-    buildPageSizeOptions(rows.length);
+    buildPageSizeOptions(rows.length, savedState.pageSize || pageSize);
 
     if (searchInput && typeof savedState.search === 'string') {
         searchInput.value = savedState.search;
@@ -4442,7 +4487,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (resetPage) currentPage = 1;
         const filtered = applyFiltersAndSort();
         const total = filtered.length;
-        syncPageSizeOptions(total, pageSize);
+        syncPageSizeOptions(rows.length, pageSize);
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
         currentPage = clampPage(currentPage, totalPages);
         const start = (currentPage - 1) * pageSize;

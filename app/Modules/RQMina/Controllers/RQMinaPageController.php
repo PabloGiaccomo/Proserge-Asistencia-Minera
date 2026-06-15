@@ -854,8 +854,10 @@ class RQMinaPageController extends WebPageController
                         'fecha' => $turno->fecha?->toDateString(),
                         'dia_label' => (string) ($turno->dia_label ?? ''),
                         'turno_a' => (string) ($turno->turno_a ?? ''),
+                        'real_turno_a' => (string) ($turno->real_turno_a ?? ''),
                         'turno_b' => (string) ($turno->turno_b ?? ''),
-                        'real' => (string) ($turno->real ?? ''),
+                        'real_turno_b' => (string) ($turno->real_turno_b ?? $turno->real ?? ''),
+                        'real' => (string) ($turno->real_turno_b ?? $turno->real ?? ''),
                     ])->values()->all(),
                 ])->values()->all(),
                 'transportes' => ($group->transportes ?? collect())->map(fn ($transporte): array => [
@@ -957,10 +959,11 @@ class RQMinaPageController extends WebPageController
             $fecha = trim((string) ($turno['fecha'] ?? ''));
             $diaLabel = trim((string) ($turno['dia_label'] ?? ''));
             $turnoA = trim((string) ($turno['turno_a'] ?? ''));
+            $realTurnoA = trim((string) ($turno['real_turno_a'] ?? ''));
             $turnoB = trim((string) ($turno['turno_b'] ?? ''));
-            $real = trim((string) ($turno['real'] ?? ''));
+            $realTurnoB = trim((string) ($turno['real_turno_b'] ?? $turno['real'] ?? ''));
 
-            if ($fecha === '' && $diaLabel === '' && $turnoA === '' && $turnoB === '' && $real === '') {
+            if ($fecha === '' && $diaLabel === '' && $turnoA === '' && $realTurnoA === '' && $turnoB === '' && $realTurnoB === '') {
                 continue;
             }
 
@@ -968,8 +971,10 @@ class RQMinaPageController extends WebPageController
                 'fecha' => $fecha,
                 'dia_label' => $diaLabel,
                 'turno_a' => $turnoA,
+                'real_turno_a' => $realTurnoA,
                 'turno_b' => $turnoB,
-                'real' => $real,
+                'real_turno_b' => $realTurnoB,
+                'real' => $realTurnoB,
             ];
         }
 

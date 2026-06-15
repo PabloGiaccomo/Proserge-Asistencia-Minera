@@ -92,7 +92,15 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Puesto</label>
-                    <input type="text" name="puesto" class="form-control" value="{{ $textValue('puesto') ?: $personal->puesto }}">
+                    @php $selectedPuesto = $textValue('puesto') ?: $personal->puesto; @endphp
+                    @include('personal.partials.puesto-autocomplete', [
+                        'name' => 'puesto',
+                        'value' => $selectedPuesto,
+                        'inputId' => 'contrato_puesto',
+                        'listId' => 'puestos_catalogo_contrato',
+                        'class' => 'form-control',
+                        'options' => $puestoOptions ?? [],
+                    ])
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha en la que firmo</label>

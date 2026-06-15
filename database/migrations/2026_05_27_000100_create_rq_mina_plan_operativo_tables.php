@@ -58,7 +58,9 @@ return new class extends Migration
                 $table->date('fecha')->nullable();
                 $table->string('dia_label', 40)->nullable();
                 $table->string('turno_a', 191)->nullable();
+                $table->string('real_turno_a', 191)->nullable();
                 $table->string('turno_b', 191)->nullable();
+                $table->string('real_turno_b', 191)->nullable();
                 $table->string('real', 191)->nullable();
                 $table->unsignedInteger('orden')->default(1);
                 $table->timestamps();
