@@ -115,6 +115,32 @@
         margin: 0;
     }
 
+    .public-signature-help {
+        padding: 12px 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #f8fbff;
+        color: #334155;
+        font-size: 13px;
+        line-height: 1.55;
+    }
+
+    .public-signature-help strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #0f172a;
+        font-weight: 800;
+    }
+
+    .public-signature-help ul {
+        margin: 0;
+        padding-left: 18px;
+    }
+
+    .public-signature-help li + li {
+        margin-top: 4px;
+    }
+
     @media (max-width: 1024px) {
         .public-guide-steps,
         .public-guide-docs {
@@ -570,6 +596,14 @@
                             @if($readonly && $firmaBase64)
                                 <img class="ficha-preview-image" src="{{ $firmaBase64 }}" alt="Firma digital">
                             @else
+                                <div class="public-signature-help">
+                                    <strong>Firma dentro del recuadro.</strong>
+                                    <ul>
+                                        <li>Usa tu dedo en celular o el mouse en computadora y dibuja tu firma completa.</li>
+                                        <li>No coloques solo una raya, iniciales sueltas ni la huella del dedo en esta parte.</li>
+                                        <li>Si te equivocas, presiona "Limpiar firma" y vuelve a firmar antes de enviar.</li>
+                                    </ul>
+                                </div>
                                 <div class="signature-pad-wrap">
                                     <canvas id="signaturePad" class="signature-pad"></canvas>
                                     <input type="hidden" name="firma_base64" id="firmaBase64" value="{{ old('firma_base64') }}">
@@ -590,6 +624,14 @@
                             @if($readonly && $huellaDataUrl)
                                 <img class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
                             @else
+                                <div class="public-signature-help">
+                                    <strong>Sube una foto clara de tu huella en papel.</strong>
+                                    <ul>
+                                        <li>Marca tu dedo con tinta, coloca la huella en una hoja blanca y toma una foto enfocada.</li>
+                                        <li>No subas una foto del dedo. Debe verse la huella marcada en el papel.</li>
+                                        <li>La imagen debe tener buena luz y mostrar la huella completa.</li>
+                                    </ul>
+                                </div>
                                 <div class="ficha-fields" style="padding:0;">
                                     <div class="ficha-field ficha-field-wide">
                                         <label class="ficha-label" for="huella">Foto de huella <span class="ficha-required">*</span></label>
