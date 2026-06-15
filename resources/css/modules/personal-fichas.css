@@ -318,6 +318,116 @@
     font-weight: 600;
 }
 
+.public-ficha-guide .ficha-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.public-guide-steps {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.public-guide-step {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    background: #f8fbff;
+}
+
+.public-guide-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    background: #0f766e;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.public-guide-step strong,
+.public-guide-docs h3 {
+    display: block;
+    margin: 0 0 6px;
+    color: #0f172a;
+    font-size: 13px;
+}
+
+.public-guide-step p,
+.public-guide-docs li,
+.public-guide-photo {
+    margin: 0;
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.public-guide-link,
+.public-guide-docs a {
+    color: #0f766e;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.public-guide-link:hover,
+.public-guide-docs a:hover {
+    text-decoration: underline;
+}
+
+.public-guide-details {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.public-guide-details summary {
+    cursor: pointer;
+    padding: 13px 14px;
+    color: #172033;
+    font-size: 13px;
+    font-weight: 800;
+    background: #f8fafc;
+}
+
+.public-guide-docs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 14px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.public-guide-docs ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.public-guide-docs li + li {
+    margin-top: 6px;
+}
+
+.public-guide-photo {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid #ccfbf1;
+    border-radius: 8px;
+    background: #f0fdfa;
+    color: #0f766e;
+}
+
+.public-guide-warning {
+    margin: 0;
+}
+
 .public-ficha-shell {
     min-height: 100vh;
     background: #f3f5f9;
@@ -332,6 +442,11 @@
 @media (max-width: 1024px) {
     .ficha-fields {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .public-guide-steps,
+    .public-guide-docs {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -358,5 +473,15 @@
 
     .ficha-link-box {
         grid-template-columns: 1fr;
+    }
+
+    .public-guide-step {
+        grid-template-columns: 30px minmax(0, 1fr);
+        padding: 12px;
+    }
+
+    .public-guide-number {
+        width: 28px;
+        height: 28px;
     }
 }

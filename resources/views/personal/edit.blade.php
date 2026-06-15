@@ -393,21 +393,38 @@
                         <h3 class="ficha-section-title">Firma y huella</h3>
                     </div>
                     <div class="ficha-fields">
-                        <div class="ficha-field">
+                        <div class="ficha-field ficha-field-wide">
                             <label class="ficha-label">Firma digital</label>
                             @if($ficha?->firma_base64)
                                 <img class="ficha-preview-image" src="{{ $ficha->firma_base64 }}" alt="Firma digital">
                             @else
                                 <div class="ficha-alert ficha-alert-warning">Sin firma registrada.</div>
                             @endif
+                            <div class="signature-pad-wrap" style="margin-top:10px;">
+                                <canvas id="editSignaturePad" class="signature-pad" aria-label="Nueva firma digital"></canvas>
+                                <input type="hidden" name="firma_base64" id="editFirmaBase64" value="{{ old('firma_base64') }}">
+                                <div class="ficha-actions-bar" style="justify-content:flex-start;">
+                                    <button type="button" class="btn btn-outline btn-sm" id="clearEditSignature">Limpiar nueva firma</button>
+                                </div>
+                                <p class="ficha-card-subtitle" style="margin:0;">Dibuja aqui solo si deseas reemplazar la firma actual.</p>
+                                @error('firma_base64')
+                                    <span class="ficha-error">{{ $message }}</span>
+                                @enderror
+                            </div>
                         </div>
                         <div class="ficha-field">
-                            <label class="ficha-label">Huella digital</label>
+                            <label class="ficha-label" for="editHuella">Huella digital</label>
                             @if($huellaDataUrl)
-                                <img class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
+                                <img id="editHuellaPreview" class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
                             @else
                                 <div class="ficha-alert ficha-alert-warning">Sin huella registrada.</div>
+                                <img id="editHuellaPreview" class="ficha-preview-image" src="" alt="Previsualizacion de huella" style="display:none;">
                             @endif
+                            <input id="editHuella" class="ficha-input" type="file" name="huella" accept="image/*" style="margin-top:10px;">
+                            <p class="ficha-card-subtitle" style="margin-top:6px;">Selecciona una nueva imagen solo si deseas reemplazar la huella actual.</p>
+                            @error('huella')
+                                <span class="ficha-error">{{ $message }}</span>
+                            @enderror
                         </div>
                     </div>
                 </section>
@@ -593,6 +610,124 @@
                 }
             });
         });
+
+        const signatureCanvas = document.getElementById('editSignaturePad');
+        const signatureHidden = document.getElementById('editFirmaBase64');
+        const clearSignatureButton = document.getElementById('clearEditSignature');
+        let signatureDrawing = false;
+        let signatureHasValue = Boolean(signatureHidden && signatureHidden.value);
+
+        if (signatureCanvas && signatureHidden) {
+            const signatureContext = signatureCanvas.getContext('2d');
+
+            const resizeSignatureCanvas = function () {
+                const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                const rect = signatureCanvas.getBoundingClientRect();
+                const current = signatureHasValue ? signatureHidden.value : null;
+                signatureCanvas.width = rect.width * ratio;
+                signatureCanvas.height = rect.height * ratio;
+                signatureContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+                signatureContext.lineWidth = 2.4;
+                signatureContext.lineCap = 'round';
+                signatureContext.lineJoin = 'round';
+                signatureContext.strokeStyle = '#0f172a';
+
+                if (current) {
+                    const img = new Image();
+                    img.onload = function () {
+                        signatureContext.drawImage(img, 0, 0, rect.width, rect.height);
+                    };
+                    img.src = current;
+                }
+            };
+
+            const signaturePoint = function (event) {
+                const source = event.touches?.[0] || event.changedTouches?.[0] || event;
+                const rect = signatureCanvas.getBoundingClientRect();
+
+                return {
+                    x: source.clientX - rect.left,
+                    y: source.clientY - rect.top,
+                };
+            };
+
+            const startSignature = function (event) {
+                event.preventDefault();
+                signatureDrawing = true;
+                signatureHasValue = true;
+
+                if (event.pointerId !== undefined && signatureCanvas.setPointerCapture) {
+                    signatureCanvas.setPointerCapture(event.pointerId);
+                }
+
+                const point = signaturePoint(event);
+                signatureContext.beginPath();
+                signatureContext.moveTo(point.x, point.y);
+            };
+
+            const moveSignature = function (event) {
+                if (!signatureDrawing) {
+                    return;
+                }
+
+                event.preventDefault();
+                const point = signaturePoint(event);
+                signatureContext.lineTo(point.x, point.y);
+                signatureContext.stroke();
+                signatureHidden.value = signatureCanvas.toDataURL('image/png');
+            };
+
+            const stopSignature = function (event) {
+                if (!signatureDrawing) {
+                    return;
+                }
+
+                event?.preventDefault?.();
+                signatureDrawing = false;
+                signatureHidden.value = signatureCanvas.toDataURL('image/png');
+            };
+
+            if (window.PointerEvent) {
+                signatureCanvas.addEventListener('pointerdown', startSignature);
+                signatureCanvas.addEventListener('pointermove', moveSignature);
+                signatureCanvas.addEventListener('pointerup', stopSignature);
+                signatureCanvas.addEventListener('pointercancel', stopSignature);
+            } else {
+                signatureCanvas.addEventListener('touchstart', startSignature, { passive: false });
+                signatureCanvas.addEventListener('touchmove', moveSignature, { passive: false });
+                signatureCanvas.addEventListener('touchend', stopSignature, { passive: false });
+                signatureCanvas.addEventListener('touchcancel', stopSignature, { passive: false });
+                signatureCanvas.addEventListener('mousedown', startSignature);
+                window.addEventListener('mousemove', moveSignature);
+                window.addEventListener('mouseup', stopSignature);
+            }
+
+            window.addEventListener('resize', resizeSignatureCanvas);
+            clearSignatureButton?.addEventListener('click', function () {
+                signatureContext.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                signatureHidden.value = '';
+                signatureHasValue = false;
+            });
+            resizeSignatureCanvas();
+        }
+
+        const huellaInput = document.getElementById('editHuella');
+        const huellaPreview = document.getElementById('editHuellaPreview');
+
+        if (huellaInput && huellaPreview) {
+            huellaInput.addEventListener('change', function () {
+                const file = huellaInput.files && huellaInput.files[0];
+                if (!file) {
+                    if (!huellaPreview.getAttribute('src')) {
+                        huellaPreview.style.display = 'none';
+                    }
+                    return;
+                }
+
+                huellaPreview.src = URL.createObjectURL(file);
+                huellaPreview.style.display = 'block';
+            });
+        }
 
         if (ceseTodayButton && fechaCeseInput) {
             ceseTodayButton.addEventListener('click', function () {

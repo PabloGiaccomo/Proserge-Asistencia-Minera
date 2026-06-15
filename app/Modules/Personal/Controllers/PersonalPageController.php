@@ -494,6 +494,8 @@ class PersonalPageController extends WebPageController
                     'minas' => $this->buildMinePayload($validated),
                     'familiares' => $validated['familiares'] ?? [],
                     'documentos' => $request->file('documentos', []),
+                    'firma_base64' => $validated['firma_base64'] ?? null,
+                    'huella' => $request->file('huella'),
                 ],
                 $this->requireAuthenticatedUser(),
             );
@@ -694,6 +696,9 @@ class PersonalPageController extends WebPageController
         foreach (PersonalFichaCatalog::documentRequirements() as $key => $requirement) {
             $rules['documentos.' . $key] = ['nullable', 'file', 'max:10240', 'mimes:pdf,doc,docx,jpg,jpeg,png,webp'];
         }
+
+        $rules['firma_base64'] = ['nullable', 'string', 'max:2500000'];
+        $rules['huella'] = ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'];
 
         return $rules;
     }

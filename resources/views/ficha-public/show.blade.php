@@ -92,6 +92,84 @@
             $currentFieldValue = fn (string $key): string => (string) old('fields.' . $key, $data[$key] ?? '');
         @endphp
 
+        @if(!$readonly)
+            <div class="ficha-card public-ficha-guide">
+                <div class="ficha-card-header">
+                    <div>
+                        <h2 class="ficha-card-title">Guia para completar tu ficha</h2>
+                        <p class="ficha-card-subtitle">Lee estos pasos antes de enviar tu informacion.</p>
+                    </div>
+                </div>
+                <div class="ficha-card-body">
+                    <div class="public-guide-steps">
+                        <div class="public-guide-step">
+                            <span class="public-guide-number">1</span>
+                            <div>
+                                <strong>Completa y revisa tus datos.</strong>
+                                <p>Llena la ficha con informacion correcta. Usa letra mayuscula cuando corresponda y revisa nombres, documento, telefono, correo, domicilio, banco, cargo y tipo de contrato antes de enviar.</p>
+                            </div>
+                        </div>
+                        <div class="public-guide-step">
+                            <span class="public-guide-number">2</span>
+                            <div>
+                                <strong>Registra tu experiencia en servicios.</strong>
+                                <p>Completa el reporte de experiencia indicando cuantas veces realizaste cada trabajo.</p>
+                                <a class="public-guide-link" href="https://docs.google.com/forms/d/e/1FAIpQLSejSTKeugA4BE7zxbP3Za1bJNaiDMqPWfh47JO0vWrPA_hs0Q/formResponse" target="_blank" rel="noopener">Abrir reporte de experiencia</a>
+                            </div>
+                        </div>
+                        <div class="public-guide-step">
+                            <span class="public-guide-number">3</span>
+                            <div>
+                                <strong>Adjunta documentos si los tienes a la mano.</strong>
+                                <p>Los documentos se cargan dentro de esta ficha. Si te falta alguno, puedes enviar la ficha y quedara pendiente de regularizacion documentaria con RRHH.</p>
+                            </div>
+                        </div>
+                        <div class="public-guide-step">
+                            <span class="public-guide-number">4</span>
+                            <div>
+                                <strong>Firma, sube tu huella y envia.</strong>
+                                <p>La firma digital y la huella son necesarias para enviar. Despues de enviar, RRHH revisara tu ficha; si observa algo, te indicara que corrijas.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <details class="public-guide-details">
+                        <summary>Ver documentos y enlaces de apoyo</summary>
+                        <div class="public-guide-docs">
+                            <div>
+                                <h3>Documentos que puedes adjuntar aqui</h3>
+                                <ul>
+                                    <li>CV documentado con certificados de trabajo y estudios. Si corresponde, incluye tu experiencia con P&S PROSERGE S.R.L.</li>
+                                    <li>DNI vigente.</li>
+                                    <li>Certiadulto o Certijoven vigente.</li>
+                                    <li>Recibo de luz o agua del domicilio declarado.</li>
+                                    <li>Renta de quinta o certificado de retenciones.</li>
+                                    <li>Declaracion jurada de Vida Ley. La entrega fisica se regularizara segun indicacion de RRHH.</li>
+                                    <li>Foto tipo carnet.</li>
+                                    <li>Documentos familiares solo si corresponde: DNI de hijos, partida de matrimonio o documento de union de hecho.</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h3>Enlaces de apoyo</h3>
+                                <ul>
+                                    <li><a href="https://www.empleosperu.gob.pe/portal-mtpe/#/login" target="_blank" rel="noopener">Crear o descargar Certificado Unico Laboral</a></li>
+                                    <li><a href="https://www.youtube.com/watch?v=WuPQDC4B3Eo" target="_blank" rel="noopener">Guia para descargar retenciones de quinta categoria</a></li>
+                                    <li><a href="https://drive.google.com/file/d/1enh_NO7JLd1C9HgTUXZYYCYiUPF2MnUR/view?usp=sharing" target="_blank" rel="noopener">Formato de Declaracion Jurada Vida Ley</a></li>
+                                </ul>
+                                <div class="public-guide-photo">
+                                    <strong>Foto tipo carnet:</strong> formato JPG, fondo blanco, mirada frontal, ojos abiertos, sin sombra, cuello descubierto y sin anteojos, gorro, capucha, chalina u otros accesorios. Recomendado: 480 x 640 px.
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="ficha-alert ficha-alert-warning public-guide-warning">
+                        Si el enlace no abre, copia y pega la direccion en tu navegador o solicita a RRHH que te reenvie el link. No compartas este enlace con otra persona.
+                    </div>
+                </div>
+            </div>
+        @endif
+
         <form method="POST" action="{{ route('ficha-colaborador.submit', ['token' => $token]) }}" enctype="multipart/form-data" class="ficha-workspace" id="workerFichaForm">
             @csrf
 
@@ -289,21 +367,23 @@
                             <h2 class="ficha-section-title">Documentos requeridos</h2>
                         </div>
                         <div class="ficha-card-body">
+                            @if(!$readonly)
+                                <div class="ficha-alert" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412;">
+                                    Si tienes los documentos a la mano, adjuntalos ahora. Si omites este paso, tu ficha se podra enviar, pero quedara pendiente de regularizacion documentaria con RRHH.
+                                </div>
+                            @endif
                             <div class="ficha-fields" style="padding:0;">
                                 @foreach($documentRequirements as $docKey => $requirement)
                                     @php
                                         $storedDoc = ($archivos ?? collect())->firstWhere('tipo', $docKey);
                                         $docLabel = $requirement['label'] ?? $requirement;
                                         $docRequired = (bool) ($requirement['required'] ?? true);
-                                        $docInputRequired = $docRequired && !$storedDoc;
                                     @endphp
                                     <div class="ficha-field ficha-field-wide">
                                         <label class="ficha-label" for="documento_{{ $docKey }}">
                                             {{ $docLabel }}
-                                            @if(!$readonly && $docRequired)
-                                                <span class="ficha-required">*</span>
-                                            @elseif(!$readonly)
-                                                <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Si aplica</span>
+                                            @if(!$readonly)
+                                                <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Opcional</span>
                                             @endif
                                         </label>
                                         @if($readonly)
@@ -311,10 +391,14 @@
                                                 {{ $storedDoc?->nombre_original ?: 'Documento registrado' }}
                                             </div>
                                         @else
-                                            <input id="documento_{{ $docKey }}" class="ficha-input js-draft-file-input" type="file" name="documentos[{{ $docKey }}]" data-file-draft-key="documentos.{{ $docKey }}" data-server-draft-url="{{ route('ficha-colaborador.archivo-borrador', ['token' => $token]) }}" data-server-draft-tipo="{{ $docKey }}" data-has-server-file="{{ $storedDoc ? '1' : '0' }}" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" {{ $docInputRequired ? 'required' : '' }}>
-                                            <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="documento_{{ $docKey }}" style="margin-top:6px; display:{{ $storedDoc ? 'block' : 'none' }};">
+                                            <input id="documento_{{ $docKey }}" class="ficha-input js-draft-file-input" type="file" name="documentos[{{ $docKey }}]" data-file-draft-key="documentos.{{ $docKey }}" data-server-draft-url="{{ route('ficha-colaborador.archivo-borrador', ['token' => $token]) }}" data-server-draft-tipo="{{ $docKey }}" data-has-server-file="{{ $storedDoc ? '1' : '0' }}" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp">
+                                            <div class="ficha-card-subtitle js-draft-file-status" data-file-status-for="documento_{{ $docKey }}" style="margin-top:6px; display:block;">
                                                 @if($storedDoc)
                                                     Ya cargado: {{ $storedDoc->nombre_original }}. Puedes reemplazarlo seleccionando otro archivo.
+                                                @elseif($docRequired)
+                                                    Faltara regularizar este documento si no lo adjuntas ahora.
+                                                @else
+                                                    Si este documento aplica para tu caso, puedes adjuntarlo ahora.
                                                 @endif
                                             </div>
                                             @error('documentos.' . $docKey) <span class="ficha-error">{{ $message }}</span> @enderror

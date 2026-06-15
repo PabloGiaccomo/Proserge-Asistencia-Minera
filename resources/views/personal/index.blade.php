@@ -550,6 +550,7 @@
     position: sticky;
     top: 0;
     z-index: 7;
+    box-sizing: border-box;
     height: 16px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -569,6 +570,7 @@
 
 .personal-page .personal-grid-scroll-top-inner {
     height: 1px;
+    min-width: 100%;
 }
 
 .personal-page .personal-grid-shell.is-expanded {
@@ -3780,6 +3782,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const defaultVisibleColumns = ['documento', 'celular', 'correo', 'puesto', 'contrato', 'estado', 'situacion', 'ocupacion', 'acciones'];
     let syncingScroll = false;
     let gridDragState = null;
+    let scrollbarSyncFrame = null;
 
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
@@ -4073,25 +4076,56 @@ document.addEventListener('DOMContentLoaded', function () {
         pageSize = Number(nextValue || optionValues[0] || 10);
     };
 
+    const gridScrollMetrics = function () {
+        if (!topScrollbar || !tableWrap || !dataGrid) {
+            return null;
+        }
+
+        const tableVisibleWidth = Math.max(0, tableWrap.clientWidth);
+        const tableScrollWidth = Math.max(tableWrap.scrollWidth, tableVisibleWidth);
+
+        return {
+            tableVisibleWidth: tableVisibleWidth,
+            tableScrollWidth: tableScrollWidth,
+            tableMaxScrollLeft: Math.max(0, tableScrollWidth - tableVisibleWidth),
+        };
+    };
+
     const syncTopScrollbar = function () {
         if (!topScrollbar || !topScrollbarInner || !tableWrap || !dataGrid) return;
-        const tableMaxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
-        const needsHorizontalScroll = tableMaxScrollLeft > 2;
-        const currentScrollLeft = Math.max(0, Math.min(tableWrap.scrollLeft, tableMaxScrollLeft));
+        const metrics = gridScrollMetrics();
+        if (!metrics) return;
+
+        const needsHorizontalScroll = metrics.tableMaxScrollLeft > 2;
+        const currentScrollLeft = Math.max(0, Math.min(tableWrap.scrollLeft, metrics.tableMaxScrollLeft));
         topScrollbar.classList.toggle('is-visible', needsHorizontalScroll);
-        topScrollbar.style.width = tableWrap.getBoundingClientRect().width + 'px';
-        topScrollbarInner.style.width = (topScrollbar.clientWidth + tableMaxScrollLeft) + 'px';
+        topScrollbar.style.width = tableWrap.offsetWidth + 'px';
+        topScrollbarInner.style.width = (topScrollbar.clientWidth + metrics.tableMaxScrollLeft) + 'px';
         tableWrap.scrollLeft = currentScrollLeft;
-        const topMaxScrollLeft = Math.max(0, topScrollbar.scrollWidth - topScrollbar.clientWidth);
-        topScrollbar.scrollLeft = topMaxScrollLeft > 0 && Math.abs(currentScrollLeft - tableMaxScrollLeft) <= 2
+        const topMaxScrollLeft = Math.max(0, topScrollbarInner.offsetWidth - topScrollbar.clientWidth);
+        topScrollbar.scrollLeft = topMaxScrollLeft > 0 && Math.abs(currentScrollLeft - metrics.tableMaxScrollLeft) <= 2
             ? topMaxScrollLeft
-            : Math.max(0, Math.min(currentScrollLeft, topMaxScrollLeft));
+            : Math.max(0, Math.min(topMaxScrollLeft * (metrics.tableMaxScrollLeft > 0 ? currentScrollLeft / metrics.tableMaxScrollLeft : 0), topMaxScrollLeft));
+    };
+
+    const scheduleScrollbarSync = function (preferredScrollLeft) {
+        if (scrollbarSyncFrame !== null) {
+            window.cancelAnimationFrame(scrollbarSyncFrame);
+        }
+
+        scrollbarSyncFrame = window.requestAnimationFrame(function () {
+            scrollbarSyncFrame = null;
+            syncTopScrollbar();
+            syncHorizontalScrollPosition(preferredScrollLeft);
+            window.requestAnimationFrame(syncTopScrollbar);
+        });
     };
 
     const syncHorizontalScrollPosition = function (preferredScrollLeft) {
         if (!tableWrap || !dataGrid) return;
 
-        const maxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
+        const metrics = gridScrollMetrics();
+        const maxScrollLeft = metrics ? metrics.tableMaxScrollLeft : Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
         const requested = Number.isFinite(preferredScrollLeft)
             ? preferredScrollLeft
             : tableWrap.scrollLeft;
@@ -4105,11 +4139,26 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
 
+    const scrollableMaxLeft = function (element) {
+        if (!element) return 0;
+
+        if (element === topScrollbar && topScrollbarInner) {
+            return Math.max(0, topScrollbarInner.offsetWidth - topScrollbar.clientWidth);
+        }
+
+        if (element === tableWrap) {
+            const metrics = gridScrollMetrics();
+            return metrics ? metrics.tableMaxScrollLeft : Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
+        }
+
+        return Math.max(0, element.scrollWidth - element.clientWidth);
+    };
+
     const syncScrollPair = function (source, target) {
         if (!source || !target) return;
 
-        const sourceMax = Math.max(0, source.scrollWidth - source.clientWidth);
-        const targetMax = Math.max(0, target.scrollWidth - target.clientWidth);
+        const sourceMax = scrollableMaxLeft(source);
+        const targetMax = scrollableMaxLeft(target);
         const sourceAtEnd = sourceMax > 0 && Math.abs(source.scrollLeft - sourceMax) <= 2;
         const ratio = sourceMax > 0 ? source.scrollLeft / sourceMax : 0;
         const nextScrollLeft = sourceAtEnd ? targetMax : targetMax * ratio;
@@ -4509,7 +4558,7 @@ document.addEventListener('DOMContentLoaded', function () {
         syncFilterIndicators();
         renderPagination(totalPages);
         updateDocumentDownloadSelectionState();
-        syncTopScrollbar();
+        scheduleScrollbarSync();
 
         saveViewState({
             search: searchInput?.value || '',
@@ -4579,7 +4628,7 @@ document.addEventListener('DOMContentLoaded', function () {
             saveViewState({
                 visibleColumns: visibleColumns,
             });
-            syncTopScrollbar();
+            scheduleScrollbarSync();
         });
     });
 
@@ -4591,7 +4640,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedOcupOffices: collectSelectedOcupOffices(),
                 selectedOcupWorkshops: collectSelectedOcupWorkshops(),
             });
-            window.requestAnimationFrame(syncTopScrollbar);
+            scheduleScrollbarSync();
         });
     });
 
@@ -4641,8 +4690,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 occupationGrouped: !!ocupGroupedToggle.checked,
             });
             window.requestAnimationFrame(function () {
-                syncTopScrollbar();
                 renderGrid(false);
+                scheduleScrollbarSync();
             });
         });
     }
@@ -4657,8 +4706,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             window.requestAnimationFrame(function () {
                 syncExpandedLayout();
-                syncTopScrollbar();
-                syncHorizontalScrollPosition(currentScrollLeft);
+                scheduleScrollbarSync(currentScrollLeft);
             });
         });
     }
@@ -4738,9 +4786,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     window.addEventListener('resize', function () {
         syncExpandedLayout();
-        syncTopScrollbar();
-        syncHorizontalScrollPosition();
+        scheduleScrollbarSync();
     });
+
+    if (window.ResizeObserver && tableWrap && dataGrid) {
+        const personalGridResizeObserver = new ResizeObserver(function () {
+            scheduleScrollbarSync();
+        });
+        personalGridResizeObserver.observe(tableWrap);
+        personalGridResizeObserver.observe(dataGrid);
+    }
 
     document.querySelectorAll('.dg-ocup-chip-btn').forEach(function (button) {
         button.addEventListener('click', function (event) {
@@ -4777,7 +4832,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
                 showOcupProceso: !!ocupShowProcesoToggle?.checked,
             });
-            window.requestAnimationFrame(syncTopScrollbar);
+            scheduleScrollbarSync();
         });
     });
     
@@ -4819,11 +4874,10 @@ document.addEventListener('DOMContentLoaded', function () {
     window.requestAnimationFrame(function () {
         setBootProgress(94, 'Ajustando vista final...');
         syncExpandedLayout();
-        syncTopScrollbar();
         if (tableWrap) {
             tableWrap.scrollTop = Number(savedState.tableScrollTop || 0);
         }
-        syncHorizontalScrollPosition(Number(savedState.tableScrollLeft || 0));
+        scheduleScrollbarSync(Number(savedState.tableScrollLeft || 0));
         if (savedState.pageScrollY) {
             window.scrollTo({ top: Number(savedState.pageScrollY || 0), behavior: 'auto' });
         }

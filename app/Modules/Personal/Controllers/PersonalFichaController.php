@@ -629,6 +629,7 @@ class PersonalFichaController extends WebPageController
                 'submitted_at' => null,
                 'read_until' => null,
                 'expires_at' => $targetExpiresAt,
+                'enabled_manually_at' => $link->enabled_manually_at ?: now(),
             ])->save();
 
             $extended[] = [

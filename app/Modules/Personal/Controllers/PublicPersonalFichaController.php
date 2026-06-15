@@ -13,7 +13,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 
 class PublicPersonalFichaController extends Controller
@@ -68,21 +67,6 @@ class PublicPersonalFichaController extends Controller
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
         $fields['tipo_documento'] = $ficha->tipo_documento;
         $fields['numero_documento'] = $ficha->numero_documento;
-        $requiredDocumentKeys = $this->fichaService->requiredDocumentKeysForPayload($fields, $validated['familiares']);
-        $uploadedDocuments = $request->file('documentos', []);
-        $missingConditionalDocuments = collect($requiredDocumentKeys)
-            ->filter(function (string $key) use ($ficha, $uploadedDocuments): bool {
-                return !$ficha->archivos->contains('tipo', $key)
-                    && !(($uploadedDocuments[$key] ?? null) instanceof \Illuminate\Http\UploadedFile);
-            })
-            ->values()
-            ->all();
-
-        if (!empty($missingConditionalDocuments)) {
-            throw ValidationException::withMessages([
-                'documentos' => 'Adjunta los documentos obligatorios o condicionales que corresponden segun tus datos.',
-            ]);
-        }
 
         $submitted = $this->fichaService->submitFromWorker(
             $resolved['link'],
@@ -231,9 +215,8 @@ class PublicPersonalFichaController extends Controller
         ];
 
         foreach (PersonalFichaCatalog::documentRequirements() as $key => $requirement) {
-            $hasStoredDocument = $ficha->archivos->contains('tipo', $key);
             $rules['documentos.' . $key] = [
-                (($requirement['required'] ?? false) && !$hasStoredDocument) ? 'required' : 'nullable',
+                'nullable',
                 'file',
                 'max:10240',
                 'mimes:pdf,doc,docx,jpg,jpeg,png,webp',
@@ -327,7 +310,6 @@ class PublicPersonalFichaController extends Controller
             'huella.required' => 'La foto de huella es obligatoria.',
             'huella.image' => 'La huella debe ser una imagen nitida.',
             'huella.max' => 'La imagen de huella no debe superar 5 MB.',
-            'documentos.*.required' => 'Adjunta este documento obligatorio.',
             'documentos.*.mimes' => 'El documento debe ser PDF, Word o imagen.',
             'documentos.*.max' => 'El documento no debe superar 10 MB.',
             'declaraciones.*.accepted' => 'Debes marcar esta declaracion para enviar la ficha.',

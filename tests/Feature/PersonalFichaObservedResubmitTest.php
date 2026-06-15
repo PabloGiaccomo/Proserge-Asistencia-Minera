@@ -6,12 +6,15 @@ use App\Models\Personal;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaLink;
 use App\Models\PersonalPuesto;
+use App\Models\Usuario;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -314,6 +317,92 @@ class PersonalFichaObservedResubmitTest extends TestCase
         ]);
     }
 
+    public function test_public_submit_allows_missing_documents_for_later_regularization(): void
+    {
+        Carbon::setTestNow('2026-06-11 09:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'submit-without-documents-token';
+        $data = $this->fichaData([
+            'numero_documento' => '45871299',
+            'telefono' => '955111333',
+            'correo' => 'sin-documentos@test.local',
+            'puesto' => 'Operario sin documentos',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45871299',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45871299',
+            'nombre_completo' => 'Trabajador Sin Documentos',
+            'puesto' => 'Operario sin documentos',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '955111333',
+            'telefono_1' => '955111333',
+            'correo' => 'sin-documentos@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45871299',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'huella_path' => 'personal_fichas/' . $fichaId . '/huella_borrador.jpg',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->get(route('ficha-colaborador.show', ['token' => $token]))
+            ->assertOk()
+            ->assertSee('Guia para completar tu ficha')
+            ->assertSee('Abrir reporte de experiencia')
+            ->assertSee('quedara pendiente de regularizacion documentaria');
+
+        $response = $this->post(route('ficha-colaborador.submit', ['token' => $token]), [
+            'fields' => $data,
+            'familiares' => [],
+            'firma_base64' => 'data:image/png;base64,signature',
+            'declaraciones' => collect(PersonalFichaCatalog::declarationCheckboxes())
+                ->mapWithKeys(fn ($_label, string $key): array => [$key => '1'])
+                ->all(),
+        ]);
+
+        $response->assertRedirect(route('ficha-colaborador.show', ['token' => $token]));
+        $response->assertSessionHasNoErrors();
+
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($fichaId);
+        $summary = app(PersonalFichaService::class)->regularizationSummary($ficha);
+
+        $this->assertSame(PersonalFicha::ESTADO_ENVIADA, $ficha->estado);
+        $this->assertSame(PersonalFicha::ESTADO_ENVIADA, $ficha->personal->estado);
+        $this->assertSame(PersonalFichaLink::ESTADO_ENVIADO, $ficha->link->estado);
+        $this->assertNotEmpty($summary['missing_documents']);
+        $this->assertTrue($summary['can_regularize']);
+    }
+
     public function test_public_draft_data_is_saved_without_submitting_ficha(): void
     {
         Carbon::setTestNow('2026-06-05 09:15:00');
@@ -597,6 +686,274 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertSame('Falta contrato firmado', $row['situacion_label']);
         $this->assertFalse($row['contrato_datos_downloaded']);
         $this->assertFalse($row['contrato_firmado']);
+    }
+
+    public function test_manual_edit_can_replace_signature_and_huella(): void
+    {
+        Storage::fake('local');
+        Carbon::setTestNow('2026-06-13 10:00:00');
+
+        $roleId = (string) Str::uuid();
+        $userId = (string) Str::uuid();
+
+        DB::table('roles')->insert([
+            'id' => $roleId,
+            'nombre' => 'RRHH_FIRMA_HUELLA_' . Str::upper(Str::random(6)),
+            'permisos' => json_encode([]),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('usuarios')->insert([
+            'id' => $userId,
+            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'password' => bcrypt('secret123'),
+            'rol_id' => $roleId,
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $actor = Usuario::query()->findOrFail($userId);
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $oldHuellaPath = 'personal_fichas/' . $fichaId . '/huella_antigua.jpg';
+        $data = $this->fichaData([
+            'numero_documento' => '45879614',
+            'telefono' => '977111224',
+            'correo' => 'firma-huella@test.local',
+            'puesto' => 'Operario firma huella',
+        ]);
+
+        Storage::disk('local')->put($oldHuellaPath, 'huella anterior');
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879614',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879614',
+            'nombre_completo' => 'Trabajador Firma Huella',
+            'puesto' => 'Operario firma huella',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_ENVIADA,
+            'telefono' => '977111224',
+            'telefono_1' => '977111224',
+            'correo' => 'firma-huella@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_ENVIADA,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879614',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'firma_base64' => 'data:image/png;base64,old-internal',
+            'huella_path' => $oldHuellaPath,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_archivos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $fichaId,
+            'tipo' => 'huella',
+            'nombre_original' => 'huella-antigua.jpg',
+            'path' => $oldHuellaPath,
+            'mime' => 'image/jpeg',
+            'size' => 128,
+            'uploaded_by_public' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $personal = Personal::query()->with('fichaColaborador')->findOrFail($personalId);
+
+        app(PersonalFichaService::class)->updateManual($personal, $data, [
+            'estado' => PersonalFicha::ESTADO_ENVIADA,
+            'es_supervisor' => false,
+            'minas' => [],
+            'familiares' => [],
+            'documentos' => [],
+            'firma_base64' => 'data:image/png;base64,new-internal',
+            'huella' => UploadedFile::fake()->image('huella-nueva.jpg', 320, 320),
+        ], $actor);
+
+        $ficha = PersonalFicha::query()->with('archivos')->findOrFail($fichaId);
+        $huella = $ficha->archivos->firstWhere('tipo', 'huella');
+
+        $this->assertSame('data:image/png;base64,new-internal', $ficha->firma_base64);
+        $this->assertNotSame($oldHuellaPath, $ficha->huella_path);
+        $this->assertNotNull($huella);
+        $this->assertSame('huella-nueva.jpg', $huella->nombre_original);
+        $this->assertFalse((bool) $huella->uploaded_by_public);
+        $this->assertSame($actor->id, $huella->uploaded_by_usuario_id);
+        Storage::disk('local')->assertExists($ficha->huella_path);
+        Storage::disk('local')->assertMissing($oldHuellaPath);
+    }
+
+    public function test_active_temporary_link_without_manual_marker_is_immediately_usable(): void
+    {
+        Carbon::setTestNow('2026-06-10 08:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'active-link-without-manual-marker';
+        $data = $this->fichaData([
+            'numero_documento' => '45879612',
+            'telefono' => '977111222',
+            'correo' => 'link-activo@test.local',
+            'puesto' => 'Operario link activo',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879612',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879612',
+            'nombre_completo' => 'Trabajador Link Activo',
+            'puesto' => 'Operario link activo',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '977111222',
+            'telefono_1' => '977111222',
+            'correo' => 'link-activo@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879612',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'enabled_manually_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $service = app(PersonalFichaService::class);
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($fichaId);
+
+        $row = $service->temporaryLinkRow($ficha);
+
+        $this->assertNotNull($row);
+        $this->assertSame(route('ficha-colaborador.show', ['token' => $token]), $row['url']);
+        $this->assertSame($fichaId, $row['link']->personal_ficha_id);
+        $this->assertSame('edit', $service->resolveToken($token)['mode']);
+
+        $extended = $service->extendLink($ficha, 24);
+
+        $this->assertNotNull($extended->enabled_manually_at);
+        $this->assertSame(PersonalFichaLink::ESTADO_ACTIVO, $extended->estado);
+    }
+
+    public function test_regularization_link_does_not_reuse_disabled_or_submitted_active_link(): void
+    {
+        Carbon::setTestNow('2026-06-12 11:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $oldLinkId = (string) Str::uuid();
+        $oldToken = Str::random(80);
+        $data = $this->fichaData([
+            'correo' => 'regularizar@test.local',
+            'puesto' => 'Ayudante regularizacion',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879613',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879613',
+            'nombre_completo' => 'Trabajador Regularizacion',
+            'puesto' => 'Ayudante regularizacion',
+            'ocupacion' => 'Ayudante',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_OBSERVADO,
+            'telefono' => '977111223',
+            'telefono_1' => '977111223',
+            'correo' => 'regularizar@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_OBSERVADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879613',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'firma_base64' => 'data:image/png;base64,old',
+            'submitted_at' => now()->subDays(2),
+            'observed_at' => now()->subDay(),
+            'observaciones_revision' => 'Regularizar documentos pendientes.',
+            'created_at' => now()->subDays(3),
+            'updated_at' => now()->subDay(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $oldLinkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $oldToken),
+            'token_encrypted' => encrypt($oldToken),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+            'submitted_at' => now()->subDays(2),
+            'disabled_at' => now()->subHour(),
+            'enabled_manually_at' => now()->subDay(),
+            'created_at' => now()->subHour(),
+            'updated_at' => now()->subHour(),
+        ]);
+
+        $service = app(PersonalFichaService::class);
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($fichaId);
+
+        $result = $service->ensureRegularizationLink($ficha, 24);
+        $newLink = $result['link'];
+        $newToken = Str::afterLast((string) $result['url'], '/');
+
+        $this->assertNotSame($oldLinkId, $newLink->id);
+        $this->assertSame(PersonalFichaLink::ESTADO_INHABILITADO, PersonalFichaLink::query()->findOrFail($oldLinkId)->estado);
+        $this->assertSame(PersonalFichaLink::ESTADO_ACTIVO, $newLink->estado);
+        $this->assertNull($newLink->submitted_at);
+        $this->assertNull($newLink->disabled_at);
+        $this->assertNotNull($newLink->enabled_manually_at);
+        $this->assertSame('edit', $service->resolveToken($newToken)['mode']);
+
+        $summary = $service->regularizationSummary($ficha->fresh(['personal', 'link', 'archivos']));
+
+        $this->assertTrue($summary['has_active_link']);
+        $this->assertSame($result['url'], $summary['url']);
     }
 
     private function fichaData(array $overrides = []): array

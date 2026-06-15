@@ -284,15 +284,22 @@ class PersonalFichaService
             ]);
 
             $ficha = $personal->fichaColaborador()->with('link')->first();
+            $signatureBase64 = trim((string) ($attributes['firma_base64'] ?? ''));
 
             if ($ficha) {
-                $ficha->forceFill([
+                $fichaPayload = [
                     'tipo_documento' => $documentType,
                     'numero_documento' => $documentNumber,
                     'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
                     'datos_json' => $data,
                     'datos_detectados_json' => $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $data),
-                ])->save();
+                ];
+
+                if ($signatureBase64 !== '') {
+                    $fichaPayload['firma_base64'] = $signatureBase64;
+                }
+
+                $ficha->forceFill($fichaPayload)->save();
             } else {
                 $estadoPersonal = strtoupper((string) ($attributes['estado'] ?? $personal->estado));
                 $estadoFicha = match ($estadoPersonal) {
@@ -305,7 +312,7 @@ class PersonalFichaService
                     default => 'INACTIVO',
                 };
 
-                $ficha = PersonalFicha::query()->create([
+                $fichaPayload = [
                     'id' => (string) Str::uuid(),
                     'personal_id' => $updatedPersonal->id,
                     'estado' => $estadoFicha,
@@ -319,7 +326,13 @@ class PersonalFichaService
                     'created_by_usuario_id' => $user->id,
                     'approved_at' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? now() : null,
                     'approved_by_usuario_id' => $estadoFicha === PersonalFicha::ESTADO_APROBADO ? $user->id : null,
-                ]);
+                ];
+
+                if ($signatureBase64 !== '') {
+                    $fichaPayload['firma_base64'] = $signatureBase64;
+                }
+
+                $ficha = PersonalFicha::query()->create($fichaPayload);
             }
 
             if (array_key_exists('familiares', $attributes)) {
@@ -334,6 +347,7 @@ class PersonalFichaService
                 }
             }
 
+            $this->syncManualHuella($ficha, $attributes['huella'] ?? null, $user);
             $this->syncFichaDocuments($ficha, $documentPaths, $user);
 
             if (strtoupper((string) ($attributes['estado'] ?? '')) === 'CESADO' && $ficha->link) {
@@ -643,6 +657,7 @@ class PersonalFichaService
 
     public function resolveToken(string $token): array
     {
+        $token = $this->normalizeFichaLinkToken($token) ?? $token;
         $hash = hash('sha256', $token);
         $link = PersonalFichaLink::query()
             ->with(['ficha.personal', 'ficha.familiares'])
@@ -993,9 +1008,19 @@ class PersonalFichaService
             return null;
         }
 
+        $token = null;
+
         try {
-            $token = Crypt::decryptString($link->token_encrypted);
+            $token = $this->normalizeFichaLinkToken(Crypt::decryptString($link->token_encrypted));
         } catch (\Throwable) {
+            try {
+                $token = $this->normalizeFichaLinkToken(Crypt::decrypt($link->token_encrypted));
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        if (!$token) {
             return null;
         }
 
@@ -1150,10 +1175,8 @@ class PersonalFichaService
 
         if (
             $ficha->estado === PersonalFicha::ESTADO_PENDIENTE
-            && $link?->estado === PersonalFichaLink::ESTADO_ACTIVO
-            && $link->enabled_manually_at !== null
+            && $this->isUsableActiveLink($link)
             && $link->emailed_at !== null
-            && $link->expires_at?->greaterThan(now())
         ) {
             return self::TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE;
         }
@@ -1249,6 +1272,7 @@ class PersonalFichaService
             'submitted_at' => null,
             'read_until' => null,
             'expires_at' => $base->addHours($hours),
+            'enabled_manually_at' => $link->enabled_manually_at ?: now(),
         ])->save();
 
         return $link->fresh();
@@ -1328,10 +1352,10 @@ class PersonalFichaService
             ]);
         }
 
-        $url = $this->publicUrlForLink($link);
+        $url = $this->activePublicUrlForLink($link);
         if (!$url) {
             throw ValidationException::withMessages([
-                'ficha' => 'No se pudo reconstruir el link temporal para enviarlo por correo.',
+                'ficha' => 'El link temporal no esta activo o ya no se puede enviar.',
             ]);
         }
 
@@ -1451,7 +1475,7 @@ class PersonalFichaService
             }
         }
 
-        if ($ficha->link && $ficha->link->estado === PersonalFichaLink::ESTADO_ACTIVO && $ficha->link->expires_at?->greaterThan(now())) {
+        if ($this->isUsableActiveLink($ficha->link)) {
             $ficha->link->forceFill([
                 'enabled_manually_at' => $ficha->link->enabled_manually_at ?: now(),
             ])->save();
@@ -1540,7 +1564,7 @@ class PersonalFichaService
                 ];
             }
 
-            if ($ficha->link && $ficha->link->estado === PersonalFichaLink::ESTADO_ACTIVO && $ficha->link->expires_at?->greaterThan(now())) {
+            if ($this->isUsableActiveLink($ficha->link)) {
                 $ficha->link->forceFill([
                     'enabled_manually_at' => $ficha->link->enabled_manually_at ?: now(),
                 ])->save();
@@ -1922,12 +1946,7 @@ class PersonalFichaService
         $link = $ficha->link;
 
         $requiresManualEnable = $this->needsRegularization($ficha);
-        $hasActiveLink = $link
-            && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
-            && $link->expires_at?->greaterThan(now());
-        $url = $hasActiveLink && (!$requiresManualEnable || $link->enabled_manually_at !== null)
-            ? $this->publicUrlForLink($link)
-            : null;
+        $url = $this->activePublicUrlForLink($link);
 
         return [
             'missing_fields' => $missingFields,
@@ -1937,6 +1956,47 @@ class PersonalFichaService
             'link' => $link,
             'url' => $url,
         ];
+    }
+
+    private function isUsableActiveLink(?PersonalFichaLink $link): bool
+    {
+        return $link !== null
+            && $link->estado === PersonalFichaLink::ESTADO_ACTIVO
+            && $link->disabled_at === null
+            && $link->submitted_at === null
+            && $link->expires_at !== null
+            && $link->expires_at->greaterThan(now())
+            && filled($link->token_encrypted);
+    }
+
+    private function activePublicUrlForLink(?PersonalFichaLink $link): ?string
+    {
+        if (!$this->isUsableActiveLink($link)) {
+            return null;
+        }
+
+        return $this->publicUrlForLink($link);
+    }
+
+    private function normalizeFichaLinkToken(mixed $token): ?string
+    {
+        if (!is_string($token)) {
+            return null;
+        }
+
+        $token = trim($token);
+        if ($token === '') {
+            return null;
+        }
+
+        if (preg_match('/^s:\d+:"/u', $token) === 1) {
+            $unserialized = @unserialize($token, ['allowed_classes' => false]);
+            if (is_string($unserialized) && trim($unserialized) !== '') {
+                return trim($unserialized);
+            }
+        }
+
+        return $token;
     }
 
     private function createSecureLink(PersonalFicha $ficha, int $hours = 24, bool $enabledManually = false): array
@@ -2020,6 +2080,30 @@ class PersonalFichaService
         }
 
         return $documentPaths;
+    }
+
+    private function syncManualHuella(PersonalFicha $ficha, mixed $huella, Usuario $user): void
+    {
+        if (!$huella instanceof UploadedFile) {
+            return;
+        }
+
+        $path = $huella->storeAs(
+            'personal_fichas/' . $ficha->id,
+            'huella_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($huella->getClientOriginalExtension() ?: 'jpg'),
+            'local',
+        );
+
+        $ficha->forceFill(['huella_path' => $path])->save();
+
+        $this->replaceFichaArchivo(
+            $ficha,
+            'huella',
+            $huella,
+            $path,
+            false,
+            $user,
+        );
     }
 
     private function syncFichaDocuments(PersonalFicha $ficha, array $documentPaths, Usuario $user): void
