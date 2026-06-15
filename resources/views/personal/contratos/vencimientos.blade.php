@@ -6,6 +6,7 @@
 @php
     $permissions = session('user.permissions', []);
     $canManage = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
+    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'personal', 'exportar');
     $month = (int) ($filters['mes'] ?? now()->month);
     $year = (int) ($filters['anio'] ?? now()->year);
     $today = \Illuminate\Support\Carbon::today();
@@ -23,7 +24,22 @@
     $decisionLabel = fn ($value): string => $decisionOptions[$value ?: \App\Models\PersonalContrato::DECISION_PENDIENTE] ?? 'Pendiente';
     $reasonLabel = fn ($value): string => $value ? ($reasonOptions[$value] ?? $value) : '-';
     $cessationReasonOptions = $cessationReasonOptions ?? [];
+    $contractTypeOptions = $contractTypeOptions ?? [];
     $currentQuery = request()->query();
+    $monthNames = [
+        1 => 'Enero',
+        2 => 'Febrero',
+        3 => 'Marzo',
+        4 => 'Abril',
+        5 => 'Mayo',
+        6 => 'Junio',
+        7 => 'Julio',
+        8 => 'Agosto',
+        9 => 'Septiembre',
+        10 => 'Octubre',
+        11 => 'Noviembre',
+        12 => 'Diciembre',
+    ];
 @endphp
 
 <style>
@@ -33,8 +49,8 @@
 }
 .expiry-filters {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px;
+    grid-template-columns: minmax(140px, 0.8fr) minmax(120px, 0.7fr) minmax(190px, 1.2fr) minmax(170px, 1fr) minmax(170px, 1fr) auto;
+    gap: 12px;
     align-items: end;
 }
 .expiry-filters label {
@@ -53,13 +69,99 @@
     color: #0f172a;
     background: #fff;
 }
+.expiry-filter-actions {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    min-height: 100%;
+}
+.expiry-filter-note {
+    margin: 10px 0 0;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+.expiry-page.is-filtering .expiry-table-wrap,
+.expiry-page.is-filtering .card:nth-of-type(2) {
+    opacity: 0.62;
+    pointer-events: none;
+}
 .expiry-table-wrap {
     overflow-x: auto;
+}
+.expiry-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.expiry-actions-menu {
+    position: relative;
+}
+.expiry-actions-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.expiry-actions-list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 30;
+    min-width: 230px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px;
+    background: #ffffff;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+}
+.expiry-actions-list[hidden] {
+    display: none;
+}
+.expiry-actions-list button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    border-radius: 9px;
+    padding: 10px 11px;
+    background: transparent;
+    color: #0f172a;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+}
+.expiry-actions-list button:hover {
+    background: #f8fafc;
 }
 .expiry-table {
     width: 100%;
     min-width: 1180px;
     border-collapse: collapse;
+}
+.expiry-select-cell {
+    width: 42px;
+    min-width: 42px;
+    text-align: center !important;
+}
+.expiry-select-check {
+    width: 16px;
+    height: 16px;
+    accent-color: #0d9488;
+    cursor: pointer;
+}
+.expiry-contract-row {
+    cursor: pointer;
+    transition: background-color 0.14s ease;
+}
+.expiry-contract-row:hover {
+    background: #f8fafc;
+}
+.expiry-contract-row.is-selected {
+    background: #ecfeff;
 }
 .expiry-table th,
 .expiry-table td {
@@ -146,14 +248,19 @@
     font-size: 12px;
     line-height: 1.35;
 }
+@media (max-width: 1100px) {
+    .expiry-filters {
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    }
+}
 </style>
 
 <div class="module-page expiry-page">
     <div class="page-header">
         <div class="page-header-top" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
             <div>
-                <h1 class="page-title">Contratos por vencer</h1>
-                <p class="page-subtitle">Control simple por periodo y decision individual de renovacion.</p>
+                <h1 class="page-title">Vencimientos de contratos</h1>
+                <p class="page-subtitle">Contratos activos con fecha fin dentro del mes seleccionado.</p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">Personal</a>
@@ -171,39 +278,26 @@
     <div class="card">
         <div class="card-header"><span class="card-title">Filtros</span></div>
         <div class="card-body">
-            <form method="GET" action="{{ route('personal.contratos.expiring') }}" class="expiry-filters">
+            <form method="GET" action="{{ route('personal.contratos.expiring') }}" class="expiry-filters" id="expiryFiltersForm" autocomplete="off">
                 <label>
                     Mes
-                    <select name="mes">
+                    <select name="mes" data-auto-filter>
                         @for($i = 1; $i <= 12; $i++)
-                            <option value="{{ $i }}" @selected($month === $i)>{{ str_pad((string) $i, 2, '0', STR_PAD_LEFT) }}</option>
+                            <option value="{{ $i }}" @selected($month === $i)>{{ str_pad((string) $i, 2, '0', STR_PAD_LEFT) }} - {{ $monthNames[$i] }}</option>
                         @endfor
                     </select>
                 </label>
                 <label>
                     Anio
-                    <input type="number" name="anio" min="2000" max="2100" value="{{ $year }}">
+                    <input type="number" name="anio" min="2000" max="2100" value="{{ $year }}" data-auto-filter>
                 </label>
                 <label>
-                    Area
-                    <input type="text" name="area" value="{{ $filters['area'] ?? '' }}" placeholder="Area">
-                </label>
-                <label>
-                    Cargo
-                    <input type="text" name="cargo" value="{{ $filters['cargo'] ?? '' }}" placeholder="Puesto o cargo">
-                </label>
-                <label>
-                    Decision
-                    <select name="estado_decision">
-                        <option value="">Todas</option>
-                        @foreach($decisionOptions as $key => $label)
-                            <option value="{{ $key }}" @selected(($filters['estado_decision'] ?? '') === $key)>{{ $label }}</option>
-                        @endforeach
-                    </select>
+                    Cargo / puesto
+                    <input type="search" name="cargo" value="{{ $filters['cargo'] ?? '' }}" placeholder="Buscar cargo o puesto" data-auto-filter data-filter-delay="450">
                 </label>
                 <label>
                     Estado laboral
-                    <select name="estado_laboral">
+                    <select name="estado_laboral" data-auto-filter>
                         <option value="">Todos</option>
                         @foreach(['ACTIVO' => 'Activo', 'FALTA_CONTRATO' => 'Falta contrato', 'INACTIVO' => 'Inactivo', 'CESADO' => 'Cesado'] as $key => $label)
                             <option value="{{ $key }}" @selected(($filters['estado_laboral'] ?? '') === $key)>{{ $label }}</option>
@@ -211,22 +305,44 @@
                     </select>
                 </label>
                 <label>
-                    Estado contractual
-                    <select name="estado_contractual">
-                        <option value="ACTIVO" @selected(($filters['estado_contractual'] ?? 'ACTIVO') === 'ACTIVO')>Activo</option>
+                    Tipo de contrato
+                    <select name="tipo_contrato" data-auto-filter>
+                        <option value="">Todos</option>
+                        @foreach($contractTypeOptions as $key => $label)
+                            <option value="{{ $key }}" @selected(($filters['tipo_contrato'] ?? '') === $key)>{{ $label }}</option>
+                        @endforeach
                     </select>
                 </label>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+                <div class="expiry-filter-actions">
                     <a href="{{ route('personal.contratos.expiring') }}" class="btn btn-outline btn-sm">Limpiar</a>
                 </div>
             </form>
+            <p class="expiry-filter-note">Los filtros se aplican automaticamente al cambiar un campo.</p>
         </div>
     </div>
 
     <div class="card">
-        <div class="card-header">
-            <span class="card-title">Contratos encontrados: {{ $contratos->count() }}</span>
+        <div class="card-header expiry-card-header">
+            <div>
+                <span class="card-title">Contratos encontrados: {{ $contratos->count() }}</span>
+                @if($canDownloadContractFormats && $contratos->isNotEmpty())
+                    <div class="expiry-muted" id="expirySelectedCount">0 trabajadores seleccionados</div>
+                @endif
+            </div>
+            @if($canDownloadContractFormats && $contratos->isNotEmpty())
+                <div class="expiry-actions-menu" data-expiry-actions-menu>
+                    <button type="button" class="btn btn-primary btn-sm expiry-actions-toggle" id="expiryActionsToggle" aria-expanded="false" aria-controls="expiryActionsList">
+                        Acciones
+                        <span aria-hidden="true">▼</span>
+                    </button>
+                    <div class="expiry-actions-list" id="expiryActionsList" hidden>
+                        <button type="button" data-expiry-contract-format-action>
+                            <span>Renovacion de contrato</span>
+                            <small id="expiryActionsSelectedBadge">0 sel.</small>
+                        </button>
+                    </div>
+                </div>
+            @endif
         </div>
         <div class="card-body">
             @if($contratos->isEmpty())
@@ -236,6 +352,11 @@
                     <table class="expiry-table">
                         <thead>
                             <tr>
+                                @if($canDownloadContractFormats)
+                                    <th class="expiry-select-cell">
+                                        <input type="checkbox" id="expirySelectAllWorkers" class="expiry-select-check" aria-label="Seleccionar todos los contratos visibles">
+                                    </th>
+                                @endif
                                 <th>Trabajador</th>
                                 <th>Documento</th>
                                 <th>Cargo / area</th>
@@ -265,13 +386,37 @@
                                     $defaultCeaseDate = $end && $days !== null && $days <= 0
                                         ? $end->toDateString()
                                         : $today->toDateString();
+                                    $workerDocument = $personal?->numero_documento ?: $personal?->dni;
+                                    $workerPayload = [
+                                        'id' => (string) ($personal?->id ?? ''),
+                                        'nombre' => (string) ($personal?->nombre_completo ?: 'Trabajador'),
+                                        'documento' => (string) ($workerDocument ?: ''),
+                                        'puesto' => (string) ($contrato->puesto ?: $personal?->puesto ?: ''),
+                                    ];
                                 @endphp
-                                <tr>
+                                <tr class="expiry-contract-row"
+                                    data-contract-worker='@json($workerPayload)'
+                                    data-worker-name="{{ $personal?->nombre_completo ?: 'Trabajador' }}"
+                                    data-worker-document="{{ $workerDocument ?: '' }}"
+                                    data-worker-position="{{ $contrato->puesto ?: $personal?->puesto ?: '' }}">
+                                    @if($canDownloadContractFormats)
+                                        <td class="expiry-select-cell" onclick="event.stopPropagation()">
+                                            <input
+                                                type="checkbox"
+                                                class="expiry-select-check js-expiry-contract-worker-check"
+                                                data-contract-format-worker-check
+                                                value="{{ $personal?->id ?? '' }}"
+                                                data-worker-name="{{ $personal?->nombre_completo ?: 'Trabajador' }}"
+                                                data-worker-payload='@json($workerPayload)'
+                                                aria-label="Seleccionar {{ $personal?->nombre_completo ?: 'trabajador' }} para formato de contrato"
+                                                @disabled(!$personal?->id)>
+                                        </td>
+                                    @endif
                                     <td>
                                         <strong>{{ $personal?->nombre_completo ?: 'Sin trabajador' }}</strong>
                                         <div class="expiry-muted">Contrato #{{ $contrato->contrato_numero }}</div>
                                     </td>
-                                    <td>{{ $personal?->tipo_documento ?: 'DNI' }} {{ $personal?->numero_documento ?: $personal?->dni }}</td>
+                                    <td>{{ $personal?->tipo_documento ?: 'DNI' }} {{ $workerDocument }}</td>
                                     <td>
                                         <strong>{{ $contrato->puesto ?: $personal?->puesto ?: '-' }}</strong>
                                         <div class="expiry-muted">{{ $contrato->area ?: '-' }}</div>
@@ -401,4 +546,126 @@
         </div>
     </div>
 </div>
+
+@include('personal.partials.contract-format-modal', [
+    'contractFormatCanDownload' => $canDownloadContractFormats,
+    'contractFormatSelectedWorkerSelector' => '.js-expiry-contract-worker-check:checked',
+])
+
+<script>
+(function () {
+    const form = document.getElementById('expiryFiltersForm');
+    if (!form) return;
+
+    let timer = null;
+    let isSubmitting = false;
+
+    const submitFilters = function (delay) {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            if (isSubmitting) return;
+            isSubmitting = true;
+            document.querySelector('.expiry-page')?.classList.add('is-filtering');
+            form.submit();
+        }, delay || 0);
+    };
+
+    form.querySelectorAll('[data-auto-filter]').forEach(function (field) {
+        const eventName = field.tagName === 'INPUT' && field.type === 'search' ? 'input' : 'change';
+        field.addEventListener(eventName, function () {
+            const delay = Number(field.dataset.filterDelay || 0);
+            submitFilters(delay);
+        });
+    });
+})();
+
+(function () {
+    const checks = Array.from(document.querySelectorAll('.js-expiry-contract-worker-check'));
+    const selectAll = document.getElementById('expirySelectAllWorkers');
+    const selectedCount = document.getElementById('expirySelectedCount');
+    const selectedBadge = document.getElementById('expiryActionsSelectedBadge');
+    const actionsToggle = document.getElementById('expiryActionsToggle');
+    const actionsList = document.getElementById('expiryActionsList');
+    const contractFormatAction = document.querySelector('[data-expiry-contract-format-action]');
+
+    if (checks.length === 0) return;
+
+    const selectedChecks = function () {
+        return checks.filter(function (input) {
+            return input.checked && !input.disabled && String(input.value || '').trim() !== '';
+        });
+    };
+
+    const updateSelection = function () {
+        const selected = selectedChecks();
+        const enabled = checks.filter(function (input) { return !input.disabled; });
+
+        checks.forEach(function (input) {
+            input.closest('tr')?.classList.toggle('is-selected', input.checked && !input.disabled);
+        });
+
+        if (selectAll) {
+            selectAll.checked = enabled.length > 0 && selected.length === enabled.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < enabled.length;
+            selectAll.disabled = enabled.length === 0;
+        }
+
+        if (selectedCount) {
+            selectedCount.textContent = selected.length + ' trabajador(es) seleccionado(s)';
+        }
+        if (selectedBadge) {
+            selectedBadge.textContent = selected.length + ' sel.';
+        }
+    };
+
+    const isInteractiveTarget = function (target) {
+        return !!target.closest('a, button, input, select, textarea, label, form, details, summary, [role="button"], [contenteditable="true"]');
+    };
+
+    checks.forEach(function (input) {
+        input.addEventListener('change', updateSelection);
+        input.closest('tr')?.addEventListener('click', function (event) {
+            if (isInteractiveTarget(event.target) || input.disabled) {
+                return;
+            }
+
+            input.checked = !input.checked;
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+    });
+
+    selectAll?.addEventListener('change', function () {
+        checks.forEach(function (input) {
+            if (!input.disabled) {
+                input.checked = selectAll.checked;
+            }
+        });
+        updateSelection();
+    });
+
+    actionsToggle?.addEventListener('click', function (event) {
+        event.stopPropagation();
+        const isHidden = actionsList?.hasAttribute('hidden');
+        actionsList?.toggleAttribute('hidden', !isHidden);
+        actionsToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('[data-expiry-actions-menu]')) {
+            actionsList?.setAttribute('hidden', '');
+            actionsToggle?.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    contractFormatAction?.addEventListener('click', function () {
+        actionsList?.setAttribute('hidden', '');
+        actionsToggle?.setAttribute('aria-expanded', 'false');
+        if (typeof window.openContractFormatModal === 'function') {
+            window.openContractFormatModal();
+        }
+    });
+
+    updateSelection();
+})();
+</script>
 @endsection

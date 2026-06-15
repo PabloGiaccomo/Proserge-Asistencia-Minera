@@ -1836,7 +1836,7 @@
                                 Descargar formato de contrato
                             </button>
                         @endif
-                        @if($canUpdatePersonal)
+                        @if($canUpdatePersonal && \Illuminate\Support\Facades\Route::has('personal.puestos.index'))
                             <a href="{{ route('personal.puestos.index') }}" class="accion-item">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
                                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>

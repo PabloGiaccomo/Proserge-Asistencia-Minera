@@ -154,6 +154,15 @@ class PersonalContratoFormatoServiceTest extends TestCase
         $session = $this->updateSession();
         $personalId = $this->createWorker('FALTA_CONTRATO');
 
+        DB::table('personal_puestos')->insertOrIgnore([
+            'id' => (string) Str::uuid(),
+            'nombre' => 'Operario contrato',
+            'funciones' => null,
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $this->withSession($session)
             ->put('/personal/' . $personalId . '/datos-contrato', [
                 'fecha_inicio_contrato' => '2026-06-03',

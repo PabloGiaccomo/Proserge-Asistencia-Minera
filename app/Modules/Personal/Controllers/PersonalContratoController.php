@@ -22,20 +22,24 @@ class PersonalContratoController extends WebPageController
 
     public function expiring(Request $request): View
     {
+        $rawMonth = $request->input('mes');
+        $rawYear = $request->input('anio');
+        $month = is_numeric($rawMonth) ? max(1, min(12, (int) $rawMonth)) : now()->month;
+        $year = is_numeric($rawYear) ? max(2000, min(2100, (int) $rawYear)) : now()->year;
+
         $filters = [
-            'mes' => $request->input('mes', now()->month),
-            'anio' => $request->input('anio', now()->year),
-            'area' => $request->input('area', ''),
+            'mes' => $month,
+            'anio' => $year,
             'cargo' => $request->input('cargo', ''),
-            'estado_decision' => $request->input('estado_decision', ''),
             'estado_laboral' => $request->input('estado_laboral', ''),
-            'estado_contractual' => $request->input('estado_contractual', PersonalContrato::ESTADO_ACTIVO),
+            'tipo_contrato' => $request->input('tipo_contrato', ''),
         ];
 
         return view('personal.contratos.vencimientos', [
             'filters' => $filters,
             'contratos' => $this->contratoService->listExpiringContracts($filters),
             'decisionOptions' => $this->contratoService->decisionStateOptions(),
+            'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
             'reasonOptions' => $this->contratoService->noRenewalReasonOptions(),
             'cessationReasonOptions' => $this->contratoService->controlledCeaseReasonOptions(),
         ]);

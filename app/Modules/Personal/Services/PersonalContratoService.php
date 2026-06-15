@@ -51,10 +51,10 @@ class PersonalContratoService
             return collect();
         }
 
-        $month = (int) ($filters['mes'] ?? Carbon::today()->month);
-        $year = (int) ($filters['anio'] ?? Carbon::today()->year);
-        $month = max(1, min(12, $month));
-        $year = max(2000, min(2100, $year));
+        $rawMonth = $filters['mes'] ?? null;
+        $rawYear = $filters['anio'] ?? null;
+        $month = is_numeric($rawMonth) ? max(1, min(12, (int) $rawMonth)) : Carbon::today()->month;
+        $year = is_numeric($rawYear) ? max(2000, min(2100, (int) $rawYear)) : Carbon::today()->year;
         $start = Carbon::create($year, $month, 1)->startOfDay();
         $end = $start->copy()->endOfMonth();
 
@@ -67,11 +67,6 @@ class PersonalContratoService
             ->orderBy('fecha_fin')
             ->orderBy('contrato_numero');
 
-        $area = trim((string) ($filters['area'] ?? ''));
-        if ($area !== '') {
-            $query->where('area', 'like', '%' . $area . '%');
-        }
-
         $cargo = trim((string) ($filters['cargo'] ?? ''));
         if ($cargo !== '') {
             $query->where(function ($query) use ($cargo): void {
@@ -80,29 +75,36 @@ class PersonalContratoService
             });
         }
 
-        $decision = strtoupper(trim((string) ($filters['estado_decision'] ?? '')));
-        if (in_array($decision, $this->decisionStateKeys(), true)) {
-            if ($decision === PersonalContrato::DECISION_PENDIENTE) {
-                $query->where(function ($query): void {
-                    $query->whereNull('estado_decision_renovacion')
-                        ->orWhere('estado_decision_renovacion', PersonalContrato::DECISION_PENDIENTE);
-                });
-            } else {
-                $query->where('estado_decision_renovacion', $decision);
-            }
-        }
-
         $estadoLaboral = strtoupper(trim((string) ($filters['estado_laboral'] ?? '')));
         if (in_array($estadoLaboral, ['ACTIVO', 'FALTA_CONTRATO', 'CESADO', 'INACTIVO'], true)) {
             $query->whereHas('personal', fn ($personalQuery) => $personalQuery->where('estado', $estadoLaboral));
         }
 
-        $estadoContractual = strtoupper(trim((string) ($filters['estado_contractual'] ?? '')));
-        if ($estadoContractual !== '' && $estadoContractual !== PersonalContrato::ESTADO_ACTIVO) {
-            return collect();
+        $contractType = strtoupper(trim((string) ($filters['tipo_contrato'] ?? '')));
+        if ($contractType !== '') {
+            $query->whereRaw('UPPER(tipo_contrato) = ?', [$contractType]);
         }
 
         return $query->get();
+    }
+
+    public function contractTypeOptions(): array
+    {
+        if (!Schema::hasTable('personal_contratos')) {
+            return [];
+        }
+
+        return PersonalContrato::query()
+            ->whereNotNull('tipo_contrato')
+            ->select('tipo_contrato')
+            ->distinct()
+            ->orderBy('tipo_contrato')
+            ->pluck('tipo_contrato')
+            ->map(fn ($type): string => trim((string) $type))
+            ->filter(fn (string $type): bool => $type !== '')
+            ->unique()
+            ->mapWithKeys(fn (string $type): array => [$type => $type])
+            ->all();
     }
 
     public function registerRenewalDecision(PersonalContrato $contract, array $payload, Usuario $user): PersonalContrato
