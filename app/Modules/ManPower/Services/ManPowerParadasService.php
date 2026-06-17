@@ -87,12 +87,20 @@ class ManPowerParadasService
             'destino_nombre' => $rq->destino_nombre ?? $rq->mina?->nombre,
             'area' => $rq->area,
             'fecha' => $fecha,
-            'detalle_requerido' => $rq->detalle->map(fn ($item): array => [
-                'rq_mina_detalle_id' => $item->id,
-                'puesto' => $item->puesto,
-                'cantidad' => (int) $item->cantidad,
-                'cantidad_atendida' => (int) $item->cantidad_atendida,
-            ])->values()->all(),
+            'detalle_requerido' => $rq->detalle->map(function ($item): array {
+                $cantidad = max(0, (int) $item->cantidad);
+                $backup = (int) ($item->cantidad_backup ?? round($cantidad * 0.2));
+                $total = (int) ($item->cantidad_total ?? ($cantidad + $backup));
+
+                return [
+                    'rq_mina_detalle_id' => $item->id,
+                    'puesto' => $item->puesto,
+                    'cantidad' => $cantidad,
+                    'cantidad_backup' => $backup,
+                    'cantidad_total' => $total,
+                    'cantidad_atendida' => (int) $item->cantidad_atendida,
+                ];
+            })->values()->all(),
             'aprobados' => $aprobados,
         ];
     }

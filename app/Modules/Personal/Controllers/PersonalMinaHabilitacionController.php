@@ -10,6 +10,7 @@ use App\Models\PersonalMinaExamenIntento;
 use App\Models\PersonalMina;
 use App\Modules\Personal\Services\PersonalMinaExcelImportService;
 use App\Modules\Personal\Services\PersonalMinaHabilitacionService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -285,16 +286,30 @@ class PersonalMinaHabilitacionController extends WebPageController
             ->with('success', 'Asignacion minera desactivada correctamente.');
     }
 
-    public function deactivateRequirement(Request $request, string $requirementId): RedirectResponse
+    public function deactivateRequirement(Request $request, string $requirementId): RedirectResponse|JsonResponse
     {
         $requirement = MinaRequisito::query()->find($requirementId);
         abort_if(!$requirement, 404);
 
-        $this->service->deactivateRequirement($requirement, $this->requireAuthenticatedUser());
+        $requirement = $this->service->deactivateRequirement($requirement, $this->requireAuthenticatedUser());
+        $message = 'Examen quitado de la mina correctamente.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'requirement_id' => $requirement->id,
+                'deactivated_requirement_ids' => $requirement->getAttribute('deactivated_requirement_ids') ?: [$requirement->id],
+                'mina_id' => $requirement->mina_id,
+                'active_count' => MinaRequisito::query()
+                    ->where('mina_id', $requirement->mina_id)
+                    ->where('activo', true)
+                    ->count(),
+            ]);
+        }
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
-            ->with('success', 'Examen quitado de la mina correctamente.');
+            ->with('success', $message);
     }
 
     public function generateExams(Request $request, string $assignmentId): RedirectResponse

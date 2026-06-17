@@ -44,6 +44,11 @@ class RQProserge extends Model
         return $this->hasMany(RQProsergeDetalle::class, 'rq_proserge_id');
     }
 
+    public function cambiosRqMina(): HasMany
+    {
+        return $this->hasMany(RQMinaDetalleCambio::class, 'rq_proserge_id')->latest();
+    }
+
     public function gruposTrabajo(): HasMany
     {
         return $this->hasMany(GrupoTrabajo::class, 'rq_proserge_id');

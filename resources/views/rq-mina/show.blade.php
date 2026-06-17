@@ -6,16 +6,35 @@
 @php
     $detalle = $item['detalle'] ?? [];
     $transporte = $item['transporte'] ?? [];
+    $cambiosPedido = $item['cambios_pedido'] ?? [];
     $supervisor = $item['supervisor'] ?? null;
     $planOperativo = $item['plan_operativo'] ?? [];
     $personalParada = $item['personal_parada'] ?? [];
-    $totalSolicitado = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $detalle));
-    $totalAtendido = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_atendida'] ?? 0), $detalle));
-    $totalPendiente = max(0, $totalSolicitado - $totalAtendido);
+    $detalleConTotales = array_map(static function (array $linea): array {
+        $cantidad = max(0, (int) ($linea['cantidad'] ?? 0));
+        $backup = array_key_exists('cantidad_backup', $linea)
+            ? max(0, (int) $linea['cantidad_backup'])
+            : (int) round($cantidad * 0.2);
+        $total = array_key_exists('cantidad_total', $linea)
+            ? max(0, (int) $linea['cantidad_total'])
+            : $cantidad + $backup;
+
+        $linea['cantidad'] = $cantidad;
+        $linea['cantidad_backup'] = $backup;
+        $linea['cantidad_total'] = $total;
+        $linea['cantidad_atendida'] = max(0, (int) ($linea['cantidad_atendida'] ?? 0));
+
+        return $linea;
+    }, $detalle);
+    $totalSolicitado = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $detalleConTotales));
+    $totalBackup = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_backup'] ?? 0), $detalleConTotales));
+    $totalSolicitadoConBackup = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_total'] ?? 0), $detalleConTotales));
+    $totalAtendido = array_sum(array_map(static fn ($d) => (int) ($d['cantidad_atendida'] ?? 0), $detalleConTotales));
+    $totalPendiente = max(0, $totalSolicitadoConBackup - $totalAtendido);
     $totalTransporte = array_sum(array_map(static fn ($d) => (int) ($d['cantidad'] ?? 0), $transporte));
     $puestosCount = count($detalle);
     $transportesCount = count($transporte);
-    $cobertura = $totalSolicitado > 0 ? round(($totalAtendido / $totalSolicitado) * 100, 1) : 0;
+    $cobertura = $totalSolicitadoConBackup > 0 ? round(($totalAtendido / $totalSolicitadoConBackup) * 100, 1) : 0;
     $fechaInicio = !empty($item['fecha_inicio']) ? \Carbon\Carbon::parse($item['fecha_inicio']) : null;
     $fechaFin = !empty($item['fecha_fin']) ? \Carbon\Carbon::parse($item['fecha_fin']) : null;
     $diasParada = ($fechaInicio && $fechaFin) ? max(1, $fechaInicio->diffInDays($fechaFin) + 1) : null;
@@ -43,6 +62,11 @@
 .rqm-chip.cancelado { background:#fee2e2; color:#991b1b; }
 .rqm-progress { width:100%; height:8px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
 .rqm-progress > span { display:block; height:100%; background:linear-gradient(90deg,#14b8a6,#0ea5e9); }
+.rqm-change-alert { border:1px solid #fed7aa; background:#fff7ed; color:#9a3412; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
+.rqm-change-alert h3 { margin:0 0 8px; color:#9a3412; font-size:15px; }
+.rqm-change-alert ul { margin:0; padding-left:18px; display:grid; gap:5px; }
+.rqm-change-alert li { font-size:13px; font-weight:600; }
+.rqm-change-alert span { color:#c2410c; font-weight:500; }
 .rqm-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
 .rqm-meta-item { border:1px solid #f1f5f9; border-radius:10px; padding:10px; }
 .rqm-meta-label { display:block; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.4px; }
@@ -92,6 +116,22 @@
 </div>
 
 @if($item)
+@if(!empty($cambiosPedido))
+<div class="rqm-change-alert">
+    <h3>Cambios del pedido para RRHH</h3>
+    <ul>
+        @foreach($cambiosPedido as $cambio)
+            <li>
+                {{ $cambio['mensaje'] ?? 'Cambio pendiente en el pedido de personal.' }}
+                @if(!empty($cambio['fecha']))
+                    <span>({{ $cambio['fecha'] }})</span>
+                @endif
+            </li>
+        @endforeach
+    </ul>
+</div>
+@endif
+
 <div class="rqm-kpis">
     <div class="rqm-kpi">
         <div class="rqm-kpi-label">Puestos requeridos</div>
@@ -99,9 +139,19 @@
         <div class="rqm-kpi-sub">roles distintos</div>
     </div>
     <div class="rqm-kpi">
-        <div class="rqm-kpi-label">Total solicitado</div>
+        <div class="rqm-kpi-label">Cantidad RQ</div>
         <div class="rqm-kpi-value">{{ $totalSolicitado }}</div>
-        <div class="rqm-kpi-sub">personas</div>
+        <div class="rqm-kpi-sub">personas base</div>
+    </div>
+    <div class="rqm-kpi">
+        <div class="rqm-kpi-label">Back up 20%</div>
+        <div class="rqm-kpi-value">{{ $totalBackup }}</div>
+        <div class="rqm-kpi-sub">sin decimales</div>
+    </div>
+    <div class="rqm-kpi">
+        <div class="rqm-kpi-label">Total con back up</div>
+        <div class="rqm-kpi-value">{{ $totalSolicitadoConBackup }}</div>
+        <div class="rqm-kpi-sub">personal requerido</div>
     </div>
     <div class="rqm-kpi">
         <div class="rqm-kpi-label">Total atendido</div>
@@ -354,27 +404,33 @@
         <h3 class="card-title">Detalle del RQ Mina (Puestos Solicitados)</h3>
     </div>
     <div class="card-body">
-        @if(!empty($detalle))
+        @if(!empty($detalleConTotales))
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
                         <tr>
                             <th>Puesto</th>
-                            <th>Cantidad Solicitada</th>
-                            <th>Cantidad Atendida</th>
+                            <th>Cantidad RQ</th>
+                            <th>Back up 20%</th>
+                            <th>Total con back up</th>
+                            <th>Entregado por RRHH</th>
                             <th>Pendiente</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($detalle as $linea)
+                        @foreach($detalleConTotales as $linea)
                         @php
                             $solicitada = (int) ($linea['cantidad'] ?? 0);
+                            $backup = (int) ($linea['cantidad_backup'] ?? round($solicitada * 0.2));
+                            $totalLinea = (int) ($linea['cantidad_total'] ?? ($solicitada + $backup));
                             $atendida = (int) ($linea['cantidad_atendida'] ?? 0);
-                            $pendiente = max(0, $solicitada - $atendida);
+                            $pendiente = max(0, $totalLinea - $atendida);
                         @endphp
                         <tr>
                             <td>{{ $linea['puesto'] ?? '-' }}</td>
                             <td>{{ $solicitada }}</td>
+                            <td>{{ $backup }}</td>
+                            <td>{{ $totalLinea }}</td>
                             <td>{{ $atendida }}</td>
                             <td>{{ $pendiente }}</td>
                         </tr>
@@ -393,7 +449,7 @@
         <h3 class="card-title">Personal Seleccionado para la Parada</h3>
     </div>
     <div class="card-body">
-        @if(($item['estado'] ?? '') !== 'enviado')
+        @if(strtoupper((string) ($item['estado'] ?? '')) !== 'ENVIADO')
             <p class="text-muted">El RQ Mina aun no fue enviado. Cuando se envie y exista seleccion desde RQ Proserge, el personal aparecera aqui.</p>
         @elseif(!empty($personalParada))
             <div class="table-responsive">
@@ -430,5 +486,17 @@
         ])
     </div>
 </div>
+@endif
+
+@if(session('clear_rq_mina_plan_draft'))
+<script>
+(function () {
+    try {
+        window.localStorage.removeItem('rq_mina_plan_draft:' + @json(session('clear_rq_mina_plan_draft')));
+    } catch (error) {
+        // No bloquea la vista si el navegador no permite almacenamiento local.
+    }
+})();
+</script>
 @endif
 @endsection

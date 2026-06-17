@@ -8,9 +8,13 @@ use App\Models\Personal;
 use App\Models\RQMina;
 use App\Models\RQMinaActividad;
 use App\Models\RQMinaActividadGrupo;
+use App\Models\RQMinaDetalle;
+use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaFieldOption;
+use App\Models\RQProsergeDetalle;
 use App\Models\Taller;
 use App\Models\Usuario;
+use App\Modules\RQProserge\Services\RQProsergeService;
 use App\Modules\RQMina\Policies\RQMinaPolicy;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
@@ -20,8 +24,10 @@ use Illuminate\Support\Str;
 
 class RQMinaService
 {
-    public function __construct(private readonly RQMinaPolicy $policy)
-    {
+    public function __construct(
+        private readonly RQMinaPolicy $policy,
+        private readonly RQProsergeService $rqProsergeService,
+    ) {
     }
 
     public function listForUser(Usuario $usuario, array $filters, int $perPage = 10, int $page = 1): array
@@ -31,7 +37,7 @@ class RQMinaService
             'creador:id,email,personal_id',
             'creador.personal:id,nombre_completo',
             'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
-            'detalle:id,rq_mina_id,puesto,cantidad,cantidad_atendida',
+            'detalle',
             'transportes:id,rq_mina_id,transporte,cantidad',
             'actividadGrupos.actividades.turnos',
             'actividadGrupos.transportes',
@@ -189,15 +195,7 @@ class RQMinaService
                 'created_by_usuario_id' => $usuario->id,
             ]);
 
-            $rows = collect($detallePayload)->map(fn (array $item): array => [
-                'id' => (string) Str::uuid(),
-                'rq_mina_id' => $rqMina->id,
-                'puesto' => $item['puesto'],
-                'cantidad' => (int) $item['cantidad'],
-                'cantidad_atendida' => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ])->all();
+            $rows = $this->buildDetalleRows((string) $rqMina->id, $detallePayload);
 
             $rqMina->detalle()->insert($rows);
 
@@ -216,7 +214,7 @@ class RQMinaService
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
                 ], $rows),
                 'cantidad_puestos' => count($rows),
-                'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad'] ?? 0)),
+                'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad_total'] ?? $row['cantidad'] ?? 0)),
                 'transporte_guardado' => array_map(static fn (array $row): array => [
                     'transporte' => (string) ($row['transporte'] ?? ''),
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
@@ -283,20 +281,9 @@ class RQMinaService
             ]);
             $rqMina->save();
 
-            $rqMina->detalle()->delete();
             $rqMina->transportes()->delete();
 
-            $rows = collect($detallePayload)->map(fn (array $item): array => [
-                'id' => (string) Str::uuid(),
-                'rq_mina_id' => $rqMina->id,
-                'puesto' => $item['puesto'],
-                'cantidad' => (int) $item['cantidad'],
-                'cantidad_atendida' => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ])->all();
-
-            $rqMina->detalle()->insert($rows);
+            $rows = $this->replaceDetalle($rqMina, $detallePayload, $usuario);
 
             $transportRows = $this->buildTransporteRows((string) $rqMina->id, $payload['transporte'] ?? []);
             if (!empty($transportRows)) {
@@ -313,13 +300,17 @@ class RQMinaService
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
                 ], $rows),
                 'cantidad_puestos' => count($rows),
-                'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad'] ?? 0)),
+                'cantidad_total' => collect($rows)->sum(fn (array $row) => (int) ($row['cantidad_total'] ?? $row['cantidad'] ?? 0)),
                 'transporte_guardado' => array_map(static fn (array $row): array => [
                     'transporte' => (string) ($row['transporte'] ?? ''),
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
                 ], $transportRows),
                 'supervisor_id' => (string) ($rqMina->supervisor_id ?? ''),
             ]);
+
+            if (strtoupper((string) $rqMina->estado) === 'ENVIADO') {
+                $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+            }
 
             return $rqMina->load([
                 'mina:id,nombre',
@@ -376,6 +367,10 @@ class RQMinaService
             $rqMina->save();
             $this->rememberFieldOptions($usuario, $payload);
 
+            if (strtoupper((string) $rqMina->estado) === 'ENVIADO') {
+                $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+            }
+
             return $rqMina->load([
                 'mina:id,nombre',
                 'creador:id,email,personal_id',
@@ -401,18 +396,31 @@ class RQMinaService
         ]);
         $rqMina->save();
 
+        $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+
         return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes']);
     }
 
-    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo): ?RQMina
+    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null): ?RQMina
     {
         if (!$this->policy->update($usuario, $rqMina)) {
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo): RQMina {
+        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo, $detallePayload): RQMina {
+            if ($detallePayload !== null) {
+                $this->replaceDetalle($rqMina, $detallePayload, $usuario);
+            }
+
             $this->replacePlanOperativo($rqMina, $planOperativo);
-            $this->rememberFieldOptions($usuario, ['plan_operativo' => $planOperativo]);
+            $this->rememberFieldOptions($usuario, [
+                'detalle' => $detallePayload ?? [],
+                'plan_operativo' => $planOperativo,
+            ]);
+
+            if (strtoupper((string) $rqMina->estado) === 'ENVIADO') {
+                $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+            }
 
             return $rqMina->fresh([
                 'mina:id,nombre',
@@ -457,12 +465,6 @@ class RQMinaService
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.supervisor_seguridad_dia', $activity['supervisor_seguridad_dia'] ?? null);
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.supervisor_seguridad_noche', $activity['supervisor_seguridad_noche'] ?? null);
 
-                foreach (($activity['turnos'] ?? []) as $turno) {
-                    $this->rememberFieldOption($usuario, 'rq_mina.plan.turno_a', $turno['turno_a'] ?? null);
-                    $this->rememberFieldOption($usuario, 'rq_mina.plan.real_turno_a', $turno['real_turno_a'] ?? null);
-                    $this->rememberFieldOption($usuario, 'rq_mina.plan.turno_b', $turno['turno_b'] ?? null);
-                    $this->rememberFieldOption($usuario, 'rq_mina.plan.real_turno_b', $turno['real_turno_b'] ?? $turno['real'] ?? null);
-                }
             }
 
             foreach (($group['transportes'] ?? []) as $transport) {
@@ -693,6 +695,279 @@ class RQMinaService
         ];
     }
 
+    private function normalizeDetalleRows(mixed $items): array
+    {
+        if (!is_array($items)) {
+            return [];
+        }
+
+        $unique = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $puesto = preg_replace('/\s+/u', ' ', trim((string) ($item['puesto'] ?? '')));
+            $cantidad = max(0, (int) ($item['cantidad'] ?? 0));
+            $key = $this->normalizeFieldOptionValue($puesto);
+
+            if ($puesto === '' || $cantidad <= 0 || $key === '') {
+                continue;
+            }
+
+            if (!isset($unique[$key])) {
+                $unique[$key] = [
+                    'puesto' => $puesto,
+                    'cantidad' => 0,
+                ];
+            }
+
+            $unique[$key]['cantidad'] += $cantidad;
+        }
+
+        return array_values($unique);
+    }
+
+    private function backupForCantidad(int $cantidad): int
+    {
+        return (int) round(max(0, $cantidad) * 0.2);
+    }
+
+    private function buildDetalleRow(string $rqMinaId, array $item, int $cantidadAtendida = 0, ?string $id = null): array
+    {
+        $cantidad = max(0, (int) ($item['cantidad'] ?? 0));
+        $backup = $this->backupForCantidad($cantidad);
+
+        return [
+            'id' => $id ?: (string) Str::uuid(),
+            'rq_mina_id' => $rqMinaId,
+            'puesto' => trim((string) ($item['puesto'] ?? '')),
+            'cantidad' => $cantidad,
+            'cantidad_backup' => $backup,
+            'cantidad_total' => $cantidad + $backup,
+            'cantidad_atendida' => max(0, $cantidadAtendida),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+    }
+
+    private function buildDetalleRows(string $rqMinaId, array $items): array
+    {
+        return collect($items)
+            ->map(fn (array $item): array => $this->buildDetalleRow($rqMinaId, $item))
+            ->values()
+            ->all();
+    }
+
+    private function replaceDetalle(RQMina $rqMina, array $detallePayload, ?Usuario $usuario = null): array
+    {
+        $normalized = $this->resolveDetallePayload(['detalle' => $detallePayload]);
+        $existingRows = $rqMina->detalle()->withCount('asignaciones')->get();
+        $trackChanges = $this->shouldTrackDetalleChanges($rqMina);
+        $existingByKey = [];
+
+        foreach ($existingRows as $row) {
+            $key = $this->normalizeFieldOptionValue((string) $row->puesto);
+            if ($key !== '' && !isset($existingByKey[$key])) {
+                $existingByKey[$key] = $row;
+            }
+        }
+
+        $keptIds = [];
+        $rowsForLog = [];
+        foreach ($normalized as $item) {
+            $key = $this->normalizeFieldOptionValue((string) ($item['puesto'] ?? ''));
+            $existing = $key !== '' ? ($existingByKey[$key] ?? null) : null;
+
+            if ($existing) {
+                $previousTotal = (int) ($existing->cantidad_total ?: $existing->cantidad);
+                $previousCantidad = (int) $existing->cantidad;
+                $previousAssigned = (int) ($existing->asignaciones_count ?? 0);
+                $row = $this->buildDetalleRow(
+                    (string) $rqMina->id,
+                    $item,
+                    (int) $existing->cantidad_atendida,
+                    (string) $existing->id
+                );
+                $update = $row;
+                unset($update['id'], $update['rq_mina_id'], $update['created_at']);
+                $existing->fill($update);
+                $existing->save();
+
+                $removedAssignments = $this->trimAssignmentsForDetalle($existing, (int) $row['cantidad_total']);
+                if ($trackChanges && ($previousTotal !== (int) $row['cantidad_total'] || $previousCantidad !== (int) $row['cantidad'])) {
+                    $tipo = (int) $row['cantidad_total'] > $previousTotal
+                        ? RQMinaDetalleCambio::TIPO_CANTIDAD_AUMENTADA
+                        : RQMinaDetalleCambio::TIPO_CANTIDAD_REDUCIDA;
+
+                    $this->recordDetalleChange(
+                        rqMina: $rqMina,
+                        detalle: $existing,
+                        puesto: (string) $row['puesto'],
+                        tipo: $tipo,
+                        cantidadAnterior: $previousTotal,
+                        cantidadNueva: (int) $row['cantidad_total'],
+                        asignacionesRetiradas: $removedAssignments,
+                        usuario: $usuario,
+                        mensaje: $this->detalleChangeMessage($tipo, (string) $row['puesto'], $previousTotal, (int) $row['cantidad_total'], $removedAssignments)
+                    );
+                } elseif ($removedAssignments > 0) {
+                    $this->recordDetalleChange(
+                        rqMina: $rqMina,
+                        detalle: $existing,
+                        puesto: (string) $row['puesto'],
+                        tipo: RQMinaDetalleCambio::TIPO_CANTIDAD_REDUCIDA,
+                        cantidadAnterior: $previousAssigned,
+                        cantidadNueva: (int) $row['cantidad_total'],
+                        asignacionesRetiradas: $removedAssignments,
+                        usuario: $usuario,
+                        mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_CANTIDAD_REDUCIDA, (string) $row['puesto'], $previousAssigned, (int) $row['cantidad_total'], $removedAssignments)
+                    );
+                }
+
+                $keptIds[] = (string) $existing->id;
+                $rowsForLog[] = $row;
+                continue;
+            }
+
+            $row = $this->buildDetalleRow((string) $rqMina->id, $item);
+            /** @var RQMinaDetalle $created */
+            $created = $rqMina->detalle()->create($row);
+            if ($trackChanges) {
+                $this->recordDetalleChange(
+                    rqMina: $rqMina,
+                    detalle: $created,
+                    puesto: (string) $row['puesto'],
+                    tipo: RQMinaDetalleCambio::TIPO_PUESTO_AGREGADO,
+                    cantidadAnterior: 0,
+                    cantidadNueva: (int) $row['cantidad_total'],
+                    asignacionesRetiradas: 0,
+                    usuario: $usuario,
+                    mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_PUESTO_AGREGADO, (string) $row['puesto'], 0, (int) $row['cantidad_total'], 0)
+                );
+            }
+            $keptIds[] = (string) $row['id'];
+            $rowsForLog[] = $row;
+        }
+
+        foreach ($existingRows as $row) {
+            if (in_array((string) $row->id, $keptIds, true)) {
+                continue;
+            }
+
+            $previousTotal = (int) ($row->cantidad_total ?: $row->cantidad);
+            $removedAssignments = $this->trimAssignmentsForDetalle($row, 0);
+
+            if ($trackChanges) {
+                $this->recordDetalleChange(
+                    rqMina: $rqMina,
+                    detalle: $row,
+                    puesto: (string) $row->puesto,
+                    tipo: RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO,
+                    cantidadAnterior: $previousTotal,
+                    cantidadNueva: 0,
+                    asignacionesRetiradas: $removedAssignments,
+                    usuario: $usuario,
+                    mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO, (string) $row->puesto, $previousTotal, 0, $removedAssignments)
+                );
+            }
+
+            $row->delete();
+        }
+
+        return $rowsForLog;
+    }
+
+    private function shouldTrackDetalleChanges(RQMina $rqMina): bool
+    {
+        return strtoupper((string) $rqMina->estado) === 'ENVIADO'
+            || $rqMina->rqProserge()->exists();
+    }
+
+    private function trimAssignmentsForDetalle(RQMinaDetalle $detalle, int $targetTotal): int
+    {
+        $targetTotal = max(0, $targetTotal);
+        $assignments = RQProsergeDetalle::query()
+            ->where('rq_mina_detalle_id', $detalle->id)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get(['id', 'rq_proserge_id']);
+
+        $surplus = max(0, $assignments->count() - $targetTotal);
+        if ($surplus <= 0) {
+            $detalle->forceFill([
+                'cantidad_atendida' => $assignments->count(),
+            ])->save();
+
+            return 0;
+        }
+
+        $idsToRemove = $assignments->take($surplus)->pluck('id')->values();
+        RQProsergeDetalle::query()->whereIn('id', $idsToRemove)->delete();
+
+        $remaining = RQProsergeDetalle::query()
+            ->where('rq_mina_detalle_id', $detalle->id)
+            ->count();
+
+        $detalle->forceFill([
+            'cantidad_atendida' => $remaining,
+        ])->save();
+
+        $this->rqProsergeService->recalculateEstadoForRqMina((string) $detalle->rq_mina_id);
+
+        return $surplus;
+    }
+
+    private function recordDetalleChange(
+        RQMina $rqMina,
+        ?RQMinaDetalle $detalle,
+        string $puesto,
+        string $tipo,
+        ?int $cantidadAnterior,
+        ?int $cantidadNueva,
+        int $asignacionesRetiradas,
+        ?Usuario $usuario,
+        string $mensaje
+    ): void {
+        $rqProsergeId = $rqMina->rqProserge()
+            ->orderByDesc('created_at')
+            ->value('id');
+
+        RQMinaDetalleCambio::query()->create([
+            'id' => (string) Str::uuid(),
+            'rq_mina_id' => (string) $rqMina->id,
+            'rq_mina_detalle_id' => $detalle?->id,
+            'rq_proserge_id' => $rqProsergeId,
+            'puesto' => $puesto,
+            'tipo' => $tipo,
+            'cantidad_anterior' => $cantidadAnterior,
+            'cantidad_nueva' => $cantidadNueva,
+            'asignaciones_retiradas' => max(0, $asignacionesRetiradas),
+            'mensaje' => $mensaje,
+            'estado' => RQMinaDetalleCambio::ESTADO_PENDIENTE,
+            'created_by_usuario_id' => $usuario?->id,
+        ]);
+    }
+
+    private function detalleChangeMessage(string $tipo, string $puesto, int $anterior, int $nuevo, int $retiradas): string
+    {
+        $accion = match ($tipo) {
+            RQMinaDetalleCambio::TIPO_PUESTO_AGREGADO => 'Se agrego el cargo',
+            RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO => 'Se retiro el cargo',
+            RQMinaDetalleCambio::TIPO_CANTIDAD_AUMENTADA => 'Aumento la cantidad solicitada para',
+            RQMinaDetalleCambio::TIPO_CANTIDAD_REDUCIDA => 'Disminuyo la cantidad solicitada para',
+            default => 'Cambio el pedido de',
+        };
+
+        $mensaje = sprintf('%s %s: %d -> %d.', $accion, $puesto, $anterior, $nuevo);
+
+        if ($retiradas > 0) {
+            $mensaje .= sprintf(' Se retiro %d asignacion(es) empezando por la ultima registrada.', $retiradas);
+        }
+
+        return $mensaje;
+    }
+
     private function buildTransporteRows(string $rqMinaId, array $items): array
     {
         return collect($items)
@@ -721,10 +996,7 @@ class RQMinaService
 
     private function resolveDetallePayload(array $payload): array
     {
-        $detalle = collect($payload['detalle'] ?? [])
-            ->filter(fn ($item): bool => is_array($item) && trim((string) ($item['puesto'] ?? '')) !== '' && (int) ($item['cantidad'] ?? 0) > 0)
-            ->values()
-            ->all();
+        $detalle = $this->normalizeDetalleRows($payload['detalle'] ?? []);
 
         if (!empty($detalle)) {
             return $detalle;
@@ -748,7 +1020,7 @@ class RQMinaService
             ->all();
 
         if (!empty($fromPlan)) {
-            return $fromPlan;
+            return $this->normalizeDetalleRows($fromPlan);
         }
 
         return [

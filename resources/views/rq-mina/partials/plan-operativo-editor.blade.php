@@ -13,11 +13,21 @@
 .rq-plan-head span { display:block; margin-top:2px; font-size:12px; color:#64748b; }
 .rq-plan-week-pill { display:inline-flex; align-items:center; border-radius:999px; background:#ecfeff; color:#0e7490; padding:5px 10px; font-size:12px; font-weight:800; margin-top:8px; }
 .rq-plan-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.rq-plan-toggle { width:38px; min-width:38px; height:38px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.rq-plan-toggle-icon { display:inline-block; line-height:1; transition:transform .18s ease; }
+.rq-plan-editor.is-collapsed .rq-plan-toggle-icon { transform:rotate(180deg); }
 .rq-plan-body { display:flex; flex-direction:column; gap:14px; padding:14px; }
+.rq-plan-body[hidden] { display:none; }
 .rq-plan-empty { border:1px dashed #cbd5e1; border-radius:10px; padding:18px; color:#64748b; background:#f8fafc; font-size:13px; text-align:center; }
 .rq-plan-group { border:1px solid #e2e8f0; border-radius:10px; background:#fff; overflow:hidden; }
 .rq-plan-group-head { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)) auto; gap:10px; padding:12px; background:#f8fafc; border-bottom:1px solid #e2e8f0; align-items:end; }
 .rq-plan-group-main { display:contents; }
+.rq-plan-group-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+.rq-plan-group-toggle { width:38px; min-width:38px; height:38px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.rq-plan-group-toggle.is-collapsed { border-color:#fde68a; background:#fffbeb; color:#92400e; }
+.rq-plan-group-toggle-icon { display:inline-block; line-height:1; transition:transform .18s ease; }
+.rq-plan-group.is-group-collapsed .rq-plan-group-head { border-bottom:0; }
+.rq-plan-group.is-group-collapsed [data-group-content] { display:none; }
 .rq-plan-field label { display:block; font-size:11px; font-weight:700; color:#64748b; margin-bottom:5px; text-transform:uppercase; }
 .rq-plan-input, .rq-plan-textarea, .rq-plan-select { width:100%; border:1px solid #dbe4ef; border-radius:8px; padding:8px 9px; font-size:12px; color:#0f172a; background:#fff; }
 .rq-plan-textarea { min-height:38px; resize:vertical; }
@@ -26,6 +36,12 @@
 .rq-plan-section-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
 .rq-plan-section-title h4 { margin:0; font-size:13px; color:#0f172a; }
 .rq-plan-activity { border:1px solid #e2e8f0; border-radius:10px; padding:10px; margin-bottom:10px; background:#fcfdff; }
+.rq-plan-activity-head { display:grid; grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) minmax(220px,2fr) auto; gap:8px; align-items:end; }
+.rq-plan-activity-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+.rq-plan-activity-toggle { width:38px; min-width:38px; height:38px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.rq-plan-activity-toggle.is-collapsed { border-color:#fde68a; background:#fffbeb; color:#92400e; }
+.rq-plan-activity-toggle-icon { display:inline-block; line-height:1; }
+.rq-plan-activity.is-activity-collapsed [data-activity-content] { display:none; }
 .rq-plan-activity-grid { display:grid; grid-template-columns:repeat(5,minmax(120px,1fr)); gap:8px; }
 .rq-plan-activity-wide { grid-column:span 2; }
 .rq-plan-supervisors { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:8px; margin-top:8px; }
@@ -35,6 +51,17 @@
 .rq-plan-schedule th { background:#f8fafc; color:#475569; text-align:left; }
 .rq-plan-schedule td:last-child, .rq-plan-schedule th:last-child { border-right:0; }
 .rq-plan-schedule input { width:100%; min-width:70px; border:1px solid #dbe4ef; border-radius:6px; padding:6px; font-size:11px; }
+.rq-plan-schedule input.rq-plan-real-input {
+    background:#f1f5f9;
+    border-color:#cbd5e1;
+    color:#64748b;
+    cursor:not-allowed;
+}
+.rq-plan-schedule input.rq-plan-real-input:focus {
+    outline:none;
+    box-shadow:none;
+    border-color:#cbd5e1;
+}
 .rq-plan-transport-row { display:grid; grid-template-columns:1fr 1fr 1.4fr 1.4fr auto; gap:8px; align-items:start; margin-bottom:8px; }
 .rq-plan-btn { border:1px solid #cbd5e1; background:#fff; color:#0f172a; border-radius:8px; padding:8px 10px; font-size:12px; font-weight:700; cursor:pointer; }
 .rq-plan-btn:hover { background:#f8fafc; }
@@ -42,7 +69,9 @@
 .rq-plan-btn.danger { border-color:#fecaca; background:#fef2f2; color:#b91c1c; }
 .modalrq-container { max-width:min(1180px, calc(100vw - 32px)); }
 @media (max-width:900px) {
-    .rq-plan-group-head, .rq-plan-activity-grid, .rq-plan-supervisors, .rq-plan-transport-row { grid-template-columns:1fr; }
+    .rq-plan-group-head, .rq-plan-activity-head, .rq-plan-activity-grid, .rq-plan-supervisors, .rq-plan-transport-row { grid-template-columns:1fr; }
+    .rq-plan-group-actions { justify-content:flex-start; }
+    .rq-plan-activity-actions { justify-content:flex-start; }
     .rq-plan-activity-wide { grid-column:auto; }
 }
 </style>
@@ -60,13 +89,73 @@ function initRQMinaPlanEditor(root) {
 
     const editorId = root.id;
     const body = root.querySelector('[data-plan-body]');
+    const toggleButton = root.querySelector('[data-toggle-plan-body]');
     const initialScript = document.querySelector('script[data-rq-plan-initial="' + editorId + '"]');
     let plan = initialScript ? JSON.parse(initialScript.textContent || '[]') : [];
+    let isCollapsed = false;
+    const collapsedGroups = new Set();
+    const collapsedActivities = new Set();
+
+    function applyCollapseState() {
+        root.classList.toggle('is-collapsed', isCollapsed);
+        if (body) {
+            body.hidden = isCollapsed;
+        }
+        if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+            toggleButton.setAttribute('title', isCollapsed ? 'Mostrar plan operativo' : 'Ocultar plan operativo');
+            toggleButton.setAttribute('aria-label', isCollapsed ? 'Mostrar plan operativo' : 'Ocultar plan operativo');
+        }
+    }
 
     function escapeHtml(value) {
         return String(value || '').replace(/[&<>"']/g, function(char) {
             return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'}[char];
         });
+    }
+
+    function applyGroupCollapse(groupEl, collapsed) {
+        if (!groupEl) return;
+
+        groupEl.classList.toggle('is-group-collapsed', collapsed);
+        const button = groupEl.querySelector('[data-toggle-group]');
+        const icon = groupEl.querySelector('[data-group-toggle-icon]');
+
+        if (button) {
+            button.classList.toggle('is-collapsed', collapsed);
+            button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            button.setAttribute('title', collapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo');
+            button.setAttribute('aria-label', collapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo');
+        }
+        if (icon) {
+            icon.innerHTML = collapsed ? '&darr;' : '&uarr;';
+        }
+    }
+
+    function applyActivityCollapse(activityEl, collapsed) {
+        if (!activityEl) return;
+
+        activityEl.classList.toggle('is-activity-collapsed', collapsed);
+        const button = activityEl.querySelector('[data-toggle-activity]');
+        const icon = activityEl.querySelector('[data-activity-toggle-icon]');
+
+        if (button) {
+            button.classList.toggle('is-collapsed', collapsed);
+            button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            button.setAttribute('title', collapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad');
+            button.setAttribute('aria-label', collapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad');
+        }
+        if (icon) {
+            icon.innerHTML = collapsed ? '&darr;' : '&uarr;';
+        }
+    }
+
+    function activityCollapseKey(activityEl) {
+        const field = activityEl ? activityEl.querySelector('[name$="[client_key]"]') : null;
+        const groupEl = activityEl ? activityEl.closest('.rq-plan-group') : null;
+        const fallback = (groupEl?.dataset.groupIndex || '0') + ':' + (activityEl?.dataset.activityIndex || '0');
+
+        return field?.value || fallback;
     }
 
     function dateInputs() {
@@ -108,9 +197,13 @@ function initRQMinaPlanEditor(root) {
         return enabled ? ' data-rq-personal-search="1" data-rq-personal-type="' + escapeHtml(type) + '"' : '';
     }
 
-    function input(name, value, placeholder = '', extraClass = '', fieldKey = '', personalSearch = false) {
-        const autocomplete = (fieldKey || personalSearch) ? ' autocomplete="off"' : '';
-        return '<input type="text" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + personalAttr(personalSearch) + autocomplete + '>';
+    function input(name, value, placeholder = '', extraClass = '', fieldKey = '', personalSearch = false, attributes = '') {
+        const autocomplete = attributes.indexOf('autocomplete=') >= 0 ? '' : ((fieldKey || personalSearch) ? ' autocomplete="off"' : '');
+        return '<input type="text" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + personalAttr(personalSearch) + autocomplete + attributes + '>';
+    }
+
+    function realInput(name, value, placeholder = '') {
+        return '<input type="text" class="rq-plan-input rq-plan-real-input" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" readonly aria-readonly="true" autocomplete="off" tabindex="-1">';
     }
 
     function textarea(name, value, placeholder = '', fieldKey = '') {
@@ -120,6 +213,7 @@ function initRQMinaPlanEditor(root) {
     function activityTemplate(groupIndex, activityIndex, activity) {
         const key = activity.client_key || activity.id || (Date.now() + '-' + groupIndex + '-' + activityIndex);
         const prefix = 'plan_operativo[' + groupIndex + '][actividades][' + activityIndex + ']';
+        const activityCollapsed = collapsedActivities.has(String(key));
         const days = weekDays(activity.turnos || []);
         const byDate = {};
         (activity.turnos || []).forEach(t => { byDate[t.fecha || t.dia_label || ''] = t; });
@@ -131,20 +225,29 @@ function initRQMinaPlanEditor(root) {
                     '<input type="hidden" name="' + sp + '[fecha]" value="' + escapeHtml(day.fecha || '') + '">' +
                     '<input type="hidden" name="' + sp + '[dia_label]" value="' + escapeHtml(day.dia_label || '') + '">' +
                 '</th>' +
-                '<td>' + input(sp + '[turno_a]', saved.turno_a || '', 'Turno A', '', 'rq_mina.plan.turno_a') + '</td>' +
-                '<td>' + input(sp + '[real_turno_a]', saved.real_turno_a || '', 'Real turno A', '', 'rq_mina.plan.real_turno_a') + '</td>' +
-                '<td>' + input(sp + '[turno_b]', saved.turno_b || '', 'Turno B', '', 'rq_mina.plan.turno_b') + '</td>' +
-                '<td>' + input(sp + '[real_turno_b]', saved.real_turno_b || saved.real || '', 'Real turno B', '', 'rq_mina.plan.real_turno_b') + '</td>' +
+                '<td>' + input(sp + '[turno_a]', saved.turno_a || '', 'Turno A', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
+                '<td>' + realInput(sp + '[real_turno_a]', saved.real_turno_a || '', 'Real turno A') + '</td>' +
+                '<td>' + input(sp + '[turno_b]', saved.turno_b || '', 'Turno B', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
+                '<td>' + realInput(sp + '[real_turno_b]', saved.real_turno_b || saved.real || '', 'Real turno B') + '</td>' +
             '</tr>';
         }).join('');
 
-        return '<div class="rq-plan-activity" data-activity-index="' + activityIndex + '">' +
+        return '<div class="rq-plan-activity' + (activityCollapsed ? ' is-activity-collapsed' : '') + '" data-activity-index="' + activityIndex + '">' +
             '<input type="hidden" name="' + prefix + '[client_key]" value="' + escapeHtml(key) + '">' +
-            '<div class="rq-plan-activity-grid">' +
+            '<div class="rq-plan-activity-head">' +
                 '<div class="rq-plan-field"><label>SAIT / Punto</label>' + input(prefix + '[sait]', activity.sait || '', 'Ej. SAIT 01', '', 'rq_mina.plan.sait') + '</div>' +
                 '<div class="rq-plan-field"><label>Sector</label>' + input(prefix + '[sector]', activity.sector || '', 'Sector', '', 'rq_mina.plan.sector') + '</div>' +
                 '<div class="rq-plan-field"><label>Area</label>' + input(prefix + '[area]', activity.area || '', 'Area', '', 'rq_mina.plan.actividad_area') + '</div>' +
-                '<div class="rq-plan-field rq-plan-activity-wide"><label>AIT trabajo</label>' + textarea(prefix + '[ait_trabajo]', activity.ait_trabajo || '', 'Puede contener mas de un AIT', 'rq_mina.plan.ait_trabajo') + '</div>' +
+                '<div class="rq-plan-field"><label>AIT trabajo</label>' + textarea(prefix + '[ait_trabajo]', activity.ait_trabajo || '', 'Puede contener mas de un AIT', 'rq_mina.plan.ait_trabajo') + '</div>' +
+                '<div class="rq-plan-activity-actions">' +
+                    '<button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button>' +
+                    '<button type="button" class="rq-plan-btn rq-plan-activity-toggle' + (activityCollapsed ? ' is-collapsed' : '') + '" data-toggle-activity aria-expanded="' + (activityCollapsed ? 'false' : 'true') + '" title="' + (activityCollapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad') + '" aria-label="' + (activityCollapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad') + '">' +
+                        '<span class="rq-plan-activity-toggle-icon" data-activity-toggle-icon>' + (activityCollapsed ? '&darr;' : '&uarr;') + '</span>' +
+                    '</button>' +
+                '</div>' +
+            '</div>' +
+            '<div data-activity-content>' +
+            '<div class="rq-plan-activity-grid" style="margin-top:8px;">' +
                 '<div class="rq-plan-field rq-plan-activity-wide"><label>Trabajos relevantes</label>' + textarea(prefix + '[detalle_trabajos_relevantes]', activity.detalle_trabajos_relevantes || '', 'Detalle de trabajos relevantes', 'rq_mina.plan.trabajos_relevantes') + '</div>' +
             '</div>' +
             '<div class="rq-plan-supervisors">' +
@@ -154,7 +257,7 @@ function initRQMinaPlanEditor(root) {
                 '<div class="rq-plan-field"><label>Sup. seguridad noche</label>' + input(prefix + '[supervisor_seguridad_noche]', activity.supervisor_seguridad_noche || '', 'Buscar personal', '', '', true) + '</div>' +
             '</div>' +
             '<div class="rq-plan-schedule"><table><thead><tr><th>Dia</th><th>Turno A / Dia</th><th>Real turno A</th><th>Turno B / Noche</th><th>Real turno B</th></tr></thead><tbody>' + scheduleRows + '</tbody></table></div>' +
-            '<div style="margin-top:8px;text-align:right;"><button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button></div>' +
+            '</div>' +
         '</div>';
     }
 
@@ -179,7 +282,8 @@ function initRQMinaPlanEditor(root) {
             const groupPrefix = 'plan_operativo[' + groupIndex + ']';
             const activities = Array.isArray(group.actividades) && group.actividades.length ? group.actividades : [];
             const transports = Array.isArray(group.transportes) && group.transportes.length ? group.transportes : [];
-            const html = '<div class="rq-plan-group" data-group-index="' + groupIndex + '">' +
+            const groupCollapsed = collapsedGroups.has(String(groupIndex));
+            const html = '<div class="rq-plan-group' + (groupCollapsed ? ' is-group-collapsed' : '') + '" data-group-index="' + groupIndex + '">' +
                 '<div class="rq-plan-group-head">' +
                     '<div class="rq-plan-group-main">' +
                         '<div class="rq-plan-field"><label>Area</label>' + input(groupPrefix + '[area_operativa]', group.area_operativa || '', 'C1, C2', '', 'rq_mina.plan.area_operativa') + '</div>' +
@@ -187,8 +291,14 @@ function initRQMinaPlanEditor(root) {
                         '<div class="rq-plan-field"><label>Grupo / frente</label>' + input(groupPrefix + '[nombre]', group.nombre || ('Grupo ' + (groupIndex + 1)), 'Grupo', '', 'rq_mina.plan.grupo_nombre') + '</div>' +
                         '<div class="rq-plan-field"><label>Observaciones</label>' + input(groupPrefix + '[observaciones]', group.observaciones || '', 'Observaciones', '', 'rq_mina.plan.grupo_observaciones') + '</div>' +
                     '</div>' +
-                    '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo</button>' +
+                    '<div class="rq-plan-group-actions">' +
+                        '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo</button>' +
+                        '<button type="button" class="rq-plan-btn rq-plan-group-toggle' + (groupCollapsed ? ' is-collapsed' : '') + '" data-toggle-group aria-expanded="' + (groupCollapsed ? 'false' : 'true') + '" title="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '" aria-label="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '">' +
+                            '<span class="rq-plan-group-toggle-icon" data-group-toggle-icon>' + (groupCollapsed ? '&darr;' : '&uarr;') + '</span>' +
+                        '</button>' +
+                    '</div>' +
                 '</div>' +
+                '<div data-group-content>' +
                 '<div class="rq-plan-section">' +
                     '<div class="rq-plan-section-title"><h4>Lista de actividades</h4><button type="button" class="rq-plan-btn" data-add-activity>Agregar actividad</button></div>' +
                     '<div data-activities>' + activities.map((activity, i) => activityTemplate(groupIndex, i, activity)).join('') + '</div>' +
@@ -196,6 +306,7 @@ function initRQMinaPlanEditor(root) {
                 '<div class="rq-plan-section">' +
                     '<div class="rq-plan-section-title"><h4>Unidades de carga y transporte</h4><button type="button" class="rq-plan-btn" data-add-transport>Agregar transporte</button></div>' +
                     '<div data-transports>' + transports.map((transport, i) => transportTemplate(groupIndex, i, transport)).join('') + '</div>' +
+                '</div>' +
                 '</div>' +
             '</div>';
             body.insertAdjacentHTML('beforeend', html);
@@ -207,6 +318,7 @@ function initRQMinaPlanEditor(root) {
         if (window.RQMinaPersonalAutocomplete) {
             window.RQMinaPersonalAutocomplete.refresh(root);
         }
+        applyCollapseState();
     }
 
     function fieldValue(scope, suffix) {
@@ -274,11 +386,47 @@ function initRQMinaPlanEditor(root) {
 
     root.addEventListener('click', function(event) {
         syncFromDom();
+        const toggleTarget = event.target.closest('[data-toggle-plan-body]');
+        if (toggleTarget && root.contains(toggleTarget)) {
+            isCollapsed = !isCollapsed;
+            applyCollapseState();
+            return;
+        }
+
         const groupEl = event.target.closest('.rq-plan-group');
         const groupIndex = groupEl ? Number(groupEl.dataset.groupIndex) : -1;
 
+        if (event.target.closest('[data-toggle-group]') && groupIndex >= 0) {
+            const key = String(groupIndex);
+            const nextCollapsed = !collapsedGroups.has(key);
+            if (nextCollapsed) {
+                collapsedGroups.add(key);
+            } else {
+                collapsedGroups.delete(key);
+            }
+            applyGroupCollapse(groupEl, nextCollapsed);
+            return;
+        }
+
+        const activityToggle = event.target.closest('[data-toggle-activity]');
+        if (activityToggle && groupIndex >= 0) {
+            const activityEl = activityToggle.closest('.rq-plan-activity');
+            const key = activityCollapseKey(activityEl);
+            const nextCollapsed = !collapsedActivities.has(key);
+            if (nextCollapsed) {
+                collapsedActivities.add(key);
+            } else {
+                collapsedActivities.delete(key);
+            }
+            applyActivityCollapse(activityEl, nextCollapsed);
+            return;
+        }
+
         if (event.target.matches('[data-add-plan-group]')) {
             plan.push({ area_operativa: '', modulo: '', nombre: 'Grupo ' + (plan.length + 1), observaciones: '', actividades: [{}], transportes: [{}] });
+            isCollapsed = false;
+            collapsedGroups.clear();
+            collapsedActivities.clear();
             render();
         }
         if (event.target.matches('[data-remove-group]') && groupIndex >= 0) {
@@ -293,6 +441,7 @@ function initRQMinaPlanEditor(root) {
         if (event.target.matches('[data-remove-activity]') && groupIndex >= 0) {
             const activityEl = event.target.closest('.rq-plan-activity');
             plan[groupIndex].actividades.splice(Number(activityEl.dataset.activityIndex), 1);
+            collapsedActivities.delete(activityCollapseKey(activityEl));
             render();
         }
         if (event.target.matches('[data-add-transport]') && groupIndex >= 0) {
@@ -310,6 +459,8 @@ function initRQMinaPlanEditor(root) {
     window.rqMinaPlanEditors[editorId] = {
         setPlan: function(nextPlan) {
             plan = Array.isArray(nextPlan) ? nextPlan : [];
+            collapsedGroups.clear();
+            collapsedActivities.clear();
             render();
         },
         getPlan: syncFromDom,
@@ -335,6 +486,9 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
         <div class="rq-plan-actions">
             <button type="button" class="rq-plan-btn primary" data-add-plan-group>Agregar area</button>
+            <button type="button" class="rq-plan-btn rq-plan-toggle" data-toggle-plan-body aria-expanded="true" title="Ocultar plan operativo" aria-label="Ocultar plan operativo">
+                <span class="rq-plan-toggle-icon">&uarr;</span>
+            </button>
         </div>
     </div>
     <div class="rq-plan-body" data-plan-body></div>

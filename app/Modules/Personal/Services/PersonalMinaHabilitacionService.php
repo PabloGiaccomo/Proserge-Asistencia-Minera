@@ -13,6 +13,7 @@ use App\Models\PersonalMinaExamenIntento;
 use App\Models\PersonalMina;
 use App\Models\PersonalMinaHistorial;
 use App\Models\Usuario;
+use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -25,6 +26,10 @@ use Illuminate\Validation\ValidationException;
 
 class PersonalMinaHabilitacionService
 {
+    public function __construct(private readonly OperationalNotificationService $operationalNotifications)
+    {
+    }
+
     public function listAssignments(array $filters)
     {
         $perPage = $this->perPageFromFilters($filters);
@@ -199,6 +204,7 @@ class PersonalMinaHabilitacionService
         return MinaRequisito::query()
             ->with(['mina', 'examen'])
             ->when($minaId, fn ($query) => $query->where('mina_id', $minaId))
+            ->where('activo', true)
             ->orderBy('orden')
             ->orderBy('nombre')
             ->get();
@@ -565,6 +571,12 @@ class PersonalMinaHabilitacionService
             $this->generateRequiredExams($relation, $user);
             $this->refreshAssignmentStatus($relation, $user);
 
+            $this->operationalNotifications->habilitacionAsignacion(
+                $relation->fresh(['personal', 'mina']) ?: $relation,
+                $user,
+                $previousState
+            );
+
             return $relation->fresh(['personal.contratoLaboralActual', 'mina', 'actualizadoPor.personal', 'historial.usuario.personal', 'examenes.intentos']);
         });
     }
@@ -606,6 +618,11 @@ class PersonalMinaHabilitacionService
         ])->save();
 
         $this->recordHistory($relation, $previousState, $state, $observation, $user);
+        $this->operationalNotifications->habilitacionAsignacion(
+            $relation->fresh(['personal', 'mina']) ?: $relation,
+            $user,
+            $previousState
+        );
 
         return $relation->fresh(['personal.contratoLaboralActual', 'mina', 'actualizadoPor.personal', 'historial.usuario.personal']);
     }
@@ -679,12 +696,36 @@ class PersonalMinaHabilitacionService
 
     public function deactivateRequirement(MinaRequisito $requirement, ?Usuario $user = null): MinaRequisito
     {
-        $requirement->forceFill(['activo' => false])->save();
+        $relatedRequirements = MinaRequisito::query()
+            ->where('mina_id', $requirement->mina_id)
+            ->where('activo', true)
+            ->where(function ($query) use ($requirement): void {
+                if (filled($requirement->examen_id)) {
+                    $query->where('examen_id', $requirement->examen_id);
+                } else {
+                    $query->whereRaw('LOWER(TRIM(nombre)) = ?', [mb_strtolower(trim((string) $requirement->nombre))]);
+                }
+            })
+            ->get();
+
+        if ($relatedRequirements->isEmpty()) {
+            $relatedRequirements = collect([$requirement]);
+        }
+
+        $deactivatedIds = $relatedRequirements->pluck('id')->values()->all();
+
+        MinaRequisito::query()
+            ->whereIn('id', $deactivatedIds)
+            ->update(['activo' => false]);
+
+        $requirement->refresh();
         if ($user) {
             $this->syncMineAssignmentsForRequirementChange($requirement->mina_id, $user);
         }
 
-        return $requirement->fresh(['mina', 'examen']);
+        return $requirement
+            ->fresh(['mina', 'examen'])
+            ->setAttribute('deactivated_requirement_ids', $deactivatedIds);
     }
 
     public function syncCurrentInformation(Usuario $user): array
@@ -988,7 +1029,12 @@ class PersonalMinaHabilitacionService
             $this->refreshAssignmentStatus($workerExam->asignacion, $user);
         });
 
-        return $workerExam->fresh(['asignacion', 'intentos']);
+        $updated = $workerExam->fresh(['asignacion.personal', 'asignacion.mina', 'intentos']);
+        if ($updated && $result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled) {
+            $this->operationalNotifications->examenProgramado($updated, $user);
+        }
+
+        return $updated;
     }
 
     public function completeScheduledAttempt(PersonalMinaExamenIntento $attempt, array $payload, ?UploadedFile $file, Usuario $user): PersonalMinaExamen
@@ -1494,6 +1540,11 @@ class PersonalMinaHabilitacionService
             ])->save();
 
             $this->recordHistory($relation, $previous, $newState, 'Calculo automatico por examenes mineros.', $user);
+            $this->operationalNotifications->habilitacionAsignacion(
+                $relation->fresh(['personal', 'mina']) ?: $relation,
+                $user,
+                $previous
+            );
 
             return true;
         }

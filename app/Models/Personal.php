@@ -62,7 +62,7 @@ class Personal extends Model
     public function minas(): BelongsToMany
     {
         return $this->belongsToMany(Mina::class, 'personal_mina', 'personal_id', 'mina_id')
-            ->withPivot(['id', 'estado', 'activo'])
+            ->withPivot(['id', 'estado', 'estado_habilitacion', 'activo'])
             ->where(function ($query): void {
                 $query->where('personal_mina.activo', true)
                     ->orWhereNull('personal_mina.activo');

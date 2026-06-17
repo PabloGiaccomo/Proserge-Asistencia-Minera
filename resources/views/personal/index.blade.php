@@ -1807,13 +1807,17 @@
                             </svg>
                             Importar Master General
                         </a>
-                        <a class="accion-item" href="{{ route('personal.export.form', request()->query()) }}">
+                        <a
+                            class="accion-item"
+                            id="personalExportExcelAction"
+                            href="{{ route('personal.export.form', request()->query()) }}"
+                            data-base-url="{{ route('personal.export.form') }}">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                 <polyline points="7 10 12 15 17 10"/>
                                 <line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            Exportar
+                            Exportar en Excel
                         </a>
                         @if($canDownloadDocuments)
                             <button type="button" class="accion-item" onclick="openDocumentDownloadModal(); document.getElementById('accionesMenu').style.display = 'none';">
@@ -3296,6 +3300,38 @@ function documentDownloadSelectedChecks() {
     });
 }
 
+function buildPersonalExportUrlFromSelection(baseUrl) {
+    const selectedWorkers = documentDownloadSelectedChecks();
+    const url = new URL(baseUrl, window.location.origin);
+
+    selectedWorkers.forEach(function (input) {
+        url.searchParams.append('personal_ids[]', input.value);
+    });
+
+    return url.toString();
+}
+
+function setupPersonalExportSelectionLink() {
+    const link = document.getElementById('personalExportExcelAction');
+    if (!link) {
+        return;
+    }
+
+    link.addEventListener('click', function (event) {
+        const selectedWorkers = documentDownloadSelectedChecks();
+        if (selectedWorkers.length === 0) {
+            return;
+        }
+
+        event.preventDefault();
+        const menu = document.getElementById('accionesMenu');
+        if (menu) {
+            menu.style.display = 'none';
+        }
+        window.location.href = buildPersonalExportUrlFromSelection(link.dataset.baseUrl || link.href);
+    });
+}
+
 function updateDocumentDownloadSelectionState() {
     const selected = documentDownloadSelectedChecks();
     const visible = documentDownloadVisibleChecks();
@@ -3737,6 +3773,8 @@ document.addEventListener('search:select', function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', function () {
+    setupPersonalExportSelectionLink();
+
     const pageRoot = document.getElementById('personalPageRoot');
     const bootOverlay = document.getElementById('personalBootOverlay');
     const bootProgressBar = document.getElementById('personalBootProgressBar');

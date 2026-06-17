@@ -42,12 +42,19 @@ class RQMinaResource extends JsonResource
                 'es_supervisor' => (bool) $this->supervisor->es_supervisor,
             ] : null),
             'detalle' => $this->whenLoaded('detalle', function (): array {
-                return $this->detalle->map(fn ($item): array => [
-                    'id' => $item->id,
-                    'puesto' => $item->puesto,
-                    'cantidad' => (int) $item->cantidad,
-                    'cantidad_atendida' => (int) $item->cantidad_atendida,
-                ])->values()->all();
+                return $this->detalle->map(function ($item): array {
+                    $cantidad = (int) $item->cantidad;
+                    $backup = (int) ($item->cantidad_backup ?? round($cantidad * 0.2));
+
+                    return [
+                        'id' => $item->id,
+                        'puesto' => $item->puesto,
+                        'cantidad' => $cantidad,
+                        'cantidad_backup' => $backup,
+                        'cantidad_total' => (int) ($item->cantidad_total ?? ($cantidad + $backup)),
+                        'cantidad_atendida' => (int) $item->cantidad_atendida,
+                    ];
+                })->values()->all();
             }),
             'transporte' => $this->whenLoaded('transportes', function (): array {
                 return $this->transportes->map(fn ($item): array => [

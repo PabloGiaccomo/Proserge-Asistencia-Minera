@@ -6,6 +6,7 @@ use App\Models\Personal;
 use App\Models\PersonalBloqueo;
 use App\Models\Usuario;
 use App\Http\Controllers\Controller;
+use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -14,6 +15,10 @@ use Illuminate\View\View;
 
 class BienestarPageController extends Controller
 {
+    public function __construct(private readonly OperationalNotificationService $operationalNotifications)
+    {
+    }
+
     public function index(Request $request): View
     {
         $search = trim((string) $request->query('search', ''));
@@ -187,7 +192,7 @@ class BienestarPageController extends Controller
             return back()->withErrors(['tipo' => 'No existe un usuario válido para registrar el bloqueo.'])->withInput();
         }
 
-        PersonalBloqueo::query()->create([
+        $bloqueo = PersonalBloqueo::query()->create([
             'id' => (string) Str::uuid(),
             'personal_id' => $trabajador->id,
             'tipo' => $tipo,
@@ -199,6 +204,10 @@ class BienestarPageController extends Controller
             'estado' => 'ACTIVO',
             'visible_para_planner' => true,
         ]);
+        $usuario = Usuario::query()->find($usuarioId);
+        if ($usuario) {
+            $this->operationalNotifications->bienestarBloqueoRegistrado($bloqueo->fresh(['personal']) ?: $bloqueo, $usuario);
+        }
 
         return redirect()
             ->route('bienestar.show', ['id' => $trabajador->id, 'mes' => Carbon::parse($payload['fecha_inicio'])->format('Y-m')])
@@ -253,7 +262,7 @@ class BienestarPageController extends Controller
             return back()->withErrors(['tipo' => 'No existe un usuario válido para registrar el bloqueo.'])->withInput();
         }
 
-        PersonalBloqueo::query()->create([
+        $bloqueo = PersonalBloqueo::query()->create([
             'id' => (string) Str::uuid(),
             'personal_id' => $trabajador->id,
             'tipo' => $tipo,
@@ -265,6 +274,10 @@ class BienestarPageController extends Controller
             'estado' => 'ACTIVO',
             'visible_para_planner' => true,
         ]);
+        $usuario = Usuario::query()->find($usuarioId);
+        if ($usuario) {
+            $this->operationalNotifications->bienestarBloqueoRegistrado($bloqueo->fresh(['personal']) ?: $bloqueo, $usuario);
+        }
 
         return redirect()
             ->route('bienestar.show', ['id' => $trabajador->id, 'mes' => Carbon::parse($payload['fecha_inicio'])->format('Y-m')])
@@ -324,11 +337,16 @@ class BienestarPageController extends Controller
 
     public function anularBloqueo(string $bloqueoId)
     {
-        $bloqueo = PersonalBloqueo::query()->findOrFail($bloqueoId);
+        $bloqueo = PersonalBloqueo::query()->with('personal')->findOrFail($bloqueoId);
 
         $bloqueo->update([
             'estado' => 'ANULADO',
         ]);
+        $usuarioId = (string) (session('user.id') ?? session('user_id') ?? '');
+        $usuario = $usuarioId !== '' ? Usuario::query()->find($usuarioId) : null;
+        if ($usuario) {
+            $this->operationalNotifications->bienestarBloqueoAnulado($bloqueo->fresh(['personal']) ?: $bloqueo, $usuario);
+        }
 
         return back()->with('success', 'Bloqueo anulado correctamente.');
     }

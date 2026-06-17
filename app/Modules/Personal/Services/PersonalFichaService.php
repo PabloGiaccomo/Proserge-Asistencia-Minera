@@ -11,6 +11,7 @@ use App\Models\PersonalFichaFamiliar;
 use App\Models\PersonalFichaLink;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
+use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Carbon\Carbon;
@@ -26,6 +27,7 @@ use Illuminate\Validation\ValidationException;
 
 class PersonalFichaService
 {
+    public const DEFAULT_LINK_HOURS = 72;
     public const TEMPORAL_ESTADO_VENCIDO = 'VENCIDO';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE = 'LINK_ENVIADO_PENDIENTE';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO = 'LINK_ENVIADO_VENCIDO';
@@ -33,6 +35,7 @@ class PersonalFichaService
     public function __construct(
         private readonly PersonalService $personalService,
         private readonly PersonalContratoDatoService $contratoDatoService,
+        private readonly OperationalNotificationService $operationalNotifications,
     )
     {
     }
@@ -136,7 +139,7 @@ class PersonalFichaService
                 }
             }
 
-            [$token, $link] = $this->createSecureLink($ficha, 24, true);
+            [$token, $link] = $this->createSecureLink($ficha, self::DEFAULT_LINK_HOURS, true);
 
             return [
                 'personal' => $personal->fresh(['fichaColaborador.link']),
@@ -242,7 +245,7 @@ class PersonalFichaService
                 'created_by_usuario_id' => $user->id,
             ]);
 
-            [$token, $link] = $this->createSecureLink($ficha, 24, true);
+            [$token, $link] = $this->createSecureLink($ficha, self::DEFAULT_LINK_HOURS, true);
 
             return [
                 'personal' => $personal->fresh(['fichaColaborador.link']),
@@ -905,7 +908,7 @@ class PersonalFichaService
 
     public function approve(PersonalFicha $ficha, Usuario $user, ?string $observaciones = null, array $contractDates = []): PersonalFicha
     {
-        return DB::transaction(function () use ($ficha, $user, $observaciones, $contractDates): PersonalFicha {
+        $approved = DB::transaction(function () use ($ficha, $user, $observaciones, $contractDates): PersonalFicha {
             $data = $this->normalizeFichaData($ficha->datos_json ?? []);
             $data['fecha_ingreso'] = PersonalNormalizer::isoDate($contractDates['fecha_ingreso'] ?? $data['fecha_ingreso'] ?? null) ?? '';
             $data['fecha_fin_contrato'] = PersonalNormalizer::isoDate($contractDates['fecha_fin_contrato'] ?? $data['fecha_fin_contrato'] ?? null) ?? '';
@@ -938,6 +941,10 @@ class PersonalFichaService
 
             return $ficha->fresh(['personal', 'familiares', 'link']);
         });
+
+        $this->operationalNotifications->fichaAprobadaFaltaContrato($approved, $user);
+
+        return $approved;
     }
 
     public function observe(PersonalFicha $ficha, Usuario $user, ?string $observaciones = null): PersonalFicha
@@ -1246,7 +1253,7 @@ class PersonalFichaService
         return $links->count();
     }
 
-    public function extendLink(PersonalFicha $ficha, int $hours = 24): PersonalFichaLink
+    public function extendLink(PersonalFicha $ficha, int $hours = self::DEFAULT_LINK_HOURS): PersonalFichaLink
     {
         $link = $ficha->link()->first();
 
@@ -1352,6 +1359,11 @@ class PersonalFichaService
             ]);
         }
 
+        if ($this->isUsableActiveLink($link)) {
+            $link = $this->ensureActiveLinkWindow($link, self::DEFAULT_LINK_HOURS);
+            $ficha->setRelation('link', $link);
+        }
+
         $url = $this->activePublicUrlForLink($link);
         if (!$url) {
             throw ValidationException::withMessages([
@@ -1397,7 +1409,7 @@ class PersonalFichaService
             ]);
         }
 
-        $result = $this->ensureRegularizationLink($ficha, 24);
+        $result = $this->ensureRegularizationLink($ficha, self::DEFAULT_LINK_HOURS);
         $ficha = $ficha->fresh(['personal', 'link']);
         $link = $ficha->link;
         $url = $result['url'] ?? $this->publicUrlForLink($link);
@@ -1453,7 +1465,7 @@ class PersonalFichaService
         ];
     }
 
-    public function ensureRegularizationLink(PersonalFicha $ficha, int $hours = 24): array
+    public function ensureRegularizationLink(PersonalFicha $ficha, int $hours = self::DEFAULT_LINK_HOURS): array
     {
         $ficha->loadMissing(['personal', 'link', 'archivos']);
 
@@ -1476,13 +1488,11 @@ class PersonalFichaService
         }
 
         if ($this->isUsableActiveLink($ficha->link)) {
-            $ficha->link->forceFill([
-                'enabled_manually_at' => $ficha->link->enabled_manually_at ?: now(),
-            ])->save();
+            $link = $this->ensureActiveLinkWindow($ficha->link, $hours);
 
             return [
-                'link' => $ficha->link->fresh(),
-                'url' => $this->publicUrlForLink($ficha->link),
+                'link' => $link,
+                'url' => $this->publicUrlForLink($link),
             ];
         }
 
@@ -1517,7 +1527,7 @@ class PersonalFichaService
         });
     }
 
-    public function activateTemporaryLinkForPersonal(Personal $personal, Usuario $user, int $hours = 24): array
+    public function activateTemporaryLinkForPersonal(Personal $personal, Usuario $user, int $hours = self::DEFAULT_LINK_HOURS): array
     {
         if (strtoupper((string) $personal->estado) === 'CESADO') {
             throw ValidationException::withMessages([
@@ -1565,14 +1575,13 @@ class PersonalFichaService
             }
 
             if ($this->isUsableActiveLink($ficha->link)) {
-                $ficha->link->forceFill([
-                    'enabled_manually_at' => $ficha->link->enabled_manually_at ?: now(),
-                ])->save();
+                $link = $this->ensureActiveLinkWindow($ficha->link, $hours);
+                $ficha->setRelation('link', $link);
 
                 return [
                     'ficha' => $ficha->fresh(['personal', 'link', 'archivos']),
-                    'link' => $ficha->link->fresh(),
-                    'url' => $this->publicUrlForLink($ficha->link),
+                    'link' => $link,
+                    'url' => $this->publicUrlForLink($link),
                 ];
             }
 
@@ -1978,6 +1987,39 @@ class PersonalFichaService
         return $this->publicUrlForLink($link);
     }
 
+    private function ensureActiveLinkWindow(PersonalFichaLink $link, int $hours = self::DEFAULT_LINK_HOURS): PersonalFichaLink
+    {
+        $expiresAt = $this->minimumLinkExpiration($hours);
+
+        if (!$link->expires_at || $link->expires_at->lessThan($expiresAt)) {
+            $link->forceFill([
+                'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+                'disabled_at' => null,
+                'submitted_at' => null,
+                'read_until' => null,
+                'expires_at' => $expiresAt,
+                'enabled_manually_at' => $link->enabled_manually_at ?: now(),
+            ])->save();
+
+            return $link->fresh();
+        }
+
+        if (!$link->enabled_manually_at) {
+            $link->forceFill([
+                'enabled_manually_at' => now(),
+            ])->save();
+
+            return $link->fresh();
+        }
+
+        return $link;
+    }
+
+    private function minimumLinkExpiration(int $hours = self::DEFAULT_LINK_HOURS): Carbon
+    {
+        return now()->copy()->addHours(max(1, $hours));
+    }
+
     private function normalizeFichaLinkToken(mixed $token): ?string
     {
         if (!is_string($token)) {
@@ -1999,7 +2041,7 @@ class PersonalFichaService
         return $token;
     }
 
-    private function createSecureLink(PersonalFicha $ficha, int $hours = 24, bool $enabledManually = false): array
+    private function createSecureLink(PersonalFicha $ficha, int $hours = self::DEFAULT_LINK_HOURS, bool $enabledManually = false): array
     {
         PersonalFichaLink::query()
             ->where('personal_ficha_id', $ficha->id)
@@ -2015,7 +2057,7 @@ class PersonalFichaService
             $hash = hash('sha256', $token);
         } while (PersonalFichaLink::query()->where('token_hash', $hash)->exists());
 
-        $expiresAt = now()->copy()->addHours($hours)->format('Y-m-d H:i:s');
+        $expiresAt = $this->minimumLinkExpiration($hours);
 
         $link = PersonalFichaLink::query()->create([
             'id' => (string) Str::uuid(),

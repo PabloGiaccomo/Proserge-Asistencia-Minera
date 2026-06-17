@@ -6,6 +6,7 @@ use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\RQMina;
+use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaFieldOption;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
@@ -106,6 +107,7 @@ class RQMinaPageController extends WebPageController
 
         $item = $this->toViewItem($rqMina);
         $item['personal_parada'] = $this->getPersonalParadaForRQMina($id);
+        $item['cambios_pedido'] = $this->getCambiosPedidoForRQMina($id);
 
         return view('rq-mina.show', compact('item'));
     }
@@ -307,7 +309,8 @@ class RQMinaPageController extends WebPageController
         }
 
         $planOperativo = $this->normalizePlanOperativoFromRequest($request);
-        $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo);
+        $detalle = $this->normalizeDetalleFromRequest($request);
+        $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo, $detalle);
 
         if (!$updated) {
             return back()->with('error', 'No tienes permiso para actualizar el plan operativo.')->withInput();
@@ -315,7 +318,8 @@ class RQMinaPageController extends WebPageController
 
         return redirect()
             ->route('rq-mina.show', $id)
-            ->with('success', 'Plan operativo semanal actualizado correctamente.');
+            ->with('success', 'Pedido de personal y plan operativo semanal actualizados correctamente.')
+            ->with('clear_rq_mina_plan_draft', $id);
     }
 
     public function store(Request $request): RedirectResponse
@@ -475,9 +479,9 @@ class RQMinaPageController extends WebPageController
             'entity_type' => 'rq_mina',
             'entity_id' => (string) $sent->id,
             'title' => 'RQ Mina enviado',
-            'permission_module' => 'rq_mina',
-            'permission_action' => 'ver',
-            'require_permission' => false,
+            'permission_module' => 'rq_proserge',
+            'permission_action' => 'asignar',
+            'require_permission' => true,
             'message' => sprintf(
                 '%s | Área: %s | %s al %s. Requiere atención RRHH/Planner.',
                 $mineName,
@@ -550,6 +554,27 @@ class RQMinaPageController extends WebPageController
                 'nombre' => $detalle->personal?->nombre_completo ?? '-',
                 'puesto' => $detalle->personal?->puesto ?? $detalle->puesto_asignado ?? '-',
                 'cargo_parada' => $detalle->puesto_asignado ?? '-',
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function getCambiosPedidoForRQMina(string $rqMinaId): array
+    {
+        return RQMinaDetalleCambio::query()
+            ->where('rq_mina_id', $rqMinaId)
+            ->where('estado', RQMinaDetalleCambio::ESTADO_PENDIENTE)
+            ->latest()
+            ->limit(20)
+            ->get()
+            ->map(fn (RQMinaDetalleCambio $cambio): array => [
+                'tipo' => $cambio->tipo,
+                'puesto' => $cambio->puesto,
+                'cantidad_anterior' => $cambio->cantidad_anterior,
+                'cantidad_nueva' => $cambio->cantidad_nueva,
+                'asignaciones_retiradas' => $cambio->asignaciones_retiradas,
+                'mensaje' => $cambio->mensaje,
+                'fecha' => $cambio->created_at?->format('Y-m-d H:i'),
             ])
             ->values()
             ->all();
@@ -750,10 +775,19 @@ class RQMinaPageController extends WebPageController
 
         $unique = [];
         foreach ($normalized as $row) {
-            $unique[] = [
-                'puesto' => $row['puesto'],
-                'cantidad' => (int) $row['cantidad'],
-            ];
+            $key = $this->normalizeFieldOptionValue((string) $row['puesto']);
+            if ($key === '') {
+                continue;
+            }
+
+            if (!isset($unique[$key])) {
+                $unique[$key] = [
+                    'puesto' => $row['puesto'],
+                    'cantidad' => 0,
+                ];
+            }
+
+            $unique[$key]['cantidad'] += (int) $row['cantidad'];
         }
 
         return array_values($unique);

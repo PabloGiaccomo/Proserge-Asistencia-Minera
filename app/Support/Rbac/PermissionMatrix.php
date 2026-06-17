@@ -216,7 +216,7 @@ class PermissionMatrix
     {
         return match ($legacyAction) {
             'read' => ['ver'],
-            'write' => ['crear', 'editar', 'actualizar'],
+            'write' => ['crear', 'editar', 'actualizar', 'asignar'],
             'manage', 'admin' => ['administrar'],
             default => [],
         };

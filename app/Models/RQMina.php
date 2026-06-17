@@ -72,6 +72,11 @@ class RQMina extends Model
         return $this->hasMany(RQProserge::class, 'rq_mina_id');
     }
 
+    public function detalleCambios(): HasMany
+    {
+        return $this->hasMany(RQMinaDetalleCambio::class, 'rq_mina_id')->latest();
+    }
+
     public function gruposTrabajo(): HasMany
     {
         return $this->hasMany(GrupoTrabajo::class, 'rq_mina_id');

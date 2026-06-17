@@ -7,6 +7,7 @@ use App\Modules\Dashboard\Policies\DashboardPolicy;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardService
 {
@@ -83,10 +84,11 @@ class DashboardService
         }
 
         $base = $this->rqProsergeBase($usuario, $filters);
+        $solicitadoSql = $this->rqMinaDetalleSolicitadoSumSql();
 
         $avance = $base
             ->leftJoin('rq_mina_detalle as rmd', 'rmd.rq_mina_id', '=', 'rp.rq_mina_id')
-            ->selectRaw('rp.id as rq_proserge_id, rp.rq_mina_id, SUM(rmd.cantidad) as solicitado, SUM(rmd.cantidad_atendida) as atendido')
+            ->selectRaw("rp.id as rq_proserge_id, rp.rq_mina_id, {$solicitadoSql} as solicitado, SUM(rmd.cantidad_atendida) as atendido")
             ->groupBy('rp.id', 'rp.rq_mina_id')
             ->get()
             ->map(function ($r): array {
@@ -294,7 +296,7 @@ class DashboardService
             'rq_mina_pendientes_envio' => $this->rqMinaBase($usuario, $filters)->where('estado', 'BORRADOR')->count(),
             'requerimientos_sin_atencion_completa' => $this->rqMinaBase($usuario, $filters)
                 ->join('rq_mina_detalle as rmd', 'rmd.rq_mina_id', '=', 'rq_mina.id')
-                ->whereColumn('rmd.cantidad_atendida', '<', 'rmd.cantidad')
+                ->whereRaw('rmd.cantidad_atendida < ' . $this->rqMinaDetalleSolicitadoValueSql())
                 ->distinct('rq_mina.id')
                 ->count('rq_mina.id'),
             'grupos_sin_asistencia_cerrada' => $this->grupoBase($usuario, $filters)
@@ -308,6 +310,20 @@ class DashboardService
             'trabajadores_multiples_faltas_periodo' => $faltasMultiples,
             'evaluaciones_pendientes' => $pendientesEvaluacion,
         ];
+    }
+
+    private function rqMinaDetalleSolicitadoSumSql(string $alias = 'rmd'): string
+    {
+        return 'SUM(' . $this->rqMinaDetalleSolicitadoValueSql($alias) . ')';
+    }
+
+    private function rqMinaDetalleSolicitadoValueSql(string $alias = 'rmd'): string
+    {
+        if (!Schema::hasColumn('rq_mina_detalle', 'cantidad_total')) {
+            return $alias . '.cantidad';
+        }
+
+        return 'COALESCE(NULLIF(' . $alias . '.cantidad_total, 0), ' . $alias . '.cantidad)';
     }
 
     private function rqMinaBase(Usuario $usuario, array $filters): Builder

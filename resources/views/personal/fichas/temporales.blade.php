@@ -266,6 +266,52 @@
             flex-wrap: wrap;
         }
 
+        .bulk-email-filters {
+            display: grid;
+            grid-template-columns: minmax(180px, 1.1fr) repeat(2, minmax(150px, 0.85fr)) auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 14px;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #f8fafc;
+        }
+
+        .bulk-email-filter-field {
+            display: grid;
+            gap: 6px;
+            color: #475569;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .bulk-email-filter-field select,
+        .bulk-email-filter-field input {
+            width: 100%;
+            border: 1px solid #dbe4ef;
+            border-radius: 9px;
+            background: #fff;
+            color: #0f172a;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 9px 10px;
+        }
+
+        .bulk-email-filter-field select:focus,
+        .bulk-email-filter-field input:focus {
+            outline: none;
+            border-color: #19d3c5;
+            box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
+        }
+
+        .bulk-email-filter-clear {
+            min-height: 39px;
+            white-space: nowrap;
+        }
+
         .bulk-email-list {
             display: grid;
             gap: 8px;
@@ -434,6 +480,10 @@
 
         @media (max-width: 860px) {
             .email-template-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .bulk-email-filters {
                 grid-template-columns: 1fr;
             }
         }
@@ -788,6 +838,28 @@
                 </div>
                 <form id="bulkEmailForm" action="{{ route('personal.fichas.send-bulk-email') }}" method="POST">
                     @csrf
+                    <div class="bulk-email-filters">
+                        <label class="bulk-email-filter-field">
+                            Estado
+                            <select id="bulkEmailEstadoFilter">
+                                <option value="">Todos</option>
+                                @foreach($estadoOptions as $stateKey => $stateLabel)
+                                    @if($stateKey !== '')
+                                        <option value="{{ $stateKey }}">{{ $stateLabel }}</option>
+                                    @endif
+                                @endforeach
+                            </select>
+                        </label>
+                        <label class="bulk-email-filter-field">
+                            Vence desde
+                            <input id="bulkEmailDateFrom" type="date">
+                        </label>
+                        <label class="bulk-email-filter-field">
+                            Vence hasta
+                            <input id="bulkEmailDateTo" type="date">
+                        </label>
+                        <button type="button" class="btn btn-outline bulk-email-filter-clear" id="bulkEmailClearFilters">Limpiar filtros</button>
+                    </div>
                     <div class="bulk-email-toolbar">
                         <label class="bulk-email-select-all">
                             <input id="bulkEmailSelectAll" type="checkbox" checked>
@@ -938,11 +1010,13 @@
                                 data-dni="{{ trim(($ficha->tipo_documento ?? '') . ' ' . ($ficha->numero_documento ?? '')) }}"
                                 data-puesto="{{ $personal?->puesto ?: 'Puesto pendiente' }}"
                                 data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
+                                data-estado-key="{{ $row['estado_key'] ?? $ficha->estado }}"
                                 data-estado="{{ $row['estado_label'] }}"
                                 data-correo="{{ $correo ?? '' }}"
                                 data-has-link="{{ $row['url'] ? '1' : '0' }}"
                                 data-can-email="{{ ($row['url'] && $correo) ? '1' : '0' }}"
                                 data-expires-at="{{ optional($link?->expires_at)->format('d/m/Y H:i') ?: '' }}"
+                                data-expires-date="{{ optional($link?->expires_at)->toDateString() ?: '' }}"
                                 data-celular="{{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '') }}">
                                 <td>
                                     <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
@@ -1013,7 +1087,7 @@
                                             @if($row['url'] && $link && !$ficha->submitted_at)
                                                 <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form">
                                                     @csrf
-                                                    <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 1 día" aria-label="Ampliar 1 día">
+                                                    <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 3 dias" aria-label="Ampliar 3 dias">
                                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                             <circle cx="12" cy="12" r="10"/>
                                                             <path d="M12 6v6l4 2"/>
@@ -1120,6 +1194,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const bulkEmailList = document.getElementById('bulkEmailList');
     const bulkEmailSelectAll = document.getElementById('bulkEmailSelectAll');
     const bulkEmailCount = document.getElementById('bulkEmailCount');
+    const bulkEmailEstadoFilter = document.getElementById('bulkEmailEstadoFilter');
+    const bulkEmailDateFrom = document.getElementById('bulkEmailDateFrom');
+    const bulkEmailDateTo = document.getElementById('bulkEmailDateTo');
+    const bulkEmailClearFilters = document.getElementById('bulkEmailClearFilters');
     const sendBulkEmailButton = document.getElementById('sendBulkEmailButton');
     const bulkEmailProgress = document.getElementById('bulkEmailProgress');
     const bulkEmailProgressTitle = document.getElementById('bulkEmailProgressTitle');
@@ -1403,17 +1481,53 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function bulkEmailFiltersActive() {
+        return Boolean(
+            (bulkEmailEstadoFilter?.value || '').trim()
+            || (bulkEmailDateFrom?.value || '').trim()
+            || (bulkEmailDateTo?.value || '').trim()
+        );
+    }
+
+    function filteredBulkEmailRows() {
+        const estado = (bulkEmailEstadoFilter?.value || '').trim().toUpperCase();
+        const fromDate = (bulkEmailDateFrom?.value || '').trim();
+        const toDate = (bulkEmailDateTo?.value || '').trim();
+
+        return getRows().filter(function (row) {
+            const expiresDate = (row.dataset.expiresDate || '').trim();
+
+            if (row.dataset.hasLink !== '1') {
+                return false;
+            }
+
+            if (estado && (row.dataset.estadoKey || '').trim().toUpperCase() !== estado) {
+                return false;
+            }
+
+            if (fromDate && (!expiresDate || expiresDate < fromDate)) {
+                return false;
+            }
+
+            if (toDate && (!expiresDate || expiresDate > toDate)) {
+                return false;
+            }
+
+            return true;
+        });
+    }
+
     function renderBulkEmailList() {
         if (!bulkEmailList) {
             return;
         }
 
-        const rows = getRows().filter(function (row) {
-            return row.dataset.hasLink === '1';
-        });
+        const rows = filteredBulkEmailRows();
 
         if (rows.length === 0) {
-            bulkEmailList.innerHTML = '<div class="bulk-email-empty">No hay trabajadores con link habilitado para enviar correo.</div>';
+            bulkEmailList.innerHTML = '<div class="bulk-email-empty">' + (bulkEmailFiltersActive()
+                ? 'No hay trabajadores con link habilitado que coincidan con esos filtros.'
+                : 'No hay trabajadores con link habilitado para enviar correo.') + '</div>';
             updateBulkEmailCount();
             return;
         }
@@ -1423,7 +1537,9 @@ document.addEventListener('DOMContentLoaded', function () {
             const name = row.dataset.nombre || 'Trabajador pendiente';
             const email = row.dataset.correo || '';
             const rowId = row.dataset.rowId || '';
-            const meta = canEmail ? email : 'Sin correo valido registrado';
+            const estado = row.dataset.estado || '-';
+            const expiresAt = row.dataset.expiresAt || '-';
+            const meta = (canEmail ? email : 'Sin correo valido registrado') + ' | ' + estado + ' | Vence: ' + expiresAt;
 
             return '<label class="bulk-email-person ' + (canEmail ? '' : 'is-disabled') + '">' +
                 '<input type="checkbox" class="js-bulk-email-check" value="' + escapeHtml(rowId) + '"' + (canEmail ? ' checked' : ' disabled') + '>' +
@@ -1493,6 +1609,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (openBulkEmailButton) {
         openBulkEmailButton.addEventListener('click', function () {
             closeActionsMenu();
+            syncBulkEmailDateBounds();
             renderBulkEmailList();
             openModal('bulkEmailModal');
         });
@@ -1668,6 +1785,40 @@ document.addEventListener('DOMContentLoaded', function () {
                     activateLinkSubmit.disabled = !activateLinkPersonalId?.value;
                 }
             });
+        });
+    }
+
+    function syncBulkEmailDateBounds() {
+        if (bulkEmailDateFrom && bulkEmailDateTo) {
+            bulkEmailDateTo.min = bulkEmailDateFrom.value || '';
+            bulkEmailDateFrom.max = bulkEmailDateTo.value || '';
+        }
+    }
+
+    [bulkEmailEstadoFilter, bulkEmailDateFrom, bulkEmailDateTo].forEach(function (control) {
+        if (!control) {
+            return;
+        }
+
+        control.addEventListener('change', function () {
+            syncBulkEmailDateBounds();
+            renderBulkEmailList();
+        });
+    });
+
+    if (bulkEmailClearFilters) {
+        bulkEmailClearFilters.addEventListener('click', function () {
+            if (bulkEmailEstadoFilter) {
+                bulkEmailEstadoFilter.value = '';
+            }
+            if (bulkEmailDateFrom) {
+                bulkEmailDateFrom.value = '';
+            }
+            if (bulkEmailDateTo) {
+                bulkEmailDateTo.value = '';
+            }
+            syncBulkEmailDateBounds();
+            renderBulkEmailList();
         });
     }
 

@@ -24,11 +24,13 @@
     data-dni="{{ trim(($ficha->tipo_documento ?? '') . ' ' . ($ficha->numero_documento ?? '')) }}"
     data-puesto="{{ $personal?->puesto ?: 'Puesto pendiente' }}"
     data-contrato="{{ $ficha->macro_tipo_contrato ?: ($personal?->contrato ?: '') }}"
+    data-estado-key="{{ $row['estado_key'] ?? $ficha->estado }}"
     data-estado="{{ $row['estado_label'] }}"
     data-correo="{{ $correo ?? '' }}"
     data-has-link="{{ $row['url'] ? '1' : '0' }}"
     data-can-email="{{ ($row['url'] && $correo) ? '1' : '0' }}"
     data-expires-at="{{ optional($link?->expires_at)->format('d/m/Y H:i') ?: '' }}"
+    data-expires-date="{{ optional($link?->expires_at)->toDateString() ?: '' }}"
     data-celular="{{ $personal?->telefono ?: ($ficha->datos_json['telefono'] ?? '') }}">
     <td>
         <strong>{{ $personal?->nombre_completo ?: 'Trabajador pendiente' }}</strong>
@@ -99,7 +101,7 @@
                 @if($row['url'] && $link && !$ficha->submitted_at)
                     <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form" data-action-name="ampliado">
                         @csrf
-                        <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 1 día" aria-label="Ampliar 1 día">
+                        <button type="submit" class="btn btn-outline btn-xs temporal-icon-btn" title="Ampliar 3 dias" aria-label="Ampliar 3 dias">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M12 6v6l4 2"/>

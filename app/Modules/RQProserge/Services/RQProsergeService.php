@@ -4,8 +4,12 @@ namespace App\Modules\RQProserge\Services;
 
 use App\Models\RQProserge;
 use App\Models\RQProsergeDetalle;
+use App\Models\RQMina;
+use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaDetalle;
+use App\Models\PersonalMina;
 use App\Models\Usuario;
+use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\RQProserge\Policies\RQProsergePolicy;
 use App\Shared\Services\DisponibilidadPersonalService;
 use App\Support\Rbac\PermissionMatrix;
@@ -19,6 +23,7 @@ class RQProsergeService
     public function __construct(
         private readonly RQProsergePolicy $policy,
         private readonly DisponibilidadPersonalService $disponibilidadService,
+        private readonly OperationalNotificationService $operationalNotifications,
     ) {
     }
 
@@ -90,6 +95,109 @@ class RQProsergeService
         return $rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']);
     }
 
+    public function syncFromRqMina(Usuario $usuario, RQMina $rqMina): ?RQProserge
+    {
+        $rqMina->loadMissing('detalle');
+
+        if ($rqMina->detalle->isEmpty()) {
+            return null;
+        }
+
+        $rq = RQProserge::query()
+            ->where('rq_mina_id', $rqMina->id)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$rq) {
+            $rq = RQProserge::query()->create([
+                'id' => (string) Str::uuid(),
+                'rq_mina_id' => $rqMina->id,
+                'mina_id' => $rqMina->mina_id,
+                'responsable_rrhh_id' => $this->resolveResponsibleRrhhId($usuario),
+                'estado' => 'PENDIENTE',
+                'comentario_planner' => null,
+                'comentario_rrhh' => null,
+            ]);
+        } else {
+            $rq->fill([
+                'mina_id' => $rqMina->mina_id,
+            ]);
+            $rq->save();
+        }
+
+        $pendingChanges = RQMinaDetalleCambio::query()
+            ->where('rq_mina_id', $rqMina->id)
+            ->where('estado', RQMinaDetalleCambio::ESTADO_PENDIENTE)
+            ->orderBy('created_at')
+            ->get();
+
+        RQMinaDetalleCambio::query()
+            ->where('rq_mina_id', $rqMina->id)
+            ->whereNull('rq_proserge_id')
+            ->update([
+                'rq_proserge_id' => $rq->id,
+                'updated_at' => now(),
+            ]);
+
+        $this->recalculateEstado($rq, $usuario);
+
+        if ($pendingChanges->isNotEmpty()) {
+            $this->operationalNotifications->rqMinaPedidoModificado(
+                $rqMina,
+                $rq->fresh(),
+                $usuario,
+                $pendingChanges->map(fn (RQMinaDetalleCambio $change): array => [
+                    'id' => (string) $change->id,
+                    'tipo' => (string) $change->tipo,
+                    'puesto' => (string) $change->puesto,
+                    'mensaje' => (string) $change->mensaje,
+                ])->values()->all()
+            );
+        }
+
+        return $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']);
+    }
+
+    public function recalculateEstadoForRqMina(string $rqMinaId): void
+    {
+        RQProserge::query()
+            ->where('rq_mina_id', $rqMinaId)
+            ->get()
+            ->each(fn (RQProserge $rq): bool => $this->recalculateEstado($rq));
+    }
+
+    public function listOperationalForUser(Usuario $usuario, array $filters = []): Collection
+    {
+        $query = RQProserge::query()->with([
+            'mina:id,nombre',
+            'responsableRrhh:id,email',
+            'rqMina:id,mina_id,destino_tipo,destino_id,destino_nombre,area,fecha_inicio,fecha_fin,estado,observaciones',
+            'rqMina.detalle.rqMina:id,fecha_inicio,fecha_fin',
+            'rqMina.detalle.asignaciones.personal:id,dni,nombre_completo,puesto',
+            'rqMina.detalle.cambios',
+            'cambiosRqMina',
+        ]);
+
+        if (!empty($filters['mina_id'])) {
+            $query->where('mina_id', $filters['mina_id']);
+        }
+
+        if (!empty($filters['estado'])) {
+            $query->where('estado', strtoupper((string) $filters['estado']));
+        }
+
+        if (!empty($filters['rq_mina_id'])) {
+            $query->where('rq_mina_id', $filters['rq_mina_id']);
+        }
+
+        if (!$this->isPrivileged($usuario)) {
+            $minaIds = $usuario->scopesMina()->pluck('mina_id');
+            $query->whereIn('mina_id', $minaIds);
+        }
+
+        return $query->orderByDesc('created_at')->get();
+    }
+
     public function assignPersonal(Usuario $usuario, RQProserge $rq, array $payload): array
     {
         if (!$this->policy->assign($usuario, $rq)) {
@@ -135,7 +243,7 @@ class RQProsergeService
             return $this->businessError('RQ_PROSERGE_DUPLICATE_ASSIGNMENT', 'Personal ya asignado en este rango dentro del RQ');
         }
 
-        DB::transaction(function () use ($rq, $payload): void {
+        DB::transaction(function () use ($rq, $payload, $usuario): void {
             RQProsergeDetalle::query()->create([
                 'id' => (string) Str::uuid(),
                 'rq_proserge_id' => $rq->id,
@@ -150,6 +258,7 @@ class RQProsergeService
             ]);
 
             $this->recalculateCantidadAtendida($payload['rq_mina_detalle_id']);
+            $this->recalculateEstado($rq, $usuario);
         });
 
         return [
@@ -175,9 +284,10 @@ class RQProsergeService
 
         $rqMinaDetalleId = $detalle->rq_mina_detalle_id;
 
-        DB::transaction(function () use ($detalle, $rqMinaDetalleId): void {
+        DB::transaction(function () use ($detalle, $rqMinaDetalleId, $rq, $usuario): void {
             $detalle->delete();
             $this->recalculateCantidadAtendida($rqMinaDetalleId);
+            $this->recalculateEstado($rq, $usuario);
         });
 
         return [
@@ -191,9 +301,17 @@ class RQProsergeService
         $candidatos = DB::table('personal as p')
             ->join('personal_mina as pm', 'pm.personal_id', '=', 'p.id')
             ->where('pm.mina_id', $rq->mina_id)
-            ->whereIn('pm.estado', ['ACTIVO', 'ASIGNADO', 'EN_PROCESO'])
+            ->where(function ($query): void {
+                $states = $this->validOperationalMineStates();
+                $query->whereIn('pm.estado', $states)
+                    ->orWhereIn('pm.estado_habilitacion', $states);
+            })
+            ->where(function ($query): void {
+                $query->where('pm.activo', true)
+                    ->orWhereNull('pm.activo');
+            })
             ->where('p.estado', 'ACTIVO')
-            ->select(['p.id', 'p.nombre_completo', 'p.puesto'])
+            ->select(['p.id', 'p.dni', 'p.numero_documento', 'p.nombre_completo', 'p.puesto'])
             ->orderBy('p.nombre_completo')
             ->limit($limit)
             ->get();
@@ -209,11 +327,76 @@ class RQProsergeService
             return [
                 'personal_id' => $row->id,
                 'nombre_completo' => $row->nombre_completo,
+                'documento' => $row->dni ?: $row->numero_documento,
                 'puesto' => $row->puesto,
                 'disponible' => $evaluacion['available'] ?? false,
                 'motivo_codigo' => $evaluacion['reason_code'],
                 'motivo' => $evaluacion['reason_message'],
                 'error_tecnico' => $evaluacion['technical_error'] ?? false,
+            ];
+        })->values()->all();
+    }
+
+    public function searchAvailablePersonal(RQProserge $rq, string $search, string $fechaInicio, string $fechaFin, int $limit = 20): array
+    {
+        $needle = trim(mb_strtolower($search));
+        $tokens = collect(preg_split('/\s+/', $needle) ?: [])
+            ->filter()
+            ->take(5)
+            ->values();
+
+        if ($tokens->isEmpty()) {
+            return [];
+        }
+
+        $candidatos = DB::table('personal as p')
+            ->join('personal_mina as pm', 'pm.personal_id', '=', 'p.id')
+            ->where('pm.mina_id', $rq->mina_id)
+            ->where(function ($query): void {
+                $states = $this->validOperationalMineStates();
+                $query->whereIn('pm.estado', $states)
+                    ->orWhereIn('pm.estado_habilitacion', $states);
+            })
+            ->where(function ($query): void {
+                $query->where('pm.activo', true)
+                    ->orWhereNull('pm.activo');
+            })
+            ->where('p.estado', 'ACTIVO')
+            ->where(function ($query) use ($tokens): void {
+                foreach ($tokens as $token) {
+                    $like = '%' . $token . '%';
+                    $query->where(function ($subQuery) use ($like): void {
+                        $subQuery
+                            ->whereRaw('LOWER(COALESCE(p.nombre_completo, "")) LIKE ?', [$like])
+                            ->orWhereRaw('LOWER(COALESCE(p.dni, "")) LIKE ?', [$like])
+                            ->orWhereRaw('LOWER(COALESCE(p.numero_documento, "")) LIKE ?', [$like])
+                            ->orWhereRaw('LOWER(COALESCE(p.puesto, "")) LIKE ?', [$like]);
+                    });
+                }
+            })
+            ->select(['p.id', 'p.dni', 'p.numero_documento', 'p.nombre_completo', 'p.puesto'])
+            ->distinct()
+            ->orderBy('p.nombre_completo')
+            ->limit($limit)
+            ->get();
+
+        return $candidatos->map(function ($row) use ($rq, $fechaInicio, $fechaFin): array {
+            $evaluacion = $this->disponibilidadService->evaluar(
+                personalId: (string) $row->id,
+                minaId: (string) $rq->mina_id,
+                fechaInicio: $fechaInicio,
+                fechaFin: $fechaFin,
+            );
+
+            return [
+                'personal_id' => (string) $row->id,
+                'nombre_completo' => (string) $row->nombre_completo,
+                'documento' => (string) ($row->dni ?: $row->numero_documento ?: ''),
+                'puesto' => (string) ($row->puesto ?: ''),
+                'disponible' => (bool) ($evaluacion['available'] ?? false),
+                'motivo_codigo' => $evaluacion['reason_code'] ?? null,
+                'motivo' => $evaluacion['reason_message'] ?? null,
+                'error_tecnico' => (bool) ($evaluacion['technical_error'] ?? false),
             ];
         })->values()->all();
     }
@@ -236,6 +419,62 @@ class RQProsergeService
             'cantidad_atendida' => $count,
             'updated_at' => now(),
         ]);
+    }
+
+    private function validOperationalMineStates(): array
+    {
+        return [
+            'ACTIVO',
+            'ASIGNADO',
+            PersonalMina::ESTADO_EN_PROCESO,
+            PersonalMina::ESTADO_HABILITADO,
+        ];
+    }
+
+    private function recalculateEstado(RQProserge $rq, ?Usuario $actor = null): bool
+    {
+        $previousState = strtoupper((string) $rq->estado);
+        $totals = RQMinaDetalle::query()
+            ->where('rq_mina_id', $rq->rq_mina_id)
+            ->selectRaw('COALESCE(SUM(CASE WHEN cantidad_total > 0 THEN cantidad_total ELSE cantidad END), 0) as solicitado')
+            ->selectRaw('COALESCE(SUM(cantidad_atendida), 0) as atendido')
+            ->first();
+
+        $solicitado = (int) ($totals->solicitado ?? 0);
+        $atendido = (int) ($totals->atendido ?? 0);
+
+        $estado = 'PENDIENTE';
+        if ($solicitado > 0 && $atendido >= $solicitado) {
+            $estado = 'COMPLETADO';
+        } elseif ($atendido > 0) {
+            $estado = 'PARCIAL';
+        }
+
+        $changed = false;
+        if (!in_array($rq->estado, ['CERRADO', 'CANCELADO'], true) && $rq->estado !== $estado) {
+            $rq->forceFill(['estado' => $estado])->save();
+            $changed = true;
+        }
+
+        if ($changed && $previousState !== $estado && $estado === 'COMPLETADO') {
+            $this->operationalNotifications->rqProsergeCompletado($rq->fresh(['rqMina.creador', 'rqMina.mina']) ?: $rq, $actor);
+        }
+
+        return true;
+    }
+
+    private function resolveResponsibleRrhhId(Usuario $actor): string
+    {
+        if (PermissionMatrix::userCanAny($actor, 'rq_proserge', ['asignar', 'actualizar', 'administrar'])) {
+            return (string) $actor->id;
+        }
+
+        $candidate = Usuario::query()
+            ->with(['rol', 'rolesAdicionales'])
+            ->get()
+            ->first(fn (Usuario $usuario): bool => PermissionMatrix::userCanAny($usuario, 'rq_proserge', ['asignar', 'actualizar', 'administrar']));
+
+        return (string) ($candidate?->id ?? $actor->id);
     }
 
     private function businessError(string $code, string $message): array

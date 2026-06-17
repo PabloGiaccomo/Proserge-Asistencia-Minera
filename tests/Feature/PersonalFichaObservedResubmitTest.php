@@ -956,6 +956,181 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertSame($result['url'], $summary['url']);
     }
 
+    public function test_activate_temporary_link_for_worker_creates_link_for_three_days(): void
+    {
+        Carbon::setTestNow('2026-06-15 09:00:00');
+
+        $personalId = (string) Str::uuid();
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879615',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879615',
+            'nombre_completo' => 'Trabajador Link Tres Dias',
+            'puesto' => 'Operario link tres dias',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '977111225',
+            'telefono_1' => '977111225',
+            'correo' => 'link-tres-dias@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $result = app(PersonalFichaService::class)->activateTemporaryLinkForPersonal(
+            Personal::query()->findOrFail($personalId),
+            $this->createUsuario(),
+        );
+
+        $link = $result['link'];
+        $this->assertSame(PersonalFichaLink::ESTADO_ACTIVO, $link->estado);
+        $this->assertNotNull($link->enabled_manually_at);
+        $this->assertTrue(now()->copy()->addHours(PersonalFichaService::DEFAULT_LINK_HOURS)->equalTo($link->expires_at));
+        $this->assertSame('edit', app(PersonalFichaService::class)->resolveToken(Str::afterLast($result['url'], '/'))['mode']);
+    }
+
+    public function test_activate_existing_usable_temporary_link_extends_short_window_to_three_days(): void
+    {
+        Carbon::setTestNow('2026-06-15 09:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'short-active-link-token';
+        $data = $this->fichaData([
+            'numero_documento' => '45879616',
+            'telefono' => '977111226',
+            'correo' => 'short-link@test.local',
+            'puesto' => 'Operario link corto',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879616',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879616',
+            'nombre_completo' => 'Trabajador Link Corto',
+            'puesto' => 'Operario link corto',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'telefono' => '977111226',
+            'telefono_1' => '977111226',
+            'correo' => 'short-link@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879616',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addHour(),
+            'enabled_manually_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $result = app(PersonalFichaService::class)->activateTemporaryLinkForPersonal(
+            Personal::query()->findOrFail($personalId),
+            $this->createUsuario(),
+        );
+
+        $this->assertSame($linkId, $result['link']->id);
+        $this->assertTrue(now()->copy()->addHours(PersonalFichaService::DEFAULT_LINK_HOURS)->equalTo($result['link']->expires_at));
+        $this->assertNotNull($result['link']->enabled_manually_at);
+        $this->assertSame('edit', app(PersonalFichaService::class)->resolveToken($token)['mode']);
+    }
+
+    public function test_regularization_reuses_active_link_and_extends_short_window_to_three_days(): void
+    {
+        Carbon::setTestNow('2026-06-15 09:00:00');
+
+        $personalId = (string) Str::uuid();
+        $fichaId = (string) Str::uuid();
+        $linkId = (string) Str::uuid();
+        $token = 'regularization-short-link-token';
+        $data = $this->fichaData([
+            'numero_documento' => '45879617',
+            'telefono' => '977111227',
+            'correo' => 'regularization-short@test.local',
+            'puesto' => 'Operario regularizacion corta',
+        ]);
+
+        DB::table('personal')->insert([
+            'id' => $personalId,
+            'dni' => '45879617',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879617',
+            'nombre_completo' => 'Trabajador Regularizacion Corta',
+            'puesto' => 'Operario regularizacion corta',
+            'ocupacion' => 'Operario',
+            'contrato' => 'INDET',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'estado' => PersonalFicha::ESTADO_OBSERVADO,
+            'telefono' => '977111227',
+            'telefono_1' => '977111227',
+            'correo' => 'regularization-short@test.local',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_fichas')->insert([
+            'id' => $fichaId,
+            'personal_id' => $personalId,
+            'estado' => PersonalFicha::ESTADO_OBSERVADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45879617',
+            'datos_detectados_json' => json_encode($data),
+            'datos_json' => json_encode($data),
+            'submitted_at' => now()->subDay(),
+            'observed_at' => now()->subHour(),
+            'observaciones_revision' => 'Regularizar datos pendientes.',
+            'created_at' => now()->subDays(2),
+            'updated_at' => now()->subHour(),
+        ]);
+
+        DB::table('personal_ficha_links')->insert([
+            'id' => $linkId,
+            'personal_ficha_id' => $fichaId,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addHour(),
+            'enabled_manually_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($fichaId);
+        $result = app(PersonalFichaService::class)->ensureRegularizationLink($ficha);
+
+        $this->assertSame($linkId, $result['link']->id);
+        $this->assertTrue(now()->copy()->addHours(PersonalFichaService::DEFAULT_LINK_HOURS)->equalTo($result['link']->expires_at));
+        $this->assertNotNull($result['link']->enabled_manually_at);
+        $this->assertSame(route('ficha-colaborador.show', ['token' => $token]), $result['url']);
+    }
+
     private function fichaData(array $overrides = []): array
     {
         $data = [
@@ -1009,5 +1184,32 @@ class PersonalFichaObservedResubmitTest extends TestCase
                 'activo' => true,
             ]
         );
+    }
+
+    private function createUsuario(): Usuario
+    {
+        $roleId = (string) Str::uuid();
+        $userId = (string) Str::uuid();
+
+        DB::table('roles')->insert([
+            'id' => $roleId,
+            'nombre' => 'RRHH_LINKS_' . Str::upper(Str::random(6)),
+            'permisos' => json_encode([]),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('usuarios')->insert([
+            'id' => $userId,
+            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'password' => bcrypt('secret123'),
+            'rol_id' => $roleId,
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return Usuario::query()->findOrFail($userId);
     }
 }

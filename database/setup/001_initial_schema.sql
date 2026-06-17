@@ -199,6 +199,8 @@ CREATE TABLE IF NOT EXISTS rq_mina_detalle (
   rq_mina_id CHAR(36) NOT NULL,
   puesto VARCHAR(191) NOT NULL,
   cantidad INT NOT NULL,
+  cantidad_backup INT NOT NULL DEFAULT 0,
+  cantidad_total INT NOT NULL DEFAULT 0,
   cantidad_atendida INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -246,6 +248,31 @@ CREATE TABLE IF NOT EXISTS rq_proserge_detalle (
   CONSTRAINT fk_rq_proserge_detalle_rq FOREIGN KEY (rq_proserge_id) REFERENCES rq_proserge(id) ON DELETE CASCADE,
   CONSTRAINT fk_rq_proserge_detalle_rq_det FOREIGN KEY (rq_mina_detalle_id) REFERENCES rq_mina_detalle(id),
   CONSTRAINT fk_rq_proserge_detalle_personal FOREIGN KEY (personal_id) REFERENCES personal(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS rq_mina_detalle_cambios (
+  id CHAR(36) NOT NULL,
+  rq_mina_id CHAR(36) NOT NULL,
+  rq_mina_detalle_id CHAR(36) NULL,
+  rq_proserge_id CHAR(36) NULL,
+  puesto VARCHAR(191) NOT NULL,
+  tipo VARCHAR(40) NOT NULL,
+  cantidad_anterior INT NULL,
+  cantidad_nueva INT NULL,
+  asignaciones_retiradas INT NOT NULL DEFAULT 0,
+  mensaje TEXT NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+  created_by_usuario_id CHAR(36) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_rq_mina_cambios_rq_estado (rq_mina_id, estado),
+  KEY idx_rq_mina_cambios_detalle (rq_mina_detalle_id),
+  KEY idx_rq_mina_cambios_proserge (rq_proserge_id),
+  CONSTRAINT fk_rq_mina_cambios_rq FOREIGN KEY (rq_mina_id) REFERENCES rq_mina(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rq_mina_cambios_detalle FOREIGN KEY (rq_mina_detalle_id) REFERENCES rq_mina_detalle(id) ON DELETE SET NULL,
+  CONSTRAINT fk_rq_mina_cambios_proserge FOREIGN KEY (rq_proserge_id) REFERENCES rq_proserge(id) ON DELETE SET NULL,
+  CONSTRAINT fk_rq_mina_cambios_usuario FOREIGN KEY (created_by_usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS grupo_trabajo (

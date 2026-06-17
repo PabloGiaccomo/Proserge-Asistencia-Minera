@@ -29,6 +29,8 @@ class PersonalExportConfig
         public readonly ?int $limit,
         /** @var array<int, string> */
         public readonly array $columns,
+        /** @var array<int, string> */
+        public readonly array $personalIds = [],
     ) {
     }
 
@@ -63,6 +65,7 @@ class PersonalExportConfig
         $mina = self::nullableText($input['mina'] ?? null);
         $minaEstado = self::nullableText($input['mina_estado'] ?? null);
         $contrato = self::nullableText($input['contrato'] ?? null);
+        $personalIds = self::resolvePersonalIds($input['personal_ids'] ?? []);
 
         // Scope presets override explicit filters where appropriate.
         if ($scope === 'all') {
@@ -106,6 +109,7 @@ class PersonalExportConfig
             order: $order,
             limit: $limit,
             columns: $columns,
+            personalIds: $personalIds,
         );
     }
 
@@ -138,6 +142,7 @@ class PersonalExportConfig
             'limit' => $this->limit === null ? 'all' : (string) $this->limit,
             'manual_limit' => $this->limit === null ? null : (string) $this->limit,
             'columns' => $this->columns,
+            'personal_ids' => $this->personalIds,
         ];
     }
 
@@ -178,6 +183,21 @@ class PersonalExportConfig
         $parsed = (int) $limitText;
 
         return $parsed > 0 ? $parsed : null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function resolvePersonalIds(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_unique(array_map(
+            static fn ($id): string => trim((string) $id),
+            $value
+        )), static fn (string $id): bool => $id !== ''));
     }
 
     private static function nullableText(mixed $value): ?string

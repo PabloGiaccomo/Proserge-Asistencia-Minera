@@ -61,6 +61,48 @@ class RQMinaApiTest extends TestCase
             ->assertJsonPath('data.estado', 'BORRADOR');
     }
 
+    public function test_calcula_backup_y_total_del_pedido_de_personal(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Parada Planta',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-30',
+            'detalle' => [
+                ['puesto' => 'Supervisor Campo', 'cantidad' => 20],
+                ['puesto' => 'Coordinador General', 'cantidad' => 2],
+            ],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonFragment([
+                'puesto' => 'Supervisor Campo',
+                'cantidad' => 20,
+                'cantidad_backup' => 4,
+                'cantidad_total' => 24,
+                'cantidad_atendida' => 0,
+            ])
+            ->assertJsonFragment([
+                'puesto' => 'Coordinador General',
+                'cantidad' => 2,
+                'cantidad_backup' => 0,
+                'cantidad_total' => 2,
+                'cantidad_atendida' => 0,
+            ]);
+
+        $this->assertDatabaseHas('rq_mina_detalle', [
+            'puesto' => 'Supervisor Campo',
+            'cantidad' => 20,
+            'cantidad_backup' => 4,
+            'cantidad_total' => 24,
+        ]);
+    }
+
     public function test_crea_rq_mina_con_destino_taller_y_transporte(): void
     {
         $minaId = $this->createMina();
@@ -373,6 +415,118 @@ class RQMinaApiTest extends TestCase
             ->assertJsonPath('data.estado', 'ENVIADO');
     }
 
+    public function test_enviar_crea_rq_proserge_para_atencion_rrhh(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+        $rqId = $this->createRQMina($minaId, $usuarioId, 'BORRADOR');
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-mina/'.$rqId.'/enviar', []);
+
+        $response->assertStatus(200)->assertJsonPath('code', 'RQ_MINA_SEND_OK');
+
+        $this->assertDatabaseHas('rq_proserge', [
+            'rq_mina_id' => $rqId,
+            'mina_id' => $minaId,
+            'estado' => 'PENDIENTE',
+        ]);
+    }
+
+    public function test_reducir_pedido_retira_ultimas_asignaciones_y_registra_cambio(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $rqId = (string) Str::uuid();
+        $detalleId = (string) Str::uuid();
+        $rqProsergeId = (string) Str::uuid();
+
+        DB::table('rq_mina')->insert([
+            'id' => $rqId,
+            'mina_id' => $minaId,
+            'area' => 'Parada planta',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-10',
+            'estado' => 'ENVIADO',
+            'created_by_usuario_id' => $usuarioId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_mina_detalle')->insert([
+            'id' => $detalleId,
+            'rq_mina_id' => $rqId,
+            'puesto' => 'Tecnico',
+            'cantidad' => 3,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 4,
+            'cantidad_atendida' => 4,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_proserge')->insert([
+            'id' => $rqProsergeId,
+            'rq_mina_id' => $rqId,
+            'mina_id' => $minaId,
+            'responsable_rrhh_id' => $usuarioId,
+            'estado' => 'COMPLETADO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $assignmentIds = [];
+        for ($i = 1; $i <= 4; $i++) {
+            $assignmentIds[] = $this->createRqProsergeAssignment(
+                rqProsergeId: $rqProsergeId,
+                rqMinaDetalleId: $detalleId,
+                personalId: $this->createPersonalForRq(),
+                createdAt: now()->addSeconds($i)
+            );
+        }
+
+        $response = $this->withToken($token)->putJson('/api/v1/rq-mina/'.$rqId, [
+            'mina_id' => $minaId,
+            'area' => 'Parada planta actualizada',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-10',
+            'detalle' => [
+                ['puesto' => 'Tecnico', 'cantidad' => 2],
+            ],
+        ]);
+
+        $response->assertOk()->assertJsonPath('code', 'RQ_MINA_UPDATE_OK');
+
+        $this->assertDatabaseHas('rq_mina_detalle', [
+            'id' => $detalleId,
+            'cantidad' => 2,
+            'cantidad_total' => 2,
+            'cantidad_atendida' => 2,
+        ]);
+
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[0]]);
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[1]]);
+        $this->assertDatabaseMissing('rq_proserge_detalle', ['id' => $assignmentIds[2]]);
+        $this->assertDatabaseMissing('rq_proserge_detalle', ['id' => $assignmentIds[3]]);
+        $this->assertDatabaseHas('rq_mina_detalle_cambios', [
+            'rq_mina_id' => $rqId,
+            'rq_mina_detalle_id' => $detalleId,
+            'tipo' => 'CANTIDAD_REDUCIDA',
+            'cantidad_anterior' => 4,
+            'cantidad_nueva' => 2,
+            'asignaciones_retiradas' => 2,
+            'estado' => 'PENDIENTE',
+        ]);
+        $this->assertDatabaseHas('rq_proserge', [
+            'id' => $rqProsergeId,
+            'estado' => 'COMPLETADO',
+        ]);
+    }
+
     private function createMina(): string
     {
         $id = (string) Str::uuid();
@@ -512,6 +666,44 @@ class RQMinaApiTest extends TestCase
             'cantidad_atendida' => 0,
             'created_at' => now(),
             'updated_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function createPersonalForRq(): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('personal')->insert([
+            'id' => $id,
+            'dni' => (string) random_int(10000000, 99999999),
+            'nombre_completo' => 'Trabajador '.Str::upper(Str::random(5)),
+            'puesto' => 'Tecnico',
+            'qr_code' => 'QR-'.Str::upper(Str::random(8)),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function createRqProsergeAssignment(string $rqProsergeId, string $rqMinaDetalleId, string $personalId, $createdAt): string
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('rq_proserge_detalle')->insert([
+            'id' => $id,
+            'rq_proserge_id' => $rqProsergeId,
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-10',
+            'estado' => 'ASIGNADO',
+            'created_at' => $createdAt,
+            'updated_at' => $createdAt,
         ]);
 
         return $id;

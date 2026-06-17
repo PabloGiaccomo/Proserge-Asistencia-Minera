@@ -19,7 +19,16 @@ class RQMinaDetalle extends Model
         'rq_mina_id',
         'puesto',
         'cantidad',
+        'cantidad_backup',
+        'cantidad_total',
         'cantidad_atendida',
+    ];
+
+    protected $casts = [
+        'cantidad' => 'integer',
+        'cantidad_backup' => 'integer',
+        'cantidad_total' => 'integer',
+        'cantidad_atendida' => 'integer',
     ];
 
     public function rqMina(): BelongsTo
@@ -30,5 +39,10 @@ class RQMinaDetalle extends Model
     public function asignaciones(): HasMany
     {
         return $this->hasMany(RQProsergeDetalle::class, 'rq_mina_detalle_id');
+    }
+
+    public function cambios(): HasMany
+    {
+        return $this->hasMany(RQMinaDetalleCambio::class, 'rq_mina_detalle_id')->latest();
     }
 }

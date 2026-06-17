@@ -9,7 +9,6 @@ use App\Models\PersonalPuesto;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
-use App\Modules\Personal\Services\PersonalFichaExportService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalAntiguoService;
 use App\Modules\Personal\Services\PersonalContratoService;
@@ -19,6 +18,7 @@ use App\Modules\Personal\Support\PersonalExportConfig;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -32,7 +32,6 @@ class PersonalPageController extends WebPageController
     public function __construct(
         private readonly PersonalService $service,
         private readonly ExportPersonalService $exportService,
-        private readonly PersonalFichaExportService $fichaExportService,
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalAntiguoService $personalAntiguoService,
         private readonly PersonalContratoService $contratoService,
@@ -153,33 +152,33 @@ class PersonalPageController extends WebPageController
         $availableColumns = $this->exportService->availableColumns();
         $config = PersonalExportConfig::fromInput($request->query(), array_keys($availableColumns), true);
         $preview = $this->exportService->preview($config);
-
-        $minas = Mina::query()
-            ->where('estado', 'ACTIVO')
-            ->orderBy('nombre')
-            ->get(['id', 'nombre'])
-            ->map(fn (Mina $mine): array => [
-                'id' => (string) $mine->id,
-                'nombre' => (string) $mine->nombre,
-            ])
-            ->values()
-            ->all();
-
         $recommendedColumns = PersonalExportConfig::recommendedColumns(array_keys($availableColumns));
-        $availableFichaColumns = $this->fichaExportService->availableColumns();
-        $recommendedFichaColumns = $this->fichaExportService->recommendedColumns();
-        $fichaPreview = $this->fichaExportService->preview($request->query());
 
         return view('personal.export', [
             'config' => $config,
             'availableColumns' => $availableColumns,
             'recommendedColumns' => $recommendedColumns,
-            'availableFichaColumns' => $availableFichaColumns,
-            'recommendedFichaColumns' => $recommendedFichaColumns,
-            'fichaPreview' => $fichaPreview,
             'preview' => $preview,
-            'minas' => $minas,
+            'selectedWorkers' => $this->exportService->workersByIds($config->personalIds),
+            'previewTable' => $this->exportService->previewTable($config),
         ]);
+    }
+
+    public function exportWorkers(Request $request): JsonResponse
+    {
+        return response()->json([
+            'workers' => $this->exportService->searchWorkers((string) $request->query('q', '')),
+        ]);
+    }
+
+    public function exportPreview(Request $request): JsonResponse
+    {
+        $availableColumns = $this->exportService->availableColumns();
+        $config = PersonalExportConfig::fromInput($request->all(), array_keys($availableColumns), false);
+
+        return response()->json(
+            $this->exportService->previewTable($config)
+        );
     }
 
     public function exportDownload(Request $request)
@@ -191,6 +190,12 @@ class PersonalPageController extends WebPageController
             return redirect()
                 ->route('personal.export.form', $request->except('_token'))
                 ->with('error', 'Debes seleccionar al menos una columna para exportar.');
+        }
+
+        if (count($config->personalIds) === 0) {
+            return redirect()
+                ->route('personal.export.form', $request->except('_token'))
+                ->with('error', 'Debes seleccionar al menos un trabajador para exportar.');
         }
 
         $preview = $this->exportService->preview($config);

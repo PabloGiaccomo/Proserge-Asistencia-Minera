@@ -815,12 +815,16 @@
         font-weight: 800;
     }
 
-    .worker-table tbody tr:hover td,
+    .worker-table tbody tr:not(.is-selected-worker) td {
+        background: #ffffff;
+    }
+
+    .worker-table tbody tr:not(.is-selected-worker):hover td,
     .mine-table tbody tr:hover td {
         background: #f8fafc;
     }
 
-    .worker-table tbody tr.active td {
+    .worker-table tbody tr.is-selected-worker td {
         background: #eff6ff;
     }
 
@@ -1808,6 +1812,18 @@
         align-content: start;
     }
 
+    .mine-config-exam-card.is-removing {
+        opacity: 0.55;
+        pointer-events: none;
+    }
+
+    .mine-config-inline-error {
+        color: #b91c1c;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.35;
+    }
+
     .mine-config-exam-card.is-empty {
         color: #94a3b8;
         align-content: center;
@@ -2346,7 +2362,7 @@
 
                     <tbody>
                         @forelse($workers as $worker)
-                            <tr @class(['active' => (int)($selectedWorker?->id ?? 0) === (int)$worker->id])>
+                            <tr @class(['is-selected-worker' => (int)($selectedWorker?->id ?? 0) === (int)$worker->id])>
                                 <td data-label="Trabajador"><strong>{{ $worker->nombre_completo }}</strong></td>
                                 <td data-label="Documento"><span class="mine-muted">{{ $worker->numero_documento ?: $worker->dni ?: 'Sin documento' }}</span></td>
                                 <td data-label="Puesto"><span class="mine-muted">{{ $worker->puesto ?: 'Sin cargo' }}</span></td>
@@ -3271,15 +3287,15 @@
                             $searchText = mb_strtolower($mine->nombre . ' ' . $mineRequirements->map(fn ($req) => $req->examen?->nombre ?: $req->nombre)->implode(' '));
                         @endphp
 
-                        <div class="mine-config-row" data-mine-config-row data-search="{{ $searchText }}">
+                        <div class="mine-config-row" data-mine-config-row data-mine-name="{{ $mine->nombre }}" data-requirement-count="{{ $mineRequirements->count() }}" data-search="{{ $searchText }}">
                             <div class="mine-config-mine-cell">
                                 <span class="mine-config-exam-title">{{ $mine->nombre }}</span>
-                                <span class="mine-muted">{{ $mineRequirements->count() }} examen{{ $mineRequirements->count() === 1 ? '' : 'es' }} configurado{{ $mineRequirements->count() === 1 ? '' : 's' }}</span>
+                                <span class="mine-muted" data-mine-config-count>{{ $mineRequirements->count() }} examen{{ $mineRequirements->count() === 1 ? '' : 'es' }} configurado{{ $mineRequirements->count() === 1 ? '' : 's' }}</span>
                             </div>
 
-                            <div class="mine-config-exams-strip">
+                            <div class="mine-config-exams-strip" data-mine-config-strip>
                                 @forelse($mineRequirements as $requirement)
-                                    <div class="mine-config-exam-card">
+                                    <div class="mine-config-exam-card" data-requirement-card data-requirement-id="{{ $requirement->id }}">
                                         <span class="mine-config-exam-title">{{ $requirement->examen?->nombre ?: $requirement->nombre }}</span>
                                         <div class="mine-inline-tags">
                                             <span class="mine-badge {{ $requirement->obligatorio ? 'danger' : 'info' }}">{{ $requirement->obligatorio ? 'Obligatorio' : 'Opcional' }}</span>
@@ -3299,13 +3315,13 @@
                                             <span class="mine-muted">Vigencia para esta mina: {{ $requirement->vigencia_dias_override }} días</span>
                                         @endif
 
-                                        <form method="POST" action="{{ route('personal.habilitacion-minera.requisitos.deactivate', array_merge(['requirementId' => $requirement->id], $currentQuery)) }}" data-loading-message="Quitando requisito de la mina...">
+                                        <form method="POST" action="{{ route('personal.habilitacion-minera.requisitos.deactivate', array_merge(['requirementId' => $requirement->id], $currentQuery)) }}" data-loading-message="Quitando requisito de la mina..." data-requirement-deactivate-form>
                                             @csrf
                                             <button type="submit" class="btn btn-outline btn-xs">Quitar</button>
                                         </form>
                                     </div>
                                 @empty
-                                    <div class="mine-config-exam-card is-empty">
+                                    <div class="mine-config-exam-card is-empty" data-empty-requirements-card>
                                         <span>Sin exámenes configurados</span>
                                     </div>
                                 @endforelse
@@ -3626,6 +3642,131 @@ function showInlineFormLoading(form) {
         button.disabled = true;
     });
 }
+
+function mineConfigCountText(count) {
+    const normalized = Math.max(0, Number(count) || 0);
+    return normalized + ' examen' + (normalized === 1 ? '' : 'es') + ' configurado' + (normalized === 1 ? '' : 's');
+}
+
+function updateMineConfigRowSearch(row) {
+    if (!row) return;
+
+    const mineName = row.dataset.mineName || '';
+    const examNames = Array.from(row.querySelectorAll('[data-requirement-card] .mine-config-exam-title'))
+        .map(function(node) { return node.textContent || ''; })
+        .join(' ');
+    row.dataset.search = (mineName + ' ' + examNames).toLocaleLowerCase();
+}
+
+function ensureMineConfigEmptyCard(strip) {
+    if (!strip || strip.querySelector('[data-empty-requirements-card]')) return;
+
+    const empty = document.createElement('div');
+    empty.className = 'mine-config-exam-card is-empty';
+    empty.dataset.emptyRequirementsCard = 'true';
+    empty.innerHTML = '<span>Sin examenes configurados</span>';
+    strip.appendChild(empty);
+}
+
+function updateMineConfigCount(row, count) {
+    if (!row) return;
+
+    const normalized = Math.max(0, Number(count) || 0);
+    row.dataset.requirementCount = String(normalized);
+
+    const counter = row.querySelector('[data-mine-config-count]');
+    if (counter) {
+        counter.textContent = mineConfigCountText(normalized);
+    }
+
+    const strip = row.querySelector('[data-mine-config-strip]');
+    if (normalized === 0) {
+        ensureMineConfigEmptyCard(strip);
+    }
+}
+
+function showMineConfigError(card, message) {
+    if (!card) return;
+
+    let node = card.querySelector('[data-requirement-error]');
+    if (!node) {
+        node = document.createElement('div');
+        node.className = 'mine-config-inline-error';
+        node.dataset.requirementError = 'true';
+        card.appendChild(node);
+    }
+
+    node.textContent = message || 'No se pudo quitar el examen de la mina.';
+}
+
+document.addEventListener('submit', function(event) {
+    const form = event.target;
+    if (!form || !form.matches('[data-requirement-deactivate-form]')) {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const card = form.closest('[data-requirement-card]');
+    const row = form.closest('[data-mine-config-row]');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalText = submitButton ? submitButton.textContent : '';
+
+    card?.classList.add('is-removing');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Quitando...';
+    }
+
+    fetch(form.action, {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: new FormData(form),
+    })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.json().catch(function() { return {}; }).then(function(payload) {
+                    throw new Error(payload.message || 'No se pudo quitar el examen de la mina.');
+                });
+            }
+
+            return response.json();
+        })
+        .then(function(payload) {
+            const deactivatedIds = Array.isArray(payload.deactivated_requirement_ids)
+                ? payload.deactivated_requirement_ids
+                : [payload.requirement_id];
+
+            deactivatedIds
+                .filter(Boolean)
+                .forEach(function(requirementId) {
+                    document.querySelectorAll('[data-requirement-card]').forEach(function(targetCard) {
+                        if (targetCard.dataset.requirementId === String(requirementId)) {
+                            targetCard.remove();
+                        }
+                    });
+                });
+
+            if (card && card.isConnected) {
+                card.remove();
+            }
+
+            updateMineConfigCount(row, payload.active_count);
+            updateMineConfigRowSearch(row);
+        })
+        .catch(function(error) {
+            card?.classList.remove('is-removing');
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = originalText || 'Quitar';
+            }
+            showMineConfigError(card, error.message);
+        });
+});
 
 document.addEventListener('submit', function(event) {
     const form = event.target;

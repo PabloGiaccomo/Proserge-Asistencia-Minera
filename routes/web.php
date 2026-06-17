@@ -107,6 +107,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal', [PersonalPageController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.index');
     Route::get('/personal/exportar', [PersonalPageController::class, 'exportForm'])->middleware('web.permission:personal,exportar')->name('personal.export.form');
     Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->middleware('web.permission:personal,exportar')->name('personal.export.download');
+    Route::get('/personal/exportar/personal', [PersonalPageController::class, 'exportWorkers'])->middleware('web.permission:personal,exportar')->name('personal.export.workers');
+    Route::post('/personal/exportar/preview', [PersonalPageController::class, 'exportPreview'])->middleware('web.permission:personal,exportar')->name('personal.export.preview');
     Route::get('/personal/formatos-contrato', [PersonalContratoFormatoController::class, 'templates'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.templates');
     Route::get('/personal/formatos-contrato/personal', [PersonalContratoFormatoController::class, 'searchWorkers'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.personal');
     Route::post('/personal/formatos-contrato/preview', [PersonalContratoFormatoController::class, 'preview'])->middleware('web.permission:personal,exportar')->name('personal.contrato-formatos.preview');
@@ -228,6 +230,7 @@ Route::middleware('web.auth')->group(function (): void {
 
     // RQ Proserge
     Route::get('/rq-proserge', [RQProsergePageController::class, 'index'])->middleware('web.permission:rq_proserge,ver')->name('rq-proserge.index');
+    Route::get('/rq-proserge/personal/buscar', [RQProsergePageController::class, 'buscarPersonal'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.personal.buscar');
     Route::get('/rq-proserge/create', [RQProsergePageController::class, 'create'])->middleware('web.permission:rq_proserge,crear')->name('rq-proserge.create');
     Route::get('/rq-proserge/{id}/edit', [RQProsergePageController::class, 'edit'])->middleware('web.permission:rq_proserge,editar')->name('rq-proserge.edit');
     Route::get('/rq-proserge/{id}', [RQProsergePageController::class, 'show'])->middleware('web.permission:rq_proserge,ver')->name('rq-proserge.show');

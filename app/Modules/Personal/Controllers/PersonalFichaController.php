@@ -367,25 +367,25 @@ class PersonalFichaController extends WebPageController
         $this->assertCanDeletePersonal();
 
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
-        $this->fichaService->extendLink($ficha, 24);
+        $this->fichaService->extendLink($ficha);
 
         if ($request->wantsJson()) {
             return response()->json([
                 'success' => true,
-                'message' => 'El link temporal fue ampliado por 1 dia mas.',
+                'message' => 'El link temporal fue ampliado por 3 dias mas.',
                 ...$this->temporaryRowResponse($ficha->fresh(['personal', 'link', 'archivos'])),
             ]);
         }
 
         return redirect()
             ->route('personal.fichas.temporales')
-            ->with('success', 'El link temporal fue ampliado por 1 dia mas.');
+            ->with('success', 'El link temporal fue ampliado por 3 dias mas.');
     }
 
     public function regularizeLink(Request $request, string $id): JsonResponse|RedirectResponse
     {
         $ficha = PersonalFicha::query()->with(['personal', 'link', 'archivos'])->findOrFail($id);
-        $result = $this->fichaService->ensureRegularizationLink($ficha, 24);
+        $result = $this->fichaService->ensureRegularizationLink($ficha);
 
         if ($request->wantsJson()) {
             return response()->json([
@@ -438,7 +438,7 @@ class PersonalFichaController extends WebPageController
         $personal = Personal::query()->findOrFail($validated['personal_id']);
 
         try {
-            $result = $this->fichaService->activateTemporaryLinkForPersonal($personal, $this->requireAuthenticatedUser(), 24);
+            $result = $this->fichaService->activateTemporaryLinkForPersonal($personal, $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
             $error = collect($exception->errors())->flatten()->first() ?: 'No se pudo activar el link temporal.';
 

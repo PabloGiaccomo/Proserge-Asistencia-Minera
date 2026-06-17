@@ -6,6 +6,7 @@ use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalContratoDato;
 use App\Models\Usuario;
+use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Database\Query\Builder;
@@ -19,6 +20,10 @@ use Illuminate\Validation\ValidationException;
 
 class PersonalContratoService
 {
+    public function __construct(private readonly OperationalNotificationService $operationalNotifications)
+    {
+    }
+
     public function listForPersonal(Personal $personal, ?Usuario $user = null)
     {
         if (!Schema::hasTable('personal_contratos')) {
@@ -182,7 +187,10 @@ class PersonalContratoService
             'usuario_decision_id' => $user->id,
         ])->save();
 
-        return $contract->fresh(['personal', 'decisionUsuario.personal']);
+        $updated = $contract->fresh(['personal', 'decisionUsuario.personal']);
+        $this->operationalNotifications->contratoDecision($updated, $user);
+
+        return $updated;
     }
 
     public function prepareRenewalFromDecision(PersonalContrato $contract, array $payload, Usuario $user): PersonalContrato
@@ -372,7 +380,7 @@ class PersonalContratoService
         $fechaCese = PersonalNormalizer::isoDate($payload['fecha_cese'] ?? null)
             ?: ($isEarlyClosure ? $today : $contractEnd);
 
-        return DB::transaction(function () use ($contract, $user, $fechaCese, $ceseReason, $ceaseObservation, $closureObservation): PersonalContrato {
+        $closed = DB::transaction(function () use ($contract, $user, $fechaCese, $ceseReason, $ceaseObservation, $closureObservation): PersonalContrato {
             $personal = $contract->personal;
             $keepsActive = $this->hasOtherCurrentSignedContract($contract);
             $motivoCeseLabel = $this->controlledCeaseReasonOptions()[$ceseReason] ?? $ceseReason;
@@ -428,6 +436,10 @@ class PersonalContratoService
 
             return $contract->fresh(['personal', 'decisionUsuario.personal', 'cierreNoRenovacionUsuario.personal']);
         });
+
+        $this->operationalNotifications->contratoNoRenovadoCerrado($closed, $user);
+
+        return $closed;
     }
 
     public function annulContract(Personal $personal, string $contractId, string $motivo, Usuario $user): PersonalContrato
@@ -642,7 +654,7 @@ class PersonalContratoService
             'local',
         );
 
-        return DB::transaction(function () use ($personal, $contract, $file, $user, $path): PersonalContrato {
+        $signed = DB::transaction(function () use ($personal, $contract, $file, $user, $path): PersonalContrato {
             $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->findOrFail($personal->id);
             $contract = PersonalContrato::query()
                 ->where('personal_id', $personal->id)
@@ -705,6 +717,10 @@ class PersonalContratoService
 
             return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
         });
+
+        $this->operationalNotifications->contratoFirmado($personal, $signed, $user);
+
+        return $signed;
     }
 
     public function canUploadSignedFileForContract(PersonalContrato $contract): bool
@@ -1081,7 +1097,7 @@ class PersonalContratoService
 
     public function markEditableContractSigned(Personal $personal, PersonalContratoDato $datos, Usuario $user): PersonalContrato
     {
-        return DB::transaction(function () use ($personal, $datos, $user): PersonalContrato {
+        $signed = DB::transaction(function () use ($personal, $datos, $user): PersonalContrato {
             $personal = Personal::query()->with(['fichaColaborador', 'minas'])->findOrFail($personal->id);
             $contract = $this->assertContractEditable($personal, $user);
 
@@ -1111,6 +1127,10 @@ class PersonalContratoService
 
             return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
         });
+
+        $this->operationalNotifications->contratoFirmado($personal, $signed, $user);
+
+        return $signed;
     }
 
     public function contractLabel(PersonalContrato $contract): string

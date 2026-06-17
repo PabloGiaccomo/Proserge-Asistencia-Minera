@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -30,6 +31,13 @@ class ExportPersonalService
         'correo' => 'Correo',
         'minas' => 'Minas Asociadas',
         'estado_mina' => 'Estados en Mina',
+    ];
+
+    /** @var array<string, array{fill:string,font:string}> */
+    private const MINE_CELL_STYLES = [
+        'mine-ok' => ['fill' => 'FFDDFCE7', 'font' => 'FF166534'],
+        'mine-warn' => ['fill' => 'FFFEF3C7', 'font' => 'FF92400E'],
+        'mine-neutral' => ['fill' => 'FFE5E7EB', 'font' => 'FF374151'],
     ];
 
     public function __construct(private readonly PersonalService $personalService)
@@ -55,15 +63,10 @@ class ExportPersonalService
 
     public function downloadWithConfig(PersonalExportConfig $config, ?string $filename = null): StreamedResponse
     {
-        $query = $this->buildQueryFromConfig($config)->with(['minas']);
-        if ($config->limit !== null) {
-            $query->limit($config->limit);
-        }
+        $records = $this->recordsForConfig($config);
 
-        $records = $query->get();
-
-        $sheetData = $this->buildRows($records, $config->columns);
-        $spreadsheet = $this->buildSpreadsheet($sheetData);
+        $table = $this->buildTable($records, $config->columns);
+        $spreadsheet = $this->buildSpreadsheet($table['headers'], $table['rows'], $table['cell_styles']);
 
         $writer = new Xlsx($spreadsheet);
         $downloadName = $filename ?: 'personal_' . now()->format('Ymd_His') . '.xlsx';
@@ -91,9 +94,94 @@ class ExportPersonalService
         ];
     }
 
+    public function previewTable(PersonalExportConfig $config, int $limit = 20): array
+    {
+        if (count($config->personalIds) === 0 || count($config->columns) === 0) {
+            return [
+                'headers' => array_map(
+                    fn (string $key): string => $this->availableColumns()[$key] ?? $key,
+                    $config->columns
+                ),
+                'rows' => [],
+                'row_ids' => [],
+                'cell_styles' => [],
+                'records' => 0,
+                'has_more' => false,
+            ];
+        }
+
+        $records = $this->recordsForConfig($config, $limit + 1);
+        $hasMore = $records->count() > $limit;
+        $records = $records->take($limit);
+        $rowIds = $records
+            ->map(fn (Personal $personal): string => (string) $personal->id)
+            ->values()
+            ->all();
+        $table = $this->buildTable($records, $config->columns);
+
+        return [
+            'headers' => $table['headers'],
+            'rows' => $table['rows'],
+            'row_ids' => $rowIds,
+            'cell_styles' => $table['cell_styles'],
+            'records' => count($config->personalIds),
+            'has_more' => $hasMore,
+        ];
+    }
+
+    public function searchWorkers(string $query, int $limit = 12): array
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return [];
+        }
+
+        return $this->personalService
+            ->buildFilteredQuery([
+                'search' => $query,
+                'with_minas' => true,
+                'limit' => max(1, min(20, $limit)),
+            ])
+            ->with(['minas'])
+            ->limit(max(1, min(20, $limit)))
+            ->get()
+            ->map(fn (Personal $personal): array => $this->workerSummary($personal))
+            ->values()
+            ->all();
+    }
+
+    public function workersByIds(array $personalIds): array
+    {
+        $ids = collect($personalIds)
+            ->map(fn ($id): string => trim((string) $id))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if (count($ids) === 0) {
+            return [];
+        }
+
+        return $this->sortRecordsBySelectedIds(
+            Personal::query()
+                ->whereIn('id', $ids)
+                ->with(['minas'])
+                ->get(),
+            $ids
+        )
+            ->map(fn (Personal $personal): array => $this->workerSummary($personal))
+            ->values()
+            ->all();
+    }
+
     private function buildQueryFromConfig(PersonalExportConfig $config): Builder
     {
         $query = $this->personalService->buildFilteredQuery($config->toFilters())->reorder();
+
+        if (count($config->personalIds) > 0) {
+            $query->whereIn('personal.id', $config->personalIds);
+        }
 
         if ($config->scope === 'mine' && empty($config->mina)) {
             $query->whereRaw('1=0');
@@ -114,32 +202,31 @@ class ExportPersonalService
         return $query->orderBy('personal.nombre_completo');
     }
 
-    private function buildRows(Collection $records, array $columns): array
+    private function buildTable(Collection $records, array $columns): array
     {
-        $availableColumns = $this->availableColumns();
-        $headers = array_map(
-            static fn (string $key) => $availableColumns[$key] ?? $key,
-            $columns
-        );
-
-        $rows = [$headers];
+        $columnDefinitions = $this->columnDefinitionsFor($records, $columns);
+        $headers = array_map(static fn (array $definition): string => $definition['label'], $columnDefinitions);
+        $rows = [];
+        $cellStyles = [];
 
         foreach ($records as $record) {
             /** @var Personal $record */
-            $mineNames = [];
-            $mineStates = [];
-
-            foreach ($record->minas as $mine) {
-                $mineNames[] = $mine->nombre;
-                $mineStates[] = sprintf('%s (%s)', $mine->nombre, PersonalNormalizer::mineStatusLabel($mine->pivot?->estado));
-            }
-
             $phoneData = PersonalNormalizer::normalizePhonePayload($record->telefono_1 ?? $record->telefono ?? null);
             $telefono1 = $record->telefono_1 ?? $phoneData['telefono_1'];
             $telefono2 = $record->telefono_2 ?? $phoneData['telefono_2'];
+            $row = [];
+            $styleRow = [];
 
-            $rows[] = array_map(function (string $columnKey) use ($record, $telefono1, $telefono2, $mineNames, $mineStates): string {
-                return match ($columnKey) {
+            foreach ($columnDefinitions as $definition) {
+                if (($definition['type'] ?? '') === 'mine') {
+                    $cell = $this->mineCellFor($record, (string) $definition['mine_id']);
+                    $row[] = $cell['value'];
+                    $styleRow[] = $cell['style'];
+                    continue;
+                }
+
+                $columnKey = (string) ($definition['key'] ?? '');
+                $row[] = match ($columnKey) {
                     'dni' => (string) $record->dni,
                     'nombre_completo' => (string) $record->nombre_completo,
                     'puesto' => (string) $record->puesto,
@@ -152,14 +239,147 @@ class ExportPersonalService
                     'telefono_2' => (string) ($telefono2 ?? ''),
                     'telefono' => (string) (PersonalNormalizer::combinePhones($telefono1, $telefono2) ?? ''),
                     'correo' => (string) ($record->correo ?? ''),
-                    'minas' => implode('; ', $mineNames),
-                    'estado_mina' => implode('; ', $mineStates),
                     default => '',
                 };
-            }, $columns);
+                $styleRow[] = '';
+            }
+
+            $rows[] = $row;
+            $cellStyles[] = $styleRow;
         }
 
-        return $rows;
+        return [
+            'headers' => $headers,
+            'rows' => $rows,
+            'cell_styles' => $cellStyles,
+        ];
+    }
+
+    private function columnDefinitionsFor(Collection $records, array $columns): array
+    {
+        $availableColumns = $this->availableColumns();
+        $includeMineMatrix = count(array_intersect($columns, ['minas', 'estado_mina'])) > 0;
+        $mineColumns = $includeMineMatrix ? $this->mineColumnsForRecords($records) : [];
+        $mineMatrixAdded = false;
+        $definitions = [];
+
+        foreach ($columns as $columnKey) {
+            if (in_array($columnKey, ['minas', 'estado_mina'], true)) {
+                if (!$mineMatrixAdded) {
+                    foreach ($mineColumns as $mineColumn) {
+                        $definitions[] = $mineColumn;
+                    }
+                    $mineMatrixAdded = true;
+                }
+
+                continue;
+            }
+
+            $definitions[] = [
+                'type' => 'field',
+                'key' => $columnKey,
+                'label' => $availableColumns[$columnKey] ?? $columnKey,
+            ];
+        }
+
+        return $definitions;
+    }
+
+    private function mineColumnsForRecords(Collection $records): array
+    {
+        return $records
+            ->flatMap(fn (Personal $personal): Collection => $personal->minas)
+            ->filter(fn ($mine): bool => filled($mine?->id) && filled($mine?->nombre))
+            ->unique(fn ($mine): string => (string) $mine->id)
+            ->sortBy(fn ($mine): string => mb_strtoupper((string) $mine->nombre))
+            ->map(fn ($mine): array => [
+                'type' => 'mine',
+                'key' => 'mine:' . $mine->id,
+                'mine_id' => (string) $mine->id,
+                'label' => (string) $mine->nombre,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array{value:string, style:string}
+     */
+    private function mineCellFor(Personal $personal, string $mineId): array
+    {
+        $mine = $personal->minas->firstWhere('id', $mineId);
+        if (!$mine) {
+            return ['value' => '-', 'style' => ''];
+        }
+
+        $status = PersonalNormalizer::mineStatusLabel(
+            $mine->pivot?->estado_habilitacion ?: $mine->pivot?->estado
+        );
+
+        return match ($status) {
+            'habilitado' => ['value' => 'Habilitado', 'style' => 'mine-ok'],
+            'no_habilitado' => ['value' => 'No habilitado', 'style' => 'mine-neutral'],
+            default => ['value' => 'En proceso', 'style' => 'mine-warn'],
+        };
+    }
+
+    private function recordsForConfig(PersonalExportConfig $config, ?int $limit = null): Collection
+    {
+        $query = $this->buildQueryFromConfig($config)->with(['minas']);
+        if ($limit !== null) {
+            $query->limit($limit);
+        } elseif ($config->limit !== null) {
+            $query->limit($config->limit);
+        }
+
+        return $this->sortRecordsBySelectedIds($query->get(), $config->personalIds);
+    }
+
+    private function sortRecordsBySelectedIds(Collection $records, array $personalIds): Collection
+    {
+        if (count($personalIds) === 0) {
+            return $records;
+        }
+
+        $order = array_flip(array_values($personalIds));
+
+        return $records
+            ->sortBy(fn (Personal $personal): int => $order[(string) $personal->id] ?? PHP_INT_MAX)
+            ->values();
+    }
+
+    private function workerSummary(Personal $personal): array
+    {
+        $mineNames = [];
+        $mineStates = [];
+
+        foreach ($personal->minas as $mine) {
+            $mineNames[] = $mine->nombre;
+            $mineStates[] = sprintf('%s (%s)', $mine->nombre, PersonalNormalizer::mineStatusLabel($mine->pivot?->estado));
+        }
+
+        $phoneData = PersonalNormalizer::normalizePhonePayload($personal->telefono_1 ?? $personal->telefono ?? null);
+        $telefono1 = $personal->telefono_1 ?? $phoneData['telefono_1'];
+        $telefono2 = $personal->telefono_2 ?? $phoneData['telefono_2'];
+
+        return [
+            'id' => (string) $personal->id,
+            'dni' => (string) $personal->dni,
+            'documento' => (string) ($personal->numero_documento ?? $personal->dni),
+            'nombre' => (string) $personal->nombre_completo,
+            'puesto' => (string) $personal->puesto,
+            'contrato' => (string) PersonalNormalizer::contractLabel($personal->contrato),
+            'ocupacion' => (string) ($personal->ocupacion ?? ''),
+            'supervisor' => $personal->es_supervisor ? 'Si' : 'No',
+            'fecha_ingreso' => (string) (optional($personal->fecha_ingreso)->toDateString() ?? ''),
+            'estado' => strtoupper((string) $personal->estado),
+            'telefono_1' => (string) ($telefono1 ?? ''),
+            'telefono_2' => (string) ($telefono2 ?? ''),
+            'telefono' => (string) (PersonalNormalizer::combinePhones($telefono1, $telefono2) ?? ''),
+            'correo' => (string) ($personal->correo ?? ''),
+            'minas' => implode('; ', $mineNames),
+            'estado_mina' => implode('; ', $mineStates),
+        ];
     }
 
     private function describeFilters(PersonalExportConfig $config): string
@@ -203,16 +423,22 @@ class ExportPersonalService
         return $sortLabel . ' (' . $orderLabel . ')';
     }
 
-    private function buildSpreadsheet(array $rows): Spreadsheet
+    private function buildSpreadsheet(array $headers, array $rows, array $cellStyles = []): Spreadsheet
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        $totalColumns = max(array_map(static fn (array $row): int => count($row), $rows));
+        $sheetRows = array_merge([$headers], $rows);
+        $totalColumns = max(array_map(static fn (array $row): int => count($row), $sheetRows));
 
-        foreach ($rows as $rowIndex => $row) {
+        foreach ($sheetRows as $rowIndex => $row) {
             foreach ($row as $colIndex => $value) {
                 $columnLetter = Coordinate::stringFromColumnIndex($colIndex + 1);
-                $sheet->setCellValue($columnLetter . ($rowIndex + 1), (string) ($value ?? ''));
+                $cellAddress = $columnLetter . ($rowIndex + 1);
+                $sheet->setCellValue($cellAddress, (string) ($value ?? ''));
+
+                if ($rowIndex > 0) {
+                    $this->applyMineCellStyle($sheet, $cellAddress, $cellStyles[$rowIndex - 1][$colIndex] ?? '');
+                }
             }
         }
 
@@ -227,5 +453,22 @@ class ExportPersonalService
         }
 
         return $spreadsheet;
+    }
+
+    private function applyMineCellStyle($sheet, string $cellAddress, string $styleKey): void
+    {
+        if (!isset(self::MINE_CELL_STYLES[$styleKey])) {
+            return;
+        }
+
+        $style = self::MINE_CELL_STYLES[$styleKey];
+        $sheet->getStyle($cellAddress)->getFill()
+            ->setFillType(Fill::FILL_SOLID)
+            ->getStartColor()
+            ->setARGB($style['fill']);
+        $sheet->getStyle($cellAddress)->getFont()
+            ->getColor()
+            ->setARGB($style['font']);
+        $sheet->getStyle($cellAddress)->getFont()->setBold(true);
     }
 }

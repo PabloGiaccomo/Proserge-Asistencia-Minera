@@ -217,6 +217,78 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertRedirect();
 
         $this->assertFalse($requirement->fresh()->activo);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertDontSee('data-requirement-id="' . $requirement->id . '"', false);
+    }
+
+    public function test_quitar_examen_de_mina_desde_modal_responde_json_sin_recargar(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $mine = $this->createMine('Unidad ajax');
+        $exam = $this->createExam('Curso ajax');
+
+        $requirement = $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->postJson(route('personal.habilitacion-minera.requisitos.deactivate', $requirement->id))
+            ->assertOk()
+            ->assertJsonPath('message', 'Examen quitado de la mina correctamente.')
+            ->assertJsonPath('requirement_id', $requirement->id)
+            ->assertJsonPath('deactivated_requirement_ids.0', $requirement->id)
+            ->assertJsonPath('mina_id', $mine->id)
+            ->assertJsonPath('active_count', 0);
+
+        $this->assertFalse($requirement->fresh()->activo);
+    }
+
+    public function test_quitar_examen_de_mina_desactiva_duplicados_activos_equivalentes(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $mine = $this->createMine('Unidad duplicada');
+        $exam = $this->createExam('Bloqueo duplicado');
+
+        $requirement = $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $duplicate = MinaRequisito::query()->create([
+            'id' => (string) Str::uuid(),
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'nombre' => $exam->nombre,
+            'obligatorio' => true,
+            'critico' => false,
+            'reprogramable' => true,
+            'activo' => true,
+            'orden' => 2,
+            'permite_no_aplica' => true,
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->postJson(route('personal.habilitacion-minera.requisitos.deactivate', $requirement->id))
+            ->assertOk()
+            ->assertJsonPath('active_count', 0)
+            ->assertJsonFragment(['deactivated_requirement_ids' => [$requirement->id, $duplicate->id]]);
+
+        $this->assertFalse($requirement->fresh()->activo);
+        $this->assertFalse($duplicate->fresh()->activo);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertDontSee('data-requirement-id="' . $requirement->id . '"', false)
+            ->assertDontSee('data-requirement-id="' . $duplicate->id . '"', false);
     }
 
     public function test_configurar_requisito_genera_y_recalcula_automaticamente_sin_boton_manual(): void

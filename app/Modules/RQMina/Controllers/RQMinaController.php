@@ -225,9 +225,9 @@ class RQMinaController extends Controller
             'entity_type' => 'rq_mina',
             'entity_id' => (string) $rqMina->id,
             'title' => 'RQ Mina enviado',
-            'permission_module' => 'rq_mina',
-            'permission_action' => 'ver',
-            'require_permission' => false,
+            'permission_module' => 'rq_proserge',
+            'permission_action' => 'asignar',
+            'require_permission' => true,
             'message' => sprintf(
                 '%s | Area: %s | %s al %s. Requiere atencion RRHH/Planner.',
                 $mineName,
