@@ -93,6 +93,37 @@ class PersonalLifecycleStateTest extends TestCase
         ]);
     }
 
+    public function test_personal_search_matches_document_number_and_unaccented_name_variants(): void
+    {
+        $id = (string) Str::uuid();
+
+        DB::table('personal')->insert([
+            'id' => $id,
+            'dni' => '01234567',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '01234567',
+            'nombre_completo' => 'NUNEZ ROLDAN JUAN FRANCISCO',
+            'puesto' => 'Operario',
+            'ocupacion' => null,
+            'contrato' => 'FIJO',
+            'es_supervisor' => false,
+            'qr_code' => 'QR-' . Str::upper(Str::random(10)),
+            'fecha_ingreso' => null,
+            'estado' => 'PENDIENTE_COMPLETAR_FICHA',
+            'correo' => 'nunez@test.local',
+            'telefono' => '999111222',
+            'telefono_1' => '999111222',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $byName = app(PersonalService::class)->list(['search' => 'nuñez rolda']);
+        $byDocument = app(PersonalService::class)->list(['search' => '01234567']);
+
+        $this->assertTrue($byName->contains('id', $id));
+        $this->assertTrue($byDocument->contains('id', $id));
+    }
+
     private function createPersonal(string $estado): Personal
     {
         $id = (string) Str::uuid();

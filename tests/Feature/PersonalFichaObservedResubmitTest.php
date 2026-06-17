@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class PersonalFichaObservedResubmitTest extends TestCase
@@ -990,6 +991,64 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertNotNull($link->enabled_manually_at);
         $this->assertTrue(now()->copy()->addHours(PersonalFichaService::DEFAULT_LINK_HOURS)->equalTo($link->expires_at));
         $this->assertSame('edit', app(PersonalFichaService::class)->resolveToken(Str::afterLast($result['url'], '/'))['mode']);
+    }
+
+    public function test_manual_creation_returns_only_persisted_and_resolvable_temporary_link(): void
+    {
+        Carbon::setTestNow('2026-06-17 10:00:00');
+
+        $data = $this->fichaData([
+            'nombres' => 'Juan Francisco',
+            'apellido_paterno' => 'Nunez',
+            'apellido_materno' => 'Roldan',
+            'numero_documento' => '45879618',
+            'telefono' => '977111228',
+            'correo' => 'manual-link@test.local',
+            'puesto' => 'Operario link manual',
+        ]);
+
+        $result = app(PersonalFichaService::class)->createManual(
+            $data,
+            ['es_supervisor' => false, 'minas' => []],
+            $this->createUsuario(),
+        );
+
+        $token = Str::afterLast($result['url'], '/');
+
+        $this->assertDatabaseHas('personal', [
+            'id' => $result['personal']->id,
+            'numero_documento' => '45879618',
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+        ]);
+        $this->assertDatabaseHas('personal_fichas', [
+            'id' => $result['ficha']->id,
+            'personal_id' => $result['personal']->id,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+        ]);
+        $this->assertDatabaseHas('personal_ficha_links', [
+            'id' => $result['link']->id,
+            'personal_ficha_id' => $result['ficha']->id,
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'disabled_at' => null,
+            'submitted_at' => null,
+        ]);
+        $this->assertTrue(now()->copy()->addHours(PersonalFichaService::DEFAULT_LINK_HOURS)->equalTo($result['link']->expires_at));
+        $this->assertSame('edit', app(PersonalFichaService::class)->resolveToken($token)['mode']);
+    }
+
+    public function test_temporary_link_cannot_be_enabled_for_non_persisted_worker(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $personal = new Personal([
+            'id' => (string) Str::uuid(),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+        ]);
+
+        app(PersonalFichaService::class)->activateTemporaryLinkForPersonal(
+            $personal,
+            $this->createUsuario(),
+        );
     }
 
     public function test_activate_existing_usable_temporary_link_extends_short_window_to_three_days(): void

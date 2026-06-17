@@ -431,7 +431,7 @@ class RQMinaPageController extends WebPageController
         if (!$deleted) {
             return redirect()
                 ->route('rq-mina.index')
-                ->with('error', 'Solo se puede eliminar un RQ en estado borrador y con permisos de edición.');
+                ->with('error', 'Solo se puede eliminar un RQ si la parada aun no termino y tienes permiso para eliminar.');
         }
 
         return redirect()->route('rq-mina.index')->with('success', 'RQ eliminado correctamente.');

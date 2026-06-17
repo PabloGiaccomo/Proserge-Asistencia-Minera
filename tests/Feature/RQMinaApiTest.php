@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
@@ -36,6 +37,13 @@ class RQMinaApiTest extends TestCase
                 'estado' => 'ACTIVO',
             ],
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_crea_rq_mina_en_borrador(): void
@@ -434,6 +442,120 @@ class RQMinaApiTest extends TestCase
         ]);
     }
 
+    public function test_web_permite_eliminar_rq_enviado_si_la_parada_no_termino(): void
+    {
+        Carbon::setTestNow('2026-06-17 09:00:00');
+
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $rqId = $this->createRQMina($minaId, $usuarioId, 'ENVIADO', '2026-06-01', '2026-06-30');
+        $detalleId = (string) DB::table('rq_mina_detalle')->where('rq_mina_id', $rqId)->value('id');
+        $rqProsergeId = (string) Str::uuid();
+        $personalId = $this->createPersonalForRq();
+        $grupoTrabajoId = (string) Str::uuid();
+
+        DB::table('rq_proserge')->insert([
+            'id' => $rqProsergeId,
+            'rq_mina_id' => $rqId,
+            'mina_id' => $minaId,
+            'responsable_rrhh_id' => $usuarioId,
+            'estado' => 'PENDIENTE',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_proserge_detalle')->insert([
+            'id' => (string) Str::uuid(),
+            'rq_proserge_id' => $rqProsergeId,
+            'rq_mina_detalle_id' => $detalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-30',
+            'estado' => 'ASIGNADO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('grupo_trabajo')->insert([
+            'id' => $grupoTrabajoId,
+            'fecha' => '2026-06-20',
+            'supervisor_id' => $personalId,
+            'mina' => 'Mina prueba',
+            'rq_mina_id' => $rqId,
+            'rq_proserge_id' => $rqProsergeId,
+            'servicio' => 'Servicio prueba',
+            'area' => 'Area prueba',
+            'horario_salida' => '07:00:00',
+            'turno' => 'DIA',
+            'estado' => 'BORRADOR',
+            'created_by_id' => $usuarioId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->withSession([
+            'auth_token' => 'test-token',
+            'user_id' => $usuarioId,
+        ])->post(route('rq-mina.destroy', $rqId));
+
+        $response->assertRedirect(route('rq-mina.index'));
+        $response->assertSessionHas('success', 'RQ eliminado correctamente.');
+
+        $this->assertDatabaseMissing('rq_mina', ['id' => $rqId]);
+        $this->assertDatabaseMissing('rq_proserge', ['id' => $rqProsergeId]);
+        $this->assertDatabaseMissing('rq_proserge_detalle', ['rq_proserge_id' => $rqProsergeId]);
+        $this->assertDatabaseHas('grupo_trabajo', [
+            'id' => $grupoTrabajoId,
+            'rq_mina_id' => null,
+            'rq_proserge_id' => null,
+        ]);
+    }
+
+    public function test_web_bloquea_eliminar_rq_si_la_parada_ya_termino(): void
+    {
+        Carbon::setTestNow('2026-06-17 09:00:00');
+
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $rqId = $this->createRQMina($minaId, $usuarioId, 'ENVIADO', '2026-06-01', '2026-06-16');
+
+        $response = $this->withSession([
+            'auth_token' => 'test-token',
+            'user_id' => $usuarioId,
+        ])->post(route('rq-mina.destroy', $rqId));
+
+        $response->assertRedirect(route('rq-mina.index'));
+        $response->assertSessionHas('error', 'Solo se puede eliminar un RQ si la parada aun no termino y tienes permiso para eliminar.');
+
+        $this->assertDatabaseHas('rq_mina', [
+            'id' => $rqId,
+            'estado' => 'ENVIADO',
+        ]);
+    }
+
+    public function test_listado_muestra_eliminar_para_enviado_no_terminado_y_lo_oculta_si_termino(): void
+    {
+        Carbon::setTestNow('2026-06-17 09:00:00');
+
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $vigenteId = $this->createRQMina($minaId, $usuarioId, 'ENVIADO', '2026-06-01', '2026-06-30');
+        $terminadoId = $this->createRQMina($minaId, $usuarioId, 'ENVIADO', '2026-05-01', '2026-05-31');
+
+        $response = $this->withSession([
+            'auth_token' => 'test-token',
+            'user_id' => $usuarioId,
+        ])->get(route('rq-mina.index'));
+
+        $response->assertOk();
+        $response->assertSee(route('rq-mina.destroy', $vigenteId), false);
+        $response->assertDontSee(route('rq-mina.destroy', $terminadoId), false);
+    }
+
     public function test_reducir_pedido_retira_ultimas_asignaciones_y_registra_cambio(): void
     {
         $minaId = $this->createMina();
@@ -641,7 +763,13 @@ class RQMinaApiTest extends TestCase
         return $plain;
     }
 
-    private function createRQMina(string $minaId, string $creadorId, string $estado): string
+    private function createRQMina(
+        string $minaId,
+        string $creadorId,
+        string $estado,
+        string $fechaInicio = '2026-04-10',
+        string $fechaFin = '2026-04-12'
+    ): string
     {
         $id = (string) Str::uuid();
 
@@ -649,8 +777,8 @@ class RQMinaApiTest extends TestCase
             'id' => $id,
             'mina_id' => $minaId,
             'area' => 'Area base',
-            'fecha_inicio' => '2026-04-10',
-            'fecha_fin' => '2026-04-12',
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
             'observaciones' => null,
             'estado' => $estado,
             'created_by_usuario_id' => $creadorId,

@@ -765,29 +765,54 @@ class PersonalService
 
     private function applySearch(Builder $query, string $search): void
     {
+        $searchableColumns = collect([
+            'nombre_completo',
+            'dni',
+            'numero_documento',
+            'puesto',
+            'ocupacion',
+            'contrato',
+            'correo',
+            'telefono',
+            'telefono_1',
+            'telefono_2',
+        ])
+            ->filter(fn (string $column): bool => Schema::hasColumn('personal', $column))
+            ->values();
+
         $tokens = collect(preg_split('/\s+/u', mb_strtolower(trim($search))) ?: [])
             ->map(fn (string $token): string => trim($token))
             ->filter()
             ->values();
 
         foreach ($tokens as $token) {
-            $needle = '%' . $token . '%';
+            $variants = collect([
+                $token,
+                PersonalNormalizer::normalizeKey($token),
+            ])
+                ->filter()
+                ->unique()
+                ->values();
 
-            $query->where(function (Builder $sub) use ($needle): void {
-                $sub->whereRaw('LOWER(personal.nombre_completo) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.dni) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.puesto) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(personal.contrato) LIKE ?', [$needle])
-                    ->orWhereExists(function ($q) use ($needle): void {
+            $query->where(function (Builder $sub) use ($variants, $searchableColumns): void {
+                foreach ($variants as $variant) {
+                    $needle = '%' . $variant . '%';
+
+                    foreach ($searchableColumns as $column) {
+                        $sub->orWhereRaw("LOWER(COALESCE(personal.{$column}, '')) LIKE ?", [$needle]);
+                    }
+
+                    $sub->orWhereExists(function ($q) use ($needle): void {
                         $q->selectRaw('1')
                             ->from('personal_mina as pm')
                             ->join('minas as m', 'm.id', '=', 'pm.mina_id')
                             ->whereColumn('pm.personal_id', 'personal.id')
                             ->where(function ($mineMatch) use ($needle): void {
-                                $mineMatch->whereRaw('LOWER(m.nombre) LIKE ?', [$needle])
-                                    ->orWhereRaw('LOWER(m.unidad_minera) LIKE ?', [$needle]);
+                                $mineMatch->whereRaw("LOWER(COALESCE(m.nombre, '')) LIKE ?", [$needle])
+                                    ->orWhereRaw("LOWER(COALESCE(m.unidad_minera, '')) LIKE ?", [$needle]);
                             });
                     });
+                }
             });
         }
     }

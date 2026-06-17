@@ -204,6 +204,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                                 $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
                                 $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
                                 $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
+                                $paradaTerminada = $fechaFinRaw !== ''
+                                    ? \Carbon\Carbon::parse($fechaFinRaw)->lt(\Carbon\Carbon::today())
+                                    : false;
                                 $fechaInicioFmt = $fechaInicioRaw !== ''
                                     ? \Carbon\Carbon::parse($fechaInicioRaw)->locale('es')->translatedFormat('d M Y')
                                     : '-';
@@ -282,8 +285,10 @@ $calcTransporteTotal = static function (array $transporte): int {
                                                 @csrf
                                                 <button type="submit" class="btn-row btn-send">Enviar</button>
                                             </form>
+                                        @endif
 
-                                            <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar este RQ? Esta acción no se puede deshacer.');">
+                                        @if(!$paradaTerminada)
+                                            <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar este RQ? Si fue enviado, tambien se retirara de la gestion relacionada. Esta accion no se puede deshacer.');">
                                                 @csrf
                                                 <button type="submit" class="btn-row btn-danger">Eliminar</button>
                                             </form>

@@ -5,6 +5,7 @@ namespace App\Modules\RQMina\Policies;
 use App\Models\RQMina;
 use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -85,11 +86,23 @@ class RQMinaPolicy
 
     public function delete(Usuario $usuario, RQMina $rqMina): bool
     {
-        if ((string) $rqMina->estado !== 'BORRADOR') {
+        if ($this->hasEnded($rqMina)) {
             return false;
         }
 
-        return $this->update($usuario, $rqMina);
+        if (!PermissionMatrix::userCan($usuario, 'rq_mina', 'eliminar')) {
+            return false;
+        }
+
+        if ($this->isPrivileged($usuario)) {
+            return true;
+        }
+
+        if ((string) $rqMina->created_by_usuario_id !== (string) $usuario->id) {
+            return false;
+        }
+
+        return $this->canAccessMina($usuario, $rqMina->mina_id);
     }
 
     private function isPrivileged(Usuario $usuario): bool
@@ -98,5 +111,14 @@ class RQMinaPolicy
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
             || PermissionMatrix::userCan($usuario, 'rq_mina', 'administrar');
+    }
+
+    private function hasEnded(RQMina $rqMina): bool
+    {
+        if (!$rqMina->fecha_fin) {
+            return false;
+        }
+
+        return $rqMina->fecha_fin->lt(Carbon::today());
     }
 }

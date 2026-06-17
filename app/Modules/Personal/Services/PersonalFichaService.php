@@ -212,7 +212,7 @@ class PersonalFichaService
             ->values()
             ->all();
 
-        return DB::transaction(function () use ($data, $documentType, $documentNumber, $attributes, $verifyFields, $missingRequired, $user): array {
+        $result = DB::transaction(function () use ($data, $documentType, $documentNumber, $attributes, $verifyFields, $missingRequired, $user): array {
             $existing = $this->findPersonalByDocument($documentType, $documentNumber);
 
             if ($existing && in_array(strtoupper((string) $existing->estado), ['ACTIVO', 'FALTA_CONTRATO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'OBSERVADO', 'LINK_VENCIDO'], true)) {
@@ -256,6 +256,10 @@ class PersonalFichaService
                 'missing_required' => $missingRequired->all(),
             ];
         });
+
+        $this->assertTemporaryLinkReady($result, $result['token'] ?? null);
+
+        return $result;
     }
 
     public function updateManual(Personal $personal, array $fields, array $attributes, Usuario $user): array
@@ -1469,6 +1473,8 @@ class PersonalFichaService
     {
         $ficha->loadMissing(['personal', 'link', 'archivos']);
 
+        $this->assertFichaHasPersistedPersonal($ficha);
+
         if (!$this->needsRegularization($ficha)) {
             throw ValidationException::withMessages([
                 'ficha' => 'La ficha ya no tiene datos o documentos pendientes por regularizar.',
@@ -1529,13 +1535,27 @@ class PersonalFichaService
 
     public function activateTemporaryLinkForPersonal(Personal $personal, Usuario $user, int $hours = self::DEFAULT_LINK_HOURS): array
     {
+        $personalId = (string) $personal->id;
+
+        if ($personalId === '' || !Personal::query()->whereKey($personalId)->exists()) {
+            throw ValidationException::withMessages([
+                'personal' => 'No se encontro el trabajador en la base de datos. Guarda el trabajador antes de habilitar el link temporal.',
+            ]);
+        }
+
+        $personal = Personal::query()->findOrFail($personalId);
+
         if (strtoupper((string) $personal->estado) === 'CESADO') {
             throw ValidationException::withMessages([
                 'personal' => 'No se puede activar link temporal para un trabajador cesado.',
             ]);
         }
 
-        return DB::transaction(function () use ($personal, $user, $hours): array {
+        $result = DB::transaction(function () use ($personalId, $user, $hours): array {
+            $personal = Personal::query()
+                ->lockForUpdate()
+                ->findOrFail($personalId);
+
             $personal->loadMissing('fichaColaborador.link');
             $ficha = $personal->fichaColaborador;
 
@@ -1594,6 +1614,10 @@ class PersonalFichaService
                 'url' => route('ficha-colaborador.show', ['token' => $token]),
             ];
         });
+
+        $this->assertTemporaryLinkReady($result, $result['token'] ?? null);
+
+        return $result;
     }
 
     public function ensurePendingFichaForPersonal(Personal $personal): PersonalFicha
@@ -2043,6 +2067,8 @@ class PersonalFichaService
 
     private function createSecureLink(PersonalFicha $ficha, int $hours = self::DEFAULT_LINK_HOURS, bool $enabledManually = false): array
     {
+        $this->assertFichaHasPersistedPersonal($ficha);
+
         PersonalFichaLink::query()
             ->where('personal_ficha_id', $ficha->id)
             ->where('estado', PersonalFichaLink::ESTADO_ACTIVO)
@@ -2070,6 +2096,71 @@ class PersonalFichaService
         ]);
 
         return [$token, $link];
+    }
+
+    private function assertFichaHasPersistedPersonal(PersonalFicha $ficha): void
+    {
+        $ficha->loadMissing('personal');
+
+        if (
+            !$ficha->exists
+            || !$ficha->personal_id
+            || !$ficha->personal
+            || !Personal::query()->whereKey((string) $ficha->personal_id)->exists()
+        ) {
+            Log::warning('Intento de generar link temporal sin trabajador persistido.', [
+                'ficha_id' => $ficha->id,
+                'personal_id' => $ficha->personal_id,
+            ]);
+
+            throw ValidationException::withMessages([
+                'personal' => 'No se puede habilitar el link porque el trabajador no esta guardado correctamente en la base de datos.',
+            ]);
+        }
+    }
+
+    private function assertTemporaryLinkReady(array $result, ?string $token = null): void
+    {
+        $personalId = (string) (($result['personal'] ?? null)?->id ?? ($result['ficha'] ?? null)?->personal_id ?? '');
+        $fichaId = (string) (($result['ficha'] ?? null)?->id ?? ($result['link'] ?? null)?->personal_ficha_id ?? '');
+        $linkId = (string) (($result['link'] ?? null)?->id ?? '');
+
+        $personalExists = $personalId !== '' && Personal::query()->whereKey($personalId)->exists();
+        $fichaExists = $fichaId !== '' && PersonalFicha::query()
+            ->whereKey($fichaId)
+            ->where('personal_id', $personalId)
+            ->exists();
+        $linkQuery = PersonalFichaLink::query()
+            ->whereKey($linkId)
+            ->where('personal_ficha_id', $fichaId)
+            ->where('estado', PersonalFichaLink::ESTADO_ACTIVO)
+            ->whereNull('disabled_at')
+            ->whereNull('submitted_at')
+            ->where('expires_at', '>', now())
+            ->whereNotNull('token_encrypted');
+
+        if ($token) {
+            $linkQuery->where('token_hash', hash('sha256', $token));
+        }
+
+        $linkReady = $linkId !== '' && $linkQuery->exists();
+
+        if ($personalExists && $fichaExists && $linkReady) {
+            return;
+        }
+
+        Log::error('Link temporal generado sin respaldo consistente en base de datos.', [
+            'personal_id' => $personalId,
+            'ficha_id' => $fichaId,
+            'link_id' => $linkId,
+            'personal_exists' => $personalExists,
+            'ficha_exists' => $fichaExists,
+            'link_ready' => $linkReady,
+        ]);
+
+        throw ValidationException::withMessages([
+            'personal' => 'El trabajador no quedo guardado correctamente y no se genero un link seguro. Intenta guardar nuevamente antes de enviar el enlace.',
+        ]);
     }
 
     private function mergeNonEmptyFichaData(array $base, array $incoming): array

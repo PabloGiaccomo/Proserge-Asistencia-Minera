@@ -531,10 +531,37 @@ class RQMinaService
 
         return (bool) DB::transaction(function () use ($rqMina): bool {
             $rqId = (string) $rqMina->id;
+            $rqProsergeIds = $rqMina->rqProserge()
+                ->pluck('id')
+                ->map(fn ($id): string => (string) $id)
+                ->values()
+                ->all();
+
+            if (!empty($rqProsergeIds)) {
+                DB::table('grupo_trabajo')
+                    ->whereIn('rq_proserge_id', $rqProsergeIds)
+                    ->update([
+                        'rq_proserge_id' => null,
+                        'updated_at' => now(),
+                    ]);
+
+                RQProsergeDetalle::query()
+                    ->whereIn('rq_proserge_id', $rqProsergeIds)
+                    ->delete();
+            }
+
+            DB::table('grupo_trabajo')
+                ->where('rq_mina_id', $rqId)
+                ->update([
+                    'rq_mina_id' => null,
+                    'updated_at' => now(),
+                ]);
+
             $rqMina->delete();
 
             Log::info('rqmina.deleted', [
                 'rq_mina_id' => $rqId,
+                'rq_proserge_ids' => $rqProsergeIds,
             ]);
 
             return true;
