@@ -29,6 +29,7 @@
                     @csrf
                     <button type="submit" class="btn btn-outline" style="color:#7F1D1D; border-color:#FCA5A5;">Eliminar</button>
                 </form>
+                @include('catalogos.minas._force_delete_form', ['item' => $item])
             @endif
             <a href="{{ route('catalogos.minas.index') }}" class="btn btn-outline">Volver</a>
         </div>

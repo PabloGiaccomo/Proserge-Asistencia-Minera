@@ -7,6 +7,7 @@ use App\Models\MinaParadero;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -132,6 +133,92 @@ class MinaCatalogService
         });
     }
 
+    public function forceDeleteAccidental(Mina $mina): array
+    {
+        $blockers = $this->forceDeleteBlockers($mina);
+
+        if (!empty($blockers)) {
+            throw ValidationException::withMessages([
+                'mina' => 'No se puede eliminar definitivamente esta mina porque tiene movimientos operativos reales: ' . implode(', ', $blockers) . '. Primero revisa esos movimientos para no perder trazabilidad.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($mina): array {
+            $mineId = (string) $mina->id;
+            $summary = [
+                'asignaciones' => 0,
+                'historiales' => 0,
+                'examenes' => 0,
+                'intentos' => 0,
+                'requisitos' => 0,
+                'paraderos' => 0,
+                'alcances_usuario' => 0,
+                'notificaciones' => 0,
+                'mina' => 0,
+            ];
+
+            $personalMineIds = $this->pluckIds('personal_mina', 'id', 'mina_id', $mineId);
+            $requirementIds = $this->pluckIds('mina_requisitos', 'id', 'mina_id', $mineId);
+
+            if (Schema::hasTable('personal_mina_examenes')) {
+                if (Schema::hasColumn('personal_mina_examenes', 'mina_origen_convalidacion_id')) {
+                    $convalidationPayload = ['mina_origen_convalidacion_id' => null];
+                    if (Schema::hasColumn('personal_mina_examenes', 'examen_origen_convalidado_id')) {
+                        $convalidationPayload['examen_origen_convalidado_id'] = null;
+                    }
+                    if (Schema::hasColumn('personal_mina_examenes', 'updated_at')) {
+                        $convalidationPayload['updated_at'] = now();
+                    }
+
+                    $summary['examenes_convalidacion_limpiados'] = DB::table('personal_mina_examenes')
+                        ->where('mina_origen_convalidacion_id', $mineId)
+                        ->update($convalidationPayload);
+                }
+
+                if ($personalMineIds->isNotEmpty() || $requirementIds->isNotEmpty()) {
+                    $examQuery = DB::table('personal_mina_examenes')->where(function ($query) use ($personalMineIds, $requirementIds): void {
+                        if ($personalMineIds->isNotEmpty() && Schema::hasColumn('personal_mina_examenes', 'personal_mina_id')) {
+                            $query->whereIn('personal_mina_id', $personalMineIds);
+                        }
+
+                        if ($requirementIds->isNotEmpty() && Schema::hasColumn('personal_mina_examenes', 'mina_requisito_id')) {
+                            $method = $personalMineIds->isNotEmpty() ? 'orWhereIn' : 'whereIn';
+                            $query->{$method}('mina_requisito_id', $requirementIds);
+                        }
+                    });
+
+                    $examIds = $examQuery->pluck('id');
+
+                    if ($examIds->isNotEmpty()) {
+                        $summary['intentos'] = $this->deleteWhereIn('personal_mina_examen_intentos', 'personal_mina_examen_id', $examIds);
+                        $summary['examenes'] = $this->deleteWhereIn('personal_mina_examenes', 'id', $examIds);
+                    }
+                }
+            }
+
+            $summary['historiales'] = $this->deleteWhereIn('personal_mina_historial', 'personal_mina_id', $personalMineIds);
+            $summary['asignaciones'] = $this->deleteWhere('personal_mina', 'mina_id', $mineId);
+            $summary['requisitos'] = $this->deleteWhere('mina_requisitos', 'mina_id', $mineId);
+            $summary['paraderos'] = $this->deleteWhere('mina_paraderos', 'mina_id', $mineId);
+            $summary['alcances_usuario'] = $this->deleteWhere('usuario_mina_scope', 'mina_id', $mineId);
+
+            if (Schema::hasTable('notification_events') && Schema::hasColumn('notification_events', 'mina_id')) {
+                $notificationPayload = ['mina_id' => null];
+                if (Schema::hasColumn('notification_events', 'updated_at')) {
+                    $notificationPayload['updated_at'] = now();
+                }
+
+                $summary['notificaciones'] = DB::table('notification_events')
+                    ->where('mina_id', $mineId)
+                    ->update($notificationPayload);
+            }
+
+            $summary['mina'] = $mina->delete() ? 1 : 0;
+
+            return $summary;
+        });
+    }
+
     private function deleteBlockers(Mina $mina): array
     {
         $id = (string) $mina->id;
@@ -139,6 +226,28 @@ class MinaCatalogService
             'RQ Mina' => fn (): int => $this->countMineUsage('rq_mina', $id, includeDestination: true),
             'RQ Proserge' => fn (): int => $this->countMineUsage('rq_proserge', $id),
             'Personal habilitado/asignado' => fn (): int => $this->countMineUsage('personal_mina', $id),
+            'Asistencias' => fn (): int => $this->countMineUsage('asistencia_encabezado', $id, includeDestination: true),
+            'Evaluaciones de desempeño' => fn (): int => $this->countMineUsage('evaluacion_desempeno', $id, includeDestination: true),
+            'Evaluaciones de supervisor' => fn (): int => $this->countMineUsage('evaluacion_supervisor', $id, includeDestination: true),
+            'Evaluaciones de residente' => fn (): int => $this->countMineUsage('evaluacion_residente', $id, includeDestination: true),
+        ];
+
+        $blockers = [];
+        foreach ($checks as $label => $resolver) {
+            if ($resolver() > 0) {
+                $blockers[] = $label;
+            }
+        }
+
+        return $blockers;
+    }
+
+    private function forceDeleteBlockers(Mina $mina): array
+    {
+        $id = (string) $mina->id;
+        $checks = [
+            'RQ Mina' => fn (): int => $this->countMineUsage('rq_mina', $id, includeDestination: true),
+            'RQ Proserge' => fn (): int => $this->countMineUsage('rq_proserge', $id),
             'Asistencias' => fn (): int => $this->countMineUsage('asistencia_encabezado', $id, includeDestination: true),
             'Evaluaciones de desempeño' => fn (): int => $this->countMineUsage('evaluacion_desempeno', $id, includeDestination: true),
             'Evaluaciones de supervisor' => fn (): int => $this->countMineUsage('evaluacion_supervisor', $id, includeDestination: true),
@@ -184,6 +293,33 @@ class MinaCatalogService
         });
 
         return (int) $query->count();
+    }
+
+    private function pluckIds(string $table, string $idColumn, string $whereColumn, string $value): SupportCollection
+    {
+        if (!Schema::hasTable($table) || !Schema::hasColumn($table, $idColumn) || !Schema::hasColumn($table, $whereColumn)) {
+            return collect();
+        }
+
+        return DB::table($table)->where($whereColumn, $value)->pluck($idColumn);
+    }
+
+    private function deleteWhere(string $table, string $column, string $value): int
+    {
+        if (!Schema::hasTable($table) || !Schema::hasColumn($table, $column)) {
+            return 0;
+        }
+
+        return DB::table($table)->where($column, $value)->delete();
+    }
+
+    private function deleteWhereIn(string $table, string $column, SupportCollection $values): int
+    {
+        if ($values->isEmpty() || !Schema::hasTable($table) || !Schema::hasColumn($table, $column)) {
+            return 0;
+        }
+
+        return DB::table($table)->whereIn($column, $values)->delete();
     }
 
     private function syncParaderos(Mina $mina, array $paraderos): void

@@ -132,6 +132,49 @@ class MinaPageController extends Controller
         return redirect()->route('catalogos.minas.index')->with('success', 'Mina eliminada correctamente.');
     }
 
+    public function forceDestroy(Request $request, string $id): RedirectResponse
+    {
+        $mina = $this->service->find($id);
+        if (!$mina) {
+            abort(404);
+        }
+
+        $validated = $request->validate([
+            'confirmacion' => ['required', 'string', 'max:191'],
+        ]);
+
+        $expected = mb_strtolower(trim((string) $mina->nombre));
+        $received = mb_strtolower(trim((string) $validated['confirmacion']));
+
+        if ($expected === '' || $received !== $expected) {
+            return back()->with('error', 'No se elimino la mina. Para confirmar debes escribir exactamente el nombre de la mina.');
+        }
+
+        try {
+            $summary = $this->service->forceDeleteAccidental($mina);
+        } catch (ValidationException $exception) {
+            return back()->with('error', $exception->validator->errors()->first('mina') ?: 'No se pudo eliminar definitivamente la mina.');
+        }
+
+        $details = collect([
+            'asignaciones' => $summary['asignaciones'] ?? 0,
+            'examenes' => $summary['examenes'] ?? 0,
+            'intentos' => $summary['intentos'] ?? 0,
+            'requisitos' => $summary['requisitos'] ?? 0,
+            'paraderos' => $summary['paraderos'] ?? 0,
+        ])
+            ->filter(fn (int $count): bool => $count > 0)
+            ->map(fn (int $count, string $label): string => "{$count} {$label}")
+            ->implode(', ');
+
+        $message = 'Mina eliminada definitivamente.';
+        if ($details !== '') {
+            $message .= ' Se limpiaron: ' . $details . '.';
+        }
+
+        return redirect()->route('catalogos.minas.index')->with('success', $message);
+    }
+
     private function toViewItem(Mina $mina): array
     {
         $isActive = strtoupper((string) $mina->estado) === 'ACTIVO';

@@ -292,6 +292,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/catalogos/minas/{id}', [MinaPageController::class, 'update'])->middleware('web.permission:minas,actualizar')->name('catalogos.minas.update');
     Route::post('/catalogos/minas/{id}/inactivar', [MinaPageController::class, 'inactivate'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.inactivate');
     Route::post('/catalogos/minas/{id}/eliminar', [MinaPageController::class, 'destroy'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.destroy');
+    Route::post('/catalogos/minas/{id}/eliminar-definitivo', [MinaPageController::class, 'forceDestroy'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.force-destroy');
     Route::get('/catalogos/talleres', [TallerPageController::class, 'index'])->middleware('web.permission:talleres,ver')->name('catalogos.talleres.index');
     Route::get('/catalogos/talleres/crear', [TallerPageController::class, 'create'])->middleware('web.permission:talleres,crear')->name('catalogos.talleres.create');
     Route::post('/catalogos/talleres', [TallerPageController::class, 'store'])->middleware('web.permission:talleres,crear')->name('catalogos.talleres.store');

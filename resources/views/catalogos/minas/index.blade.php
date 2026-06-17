@@ -81,6 +81,7 @@
                                             @csrf
                                             <button type="submit" class="btn btn-sm btn-outline" style="color:#7F1D1D; border-color:#FCA5A5;">Eliminar</button>
                                         </form>
+                                        @include('catalogos.minas._force_delete_form', ['item' => $item])
                                     @endif
                                 </td>
                             </tr>
