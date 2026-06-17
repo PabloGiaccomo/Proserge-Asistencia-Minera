@@ -142,7 +142,7 @@
     <div class="page-header">
         <div class="page-header-top" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
             <div>
-                <h1 class="page-title">Contrato #{{ $contrato->contrato_numero }}</h1>
+                <h1 class="page-title">{{ $contratoService->contractDisplayLabel($contrato) }}</h1>
                 <p class="page-subtitle">{{ $personal->nombre_completo }} - {{ $formatDate($periodoInicio) }} al {{ $periodoFin ? $formatDate($periodoFin) : 'Vigente' }}</p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">

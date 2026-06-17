@@ -78,7 +78,7 @@ class PersonalContratoRenewalTest extends TestCase
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
         $personal = $this->createPersonal('ACTIVO');
-        $base = $this->insertContract($personal, 'ACTIVO', '2026-01-01', null, true, [
+        $base = $this->insertContract($personal, 'ACTIVO', '2026-01-01', '2026-06-30', true, [
             'puesto' => 'Operario',
             'remuneracion' => '2200',
             'costo_hora' => '12',
@@ -117,8 +117,8 @@ class PersonalContratoRenewalTest extends TestCase
 
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
         $personal = $this->createPersonal('ACTIVO');
-        $base = $this->insertContract($personal, 'ACTIVO', '2026-01-01', null, true);
-        $this->insertContractData($personal, '2026-01-01', null, true);
+        $base = $this->insertContract($personal, 'ACTIVO', '2026-01-01', '2026-06-30', true);
+        $this->insertContractData($personal, '2026-01-01', '2026-06-30', true);
 
         $newContract = app(PersonalContratoService::class)->prepareRenewal($personal, [
             'fecha_inicio' => '2026-07-01',
@@ -179,6 +179,8 @@ class PersonalContratoRenewalTest extends TestCase
         $this->withSession($this->sessionFor($userId))
             ->get(route('personal.contratos.index', $personal->id))
             ->assertOk()
+            ->assertSee('Regularizar contratos')
+            ->assertSee(route('personal.antiguo.regularize', $personal->id), false)
             ->assertDontSee(route('personal.contratos.signed', [$personal->id, $cerrado->id]), false)
             ->assertDontSee(route('personal.contratos.signed', [$personal->id, $activo->id]), false)
             ->assertSee(route('personal.contratos.signed', [$personal->id, $preparacion->id]), false);
@@ -231,7 +233,7 @@ class PersonalContratoRenewalTest extends TestCase
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
         $personal = $this->createPersonal('ACTIVO');
-        $this->insertContract($personal, 'ACTIVO', '2026-01-01', null, true);
+        $this->insertContract($personal, 'ACTIVO', '2026-01-01', '2026-06-30', true);
 
         app(PersonalContratoService::class)->prepareRenewal($personal, ['fecha_inicio' => '2026-07-01'], $actor);
 
@@ -262,7 +264,7 @@ class PersonalContratoRenewalTest extends TestCase
         }
 
         $sinFirma = $this->createPersonal('ACTIVO');
-        $baseSinFirma = $this->insertContract($sinFirma, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', null, false);
+        $baseSinFirma = $this->insertContract($sinFirma, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', false);
 
         $renovacion = app(PersonalContratoService::class)->prepareRenewal($sinFirma, ['fecha_inicio' => '2026-07-01'], $actor);
 
@@ -351,7 +353,7 @@ class PersonalContratoRenewalTest extends TestCase
         $denied = $this->createUser(['personal' => ['ver']]);
         $allowed = $this->createUser(['personal' => ['ver', 'actualizar', 'editar']]);
         $activo = $this->createPersonal('ACTIVO');
-        $this->insertContract($activo, 'ACTIVO', '2026-01-01', null, true);
+        $this->insertContract($activo, 'ACTIVO', '2026-01-01', '2026-06-30', true);
         $cesado = $this->createPersonal('CESADO', [
             'fecha_cese' => '2026-05-31',
             'motivo_cese' => 'Fin anterior',
@@ -369,6 +371,87 @@ class PersonalContratoRenewalTest extends TestCase
         $this->withSession($this->sessionFor($allowed))
             ->post(route('personal.contratos.reentry', $cesado->id), ['fecha_inicio' => '2026-08-01'])
             ->assertRedirect(route('personal.contrato-datos.edit', $cesado->id));
+    }
+
+    public function test_historial_de_contratos_muestra_catalogo_de_puestos_al_editar(): void
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            $this->markTestSkipped('El catalogo de puestos no esta disponible.');
+        }
+
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        if (DB::table('personal_puestos')->where('nombre', 'SUPERVISOR CAMPO')->exists()) {
+            DB::table('personal_puestos')->where('nombre', 'SUPERVISOR CAMPO')->update([
+                'activo' => true,
+                'updated_at' => now(),
+            ]);
+        } else {
+            DB::table('personal_puestos')->insert([
+                'id' => (string) Str::uuid(),
+                'nombre' => 'SUPERVISOR CAMPO',
+                'funciones' => 'Funciones de prueba',
+                'activo' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $personal = $this->createPersonal('ACTIVO', ['puesto' => 'SUPERVISOR CAMPO']);
+        $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', true, [
+            'puesto' => 'SUPERVISOR CAMPO',
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.index', $personal->id))
+            ->assertOk()
+            ->assertSee('data-contract-edit-field="puesto"', false)
+            ->assertSee('list="puestos_catalogo_contract_edit"', false)
+            ->assertSee('<option value="SUPERVISOR CAMPO"', false)
+            ->assertSee('<select name="tipo_contrato"', false)
+            ->assertSee('data-contract-edit-field="tipo_contrato"', false)
+            ->assertSee('<option value="FIJO">Personal fijo / servicio especifico</option>', false);
+    }
+
+    public function test_editar_contrato_rechaza_puesto_fuera_del_catalogo(): void
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            $this->markTestSkipped('El catalogo de puestos no esta disponible.');
+        }
+
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $personal = $this->createPersonal('ACTIVO');
+        $contract = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->from(route('personal.contratos.index', $personal->id))
+            ->put(route('personal.contratos.update', [$personal->id, $contract->id]), [
+                'fecha_inicio' => '2026-01-01',
+                'fecha_fin' => '2026-06-30',
+                'tipo_contrato' => 'FIJO',
+                'puesto' => 'PUESTO INVENTADO',
+                'motivo_correccion' => 'Prueba de validacion de puesto',
+            ])
+            ->assertRedirect(route('personal.contratos.index', $personal->id))
+            ->assertSessionHasErrors('puesto');
+    }
+
+    public function test_editar_contrato_rechaza_tipo_de_contrato_fuera_del_catalogo(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $personal = $this->createPersonal('ACTIVO');
+        $contract = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->from(route('personal.contratos.index', $personal->id))
+            ->put(route('personal.contratos.update', [$personal->id, $contract->id]), [
+                'fecha_inicio' => '2026-01-01',
+                'fecha_fin' => '2026-06-30',
+                'tipo_contrato' => 'TIPO INVENTADO',
+                'puesto' => null,
+                'motivo_correccion' => 'Prueba de validacion de tipo de contrato',
+            ])
+            ->assertRedirect(route('personal.contratos.index', $personal->id))
+            ->assertSessionHasErrors('tipo_contrato');
     }
 
     private function createPersonal(string $estado, array $overrides = []): Personal

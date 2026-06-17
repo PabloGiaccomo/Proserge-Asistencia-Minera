@@ -27,6 +27,7 @@
 
     $permissions = session('user.permissions', []);
     $canManageContracts = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
+    $canDeleteContracts = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['eliminar', 'administrar']);
     $estadoPersonal = strtoupper((string) ($trabajador['estado'] ?? $personal->estado ?? ''));
     $preparingContract = $contratos
         ->filter(fn ($contrato): bool => strtoupper((string) $contrato->estado) === 'PREPARACION')
@@ -196,6 +197,19 @@
 .contract-upload-modal.is-open {
     display: flex;
 }
+.contract-edit-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 84;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(15, 23, 42, .38);
+}
+.contract-edit-modal.is-open {
+    display: flex;
+}
 .contract-delete-dialog {
     width: min(420px, 100%);
     border-radius: 10px;
@@ -211,6 +225,52 @@
     border: 1px solid #e2e8f0;
     box-shadow: 0 18px 40px rgba(15, 23, 42, .18);
     padding: 18px;
+}
+.contract-edit-dialog {
+    width: min(820px, 100%);
+    max-height: min(86vh, 760px);
+    overflow: auto;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, .18);
+    padding: 18px;
+}
+.contract-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+}
+.contract-edit-grid label {
+    display: grid;
+    gap: 5px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+}
+.contract-edit-grid input,
+.contract-edit-grid select,
+.contract-edit-grid textarea {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 10px;
+    color: #0f172a;
+}
+.contract-edit-grid textarea {
+    min-height: 82px;
+    resize: vertical;
+}
+.contract-edit-wide {
+    grid-column: 1 / -1;
+}
+.contract-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
 }
 .contract-delete-title {
     margin: 0;
@@ -309,6 +369,9 @@
     .contract-flow-form {
         grid-template-columns: 1fr;
     }
+    .contract-edit-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
 
@@ -320,6 +383,9 @@
                 <p class="page-subtitle">{{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}</p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+                @if($canManageContracts)
+                    <a href="{{ route('personal.antiguo.regularize', $personal->id) }}" class="btn btn-outline btn-sm">Regularizar contratos</a>
+                @endif
                 <a href="{{ route('personal.documentos.index', $personal->id) }}" class="btn btn-outline btn-sm">Documentos</a>
                 <a href="{{ route('personal.edit', $personal->id) }}" class="btn btn-outline btn-sm">Editar trabajador</a>
                 <a href="{{ route('personal.index') }}" class="btn btn-primary btn-sm">Volver</a>
@@ -457,14 +523,15 @@
                                     $activadoPor = $contrato->activadoPor?->personal?->nombre_completo ?: $contrato->activadoPor?->email ?: 'No registrado';
                                     $cerradoPor = $contrato->cerradoPor?->personal?->nombre_completo ?: $contrato->cerradoPor?->email ?: 'No registrado';
                                     $estadoContrato = strtoupper((string) $contrato->estado);
-                                    $canAnnul = $estadoContrato === 'PREPARACION';
+                                    $canEditContract = $canManageContracts && $estadoContrato !== 'ANULADO';
+                                    $canAnnul = $canDeleteContracts && $estadoContrato !== 'ANULADO';
                                     $canUploadSignedContract = $canManageContracts && $contratoService->canUploadSignedFileForContract($contrato);
-                                    $contractLabel = 'Contrato #' . $contrato->contrato_numero . ' - ' . $inicio . ' al ' . $fin;
+                                    $contractLabel = $contratoService->contractDisplayLabel($contrato);
                                     $relatedRenewals = $renewalsByOrigin->get($contrato->id, collect());
                                 @endphp
                                 <tr>
                                     <td>
-                                        <strong>Contrato #{{ $contrato->contrato_numero }}</strong>
+                                        <strong>{{ $contractLabel }}</strong>
                                         @if($contrato->origen_contrato_id)
                                             <div class="text-muted">Creado desde contrato anterior</div>
                                         @endif
@@ -477,7 +544,7 @@
                                         @if($relatedRenewals->isNotEmpty())
                                             <div class="text-muted">
                                                 Renovacion generada:
-                                                {{ $relatedRenewals->map(fn ($renovacion) => 'Contrato #' . $renovacion->contrato_numero)->join(', ') }}
+                                                {{ $relatedRenewals->map(fn ($renovacion) => $contratoService->contractDisplayLabel($renovacion))->join(', ') }}
                                             </div>
                                         @endif
                                     </td>
@@ -509,6 +576,29 @@
                                                     <path d="m13 16 2 2"/>
                                                 </svg>
                                             </a>
+                                            @if($canEditContract)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs contract-icon-btn js-contract-edit"
+                                                    title="Editar contrato"
+                                                    aria-label="Editar {{ $contractLabel }}"
+                                                    data-edit-url="{{ route('personal.contratos.update', [$personal->id, $contrato->id]) }}"
+                                                    data-contract-label="{{ $contractLabel }}"
+                                                    data-fecha-inicio="{{ optional($contrato->fecha_inicio)->toDateString() }}"
+                                                    data-fecha-fin="{{ optional($contrato->fecha_fin)->toDateString() }}"
+                                                    data-tipo-contrato="{{ trim((string) $contrato->tipo_contrato) !== '' ? \App\Modules\Personal\Support\PersonalNormalizer::contract($contrato->tipo_contrato) : '' }}"
+                                                    data-puesto="{{ $contrato->puesto }}"
+                                                    data-area="{{ $contrato->area }}"
+                                                    data-mina="{{ $contrato->mina }}"
+                                                    data-remuneracion="{{ $contrato->remuneracion }}"
+                                                    data-costo-hora="{{ $contrato->costo_hora }}"
+                                                    data-motivo-cese="{{ $contrato->motivo_cese }}">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                        <path d="M12 20h9"/>
+                                                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                                                    </svg>
+                                                </button>
+                                            @endif
                                             @if($canUploadSignedContract)
                                                 <button
                                                     type="button"
@@ -529,8 +619,8 @@
                                                 <button
                                                     type="button"
                                                     class="btn btn-outline btn-xs contract-icon-btn contract-delete-btn js-contract-delete"
-                                                    title="Anular contrato"
-                                                    aria-label="Anular {{ $contractLabel }}"
+                                                    title="Eliminar contrato"
+                                                    aria-label="Eliminar {{ $contractLabel }}"
                                                     data-delete-url="{{ route('personal.contratos.destroy', [$personal->id, $contrato->id]) }}"
                                                     data-contract-label="{{ $contractLabel }}">
                                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -556,17 +646,89 @@
 
 <div class="contract-delete-modal" id="contractDeleteModal" aria-hidden="true">
     <div class="contract-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="contractDeleteTitle">
-        <h2 class="contract-delete-title" id="contractDeleteTitle">Anular contrato en preparacion</h2>
+        <h2 class="contract-delete-title" id="contractDeleteTitle">Eliminar contrato</h2>
         <p class="contract-delete-text">
-            Se marcara <strong id="contractDeleteLabel">este contrato</strong> como anulado, sin eliminarlo de la base de datos.
+            Se marcara <strong id="contractDeleteLabel">este contrato</strong> como anulado. No se borrara fisicamente de la base de datos.
         </p>
-        <p class="contract-delete-text">Solo se permite anular contratos en preparacion. Los contratos cerrados o historicos quedan inamovibles.</p>
+        <p class="contract-delete-text">Esta accion queda registrada con motivo para conservar trazabilidad del historial laboral.</p>
         <form method="POST" id="contractDeleteForm">
             @csrf
             <textarea name="motivo_anulacion" class="contract-delete-reason" maxlength="2000" required placeholder="Motivo de anulacion"></textarea>
             <div class="contract-delete-actions">
                 <button type="button" class="btn btn-outline btn-sm" data-contract-delete-cancel>Cancelar</button>
-                <button type="submit" class="btn btn-danger btn-sm">Anular contrato</button>
+                <button type="submit" class="btn btn-danger btn-sm">Eliminar / anular</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="contract-edit-modal" id="contractEditModal" aria-hidden="true">
+    <div class="contract-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="contractEditTitle">
+        <h2 class="contract-delete-title" id="contractEditTitle">Editar contrato</h2>
+        <p class="contract-delete-text">
+            Corrige <strong id="contractEditLabel">este contrato</strong>. Indica el motivo para que el cambio quede auditado.
+        </p>
+        <form method="POST" id="contractEditForm">
+            @csrf
+            @method('PUT')
+            <div class="contract-edit-grid">
+                <label>
+                    Fecha de inicio
+                    <input type="date" name="fecha_inicio" data-contract-edit-field="fecha_inicio" required>
+                </label>
+                <label>
+                    Fecha de fin
+                    <input type="date" name="fecha_fin" data-contract-edit-field="fecha_fin">
+                </label>
+                <label>
+                    Tipo de contrato
+                    <select name="tipo_contrato" data-contract-edit-field="tipo_contrato">
+                        <option value="">Sin tipo registrado</option>
+                        @foreach($contractTypeOptions ?? [] as $typeValue => $typeLabel)
+                            <option value="{{ $typeValue }}">{{ $typeLabel }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <label>
+                    Puesto
+                    @include('personal.partials.puesto-autocomplete', [
+                        'name' => 'puesto',
+                        'value' => '',
+                        'inputId' => 'contract_edit_puesto',
+                        'listId' => 'puestos_catalogo_contract_edit',
+                        'options' => $puestoOptions ?? [],
+                        'placeholder' => 'Escribe para buscar puesto',
+                        'dataField' => 'puesto',
+                    ])
+                </label>
+                <label>
+                    Area
+                    <input type="text" name="area" data-contract-edit-field="area" maxlength="191">
+                </label>
+                <label>
+                    Mina
+                    <input type="text" name="mina" data-contract-edit-field="mina" maxlength="191">
+                </label>
+                <label>
+                    Sueldo
+                    <input type="text" name="remuneracion" data-contract-edit-field="remuneracion" maxlength="191">
+                </label>
+                <label>
+                    Costo hora
+                    <input type="text" name="costo_hora" data-contract-edit-field="costo_hora" maxlength="191">
+                </label>
+                <label class="contract-edit-wide">
+                    Motivo de cese
+                    <textarea name="motivo_cese" data-contract-edit-field="motivo_cese" maxlength="2000" placeholder="Solo si corresponde"></textarea>
+                </label>
+                <label class="contract-edit-wide">
+                    Motivo de correccion
+                    <textarea name="motivo_correccion" maxlength="2000" required placeholder="Ej. Se corrigio fecha digitada por error"></textarea>
+                </label>
+            </div>
+            <div class="contract-edit-actions">
+                <button type="button" class="btn btn-outline btn-sm" data-contract-edit-cancel>Cancelar</button>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar correccion</button>
             </div>
         </form>
     </div>
@@ -603,6 +765,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const uploadLabel = document.getElementById('contractUploadLabel');
     const uploadCurrentFile = document.getElementById('contractUploadCurrentFile');
     const uploadCancelButton = uploadModal?.querySelector('[data-contract-upload-cancel]');
+    const editModal = document.getElementById('contractEditModal');
+    const editForm = document.getElementById('contractEditForm');
+    const editLabel = document.getElementById('contractEditLabel');
+    const editCancelButton = editModal?.querySelector('[data-contract-edit-cancel]');
 
     const closeModal = function () {
         if (!modal || !form) return;
@@ -619,6 +785,14 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadForm.reset();
     };
 
+    const closeEditModal = function () {
+        if (!editModal || !editForm) return;
+        editModal.classList.remove('is-open');
+        editModal.setAttribute('aria-hidden', 'true');
+        editForm.removeAttribute('action');
+        editForm.reset();
+    };
+
     document.querySelectorAll('.js-contract-delete').forEach(function (button) {
         button.addEventListener('click', function () {
             if (!modal || !form || !label) return;
@@ -626,6 +800,33 @@ document.addEventListener('DOMContentLoaded', function () {
             label.textContent = button.dataset.contractLabel || 'este contrato';
             modal.classList.add('is-open');
             modal.setAttribute('aria-hidden', 'false');
+        });
+    });
+
+    document.querySelectorAll('.js-contract-edit').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (!editModal || !editForm || !editLabel) return;
+            editForm.setAttribute('action', button.dataset.editUrl || '');
+            editLabel.textContent = button.dataset.contractLabel || 'este contrato';
+            const fieldMap = {
+                fecha_inicio: button.dataset.fechaInicio || '',
+                fecha_fin: button.dataset.fechaFin || '',
+                tipo_contrato: button.dataset.tipoContrato || '',
+                puesto: button.dataset.puesto || '',
+                area: button.dataset.area || '',
+                mina: button.dataset.mina || '',
+                remuneracion: button.dataset.remuneracion || '',
+                costo_hora: button.dataset.costoHora || '',
+                motivo_cese: button.dataset.motivoCese || '',
+            };
+            Object.entries(fieldMap).forEach(function ([name, value]) {
+                const field = editForm.querySelector('[data-contract-edit-field="' + name + '"]');
+                if (field) {
+                    field.value = value;
+                }
+            });
+            editModal.classList.add('is-open');
+            editModal.setAttribute('aria-hidden', 'false');
         });
     });
 
@@ -644,6 +845,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     cancelButton?.addEventListener('click', closeModal);
     uploadCancelButton?.addEventListener('click', closeUploadModal);
+    editCancelButton?.addEventListener('click', closeEditModal);
     modal?.addEventListener('click', function (event) {
         if (event.target === modal) {
             closeModal();
@@ -654,10 +856,16 @@ document.addEventListener('DOMContentLoaded', function () {
             closeUploadModal();
         }
     });
+    editModal?.addEventListener('click', function (event) {
+        if (event.target === editModal) {
+            closeEditModal();
+        }
+    });
     document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') {
             closeModal();
             closeUploadModal();
+            closeEditModal();
         }
     });
 });

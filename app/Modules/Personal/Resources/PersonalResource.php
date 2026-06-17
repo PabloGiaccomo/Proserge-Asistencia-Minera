@@ -335,6 +335,7 @@ class PersonalResource extends JsonResource
             return [
                 'id' => (string) $contract->id,
                 'numero' => (int) $contract->contrato_numero,
+                'label' => 'Contrato ' . trim(($formatDate(optional($contract->fecha_inicio)->toDateString()) ?: 'sin inicio') . ' al ' . (optional($contract->fecha_fin)->toDateString() ? $formatDate(optional($contract->fecha_fin)->toDateString()) : 'Vigente')),
                 'estado' => (string) $contract->estado,
                 'fecha_inicio' => optional($contract->fecha_inicio)->toDateString(),
                 'fecha_fin' => optional($contract->fecha_fin)->toDateString(),

@@ -49,15 +49,19 @@ class OperationalNotificationService
 
     public function contratoFirmado(Personal $personal, PersonalContrato $contract, Usuario $actor): void
     {
+        $inicio = optional($contract->fecha_inicio)->format('d/m/Y') ?: 'sin inicio';
+        $fin = optional($contract->fecha_fin)->format('d/m/Y') ?: 'vigente';
+
         $this->emit('personal_contrato_firmado', [
             'actor_user_id' => (string) $actor->id,
             'entity_type' => PersonalContrato::class,
             'entity_id' => (string) $contract->id,
             'priority' => 'medium',
             'message' => sprintf(
-                'Se cargo el contrato firmado de %s. Contrato #%s.',
+                'Se cargo el contrato firmado de %s. Periodo: %s al %s.',
                 $personal->nombre_completo ?: 'trabajador',
-                $contract->contrato_numero ?: '-'
+                $inicio,
+                $fin
             ),
             'payload' => [
                 'personal_id' => (string) $personal->id,

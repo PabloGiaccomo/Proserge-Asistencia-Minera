@@ -4,6 +4,7 @@ namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\PersonalContrato;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
@@ -11,7 +12,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -46,6 +49,7 @@ class PersonalContratoController extends WebPageController
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
             'reasonOptions' => $this->contratoService->noRenewalReasonOptions(),
             'cessationReasonOptions' => $this->contratoService->controlledCeaseReasonOptions(),
+            'contratoService' => $this->contratoService,
         ]);
     }
 
@@ -59,6 +63,8 @@ class PersonalContratoController extends WebPageController
             'trabajador' => PersonalResource::make($personal)->resolve(),
             'contratos' => $this->contratoService->listForPersonal($personal, $this->requireAuthenticatedUser()),
             'contratoService' => $this->contratoService,
+            'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
+            'puestoOptions' => $this->puestoOptions(),
         ]);
     }
 
@@ -91,7 +97,7 @@ class PersonalContratoController extends WebPageController
         abort_unless($contract->hasSignedFile() && Storage::disk('local')->exists($contract->signed_contract_path), 404);
 
         $filename = $contract->signed_contract_original_name
-            ?: 'contrato_firmado_' . $contract->contrato_numero . '.pdf';
+            ?: 'contrato_firmado_' . $this->contratoService->contractFileSlug($contract) . '.pdf';
 
         return response(Storage::disk('local')->get($contract->signed_contract_path), 200, [
             'Content-Type' => $contract->signed_contract_mime ?: 'application/pdf',
@@ -131,6 +137,74 @@ class PersonalContratoController extends WebPageController
         return redirect()
             ->route('personal.contratos.index', $personal->id)
             ->with('success', 'Contrato firmado subido correctamente.');
+    }
+
+    public function update(Request $request, string $id, string $contractId): RedirectResponse
+    {
+        $personal = $this->personalService->find($id);
+        abort_if(!$personal, 404);
+
+        $puestoRules = ['nullable', 'string', 'max:191'];
+        if (Schema::hasTable('personal_puestos')) {
+            $puestoRules[] = Rule::exists('personal_puestos', 'nombre');
+        }
+
+        $contractTypeRules = ['nullable', 'string', 'max:80'];
+        $contractTypeOptions = $this->contratoService->contractTypeOptions();
+        if ($contractTypeOptions !== []) {
+            $contractTypeRules[] = Rule::in(array_keys($contractTypeOptions));
+        }
+
+        $validated = $request->validate([
+            'fecha_inicio' => ['required', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'tipo_contrato' => $contractTypeRules,
+            'puesto' => $puestoRules,
+            'area' => ['nullable', 'string', 'max:191'],
+            'mina' => ['nullable', 'string', 'max:191'],
+            'remuneracion' => ['nullable', 'string', 'max:191'],
+            'costo_hora' => ['nullable', 'string', 'max:191'],
+            'motivo_cese' => ['nullable', 'string', 'max:2000'],
+            'motivo_correccion' => ['required', 'string', 'max:2000'],
+        ], [
+            'fecha_inicio.required' => 'La fecha de inicio del contrato es obligatoria.',
+            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+            'tipo_contrato.in' => 'Selecciona un tipo de contrato registrado.',
+            'puesto.exists' => 'Selecciona un puesto registrado en el catalogo.',
+            'motivo_correccion.required' => 'Indica el motivo de la correccion.',
+        ]);
+
+        try {
+            $this->contratoService->correctContract(
+                $personal,
+                $contractId,
+                $validated,
+                $this->requireAuthenticatedUser(),
+            );
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.contratos.index', $personal->id)
+                ->withInput()
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo corregir el contrato.');
+        }
+
+        return redirect()
+            ->route('personal.contratos.index', $personal->id)
+            ->with('success', 'Contrato corregido correctamente. La correccion quedo registrada en auditoria.');
+    }
+
+    private function puestoOptions(): array
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            return [];
+        }
+
+        return PersonalPuesto::query()
+            ->orderBy('nombre')
+            ->pluck('nombre')
+            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
+            ->values()
+            ->all();
     }
 
     public function renew(Request $request, string $id): RedirectResponse

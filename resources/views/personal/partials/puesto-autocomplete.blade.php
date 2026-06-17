@@ -14,6 +14,7 @@
     $puestoDisabled = (bool) ($disabled ?? false);
     $puestoReadonly = (bool) ($readonly ?? false);
     $puestoErrorId = $puestoInputId . '_error';
+    $puestoDataField = $dataField ?? null;
 @endphp
 
 <input
@@ -27,6 +28,7 @@
     autocomplete="off"
     aria-describedby="{{ $puestoErrorId }}"
     data-puesto-autocomplete
+    @if($puestoDataField) data-contract-edit-field="{{ $puestoDataField }}" @endif
     {{ $puestoRequired ? 'required' : '' }}
     {{ $puestoDisabled ? 'disabled' : '' }}
     {{ $puestoReadonly ? 'readonly' : '' }}

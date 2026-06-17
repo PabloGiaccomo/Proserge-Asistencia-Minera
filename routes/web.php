@@ -179,6 +179,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.reentry');
     Route::get('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'downloadSignedContract'])->middleware('web.permission:personal,ver')->name('personal.contratos.signed.download');
     Route::post('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'uploadSignedContract'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.signed');
+    Route::put('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.update');
     Route::get('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'show'])->middleware('web.permission:personal,ver')->name('personal.contratos.show');
     Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
     Route::get('/personal/{id}/documentos', [PersonalDocumentoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.documentos.index');

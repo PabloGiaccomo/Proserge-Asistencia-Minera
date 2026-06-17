@@ -73,6 +73,43 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         $this->assertSame($targetContract->id, $result->first()->id);
     }
 
+    public function test_filtro_tipo_contrato_reconoce_tipo_guardado_en_trabajador(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $target = $this->createPersonal('ACTIVO', [
+            'nombre_completo' => 'Tipo Desde Trabajador',
+            'contrato' => 'Personal fijo / servicio especifico',
+        ]);
+        $other = $this->createPersonal('ACTIVO', [
+            'nombre_completo' => 'Tipo Intermitente Trabajador',
+            'contrato' => 'Intermitente',
+        ]);
+
+        $targetContract = $this->insertContract($target, '2026-01-01', '2026-06-20', true, ['tipo_contrato' => null]);
+        $this->insertContract($other, '2026-01-01', '2026-06-22', true, ['tipo_contrato' => null]);
+
+        $service = app(PersonalContratoService::class);
+        $this->assertArrayHasKey('FIJO', $service->contractTypeOptions());
+        $this->assertArrayHasKey('INTER', $service->contractTypeOptions());
+
+        $result = $service->listExpiringContracts([
+            'mes' => 6,
+            'anio' => 2026,
+            'tipo_contrato' => 'FIJO',
+        ]);
+
+        $this->assertSame([$targetContract->id], $result->pluck('id')->values()->all());
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('value="FIJO"', false)
+            ->assertSee('Personal fijo / servicio especifico')
+            ->assertSee('Intermitente');
+    }
+
     public function test_filtro_por_trabajador_ignora_mes_anio_y_muestra_todo_su_historial(): void
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
@@ -137,8 +174,8 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ->assertSee('name="anio" min="2000" max="2100" value="2026" data-auto-filter data-date-filter disabled', false)
             ->assertSee('name="trabajador"', false)
             ->assertSee('Filtro Trabajador Vista')
-            ->assertSee('Contrato #1')
-            ->assertSee('Contrato #2');
+            ->assertSee('Contrato 01/01/2026 al 31/03/2026')
+            ->assertSee('Contrato 01/04/2026 al 30/06/2026');
     }
 
     public function test_vista_de_vencimientos_permite_seleccionar_y_descargar_formato_de_renovacion(): void

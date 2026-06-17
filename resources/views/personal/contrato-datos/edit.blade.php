@@ -7,6 +7,9 @@
     $dateValue = fn ($field): string => old($field, optional($datos->{$field})->toDateString() ?? '');
     $textValue = fn ($field): string => (string) old($field, $datos->{$field} ?? '');
     $estadoContrato = strtoupper((string) ($contrato->estado ?? 'PREPARACION'));
+    $contratoLabel = $contrato
+        ? app(\App\Modules\Personal\Services\PersonalContratoService::class)->contractDisplayLabel($contrato)
+        : 'Contrato sin periodo';
 @endphp
 
 <style>
@@ -24,7 +27,10 @@
                 <h1 class="page-title">Datos de contrato</h1>
                 <p class="page-subtitle">
                     {{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}
+                    @if(false)
                     · Contrato #{{ $contrato->contrato_numero ?? '-' }} {{ $estadoContrato === 'PREPARACION' ? 'en preparacion' : strtolower($estadoContrato) }}
+                    @endif
+                    - {{ $contratoLabel }} {{ $estadoContrato === 'PREPARACION' ? 'en preparacion' : strtolower($estadoContrato) }}
                 </p>
             </div>
             <div class="page-actions">

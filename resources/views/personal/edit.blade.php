@@ -13,7 +13,6 @@
 
     $stateByLocation = old('mina_estado', $trabajador['minas_estado'] ?? []);
     $familyRows = old('familiares', app(\App\Modules\Personal\Services\PersonalFichaService::class)->familyRowsForEdit($ficha));
-    $canRegularizeLegacy = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'actualizar');
 @endphp
 <style>
     .personal-edit-action-bar {
@@ -58,9 +57,6 @@
             </div>
             <div class="page-actions personal-edit-action-bar">
                 <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
-                @if($canRegularizeLegacy)
-                    <a href="{{ route('personal.antiguo.regularize', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Regularizar antiguo</a>
-                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
                 <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>

@@ -600,7 +600,8 @@ textarea.expiry-field {
                                     $canRegisterDecision = $canManage && (bool) $contrato->getAttribute('can_register_decision');
                                     $nextStart = $end ? $end->copy()->addDay()->toDateString() : now()->toDateString();
                                     $workerDocument = $personal?->numero_documento ?: $personal?->dni;
-                                    $contractType = $contrato->tipo_contrato ?: $personal?->contrato ?: 'SIN_TIPO';
+                                    $contractType = $contrato->getAttribute('tipo_contrato_visual') ?: 'SIN_TIPO';
+                                    $contractTypeLabel = $contrato->getAttribute('tipo_contrato_label') ?: ($contractType === 'SIN_TIPO' ? '-' : $contractType);
                                     $workerPayload = [
                                         'id' => (string) ($personal?->id ?? ''),
                                         'nombre' => (string) ($personal?->nombre_completo ?: 'Trabajador'),
@@ -658,7 +659,7 @@ textarea.expiry-field {
                                         @else
                                             <strong class="expiry-worker-name">{{ $personal?->nombre_completo ?: 'Sin trabajador' }}</strong>
                                         @endif
-                                        <div class="expiry-muted">Contrato #{{ $contrato->contrato_numero }}</div>
+                                        <div class="expiry-muted">{{ $contratoService->contractDisplayLabel($contrato) }}</div>
                                     </td>
                                     <td>{{ $personal?->tipo_documento ?: 'DNI' }} {{ $workerDocument }}</td>
                                     <td>
@@ -678,7 +679,7 @@ textarea.expiry-field {
                                             <span class="expiry-badge ok">{{ $days }} dias</span>
                                         @endif
                                     </td>
-                                    <td>{{ $contractType === 'SIN_TIPO' ? '-' : $contractType }}</td>
+                                    <td>{{ $contractTypeLabel }}</td>
                                     <td>
                                         <div><span class="expiry-badge {{ $visualContractState === 'RENOVADO' ? 'ok' : '' }}">{{ ucfirst(strtolower($visualContractState)) }}</span></div>
                                         @if($hasLaterContract)
@@ -888,7 +889,7 @@ textarea.expiry-field {
                 : '';
 
             return '<div class="expiry-worker-history-item">'
-                + '<div class="expiry-worker-history-period">Contrato #' + escapeHtml(item.numero || '-') + ' - ' + escapeHtml(item.periodo || '-') + '</div>'
+                + '<div class="expiry-worker-history-period">Contrato ' + escapeHtml(item.periodo || '-') + '</div>'
                 + '<div class="expiry-worker-history-detail">Cargo: ' + escapeHtml(item.puesto || '-') + '</div>'
                 + salary
                 + hourly

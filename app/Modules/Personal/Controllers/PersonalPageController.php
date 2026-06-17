@@ -749,7 +749,6 @@ class PersonalPageController extends WebPageController
             'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
             'fecha_firma' => ['nullable', 'date'],
             'area' => ['nullable', 'string', 'max:191'],
-            'mina' => ['nullable', 'string', 'max:191'],
             'remuneracion' => ['nullable', 'string', 'max:120'],
             'costo_hora' => ['nullable', 'string', 'max:120'],
             'motivo_cese' => ['nullable', 'string', 'max:2000'],

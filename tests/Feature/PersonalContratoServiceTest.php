@@ -139,19 +139,21 @@ class PersonalContratoServiceTest extends TestCase
         $service = app(PersonalContratoService::class);
         $personal = Personal::query()->findOrFail($personalId);
 
-        try {
-            $service->annulContract($personal, $closedId, 'Error de prueba', $actor);
-            $this->fail('No debio permitir anular un contrato historico cerrado.');
-        } catch (ValidationException $exception) {
-            $this->assertSame(
-                'No se puede anular un contrato historico cerrado. El historial es inamovible.',
-                collect($exception->errors())->flatten()->first(),
-            );
-        }
-
         $this->assertDatabaseHas('personal_contratos', [
             'id' => $closedId,
             'estado' => 'CERRADO',
+        ]);
+
+        $service->annulContract($personal, $closedId, 'Error de prueba', $actor);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $closedId,
+            'estado' => 'ANULADO',
+            'motivo_anulacion' => 'Error de prueba',
+        ]);
+        $this->assertDatabaseHas('personal_contrato_correcciones', [
+            'personal_contrato_id' => $closedId,
+            'accion' => 'ANULACION',
+            'motivo' => 'Error de prueba',
         ]);
 
         $service->annulContract($personal, $preparingId, 'Creado por error', $actor);
@@ -160,6 +162,107 @@ class PersonalContratoServiceTest extends TestCase
             'estado' => 'ANULADO',
             'motivo_anulacion' => 'Creado por error',
         ]);
+    }
+
+    public function test_contract_correction_updates_dates_and_keeps_audit(): void
+    {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $contractId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            'id' => $contractId,
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'ACTIVO',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-10-31',
+            'tipo_contrato' => 'FIJO',
+            'puesto' => 'Operario',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $contract = app(PersonalContratoService::class)->correctContract(
+            Personal::query()->findOrFail($personalId),
+            $contractId,
+            [
+                'fecha_inicio' => '2026-06-02',
+                'fecha_fin' => '2026-11-01',
+                'tipo_contrato' => 'FIJO',
+                'puesto' => 'Operario',
+                'motivo_correccion' => 'Fecha digitada por error',
+            ],
+            $actor,
+        );
+
+        $this->assertSame('2026-06-02', optional($contract->fecha_inicio)->toDateString());
+        $this->assertSame('2026-11-01', optional($contract->fecha_fin)->toDateString());
+        $this->assertDatabaseHas('personal_contrato_correcciones', [
+            'personal_contrato_id' => $contractId,
+            'accion' => 'CORRECCION',
+            'motivo' => 'Fecha digitada por error',
+        ]);
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personalId,
+            'fecha_inicio_contrato' => '2026-06-02',
+            'fecha_fin_contrato' => '2026-11-01',
+        ]);
+
+        $snapshot = json_decode((string) DB::table('personal_contratos')->where('id', $contractId)->value('snapshot_inicial_json'), true);
+        $this->assertSame('correccion_contrato', data_get($snapshot, 'evento'));
+        $this->assertSame('2026-06-02', data_get($snapshot, 'rango.fecha_inicio'));
+        $this->assertSame('2026-11-01', data_get($snapshot, 'rango.fecha_fin'));
+        $this->assertSame('Fecha digitada por error', data_get($snapshot, 'extra.motivo_correccion'));
+    }
+
+    public function test_closed_contract_correction_refreshes_historical_snapshot(): void
+    {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $contractId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            'id' => $contractId,
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'CERRADO',
+            'fecha_inicio' => '2026-04-01',
+            'fecha_fin' => '2026-04-30',
+            'tipo_contrato' => 'FIJO',
+            'puesto' => 'Operario',
+            'snapshot_json' => json_encode([
+                'evento' => 'cierre_contrato',
+                'rango' => [
+                    'fecha_inicio' => '2026-04-01',
+                    'fecha_fin' => '2026-04-30',
+                ],
+            ], JSON_UNESCAPED_UNICODE),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $contract = app(PersonalContratoService::class)->correctContract(
+            Personal::query()->findOrFail($personalId),
+            $contractId,
+            [
+                'fecha_inicio' => '2026-04-02',
+                'fecha_fin' => '2026-05-01',
+                'tipo_contrato' => 'FIJO',
+                'puesto' => 'Operario',
+                'motivo_correccion' => 'Regularizacion de fecha historica',
+            ],
+            $actor,
+        );
+
+        $this->assertSame('2026-04-02', optional($contract->fecha_inicio)->toDateString());
+        $this->assertSame('2026-05-01', optional($contract->fecha_fin)->toDateString());
+
+        $snapshot = json_decode((string) DB::table('personal_contratos')->where('id', $contractId)->value('snapshot_json'), true);
+        $this->assertSame('correccion_contrato', data_get($snapshot, 'evento'));
+        $this->assertSame('2026-04-02', data_get($snapshot, 'rango.fecha_inicio'));
+        $this->assertSame('2026-05-01', data_get($snapshot, 'rango.fecha_fin'));
+        $this->assertSame('Regularizacion de fecha historica', data_get($snapshot, 'extra.motivo_correccion'));
     }
 
     public function test_closed_contract_cannot_be_edited(): void
@@ -279,6 +382,82 @@ class PersonalContratoServiceTest extends TestCase
         ]);
 
         $this->assertSame('FALTA_CONTRATO', $updated->estado);
+    }
+
+    public function test_no_permite_registrar_contrato_con_periodo_solapado(): void
+    {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'CERRADO',
+            'fecha_inicio' => '2026-01-01',
+            'fecha_fin' => '2026-06-30',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        try {
+            app(PersonalContratoService::class)->registerLegacyContract(
+                Personal::query()->findOrFail($personalId),
+                [
+                    'fecha_inicio' => '2026-06-30',
+                    'fecha_fin' => '2026-12-31',
+                    'estado_laboral' => 'CESADO',
+                    'estado_contrato' => 'CERRADO',
+                    'tipo_contrato' => 'FIJO',
+                    'puesto' => 'Operario',
+                    'motivo_cese' => 'Contrato historico',
+                ],
+                null,
+                $actor,
+            );
+
+            $this->fail('No debio permitir registrar dos contratos cruzados por la misma fecha.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString(
+                'cruza ese periodo',
+                collect($exception->errors())->flatten()->first()
+            );
+        }
+    }
+
+    public function test_permite_registrar_contrato_continuo_al_dia_siguiente(): void
+    {
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'CERRADO',
+            'fecha_inicio' => '2026-01-01',
+            'fecha_fin' => '2026-06-30',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $contract = app(PersonalContratoService::class)->registerLegacyContract(
+            Personal::query()->findOrFail($personalId),
+            [
+                'fecha_inicio' => '2026-07-01',
+                'fecha_fin' => '2026-12-31',
+                'estado_laboral' => 'CESADO',
+                'estado_contrato' => 'CERRADO',
+                'tipo_contrato' => 'FIJO',
+                'puesto' => 'Operario',
+                'motivo_cese' => 'Contrato historico',
+            ],
+            null,
+            $actor,
+        );
+
+        $this->assertSame('2026-07-01', optional($contract->fecha_inicio)->toDateString());
+        $this->assertSame('2026-12-31', optional($contract->fecha_fin)->toDateString());
     }
 
     private function createRole(string $name): string

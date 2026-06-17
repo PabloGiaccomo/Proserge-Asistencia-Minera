@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -99,16 +100,17 @@ class PersonalAntiguoRegistrationTest extends TestCase
             $this->assertSame('Solo se puede modificar el contrato vigente o en preparacion.', collect($exception->errors())->flatten()->first());
         }
 
-        try {
-            app(PersonalContratoService::class)->annulContract($personal, $contract->id, 'Error historico', $actor);
-            $this->fail('No debio permitir anular un contrato historico cerrado.');
-        } catch (ValidationException $exception) {
-            $this->assertSame('No se puede anular un contrato historico cerrado. El historial es inamovible.', collect($exception->errors())->flatten()->first());
-        }
+        app(PersonalContratoService::class)->annulContract($personal, $contract->id, 'Error historico', $actor);
 
         $this->assertDatabaseHas('personal_contratos', [
             'id' => $contract->id,
-            'estado' => 'CERRADO',
+            'estado' => 'ANULADO',
+            'motivo_anulacion' => 'Error historico',
+        ]);
+        $this->assertDatabaseHas('personal_contrato_correcciones', [
+            'personal_contrato_id' => $contract->id,
+            'accion' => 'ANULACION',
+            'motivo' => 'Error historico',
         ]);
     }
 
@@ -198,6 +200,7 @@ class PersonalAntiguoRegistrationTest extends TestCase
     {
         $deniedUser = $this->createUser(['personal' => ['ver']]);
         $allowedUser = $this->createUser(['personal' => ['crear', 'ver']]);
+        $this->ensurePuesto('Operario');
 
         $this->withSession($this->sessionFor($deniedUser))
             ->get(route('personal.antiguo.create'))
@@ -267,6 +270,30 @@ class PersonalAntiguoRegistrationTest extends TestCase
             'estado' => $estado,
             'created_at' => now(),
             'updated_at' => now(),
+        ]);
+    }
+
+    private function ensurePuesto(string $nombre): void
+    {
+        if (!Schema::hasTable('personal_puestos')) {
+            return;
+        }
+
+        if (DB::table('personal_puestos')->where('nombre', $nombre)->exists()) {
+            DB::table('personal_puestos')
+                ->where('nombre', $nombre)
+                ->update(['activo' => true, 'updated_at' => now()]);
+
+            return;
+        }
+
+        DB::table('personal_puestos')->insert([
+                'id' => (string) Str::uuid(),
+                'nombre' => $nombre,
+                'funciones' => null,
+                'activo' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
         ]);
     }
 

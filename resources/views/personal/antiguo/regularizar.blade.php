@@ -8,7 +8,7 @@
     $origenActual = old('origen_registro', $personal->origen_registro ?: ($estadoInterno === 'CESADO' ? 'HISTORICO' : 'ANTIGUO'));
     $fechaInicio = old('fecha_inicio', optional($contratoDatos?->fecha_inicio_contrato)->toDateString() ?: optional($personal->fecha_ingreso)->toDateString());
     $fechaFin = old('fecha_fin', optional($contratoDatos?->fecha_fin_contrato)->toDateString() ?: optional($contratoActual?->fecha_fin)->toDateString());
-    $fechaFirma = old('fecha_firma', optional($contratoDatos?->fecha_firma)->toDateString() ?: optional($contratoActual?->signed_at)->toDateString());
+    $fechaFirma = $fechaInicio;
     $hasLegacySignedFile = $contratoDatos?->signed_at && $contratoDatos?->signed_contract_path;
 @endphp
 
@@ -146,7 +146,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha inicio contrato</label>
-                    <input type="date" name="fecha_inicio" class="form-control" value="{{ $fechaInicio }}">
+                    <input type="date" name="fecha_inicio" id="regularizeFechaInicio" class="form-control" value="{{ $fechaInicio }}">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha fin</label>
@@ -154,15 +154,11 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha firma</label>
-                    <input type="date" name="fecha_firma" class="form-control" value="{{ $fechaFirma }}">
+                    <input type="date" name="fecha_firma" id="regularizeFechaFirma" class="form-control" value="{{ $fechaFirma }}" readonly>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Area</label>
+                    <label class="form-label">Area o cargo</label>
                     <input type="text" name="area" class="form-control" value="{{ old('area') }}" maxlength="191">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Mina / sede</label>
-                    <input type="text" name="mina" class="form-control" value="{{ old('mina') }}" maxlength="191">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Remuneracion</label>
@@ -208,4 +204,23 @@
         </div>
     </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const startInput = document.getElementById('regularizeFechaInicio');
+    const signInput = document.getElementById('regularizeFechaFirma');
+
+    if (!startInput || !signInput) {
+        return;
+    }
+
+    const syncSignDate = function () {
+        signInput.value = startInput.value || '';
+    };
+
+    syncSignDate();
+    startInput.addEventListener('input', syncSignDate);
+    startInput.addEventListener('change', syncSignDate);
+});
+</script>
 @endsection

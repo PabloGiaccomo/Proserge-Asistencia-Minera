@@ -2362,7 +2362,7 @@
 
                     <tbody>
                         @forelse($workers as $worker)
-                            <tr @class(['is-selected-worker' => (int)($selectedWorker?->id ?? 0) === (int)$worker->id])>
+                            <tr @class(['is-selected-worker' => $selectedWorker && (string) $selectedWorker->id === (string) $worker->id])>
                                 <td data-label="Trabajador"><strong>{{ $worker->nombre_completo }}</strong></td>
                                 <td data-label="Documento"><span class="mine-muted">{{ $worker->numero_documento ?: $worker->dni ?: 'Sin documento' }}</span></td>
                                 <td data-label="Puesto"><span class="mine-muted">{{ $worker->puesto ?: 'Sin cargo' }}</span></td>

@@ -106,9 +106,17 @@ class PersonalContratoService
             $query->whereHas('personal', fn ($personalQuery) => $personalQuery->where('estado', $estadoLaboral));
         }
 
-        $contractType = strtoupper(trim((string) ($filters['tipo_contrato'] ?? '')));
-        if (!$isWorkerHistoryMode && $contractType !== '') {
-            $query->whereRaw('UPPER(tipo_contrato) = ?', [$contractType]);
+        $rawContractType = trim((string) ($filters['tipo_contrato'] ?? ''));
+        if (!$isWorkerHistoryMode && $rawContractType !== '') {
+            $contractType = PersonalNormalizer::contract($rawContractType);
+            $searchValues = $this->contractTypeSearchValues($contractType);
+
+            $query->where(function ($query) use ($searchValues): void {
+                $query->whereIn(DB::raw('LOWER(TRIM(COALESCE(tipo_contrato, "")))'), $searchValues)
+                    ->orWhereHas('personal', function ($personalQuery) use ($searchValues): void {
+                        $personalQuery->whereIn(DB::raw('LOWER(TRIM(COALESCE(contrato, "")))'), $searchValues);
+                    });
+            });
         }
 
         return $this->decorateExpiringContracts($query->get());
@@ -116,20 +124,42 @@ class PersonalContratoService
 
     public function contractTypeOptions(): array
     {
-        if (!Schema::hasTable('personal_contratos')) {
-            return [];
+        $values = collect();
+
+        if (Schema::hasTable('personal_contratos')) {
+            $values = $values->merge(
+                PersonalContrato::query()
+                    ->whereNotNull('tipo_contrato')
+                    ->select('tipo_contrato')
+                    ->distinct()
+                    ->pluck('tipo_contrato')
+            );
         }
 
-        return PersonalContrato::query()
-            ->whereNotNull('tipo_contrato')
-            ->select('tipo_contrato')
-            ->distinct()
-            ->orderBy('tipo_contrato')
-            ->pluck('tipo_contrato')
-            ->map(fn ($type): string => trim((string) $type))
+        if (Schema::hasTable('personal') && Schema::hasColumn('personal', 'contrato')) {
+            $values = $values->merge(
+                Personal::query()
+                    ->whereNotNull('contrato')
+                    ->select('contrato')
+                    ->distinct()
+                    ->pluck('contrato')
+            );
+        }
+
+        $detected = $values
+            ->map(fn ($type): string => PersonalNormalizer::text($type))
             ->filter(fn (string $type): bool => $type !== '')
+            ->map(fn (string $type): string => PersonalNormalizer::contract($type))
             ->unique()
-            ->mapWithKeys(fn (string $type): array => [$type => $type])
+            ->values();
+
+        $optionKeys = $detected->isNotEmpty()
+            ? $detected
+            : collect(['REG', 'FIJO', 'INTER', 'INDET']);
+
+        return $optionKeys
+            ->sortBy(fn (string $type): int => $this->contractTypeOptionOrder($type))
+            ->mapWithKeys(fn (string $type): array => [$type => PersonalNormalizer::contractLabel($type)])
             ->all();
     }
 
@@ -284,7 +314,7 @@ class PersonalContratoService
                     continue;
                 }
 
-                $label = $contract->personal?->nombre_completo ?: ('Contrato #' . $contract->contrato_numero);
+                $label = $contract->personal?->nombre_completo ?: $this->contractDisplayLabel($contract);
 
                 try {
                     $this->registerRenewalDecision($contract, $payload, $user);
@@ -442,6 +472,86 @@ class PersonalContratoService
         return $closed;
     }
 
+    public function correctContract(Personal $personal, string $contractId, array $payload, Usuario $user): PersonalContrato
+    {
+        if (!Schema::hasTable('personal_contratos')) {
+            throw ValidationException::withMessages([
+                'contrato' => 'El historial de contratos no esta disponible.',
+            ]);
+        }
+
+        $contract = PersonalContrato::query()
+            ->where('personal_id', $personal->id)
+            ->find($contractId);
+
+        if (!$contract) {
+            throw ValidationException::withMessages([
+                'contrato' => 'Contrato no encontrado.',
+            ]);
+        }
+
+        if (strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_ANULADO) {
+            throw ValidationException::withMessages([
+                'contrato' => 'No se puede corregir un contrato anulado.',
+            ]);
+        }
+
+        $fechaInicio = PersonalNormalizer::isoDate($payload['fecha_inicio'] ?? null);
+        $fechaFin = PersonalNormalizer::isoDate($payload['fecha_fin'] ?? null);
+        $motivo = trim(PersonalNormalizer::text($payload['motivo_correccion'] ?? ''));
+
+        if (!$fechaInicio) {
+            throw ValidationException::withMessages([
+                'fecha_inicio' => 'La fecha de inicio del contrato es obligatoria.',
+            ]);
+        }
+
+        if ($fechaFin && $fechaFin < $fechaInicio) {
+            throw ValidationException::withMessages([
+                'fecha_fin' => 'La fecha de fin no puede ser anterior al inicio.',
+            ]);
+        }
+
+        if ($motivo === '') {
+            throw ValidationException::withMessages([
+                'motivo_correccion' => 'El motivo de correccion es obligatorio.',
+            ]);
+        }
+
+        $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
+
+        return DB::transaction(function () use ($personal, $contract, $payload, $user, $fechaInicio, $fechaFin, $motivo): PersonalContrato {
+            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->findOrFail($personal->id);
+            $contract = PersonalContrato::query()
+                ->where('personal_id', $personal->id)
+                ->findOrFail($contract->id);
+            $before = $this->contractAuditPayload($contract);
+
+            $contract->forceFill([
+                'fecha_inicio' => $fechaInicio,
+                'fecha_fin' => $fechaFin,
+                'tipo_contrato' => PersonalNormalizer::text($payload['tipo_contrato'] ?? '') !== ''
+                    ? PersonalNormalizer::contract($payload['tipo_contrato'])
+                    : $contract->tipo_contrato,
+                'puesto' => mb_substr(PersonalNormalizer::text($payload['puesto'] ?? $contract->puesto), 0, 191) ?: null,
+                'area' => mb_substr(PersonalNormalizer::text($payload['area'] ?? $contract->area), 0, 191) ?: null,
+                'mina' => mb_substr(PersonalNormalizer::text($payload['mina'] ?? $contract->mina), 0, 191) ?: null,
+                'remuneracion' => mb_substr(PersonalNormalizer::text($payload['remuneracion'] ?? $contract->remuneracion), 0, 191) ?: null,
+                'costo_hora' => mb_substr(PersonalNormalizer::text($payload['costo_hora'] ?? $contract->costo_hora), 0, 191) ?: null,
+                'motivo_cese' => mb_substr(PersonalNormalizer::text($payload['motivo_cese'] ?? $contract->motivo_cese), 0, 2000) ?: null,
+            ])->save();
+
+            $contract = $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+            $this->syncEditableContractDataAfterCorrection($personal, $contract, $user);
+            $contract = $this->refreshCorrectedContractSnapshot($personal, $contract, $motivo);
+
+            $after = $this->contractAuditPayload($contract);
+            $this->recordContractAudit($contract, 'CORRECCION', $motivo, $before, $after, $user);
+
+            return $contract;
+        });
+    }
+
     public function annulContract(Personal $personal, string $contractId, string $motivo, Usuario $user): PersonalContrato
     {
         if (!Schema::hasTable('personal_contratos')) {
@@ -460,9 +570,9 @@ class PersonalContratoService
             ]);
         }
 
-        if ($contract->isHistoricalLocked()) {
+        if (strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_ANULADO) {
             throw ValidationException::withMessages([
-                'contrato' => 'No se puede anular un contrato historico cerrado. El historial es inamovible.',
+                'contrato' => 'El contrato ya se encuentra anulado.',
             ]);
         }
 
@@ -473,22 +583,31 @@ class PersonalContratoService
             ]);
         }
 
-        $contract->forceFill([
-            'estado' => PersonalContrato::ESTADO_ANULADO,
-            'motivo_anulacion' => $motivo,
-            'anulado_at' => now(),
-            'anulado_by_usuario_id' => $user->id,
-            'snapshot_json' => $contract->snapshot_json ?: $this->buildSnapshot($personal, 'anulacion_contrato', [
+        return DB::transaction(function () use ($personal, $contract, $motivo, $user): PersonalContrato {
+            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->findOrFail($personal->id);
+            $contract = PersonalContrato::query()
+                ->where('personal_id', $personal->id)
+                ->findOrFail($contract->id);
+            $before = $this->contractAuditPayload($contract);
+
+            $contract->forceFill([
+                'estado' => PersonalContrato::ESTADO_ANULADO,
                 'motivo_anulacion' => $motivo,
-                'contrato_numero' => $contract->contrato_numero,
-            ], $contract),
-        ])->save();
+                'anulado_at' => now(),
+                'anulado_by_usuario_id' => $user->id,
+                'snapshot_json' => $contract->snapshot_json ?: $this->buildSnapshot($personal, 'anulacion_contrato', [
+                    'motivo_anulacion' => $motivo,
+                    'contrato_numero' => $contract->contrato_numero,
+                ], $contract),
+            ])->save();
 
-        if (strtoupper((string) $personal->estado) === PersonalContratoDatoService::PENDING_STATE) {
-            $personal->forceFill(['estado' => 'PENDIENTE_COMPLETAR_FICHA'])->save();
-        }
+            $contract = $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+            $after = $this->contractAuditPayload($contract);
+            $this->recordContractAudit($contract, 'ANULACION', $motivo, $before, $after, $user);
+            $this->syncPersonalStateAfterContractAnnulment($personal, $contract, $before);
 
-        return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+            return $contract;
+        });
     }
 
     public function ensureHistoricalContractForCeased(Personal $personal, ?Usuario $user = null): ?PersonalContrato
@@ -537,13 +656,19 @@ class PersonalContratoService
             ? PersonalContrato::ESTADO_PREPARACION
             : PersonalContrato::ESTADO_ACTIVO;
 
+        $fechaInicio = $this->currentContractStartDate($personal);
+        $fechaFin = $this->currentContractEndDate($personal);
+        if ($fechaInicio) {
+            $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin);
+        }
+
         return PersonalContrato::query()->create([
             'id' => (string) Str::uuid(),
             'personal_id' => $personal->id,
             'contrato_numero' => $this->nextContractNumber($personal),
             'estado' => $initialState,
-            'fecha_inicio' => $this->currentContractStartDate($personal),
-            'fecha_fin' => $this->currentContractEndDate($personal),
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
             'activado_at' => now(),
             'activado_by_usuario_id' => $user?->id,
             'personal_ficha_id' => $personal->fichaColaborador?->id,
@@ -563,10 +688,14 @@ class PersonalContratoService
 
             $contract = $this->ensureActiveContract($personal, $user);
             $contractEnd = PersonalNormalizer::isoDate($fechaFin) ?: Carbon::today()->toDateString();
+            $contractStart = optional($contract->fecha_inicio)->toDateString() ?: $this->currentContractStartDate($personal);
+            if ($contractStart) {
+                $this->assertContractPeriodAvailable($personal, $contractStart, $contractEnd, $contract->id);
+            }
 
             $contract->forceFill([
                 'estado' => PersonalContrato::ESTADO_CERRADO,
-                'fecha_inicio' => $contract->fecha_inicio ?: $this->currentContractStartDate($personal),
+                'fecha_inicio' => $contractStart,
                 'fecha_fin' => $contractEnd,
                 'motivo_cese' => trim($motivo),
                 'cerrado_at' => now(),
@@ -620,6 +749,8 @@ class PersonalContratoService
                 throw ValidationException::withMessages(['fecha_fin' => 'La fecha de fin no puede ser anterior al inicio.']);
             }
 
+            $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin);
+
             $contract = $this->createPreparationContractFromBase($personal, $base, $fechaInicio, $fechaFin, $user, PersonalContrato::MOVIMIENTO_RENOVACION, $payload);
             $this->putRenewalInPreparation($personal, $fechaInicio, $fechaFin, $contract, $user);
             $this->markBaseRenewalPrepared($base, $user);
@@ -650,7 +781,7 @@ class PersonalContratoService
 
         $path = $file->storeAs(
             'personal_contratos/' . $personal->id,
-            'contrato_firmado_' . $contract->contrato_numero . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.pdf',
+            'contrato_firmado_' . $this->contractFileSlug($contract) . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.pdf',
             'local',
         );
 
@@ -661,6 +792,10 @@ class PersonalContratoService
                 ->findOrFail($contract->id);
             $wasPreparation = strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_PREPARACION;
             $isEditableContract = $contract->isEditable();
+            $fechaInicio = optional($contract->fecha_inicio)->toDateString();
+            if ($fechaInicio) {
+                $this->assertContractPeriodAvailable($personal, $fechaInicio, optional($contract->fecha_fin)->toDateString(), $contract->id);
+            }
 
             $data = [
                 'signed_at' => now(),
@@ -758,6 +893,8 @@ class PersonalContratoService
                 throw ValidationException::withMessages(['fecha_fin' => 'La fecha de fin no puede ser anterior al inicio.']);
             }
 
+            $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin);
+
             $contract = $this->createPreparationContractFromBase($personal, $base, $fechaInicio, $fechaFin, $user, PersonalContrato::MOVIMIENTO_REINGRESO, $payload);
             $this->putPersonalInPendingContract($personal, $fechaInicio, $fechaFin, $contract, $user);
 
@@ -797,6 +934,8 @@ class PersonalContratoService
                 'contrato.fecha_fin' => 'Un trabajador antiguo cesado debe tener fecha de fin de contrato.',
             ]);
         }
+
+        $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin);
 
         $isCurrent = $estadoLaboral !== 'CESADO' && $estadoContratoInput === 'VIGENTE';
         $hasSignedFile = $signedFile !== null;
@@ -913,8 +1052,7 @@ class PersonalContratoService
         $fechaFin = PersonalNormalizer::isoDate($payload['fecha_fin'] ?? null)
             ?: optional($datos?->fecha_fin_contrato)->toDateString()
             ?: $this->currentContractEndDate($personal);
-        $fechaFirma = PersonalNormalizer::isoDate($payload['fecha_firma'] ?? null)
-            ?: optional($datos?->fecha_firma)->toDateString();
+        $fechaFirma = $fechaInicio;
         $estadoPersonal = strtoupper((string) $personal->estado);
         $estadoContratoInput = strtoupper(trim((string) ($payload['estado_contrato'] ?? ($estadoPersonal === 'CESADO' ? 'CERRADO' : 'VIGENTE'))));
 
@@ -931,12 +1069,17 @@ class PersonalContratoService
         }
 
         $isCurrent = $estadoPersonal !== 'CESADO' && $estadoContratoInput === 'VIGENTE';
+        $existingEquivalent = $this->findEquivalentContract($personal, $fechaInicio, $fechaFin, $isCurrent);
+        $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $existingEquivalent?->id);
+
         $storedFile = $signedFile ? $this->storeLegacySignedFile($personal, $signedFile) : null;
         $legacyFile = !$storedFile ? $this->legacySignedFileFromContractData($datos) : null;
         $signedData = $storedFile ?: $legacyFile;
-        $existingEquivalent = $this->findEquivalentContract($personal, $fechaInicio, $fechaFin, $isCurrent);
         if (!$signedData && $existingEquivalent?->hasSignedFile()) {
             $signedData = $this->signedFileFromContract($existingEquivalent);
+        }
+        if ($signedData) {
+            $signedData['signed_at'] = Carbon::parse($fechaFirma)->startOfDay();
         }
         $hasSignedFile = $signedData !== null;
         $warning = null;
@@ -1017,6 +1160,7 @@ class PersonalContratoService
 
             if ($isCurrent && $signedData && $datos) {
                 $datos->forceFill([
+                    'fecha_firma' => $fechaFirma,
                     'signed_at' => $signedData['signed_at'] ?? now(),
                     'signed_contract_path' => $signedData['path'],
                     'signed_contract_original_name' => $signedData['original_name'],
@@ -1078,10 +1222,16 @@ class PersonalContratoService
     public function syncEditableContractData(Personal $personal, PersonalContratoDato $datos, Usuario $user): PersonalContrato
     {
         $contract = $this->assertContractEditable($personal, $user);
+        $fechaInicio = optional($datos->fecha_inicio_contrato)->toDateString()
+            ?: optional($contract->fecha_inicio)->toDateString();
+        $fechaFin = optional($datos->fecha_fin_contrato)->toDateString();
+        if ($fechaInicio) {
+            $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
+        }
 
         $contract->forceFill([
-            'fecha_inicio' => $datos->fecha_inicio_contrato ?: $contract->fecha_inicio,
-            'fecha_fin' => $datos->fecha_fin_contrato,
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
             'puesto' => $datos->puesto ?: $contract->puesto,
             'remuneracion' => $datos->sueldo_num ?: $contract->remuneracion,
             'costo_hora' => $datos->sueldo_hora_paradas ?: $contract->costo_hora,
@@ -1100,11 +1250,18 @@ class PersonalContratoService
         $signed = DB::transaction(function () use ($personal, $datos, $user): PersonalContrato {
             $personal = Personal::query()->with(['fichaColaborador', 'minas'])->findOrFail($personal->id);
             $contract = $this->assertContractEditable($personal, $user);
+            $fechaInicio = optional($datos->fecha_inicio_contrato)->toDateString()
+                ?: optional($contract->fecha_inicio)->toDateString()
+                ?: $this->currentContractStartDate($personal);
+            $fechaFin = optional($datos->fecha_fin_contrato)->toDateString();
+            if ($fechaInicio) {
+                $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
+            }
 
             $contract->forceFill([
                 'estado' => PersonalContrato::ESTADO_ACTIVO,
-                'fecha_inicio' => $datos->fecha_inicio_contrato ?: $contract->fecha_inicio ?: $this->currentContractStartDate($personal),
-                'fecha_fin' => $datos->fecha_fin_contrato,
+                'fecha_inicio' => $fechaInicio,
+                'fecha_fin' => $fechaFin,
                 'signed_at' => $datos->signed_at ?: now(),
                 'signed_by_usuario_id' => $user->id,
                 'signed_contract_path' => $datos->signed_contract_path,
@@ -1135,10 +1292,33 @@ class PersonalContratoService
 
     public function contractLabel(PersonalContrato $contract): string
     {
+        return $this->contractDisplayLabel($contract);
+    }
+
+    public function contractDisplayLabel(PersonalContrato $contract): string
+    {
+        return 'Contrato ' . $this->contractPeriodLabel($contract);
+    }
+
+    public function contractPeriodLabel(PersonalContrato $contract): string
+    {
         $inicio = optional($contract->fecha_inicio)->format('d/m/Y') ?: 'sin inicio';
         $fin = optional($contract->fecha_fin)->format('d/m/Y') ?: 'vigente';
 
-        return 'Contrato ' . $contract->contrato_numero . ': ' . $inicio . ' al ' . $fin;
+        return $inicio . ' al ' . $fin;
+    }
+
+    public function contractFileSlug(PersonalContrato $contract): string
+    {
+        $inicio = optional($contract->fecha_inicio)->toDateString() ?: 'sin-inicio';
+        $fin = optional($contract->fecha_fin)->toDateString() ?: 'vigente';
+
+        return Str::of($inicio . '_al_' . $fin)
+            ->ascii()
+            ->lower()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->toString() ?: 'periodo';
     }
 
     public function decisionStateOptions(): array
@@ -1260,6 +1440,7 @@ class PersonalContratoService
             $renewals = $renewalsByOrigin->get($contract->id, collect());
             $related = $contractsByPersonal->get($contract->personal_id, collect());
             $end = optional($contract->fecha_fin)->toDateString();
+            $contractType = $this->effectiveContractType($contract);
 
             $hasPreparation = $renewals->contains(fn (PersonalContrato $item): bool => strtoupper((string) $item->estado) === PersonalContrato::ESTADO_PREPARACION)
                 || $related->contains(fn (PersonalContrato $item): bool => strtoupper((string) $item->estado) === PersonalContrato::ESTADO_PREPARACION);
@@ -1290,9 +1471,78 @@ class PersonalContratoService
             $contract->setAttribute('decision_visual_inferida', $explicitDecision === '' && $hasLaterContract);
             $contract->setAttribute('can_register_decision', $this->isDecisionAllowedContract($contract));
             $contract->setAttribute('previous_contracts_summary', $this->previousContractSummaries($contract, $related));
+            $contract->setAttribute('tipo_contrato_visual', $contractType);
+            $contract->setAttribute('tipo_contrato_label', $contractType !== '' ? PersonalNormalizer::contractLabel($contractType) : '');
 
             return $contract;
         });
+    }
+
+    private function effectiveContractType(PersonalContrato $contract): string
+    {
+        $contractValue = PersonalNormalizer::text($contract->tipo_contrato);
+        if ($contractValue !== '') {
+            return PersonalNormalizer::contract($contractValue);
+        }
+
+        $personalValue = PersonalNormalizer::text($contract->personal?->contrato);
+        if ($personalValue !== '') {
+            return PersonalNormalizer::contract($personalValue);
+        }
+
+        return '';
+    }
+
+    private function contractTypeOptionOrder(string $type): int
+    {
+        return [
+            'FIJO' => 10,
+            'INTER' => 20,
+            'INDET' => 30,
+            'REG' => 40,
+        ][$type] ?? 99;
+    }
+
+    /**
+     * Valores historicos equivalentes a una clave contractual normalizada.
+     * Se usan para que el filtro reconozca tanto contratos nuevos como datos antiguos del trabajador.
+     */
+    private function contractTypeSearchValues(string $type): array
+    {
+        $aliases = [
+            'FIJO' => [
+                'FIJO',
+                'SE',
+                'SERVICIO ESPECIFICO',
+                'SERVICIO ESPECÍFICO',
+                'PERSONAL FIJO',
+                'PERSONAL FIJO / SERVICIO ESPECIFICO',
+                'PERSONAL FIJO / SERVICIO ESPECÍFICO',
+            ],
+            'INTER' => [
+                'INTER',
+                'INTERMITENTE',
+            ],
+            'INDET' => [
+                'INDET',
+                'INDETERMINADO',
+            ],
+            'REG' => [
+                'REG',
+                'REGIMEN',
+                'RÉGIMEN',
+                'REGIMEN LABORAL',
+                'RÉGIMEN LABORAL',
+            ],
+        ][$type] ?? [$type];
+
+        return collect($aliases)
+            ->merge([PersonalNormalizer::contractLabel($type)])
+            ->map(fn (string $value): string => mb_strtolower(trim($value)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function previousContractSummaries(PersonalContrato $contract, Collection $related): Collection
@@ -1615,6 +1865,44 @@ class PersonalContratoService
         ])->save();
     }
 
+    private function assertContractPeriodAvailable(Personal $personal, string $fechaInicio, ?string $fechaFin, ?string $ignoreContractId = null): void
+    {
+        if (!Schema::hasTable('personal_contratos')) {
+            return;
+        }
+
+        $rangeEnd = $fechaFin ?: '9999-12-31';
+        $query = PersonalContrato::query()
+            ->where('personal_id', $personal->id)
+            ->where('estado', '!=', PersonalContrato::ESTADO_ANULADO)
+            ->whereNotNull('fecha_inicio')
+            ->whereDate('fecha_inicio', '<=', $rangeEnd)
+            ->where(function ($query) use ($fechaInicio): void {
+                $query->whereNull('fecha_fin')
+                    ->orWhereDate('fecha_fin', '>=', $fechaInicio);
+            });
+
+        if ($ignoreContractId) {
+            $query->where('id', '!=', $ignoreContractId);
+        }
+
+        $conflict = $query
+            ->orderBy('fecha_inicio')
+            ->orderBy('fecha_fin')
+            ->first();
+
+        if (!$conflict) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'fecha_inicio' => sprintf(
+                'Ya existe un contrato de este trabajador que cruza ese periodo: %s. Corrige las fechas antes de guardar otro contrato.',
+                $this->contractPeriodLabel($conflict)
+            ),
+        ]);
+    }
+
     private function legacyContractOptionalColumns(array $payload, bool $isHistorical, bool $missingFile, Usuario $user): array
     {
         return [
@@ -1690,6 +1978,158 @@ class PersonalContratoService
             'size' => (int) ($contract->signed_contract_size ?: 0),
             'signed_at' => $contract->signed_at,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function contractAuditPayload(PersonalContrato $contract): array
+    {
+        return [
+            'id' => (string) $contract->id,
+            'contrato_numero' => (int) $contract->contrato_numero,
+            'estado' => strtoupper((string) $contract->estado),
+            'fecha_inicio' => optional($contract->fecha_inicio)->toDateString(),
+            'fecha_fin' => optional($contract->fecha_fin)->toDateString(),
+            'tipo_contrato' => $contract->tipo_contrato,
+            'puesto' => $contract->puesto,
+            'area' => $contract->area,
+            'mina' => $contract->mina,
+            'remuneracion' => $contract->remuneracion,
+            'costo_hora' => $contract->costo_hora,
+            'motivo_cese' => $contract->motivo_cese,
+            'signed_at' => optional($contract->signed_at)->toDateTimeString(),
+            'signed_contract_original_name' => $contract->signed_contract_original_name,
+            'anulado_at' => optional($contract->anulado_at)->toDateTimeString(),
+            'motivo_anulacion' => $contract->motivo_anulacion,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $before
+     * @param array<string, mixed> $after
+     */
+    private function recordContractAudit(
+        PersonalContrato $contract,
+        string $action,
+        string $reason,
+        array $before,
+        array $after,
+        Usuario $user
+    ): void {
+        if (!Schema::hasTable('personal_contrato_correcciones')) {
+            return;
+        }
+
+        DB::table('personal_contrato_correcciones')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_contrato_id' => $contract->id,
+            'personal_id' => $contract->personal_id,
+            'usuario_id' => $user->id,
+            'accion' => strtoupper($action),
+            'motivo' => mb_substr($reason, 0, 2000),
+            'datos_anteriores_json' => json_encode($before, JSON_UNESCAPED_UNICODE),
+            'datos_nuevos_json' => json_encode($after, JSON_UNESCAPED_UNICODE),
+            'created_at' => now(),
+        ]);
+    }
+
+    private function syncEditableContractDataAfterCorrection(Personal $personal, PersonalContrato $contract, Usuario $user): void
+    {
+        $state = strtoupper((string) $contract->estado);
+        if (!in_array($state, [PersonalContrato::ESTADO_PREPARACION, PersonalContrato::ESTADO_ACTIVO], true)) {
+            return;
+        }
+
+        $contractDataService = app(PersonalContratoDatoService::class);
+        $datos = $contractDataService->ensureForPersonal($personal, [
+            'fecha_inicio_contrato' => optional($contract->fecha_inicio)->toDateString(),
+            'fecha_fin_contrato' => optional($contract->fecha_fin)->toDateString(),
+            'puesto' => $contract->puesto ?: $personal->puesto,
+            'sueldo_num' => $contract->remuneracion,
+            'sueldo_hora_paradas' => $contract->costo_hora,
+        ], $user);
+
+        $datos->forceFill([
+            'fecha_inicio_contrato' => optional($contract->fecha_inicio)->toDateString(),
+            'fecha_fin_contrato' => optional($contract->fecha_fin)->toDateString(),
+            'puesto' => $contract->puesto ?: $datos->puesto,
+            'sueldo_num' => $contract->remuneracion ?: $datos->sueldo_num,
+            'sueldo_hora_paradas' => $contract->costo_hora ?: $datos->sueldo_hora_paradas,
+            'updated_by_usuario_id' => $user->id,
+        ])->save();
+
+        if ($state === PersonalContrato::ESTADO_ACTIVO) {
+            $personalData = [];
+            if (Schema::hasColumn('personal', 'fecha_ingreso')) {
+                $personalData['fecha_ingreso'] = optional($contract->fecha_inicio)->toDateString();
+            }
+            if ($contract->puesto) {
+                $personalData['puesto'] = $contract->puesto;
+            }
+            if ($contract->tipo_contrato) {
+                $personalData['contrato'] = $contract->tipo_contrato;
+            }
+            if ($personalData !== []) {
+                $personal->forceFill($personalData)->save();
+            }
+        }
+    }
+
+    private function refreshCorrectedContractSnapshot(Personal $personal, PersonalContrato $contract, string $reason): PersonalContrato
+    {
+        $contract = $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+        if (!$contract) {
+            throw ValidationException::withMessages([
+                'contrato' => 'Contrato no encontrado despues de la correccion.',
+            ]);
+        }
+
+        $state = strtoupper((string) $contract->estado);
+        $snapshotColumn = in_array($state, [PersonalContrato::ESTADO_PREPARACION, PersonalContrato::ESTADO_ACTIVO], true)
+            ? 'snapshot_inicial_json'
+            : 'snapshot_json';
+
+        $snapshot = $this->buildSnapshot($personal, 'correccion_contrato', [
+            'contrato_numero' => $contract->contrato_numero,
+            'motivo_correccion' => $reason,
+            'fecha_fin' => optional($contract->fecha_fin)->toDateString(),
+        ], $contract);
+
+        $contract->forceFill([
+            $snapshotColumn => $snapshot,
+        ])->save();
+
+        return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+    }
+
+    /**
+     * @param array<string, mixed> $before
+     */
+    private function syncPersonalStateAfterContractAnnulment(Personal $personal, PersonalContrato $contract, array $before): void
+    {
+        $previousState = strtoupper((string) ($before['estado'] ?? ''));
+        if (!in_array($previousState, [PersonalContrato::ESTADO_PREPARACION, PersonalContrato::ESTADO_ACTIVO], true)) {
+            return;
+        }
+
+        $personal = Personal::query()->findOrFail($personal->id);
+        $workerState = strtoupper((string) $personal->estado);
+        if ($workerState === 'CESADO') {
+            return;
+        }
+
+        if ($this->hasOtherCurrentSignedContract($contract)) {
+            if ($workerState !== 'ACTIVO') {
+                $personal->forceFill(['estado' => 'ACTIVO'])->save();
+            }
+
+            return;
+        }
+
+        if ($workerState === 'ACTIVO') {
+            $personal->forceFill(['estado' => PersonalContratoDatoService::PENDING_STATE])->save();
+        }
     }
 
     /**

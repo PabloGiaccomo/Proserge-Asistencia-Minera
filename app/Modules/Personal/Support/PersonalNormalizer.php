@@ -126,6 +126,8 @@ class PersonalNormalizer
             'se' => 'FIJO',
             'servicioespecifico' => 'FIJO',
             'personalfijo' => 'FIJO',
+            'personalfijoservicioespecifico' => 'FIJO',
+            'personalfijoyservicioespecifico' => 'FIJO',
             'fijo' => 'FIJO',
             'intermitente' => 'INTER',
             'inter' => 'INTER',

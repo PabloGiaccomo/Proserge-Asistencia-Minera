@@ -221,9 +221,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                                     : '-';
                             @endphp
                             <tr>
-                                <td>{{ $rq['lugar'] ?? $rq['mina'] ?? '-' }}</td>
-                                <td>{{ $rq['area'] ?? '-' }}</td>
-                                <td>
+                                <td data-label="Lugar">{{ $rq['lugar'] ?? $rq['mina'] ?? '-' }}</td>
+                                <td data-label="Área">{{ $rq['area'] ?? '-' }}</td>
+                                <td data-label="Fechas">
                                     <div class="inline-flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-[180px]">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mt-0.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
@@ -238,9 +238,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                                         </div>
                                     </div>
                                 </td>
-                                <td>{{ $rq['creador'] ?? '-' }}</td>
-                                <td>{{ $rq['supervisor']['nombre'] ?? '-' }}</td>
-                                <td>
+                                <td data-label="Creador">{{ $rq['creador'] ?? '-' }}</td>
+                                <td data-label="Supervisor">{{ $rq['supervisor']['nombre'] ?? '-' }}</td>
+                                <td data-label="Plan">
                                     @if($planGrupos > 0)
                                         <div class="transport-cell">
                                             <span class="transport-total">{{ $planGrupos }} grupo(s)</span>
@@ -250,9 +250,9 @@ $calcTransporteTotal = static function (array $transporte): int {
                                         <span class="transport-empty">Sin plan</span>
                                     @endif
                                 </td>
-                                <td>{{ $calcPuestos($detalle) }}</td>
-                                <td>{{ $calcTotal($detalle) }}</td>
-                                <td>
+                                <td data-label="Puestos">{{ $calcPuestos($detalle) }}</td>
+                                <td data-label="Total">{{ $calcTotal($detalle) }}</td>
+                                <td data-label="Transporte">
                                     @if($transporteTotal > 0)
                                         <div class="transport-cell">
                                             <span class="transport-total">{{ $transporteTotal }} unidad(es)</span>
@@ -267,10 +267,10 @@ $calcTransporteTotal = static function (array $transporte): int {
                                         <span class="transport-empty">Sin transporte</span>
                                     @endif
                                 </td>
-                                <td>
+                                <td data-label="Estado">
                                     <span class="estado-badge {{ $rq['estado'] ?? 'borrador' }}">{{ ucfirst($rq['estado'] ?? 'borrador') }}</span>
                                 </td>
-                                <td>
+                                <td data-label="Acciones">
                                     <div class="row-actions">
                                         <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
                                         <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-row-outline">Plan</a>

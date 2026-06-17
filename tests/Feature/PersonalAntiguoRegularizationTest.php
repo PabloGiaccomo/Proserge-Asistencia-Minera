@@ -108,6 +108,28 @@ class PersonalAntiguoRegularizationTest extends TestCase
         ]);
     }
 
+    public function test_regularizacion_usa_fecha_inicio_como_fecha_firma_automatica(): void
+    {
+        Storage::fake('local');
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createExistingPersonal('FALTA_CONTRATO', ['numero_documento' => '73111120']);
+
+        app(PersonalAntiguoService::class)->regularizeExisting($personal, [
+            'origen_registro' => 'ANTIGUO',
+            'sincronizar_contrato' => true,
+            'estado_contrato' => 'VIGENTE',
+            'fecha_inicio' => '2026-04-15',
+            'fecha_fin' => '2026-08-15',
+        ], UploadedFile::fake()->create('contrato-firmado.pdf', 20, 'application/pdf'), $actor);
+
+        $this->assertDatabaseHas('personal_contratos', [
+            'personal_id' => $personal->id,
+            'fecha_inicio' => '2026-04-15',
+            'signed_at' => '2026-04-15 00:00:00',
+            'signed_contract_original_name' => 'contrato-firmado.pdf',
+        ]);
+    }
+
     public function test_cesado_existente_se_marca_historico_y_no_se_reactiva(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
@@ -200,7 +222,9 @@ class PersonalAntiguoRegularizationTest extends TestCase
 
         $this->withSession($this->sessionFor($allowed))
             ->get(route('personal.antiguo.regularize', $personal->id))
-            ->assertOk();
+            ->assertOk()
+            ->assertSee('Area o cargo')
+            ->assertDontSee('Mina / sede');
 
         $this->withSession($this->sessionFor($denied))
             ->post(route('personal.antiguo.regularize.update', $personal->id), [
