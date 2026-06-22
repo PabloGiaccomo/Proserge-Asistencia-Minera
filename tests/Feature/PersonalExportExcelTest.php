@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Personal;
+use App\Models\PersonalFicha;
+use App\Models\PersonalFichaFamiliar;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -114,6 +116,88 @@ class PersonalExportExcelTest extends TestCase
             ->assertJsonPath('cell_styles.0.1', 'mine-warn')
             ->assertJsonPath('cell_styles.0.2', 'mine-ok')
             ->assertJsonPath('cell_styles.1.1', 'mine-neutral');
+    }
+
+    public function test_export_preview_includes_extended_ficha_fields_and_family_summary(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'exportar']]);
+        $worker = $this->createPersonal([
+            'dni' => '33334444',
+            'numero_documento' => '33334444',
+            'nombre_completo' => 'TRABAJADOR FICHA COMPLETA',
+            'telefono_2' => '988776655',
+        ]);
+        $ficha = PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $worker->id,
+            'estado' => PersonalFicha::ESTADO_APROBADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '33334444',
+            'datos_json' => [
+                'sexo' => 'Masculino',
+                'estado_civil' => 'Casado',
+                'nacionalidad' => 'Peruana',
+                'grupo_sanguineo' => 'O+',
+                'brevete' => 'A-IIb',
+                'fecha_nacimiento' => '1990-04-12',
+                'pais_nacimiento' => 'Peru',
+                'departamento_nacimiento' => 'AREQUIPA',
+                'provincia_nacimiento' => 'AREQUIPA',
+                'distrito_nacimiento' => 'CERRO COLORADO',
+                'telefono_alterno' => '977665544',
+                'domicilio_tipo' => 'Peru',
+                'domicilio_departamento' => 'AREQUIPA',
+                'domicilio_provincia' => 'AREQUIPA',
+                'domicilio_distrito' => 'CERRO COLORADO',
+                'domicilio_direccion' => 'AV. PRUEBA 123',
+                'grado_instruccion' => 'Secundaria completa',
+                'profesion_oficio' => 'MECANICO',
+                'talla_zapato' => '42',
+                'talla_polo' => 'L',
+                'talla_pantalon' => '34',
+                'talla_respirador' => 'M',
+            ],
+        ]);
+        PersonalFichaFamiliar::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $ficha->id,
+            'parentesco' => 'ESPOSA',
+            'nombres_apellidos' => 'CONTACTO UNO',
+            'fecha_nacimiento' => '1992-03-10',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '44443333',
+            'telefono' => '955443322',
+            'vive_con_trabajador' => true,
+            'estudia' => false,
+            'contacto_emergencia' => true,
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->postJson(route('personal.export.preview'), [
+                'columns' => [
+                    'dni',
+                    'sexo',
+                    'estado_civil',
+                    'fecha_nacimiento',
+                    'domicilio_direccion',
+                    'grado_instruccion',
+                    'talla_zapato',
+                    'familiares_resumen',
+                    'contactos_emergencia',
+                ],
+                'personal_ids' => [$worker->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('headers.1', 'Sexo')
+            ->assertJsonPath('headers.7', 'Familiares o contactos')
+            ->assertJsonPath('rows.0.1', 'Masculino')
+            ->assertJsonPath('rows.0.2', 'Casado')
+            ->assertJsonPath('rows.0.3', '1990-04-12')
+            ->assertJsonPath('rows.0.4', 'AV. PRUEBA 123')
+            ->assertJsonPath('rows.0.5', 'Secundaria completa')
+            ->assertJsonPath('rows.0.6', '42')
+            ->assertJsonPath('rows.0.7', 'ESPOSA - CONTACTO UNO - Doc. 44443333 - Tel. 955443322 - Nac. 1992-03-10 - Vive con trabajador - Contacto emergencia')
+            ->assertJsonPath('rows.0.8', 'ESPOSA - CONTACTO UNO - Doc. 44443333 - Tel. 955443322 - Nac. 1992-03-10 - Vive con trabajador - Contacto emergencia');
     }
 
     public function test_export_download_requires_selected_workers(): void

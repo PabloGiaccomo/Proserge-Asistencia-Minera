@@ -37,6 +37,7 @@ class RQMinaService
             'creador:id,email,personal_id',
             'creador.personal:id,nombre_completo',
             'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+            'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
             'detalle',
             'transportes:id,rq_mina_id,transporte,cantidad',
             'actividadGrupos.actividades.turnos',
@@ -59,6 +60,12 @@ class RQMinaService
                     ->orWhereHas('mina', fn ($mineQuery) => $mineQuery->where('nombre', 'like', $like))
                     ->orWhereHas('transportes', fn ($transportQuery) => $transportQuery->where('transporte', 'like', $like))
                     ->orWhereHas('supervisor', function ($supervisorQuery) use ($like) {
+                        $supervisorQuery
+                            ->where('nombre_completo', 'like', $like)
+                            ->orWhere('dni', 'like', $like)
+                            ->orWhere('puesto', 'like', $like);
+                    })
+                    ->orWhereHas('supervisorPets', function ($supervisorQuery) use ($like) {
                         $supervisorQuery
                             ->where('nombre_completo', 'like', $like)
                             ->orWhere('dni', 'like', $like)
@@ -138,7 +145,7 @@ class RQMinaService
     public function findForUser(Usuario $usuario, string $id): ?RQMina
     {
         $rqMina = RQMina::query()
-            ->with(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes'])
+            ->with(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes'])
             ->find($id);
 
         if (!$rqMina) {
@@ -164,6 +171,7 @@ class RQMinaService
             'transporte_count' => count($payload['transporte'] ?? []),
             'plan_operativo_grupos_count' => count($payload['plan_operativo'] ?? []),
             'supervisor_id' => (string) ($payload['supervisor_id'] ?? ''),
+            'supervisor_pets_id' => (string) ($payload['supervisor_pets_id'] ?? ''),
         ]);
 
         $destination = $this->resolveDestination(
@@ -187,6 +195,7 @@ class RQMinaService
                 'destino_id' => $destination['id'],
                 'destino_nombre' => $destination['nombre'],
                 'supervisor_id' => $this->resolveSupervisorId($payload['supervisor_id'] ?? null),
+                'supervisor_pets_id' => $this->resolveSupervisorId($payload['supervisor_pets_id'] ?? null),
                 'area' => $payload['area'],
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
@@ -220,6 +229,7 @@ class RQMinaService
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
                 ], $transportRows),
                 'supervisor_id' => (string) ($rqMina->supervisor_id ?? ''),
+                'supervisor_pets_id' => (string) ($rqMina->supervisor_pets_id ?? ''),
             ]);
 
             return $rqMina->load([
@@ -227,6 +237,7 @@ class RQMinaService
                 'creador:id,email,personal_id',
                 'creador.personal:id,nombre_completo',
                 'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
                 'detalle',
                 'transportes',
                 'actividadGrupos.actividades.turnos',
@@ -248,6 +259,7 @@ class RQMinaService
             'transporte_count' => count($payload['transporte'] ?? []),
             'plan_operativo_grupos_count' => count($payload['plan_operativo'] ?? []),
             'supervisor_id' => (string) ($payload['supervisor_id'] ?? ''),
+            'supervisor_pets_id' => (string) ($payload['supervisor_pets_id'] ?? ''),
         ]);
 
         if (!$this->policy->update($usuario, $rqMina)) {
@@ -274,6 +286,7 @@ class RQMinaService
                 'destino_id' => $destination['id'],
                 'destino_nombre' => $destination['nombre'],
                 'supervisor_id' => $this->resolveSupervisorId($payload['supervisor_id'] ?? null),
+                'supervisor_pets_id' => $this->resolveSupervisorId($payload['supervisor_pets_id'] ?? null),
                 'area' => $payload['area'],
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
@@ -306,6 +319,7 @@ class RQMinaService
                     'cantidad' => (int) ($row['cantidad'] ?? 0),
                 ], $transportRows),
                 'supervisor_id' => (string) ($rqMina->supervisor_id ?? ''),
+                'supervisor_pets_id' => (string) ($rqMina->supervisor_pets_id ?? ''),
             ]);
 
             if (strtoupper((string) $rqMina->estado) === 'ENVIADO') {
@@ -317,6 +331,7 @@ class RQMinaService
                 'creador:id,email,personal_id',
                 'creador.personal:id,nombre_completo',
                 'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
                 'detalle',
                 'transportes',
                 'actividadGrupos.actividades.turnos',
@@ -334,6 +349,7 @@ class RQMinaService
             'destino_tipo' => (string) ($payload['destino_tipo'] ?? ''),
             'destino_id' => (string) ($payload['destino_id'] ?? ''),
             'supervisor_id' => (string) ($payload['supervisor_id'] ?? ''),
+            'supervisor_pets_id' => (string) ($payload['supervisor_pets_id'] ?? ''),
         ]);
 
         if (!$this->policy->update($usuario, $rqMina)) {
@@ -359,6 +375,7 @@ class RQMinaService
                 'destino_id' => $destination['id'],
                 'destino_nombre' => $destination['nombre'],
                 'supervisor_id' => $this->resolveSupervisorId($payload['supervisor_id'] ?? null),
+                'supervisor_pets_id' => $this->resolveSupervisorId($payload['supervisor_pets_id'] ?? null),
                 'area' => $payload['area'],
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
@@ -376,6 +393,7 @@ class RQMinaService
                 'creador:id,email,personal_id',
                 'creador.personal:id,nombre_completo',
                 'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
                 'detalle',
                 'transportes',
                 'actividadGrupos.actividades.turnos',
@@ -398,7 +416,7 @@ class RQMinaService
 
         $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
 
-        return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes']);
+        return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes']);
     }
 
     public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null): ?RQMina
@@ -427,6 +445,7 @@ class RQMinaService
                 'creador:id,email,personal_id',
                 'creador.personal:id,nombre_completo',
                 'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
                 'detalle',
                 'transportes',
                 'actividadGrupos.actividades.turnos',

@@ -62,6 +62,9 @@
     gap: 8px;
     flex-wrap: wrap;
 }
+.legacy-field-hidden {
+    display: none !important;
+}
 </style>
 
 <div class="module-page legacy-regularize-page">
@@ -175,7 +178,7 @@
                         <p class="legacy-note" style="margin-top:6px;">Existe un contrato firmado anterior en datos de contrato; si sincronizas, se asociara al contrato laboral.</p>
                     @endif
                 </div>
-                <div class="form-group">
+                <div class="form-group" data-regularize-motivo-cese>
                     <label class="form-label">Motivo de cese</label>
                     <input type="text" name="motivo_cese" class="form-control" value="{{ old('motivo_cese', $personal->motivo_cese) }}" maxlength="2000">
                 </div>
@@ -209,6 +212,9 @@
 document.addEventListener('DOMContentLoaded', function () {
     const startInput = document.getElementById('regularizeFechaInicio');
     const signInput = document.getElementById('regularizeFechaFirma');
+    const contractState = document.getElementById('regularizeEstadoContrato');
+    const ceaseReasonGroup = document.querySelector('[data-regularize-motivo-cese]');
+    const ceaseReasonInput = ceaseReasonGroup ? ceaseReasonGroup.querySelector('input[name="motivo_cese"]') : null;
 
     if (!startInput || !signInput) {
         return;
@@ -221,6 +227,23 @@ document.addEventListener('DOMContentLoaded', function () {
     syncSignDate();
     startInput.addEventListener('input', syncSignDate);
     startInput.addEventListener('change', syncSignDate);
+
+    const syncCeaseReason = function () {
+        if (!contractState || !ceaseReasonGroup || !ceaseReasonInput) {
+            return;
+        }
+
+        const shouldShow = String(contractState.value || '').toUpperCase() === 'CERRADO';
+        ceaseReasonGroup.classList.toggle('legacy-field-hidden', !shouldShow);
+        ceaseReasonInput.disabled = !shouldShow;
+
+        if (!shouldShow) {
+            ceaseReasonInput.value = '';
+        }
+    };
+
+    syncCeaseReason();
+    contractState?.addEventListener('change', syncCeaseReason);
 });
 </script>
 @endsection

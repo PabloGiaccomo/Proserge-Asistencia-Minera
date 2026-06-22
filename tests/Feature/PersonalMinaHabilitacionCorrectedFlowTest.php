@@ -829,6 +829,110 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertStringNotContainsString($pendingExam->nombre, $matrix);
     }
 
+    public function test_proximos_vencimientos_muestra_solo_minas_asignadas_y_abre_gestion(): void
+    {
+        Carbon::setTestNow('2026-06-10 08:00:00');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonalWithDocument('73187777', [
+            'nombre_completo' => 'TRABAJADOR POR VENCER',
+        ]);
+        $assignedMine = $this->createMine('Mina vencimiento asignada');
+        $unassignedMine = $this->createMine('Mina vencimiento no asignada');
+        $exam = $this->createExam('Examen por vencer', [
+            'tiene_vigencia' => true,
+            'vigencia_dias' => 180,
+        ]);
+
+        foreach ([$assignedMine, $unassignedMine] as $mine) {
+            $service->storeRequirement([
+                'mina_id' => $mine->id,
+                'examen_id' => $exam->id,
+                'obligatorio' => true,
+            ]);
+        }
+
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $assignedMine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor)->load('examenes');
+
+        $workerExam = $assignment->examenes->first();
+        $workerExam->forceFill([
+            'estado' => PersonalMinaExamen::ESTADO_VIGENTE,
+            'fecha_realizacion' => '2026-01-10',
+            'fecha_vencimiento' => '2026-06-25',
+        ])->save();
+
+        $response = $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertSee('Seleccionar trabajador')
+            ->assertSee('Matriz operativa')
+            ->assertSee('Proximos vencimientos')
+            ->assertSee('data-mine-view-tab="expiring"', false)
+            ->assertSee('TRABAJADOR POR VENCER')
+            ->assertSee('EXAMEN POR VENCER')
+            ->assertSee('25/06/2026')
+            ->assertSee('openWorkerExams', false);
+
+        $expiringTable = Str::betweenFirst($response->getContent(), 'data-testid="mine-upcoming-expirations"', '</table>');
+
+        $this->assertStringContainsString($assignedMine->nombre, $expiringTable);
+        $this->assertStringNotContainsString($unassignedMine->nombre, $expiringTable);
+    }
+
+    public function test_examenes_programados_muestran_intentos_pendientes_y_abren_gestion(): void
+    {
+        Carbon::setTestNow('2026-06-10 08:00:00');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $worker = $this->createPersonalWithDocument('73187778', [
+            'nombre_completo' => 'TRABAJADOR PROGRAMADO',
+        ]);
+        $mine = $this->createMine('Mina programada');
+        $exam = $this->createExam('Examen programado visible');
+
+        $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $exam->id,
+            'obligatorio' => true,
+        ]);
+
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor)->load('examenes');
+
+        $workerExam = $assignment->examenes->first();
+        $service->registerAttempt($workerExam, [
+            'fecha_programacion' => '2026-06-19',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+        ], null, $actor);
+
+        $response = $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.habilitacion-minera.index', ['vista' => 'scheduled']))
+            ->assertOk()
+            ->assertSee('Examenes programados')
+            ->assertSee('data-mine-view-tab="scheduled"', false)
+            ->assertSee('data-testid="mine-scheduled-exams"', false)
+            ->assertSee('TRABAJADOR PROGRAMADO')
+            ->assertSee('EXAMEN PROGRAMADO VISIBLE')
+            ->assertSee('19/06/2026')
+            ->assertSee('Ver programados')
+            ->assertSee('openWorkerExams', false);
+
+        $scheduledTable = Str::betweenFirst($response->getContent(), 'data-testid="mine-scheduled-exams"', '</table>');
+
+        $this->assertStringContainsString($mine->nombre, $scheduledTable);
+        $this->assertStringContainsString((string) $assignment->id, $scheduledTable);
+        $this->assertStringContainsString((string) $workerExam->id, $scheduledTable);
+    }
+
     public function test_vista_no_muestra_habilitado_visual_sin_examenes_configurados_o_generados(): void
     {
         $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);

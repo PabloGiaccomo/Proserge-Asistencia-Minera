@@ -21,6 +21,7 @@ class RQMinaResource extends JsonResource
             'observaciones' => $this->observaciones,
             'estado' => $this->estado,
             'supervisor_id' => $this->supervisor_id,
+            'supervisor_pets_id' => $this->supervisor_pets_id,
             'created_by_usuario_id' => $this->created_by_usuario_id,
             'enviado_at' => optional($this->enviado_at)->toIso8601String(),
             'created_at' => optional($this->created_at)->toIso8601String(),
@@ -40,6 +41,13 @@ class RQMinaResource extends JsonResource
                 'dni' => $this->supervisor->dni,
                 'puesto' => $this->supervisor->puesto,
                 'es_supervisor' => (bool) $this->supervisor->es_supervisor,
+            ] : null),
+            'supervisor_pets' => $this->whenLoaded('supervisorPets', fn (): ?array => $this->supervisorPets ? [
+                'id' => $this->supervisorPets->id,
+                'nombre' => $this->supervisorPets->nombre_completo,
+                'dni' => $this->supervisorPets->dni,
+                'puesto' => $this->supervisorPets->puesto,
+                'es_supervisor' => (bool) $this->supervisorPets->es_supervisor,
             ] : null),
             'detalle' => $this->whenLoaded('detalle', function (): array {
                 return $this->detalle->map(function ($item): array {

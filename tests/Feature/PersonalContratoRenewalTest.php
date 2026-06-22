@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Personal;
 use App\Models\PersonalContrato;
+use App\Models\PersonalFicha;
 use App\Models\Usuario;
 use App\Modules\Personal\Services\PersonalContratoDatoService;
 use App\Modules\Personal\Services\PersonalContratoService;
@@ -11,6 +12,7 @@ use App\Modules\Personal\Services\PersonalService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +23,13 @@ use Tests\TestCase;
 class PersonalContratoRenewalTest extends TestCase
 {
     use DatabaseTransactions;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     public function test_renovacion_futura_crea_preparacion_sin_desactivar_ni_cerrar_base(): void
     {
@@ -250,7 +259,7 @@ class PersonalContratoRenewalTest extends TestCase
             app(PersonalContratoService::class)->prepareRenewal($sinBase, ['fecha_inicio' => '2026-07-01'], $actor);
             $this->fail('No debio renovar sin contrato base.');
         } catch (ValidationException $exception) {
-            $this->assertSame('No hay contrato vigente renovable para este trabajador.', collect($exception->errors())->flatten()->first());
+            $this->assertSame('No hay contrato renovable para este trabajador. Debe existir un contrato activo o vencido dentro de los ultimos 7 dias.', collect($exception->errors())->flatten()->first());
         }
 
         $anulado = $this->createPersonal('ACTIVO');
@@ -260,7 +269,7 @@ class PersonalContratoRenewalTest extends TestCase
             app(PersonalContratoService::class)->prepareRenewal($anulado, ['fecha_inicio' => '2026-07-01'], $actor);
             $this->fail('No debio renovar contrato anulado.');
         } catch (ValidationException $exception) {
-            $this->assertSame('No hay contrato vigente renovable para este trabajador.', collect($exception->errors())->flatten()->first());
+            $this->assertSame('No hay contrato renovable para este trabajador. Debe existir un contrato activo o vencido dentro de los ultimos 7 dias.', collect($exception->errors())->flatten()->first());
         }
 
         $sinFirma = $this->createPersonal('ACTIVO');
@@ -301,6 +310,64 @@ class PersonalContratoRenewalTest extends TestCase
             'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVACION_PREPARADA,
             'decision_final' => PersonalContrato::DECISION_RENOVAR,
         ]);
+    }
+
+    public function test_contrato_cerrado_reciente_puede_renovarse_hasta_siete_dias_despues(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO', [
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+        $base = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-05-30', '2026-06-18', true, [
+            'puesto' => 'Operador',
+            'tipo_contrato' => 'FIJO',
+        ]);
+
+        $renovacion = app(PersonalContratoService::class)->prepareRenewal($personal, [
+            'fecha_inicio' => '2026-06-19',
+            'fecha_fin' => '2026-12-31',
+            'observacion_renovacion' => 'Renovacion dentro de la semana de gracia',
+        ], $actor);
+
+        $this->assertSame(PersonalContrato::ESTADO_PREPARACION, $renovacion->estado);
+        $this->assertSame(PersonalContrato::MOVIMIENTO_RENOVACION, $renovacion->tipo_movimiento);
+        $this->assertSame($base->id, $renovacion->origen_contrato_id);
+        $this->assertSame('Operador', $renovacion->puesto);
+        $this->assertSame('CESADO', $personal->fresh()->estado);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $base->id,
+            'estado' => PersonalContrato::ESTADO_CERRADO,
+            'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVACION_PREPARADA,
+            'decision_final' => PersonalContrato::DECISION_RENOVAR,
+        ]);
+    }
+
+    public function test_contrato_cerrado_fuera_de_siete_dias_no_es_renovable(): void
+    {
+        Carbon::setTestNow('2026-06-27 09:00:00');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO', [
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+        $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-05-30', '2026-06-18', true);
+
+        try {
+            app(PersonalContratoService::class)->prepareRenewal($personal, [
+                'fecha_inicio' => '2026-06-28',
+                'fecha_fin' => '2026-12-31',
+            ], $actor);
+            $this->fail('No debio renovar un contrato vencido fuera de la semana de gracia.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                'No hay contrato renovable para este trabajador. Debe existir un contrato activo o vencido dentro de los ultimos 7 dias.',
+                collect($exception->errors())->flatten()->first()
+            );
+        }
     }
 
     public function test_reingreso_de_cesado_crea_preparacion_y_no_activa_hasta_pdf_firmado(): void
@@ -346,6 +413,102 @@ class PersonalContratoRenewalTest extends TestCase
             'estado' => PersonalContrato::ESTADO_CERRADO,
             'fecha_fin' => '2026-05-31',
         ]);
+    }
+
+    public function test_reingreso_permite_actualizar_datos_laborales_bancarios_y_pensionarios(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO', [
+            'fecha_cese' => '2026-05-31',
+            'motivo_cese' => 'Termino de contrato anterior',
+            'puesto' => 'Ayudante',
+            'ocupacion' => 'Operativo',
+            'contrato' => 'INTER',
+        ]);
+        $base = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-05-31', true, [
+            'puesto' => 'Ayudante',
+            'tipo_contrato' => 'INTER',
+            'remuneracion' => '2100',
+            'costo_hora' => '12',
+        ]);
+
+        PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_APROBADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $personal->dni,
+            'macro_tipo_contrato' => 'INTER',
+            'datos_json' => [
+                'puesto' => 'Ayudante',
+                'contrato' => 'INTER',
+                'banco' => 'BCP',
+                'numero_cuenta' => '111111',
+                'sistema_pensionario' => 'Sistema Nacional de Pensiones',
+            ],
+            'created_by_usuario_id' => $actor->id,
+            'submitted_at' => now(),
+            'approved_at' => now(),
+            'approved_by_usuario_id' => $actor->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $newContract = app(PersonalContratoService::class)->prepareReentry($personal, [
+            'fecha_inicio' => '2026-08-01',
+            'fecha_fin' => '2026-12-31',
+            'puesto' => 'Mecanico',
+            'tipo_contrato' => 'FIJO',
+            'ocupacion' => 'Tecnico mecanico',
+            'area' => 'Taller',
+            'remuneracion' => '3200',
+            'costo_hora' => '18',
+            'banco' => 'Scotiabank',
+            'banco_otro' => '',
+            'numero_cuenta' => '987654321',
+            'cci' => '00298765432198765432',
+            'sistema_pensionario' => 'Sistema Privado de Pensiones',
+            'tipo_comision' => 'Flujo',
+            'tipo_afp' => 'Prima',
+            'cuspp' => 'CUSPP123',
+            'observacion_renovacion' => 'Reingreso con datos actualizados',
+        ], $actor);
+
+        $newContract->refresh();
+        $personal->refresh();
+        $ficha = $personal->fichaColaborador()->firstOrFail();
+        $contratoDatos = $personal->contratoDatos()->firstOrFail();
+
+        $this->assertSame(PersonalContrato::ESTADO_PREPARACION, $newContract->estado);
+        $this->assertSame($base->id, $newContract->origen_contrato_id);
+        $this->assertSame('Mecanico', $newContract->puesto);
+        $this->assertSame('FIJO', $newContract->tipo_contrato);
+        $this->assertSame('Taller', $newContract->area);
+        $this->assertSame('3200', $newContract->remuneracion);
+        $this->assertSame('18', $newContract->costo_hora);
+
+        $this->assertSame(PersonalContratoDatoService::PENDING_STATE, $personal->estado);
+        $this->assertSame('Mecanico', $personal->puesto);
+        $this->assertSame('FIJO', $personal->contrato);
+        $this->assertSame('Tecnico mecanico', $personal->ocupacion);
+        $this->assertNull($personal->fecha_cese);
+
+        $this->assertSame('2026-08-01', optional($contratoDatos->fecha_inicio_contrato)->toDateString());
+        $this->assertSame('2026-12-31', optional($contratoDatos->fecha_fin_contrato)->toDateString());
+        $this->assertSame('Mecanico', $contratoDatos->puesto);
+        $this->assertSame('3200', $contratoDatos->sueldo_num);
+        $this->assertSame('18', $contratoDatos->sueldo_hora_paradas);
+
+        $fichaData = $ficha->datos_json;
+        $this->assertSame('Mecanico', $fichaData['puesto']);
+        $this->assertSame('FIJO', $fichaData['contrato']);
+        $this->assertSame('Scotiabank', $fichaData['banco']);
+        $this->assertSame('987654321', $fichaData['numero_cuenta']);
+        $this->assertSame('00298765432198765432', $fichaData['cci']);
+        $this->assertSame('Sistema Privado de Pensiones', $fichaData['sistema_pensionario']);
+        $this->assertSame('Flujo', $fichaData['tipo_comision']);
+        $this->assertSame('Prima', $fichaData['tipo_afp']);
+        $this->assertSame('CUSPP123', $fichaData['cuspp']);
     }
 
     public function test_rutas_de_renovacion_y_reingreso_respetan_permiso_actualizar(): void

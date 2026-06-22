@@ -7,6 +7,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ParadaHerramientaItem extends Model
 {
+    public const TIPO_BASE = 'BASE';
+    public const TIPO_ADICIONAL = 'ADICIONAL';
+
+    public const CATEGORIA_HERRAMIENTA = 'HERRAMIENTA';
+    public const CATEGORIA_CONSUMIBLE = 'CONSUMIBLE';
+
     protected $table = 'parada_herramienta_items';
 
     public $incrementing = false;
@@ -17,8 +23,12 @@ class ParadaHerramientaItem extends Model
         'id',
         'grupo_id',
         'tipo',
+        'categoria',
         'descripcion',
         'cantidad_solicitada',
+        'cantidad_entregada',
+        'cantidad_recibida',
+        'unidad',
         'observaciones',
         'pedido_solicitado_at',
         'pedido_llego_at',
@@ -27,6 +37,8 @@ class ParadaHerramientaItem extends Model
 
     protected $casts = [
         'cantidad_solicitada' => 'integer',
+        'cantidad_entregada' => 'integer',
+        'cantidad_recibida' => 'integer',
         'pedido_solicitado_at' => 'date',
         'pedido_llego_at' => 'date',
         'orden' => 'integer',

@@ -52,6 +52,37 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ->assertDontSee('Control Vencimiento Junio');
     }
 
+    public function test_vista_resalta_trabajador_en_lista_negra_y_muestra_motivo(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $worker = $this->createPersonal('ACTIVO', [
+            'nombre_completo' => 'Control Lista Negra Vencimiento',
+            'numero_documento' => '77112233',
+            'dni' => '77112233',
+        ]);
+        DB::table('personal')
+            ->where('id', $worker->id)
+            ->update([
+                'en_lista_negra' => true,
+                'lista_negra_motivo' => 'No considerar en renovaciones sin revision de RRHH.',
+                'lista_negra_at' => '2026-06-05 10:30:00',
+                'lista_negra_by_usuario_id' => $userId,
+                'updated_at' => now(),
+            ]);
+        $this->insertContract($worker, '2026-01-01', '2026-06-20', true);
+
+        $this->withSession($this->sessionFor($userId, ['personal' => ['ver']]))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Control Lista Negra Vencimiento')
+            ->assertSee('blacklisted-worker', false)
+            ->assertSee('Lista negra')
+            ->assertSee('Ver motivo de lista negra')
+            ->assertSee('No considerar en renovaciones sin revision de RRHH.', false);
+    }
+
     public function test_filtros_por_mes_cargo_estado_laboral_y_tipo_contrato(): void
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
@@ -357,7 +388,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ], $actor);
             $this->fail('No debio registrar decision activa en contrato historico.');
         } catch (ValidationException $exception) {
-            $this->assertSame('Solo se puede registrar decision sobre contratos vigentes activos.', collect($exception->errors())->flatten()->first());
+            $this->assertSame('Solo se puede registrar decision sobre contratos activos o vencidos dentro de los ultimos 7 dias.', collect($exception->errors())->flatten()->first());
         }
     }
 

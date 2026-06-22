@@ -3,6 +3,8 @@
 namespace App\Modules\ParadaHerramientas\Services;
 
 use App\Models\GrupoTrabajo;
+use App\Models\ParadaHerramientaCatalogo;
+use App\Models\ParadaHerramientaCatalogoObservacion;
 use App\Models\ParadaHerramientaGrupo;
 use App\Models\ParadaHerramientaItem;
 use App\Models\ParadaHerramientaLista;
@@ -15,10 +17,27 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 class ParadaHerramientaService
 {
+    private const CATEGORY_TOOL = ParadaHerramientaItem::CATEGORIA_HERRAMIENTA;
+    private const CATEGORY_CONSUMABLE = ParadaHerramientaItem::CATEGORIA_CONSUMIBLE;
+
+    private const TYPE_BASE = ParadaHerramientaItem::TIPO_BASE;
+    private const TYPE_ADDITIONAL = ParadaHerramientaItem::TIPO_ADICIONAL;
+
+    private const FORM_BUCKETS = [
+        'base' => [self::TYPE_BASE, self::CATEGORY_TOOL],
+        'adicional' => [self::TYPE_ADDITIONAL, self::CATEGORY_TOOL],
+        'consumibles_base' => [self::TYPE_BASE, self::CATEGORY_CONSUMABLE],
+        'consumibles_adicional' => [self::TYPE_ADDITIONAL, self::CATEGORY_CONSUMABLE],
+    ];
+
     public function __construct(private readonly NotificationService $notificationService)
     {
     }
@@ -35,6 +54,7 @@ class ParadaHerramientaService
             ->whereNotNull('fecha_inicio');
 
         $this->applyMineScope($query, $usuario);
+        $this->applySupervisorScope($query, $usuario);
 
         $search = trim((string) ($filters['q'] ?? ''));
         if ($search !== '') {
@@ -85,7 +105,13 @@ class ParadaHerramientaService
     public function ensureLista(RQMina $rq, Usuario $usuario): ParadaHerramientaLista
     {
         $fechaInicio = Carbon::parse($rq->fecha_inicio);
-        $lista = $rq->listaHerramientas;
+        $lista = $rq->relationLoaded('listaHerramientas')
+            ? $rq->getRelation('listaHerramientas')
+            : null;
+
+        if (!$lista) {
+            $lista = $rq->listaHerramientas()->first();
+        }
 
         if (!$lista) {
             $lista = ParadaHerramientaLista::query()->create([
@@ -150,8 +176,12 @@ class ParadaHerramientaService
                         'id' => (string) Str::uuid(),
                         'grupo_id' => $grupo->id,
                         'tipo' => $item['tipo'],
+                        'categoria' => $item['categoria'],
                         'descripcion' => $item['descripcion'],
                         'cantidad_solicitada' => $item['cantidad_solicitada'],
+                        'cantidad_entregada' => $item['cantidad_entregada'],
+                        'cantidad_recibida' => $item['cantidad_recibida'],
+                        'unidad' => $item['unidad'],
                         'observaciones' => $item['observaciones'] ?: null,
                         'pedido_solicitado_at' => $item['pedido_solicitado_at'] ?? null,
                         'pedido_llego_at' => $item['pedido_llego_at'] ?? null,
@@ -163,6 +193,7 @@ class ParadaHerramientaService
 
                 if (!empty($rows)) {
                     $grupo->items()->insert($rows);
+                    $this->rememberCatalogRows($rows, $usuario);
                 }
             }
         });
@@ -186,13 +217,13 @@ class ParadaHerramientaService
         }
 
         $hasItems = $lista->grupos()
-            ->whereHas('items')
+            ->whereHas('items', fn ($query) => $query->where('cantidad_solicitada', '>', 0))
             ->exists();
 
         if (!$hasItems) {
             return [
                 'ok' => false,
-                'message' => 'La lista debe tener al menos una herramienta antes de enviarse.',
+                'message' => 'La lista debe tener al menos una herramienta o consumible con cantidad solicitada antes de enviarse.',
             ];
         }
 
@@ -342,22 +373,10 @@ class ParadaHerramientaService
                 'grupo_trabajo_id' => (string) ($grupo->grupo_trabajo_id ?? ''),
                 'nombre' => $grupo->nombre,
                 'observaciones' => $grupo->observaciones,
-                'base' => $grupo->items->where('tipo', 'BASE')->values()->map(fn ($item): array => [
-                    'id' => (string) $item->id,
-                    'descripcion' => $item->descripcion,
-                    'cantidad_solicitada' => (int) $item->cantidad_solicitada,
-                    'observaciones' => $item->observaciones,
-                    'pedido_solicitado_at' => $item->pedido_solicitado_at?->toDateString(),
-                    'pedido_llego_at' => $item->pedido_llego_at?->toDateString(),
-                ])->all(),
-                'adicional' => $grupo->items->where('tipo', 'ADICIONAL')->values()->map(fn ($item): array => [
-                    'id' => (string) $item->id,
-                    'descripcion' => $item->descripcion,
-                    'cantidad_solicitada' => (int) $item->cantidad_solicitada,
-                    'observaciones' => $item->observaciones,
-                    'pedido_solicitado_at' => $item->pedido_solicitado_at?->toDateString(),
-                    'pedido_llego_at' => $item->pedido_llego_at?->toDateString(),
-                ])->all(),
+                'base' => $this->itemsForBucket($grupo, self::TYPE_BASE, self::CATEGORY_TOOL),
+                'adicional' => $this->itemsForBucket($grupo, self::TYPE_ADDITIONAL, self::CATEGORY_TOOL),
+                'consumibles_base' => $this->itemsForBucket($grupo, self::TYPE_BASE, self::CATEGORY_CONSUMABLE),
+                'consumibles_adicional' => $this->itemsForBucket($grupo, self::TYPE_ADDITIONAL, self::CATEGORY_CONSUMABLE),
             ])->values()->all(),
         ];
     }
@@ -365,9 +384,11 @@ class ParadaHerramientaService
     private function toListRow(RQMina $rq): array
     {
         $fechaInicio = Carbon::parse($rq->fecha_inicio);
+        $fechaFin = $rq->fecha_fin ? Carbon::parse($rq->fecha_fin) : null;
         $lista = $rq->listaHerramientas;
         $deadline = $lista?->fecha_limite_envio ? Carbon::parse($lista->fecha_limite_envio) : $this->deadlineFor($rq);
         $dias = now()->startOfDay()->diffInDays($deadline->copy()->startOfDay(), false);
+        $today = now()->startOfDay();
 
         return [
             'rq_mina_id' => (string) $rq->id,
@@ -375,7 +396,9 @@ class ParadaHerramientaService
             'mina' => $rq->mina?->nombre ?? '-',
             'area' => $rq->area,
             'fecha_inicio' => $fechaInicio->toDateString(),
-            'fecha_fin' => $rq->fecha_fin?->toDateString(),
+            'fecha_fin' => $fechaFin?->toDateString(),
+            'parada_iniciada' => $today->gte($fechaInicio->copy()->startOfDay()),
+            'parada_finalizada' => $fechaFin ? $today->gte($fechaFin->copy()->startOfDay()) : false,
             'semana' => (int) $fechaInicio->isoWeek(),
             'anio_semana' => (int) $fechaInicio->isoWeekYear(),
             'fecha_limite_envio' => $deadline->toDateString(),
@@ -384,6 +407,36 @@ class ParadaHerramientaService
             'enviado_at' => $lista?->enviado_at?->format('Y-m-d H:i:s'),
             'grupos_count' => $lista?->grupos?->count() ?? $rq->gruposTrabajo->count(),
         ];
+    }
+
+    private function itemsForBucket(ParadaHerramientaGrupo $grupo, string $tipo, string $categoria): array
+    {
+        return $grupo->items
+            ->where('tipo', $tipo)
+            ->filter(function ($item) use ($categoria): bool {
+                $itemCategory = strtoupper((string) ($item->categoria ?: self::CATEGORY_TOOL));
+
+                return $itemCategory === $categoria;
+            })
+            ->values()
+            ->map(function ($item): array {
+                $solicitada = (int) $item->cantidad_solicitada;
+                $entregada = (int) ($item->cantidad_entregada ?? 0);
+
+                return [
+                    'id' => (string) $item->id,
+                    'descripcion' => $item->descripcion,
+                    'cantidad_solicitada' => $solicitada,
+                    'cantidad_entregada' => $entregada,
+                    'cantidad_recibida' => (int) ($item->cantidad_recibida ?? 0),
+                    'cantidad_faltante' => max(0, $solicitada - $entregada),
+                    'unidad' => $item->unidad,
+                    'observaciones' => $item->observaciones,
+                    'pedido_solicitado_at' => $item->pedido_solicitado_at?->toDateString(),
+                    'pedido_llego_at' => $item->pedido_llego_at?->toDateString(),
+                ];
+            })
+            ->all();
     }
 
     private function seedGroupsFromParada(ParadaHerramientaLista $lista, RQMina $rq): void
@@ -424,10 +477,10 @@ class ParadaHerramientaService
             $nombre = trim((string) ($group['nombre'] ?? ''));
             $observaciones = trim((string) ($group['observaciones'] ?? ''));
             $grupoTrabajoId = trim((string) ($group['grupo_trabajo_id'] ?? ''));
-            $items = array_merge(
-                $this->normalizeItems($group['base'] ?? [], 'BASE'),
-                $this->normalizeItems($group['adicional'] ?? [], 'ADICIONAL'),
-            );
+            $items = [];
+            foreach (self::FORM_BUCKETS as $bucket => [$tipo, $categoria]) {
+                $items = array_merge($items, $this->normalizeItems($group[$bucket] ?? [], $tipo, $categoria));
+            }
 
             if ($nombre === '' && empty($items)) {
                 continue;
@@ -452,7 +505,7 @@ class ParadaHerramientaService
         return $normalized;
     }
 
-    private function normalizeItems(mixed $items, string $tipo): array
+    private function normalizeItems(mixed $items, string $tipo, string $categoria): array
     {
         if (!is_array($items)) {
             return [];
@@ -465,7 +518,10 @@ class ParadaHerramientaService
             }
 
             $descripcion = trim((string) ($item['descripcion'] ?? ''));
-            $cantidad = (int) ($item['cantidad_solicitada'] ?? $item['cantidad'] ?? 0);
+            $cantidad = max(0, (int) ($item['cantidad_solicitada'] ?? $item['cantidad'] ?? 0));
+            $cantidadEntregada = max(0, (int) ($item['cantidad_entregada'] ?? 0));
+            $cantidadRecibida = max(0, (int) ($item['cantidad_recibida'] ?? 0));
+            $unidad = trim((string) ($item['unidad'] ?? ''));
             $observaciones = trim((string) ($item['observaciones'] ?? ''));
             $pedidoSolicitado = $this->sanitizeDate($item['pedido_solicitado_at'] ?? null);
             $pedidoLlego = $this->sanitizeDate($item['pedido_llego_at'] ?? null);
@@ -474,11 +530,15 @@ class ParadaHerramientaService
                 continue;
             }
 
-            if ($descripcion !== '' && $cantidad > 0) {
+            if ($descripcion !== '') {
                 $normalized[] = [
                     'tipo' => $tipo,
+                    'categoria' => $categoria,
                     'descripcion' => $descripcion,
                     'cantidad_solicitada' => $cantidad,
+                    'cantidad_entregada' => $cantidadEntregada,
+                    'cantidad_recibida' => $cantidadRecibida,
+                    'unidad' => $unidad !== '' ? $unidad : null,
                     'observaciones' => $observaciones,
                     'pedido_solicitado_at' => $pedidoSolicitado,
                     'pedido_llego_at' => $pedidoLlego,
@@ -513,6 +573,9 @@ class ParadaHerramientaService
             ];
         }
 
+        $mode = in_array(($payload['modo'] ?? ''), ['entrega', 'recepcion'], true)
+            ? (string) $payload['modo']
+            : 'todo';
         $updates = $this->normalizePedidoUpdates($payload['grupos'] ?? []);
         if (empty($updates)) {
             return [
@@ -526,19 +589,29 @@ class ParadaHerramientaService
             ->map(fn ($id) => (string) $id)
             ->flip();
 
-        DB::transaction(function () use ($updates, $allowedIds): void {
+        DB::transaction(function () use ($updates, $allowedIds, $mode): void {
             foreach ($updates as $itemId => $fields) {
                 if (!$allowedIds->has($itemId)) {
                     continue;
                 }
 
+                $data = [
+                    'pedido_solicitado_at' => $fields['pedido_solicitado_at'],
+                    'pedido_llego_at' => $fields['pedido_llego_at'],
+                    'updated_at' => now(),
+                ];
+
+                if ($mode === 'todo' || $mode === 'entrega') {
+                    $data['cantidad_entregada'] = $fields['cantidad_entregada'];
+                }
+
+                if ($mode === 'todo' || $mode === 'recepcion') {
+                    $data['cantidad_recibida'] = $fields['cantidad_recibida'];
+                }
+
                 ParadaHerramientaItem::query()
                     ->where('id', $itemId)
-                    ->update([
-                        'pedido_solicitado_at' => $fields['pedido_solicitado_at'],
-                        'pedido_llego_at' => $fields['pedido_llego_at'],
-                        'updated_at' => now(),
-                    ]);
+                    ->update($data);
             }
         });
 
@@ -548,6 +621,798 @@ class ParadaHerramientaService
         ];
     }
 
+    public function importarFormatoGrupo(Usuario $usuario, RQMina $rq, string $grupoId, UploadedFile $file): array
+    {
+        $lista = $this->ensureLista($rq, $usuario)->load('grupos.items');
+
+        if (!$this->canEditLista($usuario, $rq, $lista)) {
+            return [
+                'ok' => false,
+                'message' => 'La lista ya no puede editarse porque vencio el plazo de envio o ya fue enviada.',
+            ];
+        }
+
+        /** @var ParadaHerramientaGrupo|null $grupo */
+        $grupo = $lista->grupos->firstWhere('id', $grupoId);
+        if (!$grupo) {
+            return [
+                'ok' => false,
+                'message' => 'Grupo no encontrado para actualizar herramientas y consumibles.',
+            ];
+        }
+
+        try {
+            $reader = IOFactory::createReaderForFile($file->getRealPath());
+            $reader->setReadDataOnly(false);
+            $spreadsheet = $reader->load($file->getRealPath());
+        } catch (\Throwable $exception) {
+            return [
+                'ok' => false,
+                'message' => 'No se pudo leer el Excel: ' . $exception->getMessage(),
+            ];
+        }
+
+        $parsed = [
+            self::CATEGORY_TOOL => [],
+            self::CATEGORY_CONSUMABLE => [],
+        ];
+
+        foreach ($spreadsheet->getWorksheetIterator() as $index => $sheet) {
+            $category = $this->categoryForSheet($sheet->getTitle(), $index);
+            if (!$category) {
+                continue;
+            }
+
+            $parsed[$category] = array_merge($parsed[$category], $this->parseFormatoSheet($sheet, $category));
+        }
+
+        $totalRows = count($parsed[self::CATEGORY_TOOL]) + count($parsed[self::CATEGORY_CONSUMABLE]);
+        if ($totalRows === 0) {
+            return [
+                'ok' => false,
+                'message' => 'No se encontraron herramientas ni consumibles con descripcion en el formato.',
+            ];
+        }
+
+        $summary = DB::transaction(function () use ($grupo, $parsed, $usuario): array {
+            $this->rememberCatalogRows(array_merge($parsed[self::CATEGORY_TOOL], $parsed[self::CATEGORY_CONSUMABLE]), $usuario);
+
+            return [
+                self::CATEGORY_TOOL => $this->syncImportedRows($grupo, self::CATEGORY_TOOL, $parsed[self::CATEGORY_TOOL]),
+                self::CATEGORY_CONSUMABLE => $this->syncImportedRows($grupo, self::CATEGORY_CONSUMABLE, $parsed[self::CATEGORY_CONSUMABLE]),
+            ];
+        });
+
+        return [
+            'ok' => true,
+            'message' => sprintf(
+                'Formato actualizado para %s. Herramientas: %d creadas, %d actualizadas, %d retiradas. Consumibles: %d creados, %d actualizados, %d retirados.',
+                $grupo->nombre,
+                $summary[self::CATEGORY_TOOL]['creados'],
+                $summary[self::CATEGORY_TOOL]['actualizados'],
+                $summary[self::CATEGORY_TOOL]['retirados'],
+                $summary[self::CATEGORY_CONSUMABLE]['creados'],
+                $summary[self::CATEGORY_CONSUMABLE]['actualizados'],
+                $summary[self::CATEGORY_CONSUMABLE]['retirados'],
+            ),
+            'summary' => $summary,
+        ];
+    }
+
+    public function importarCatalogo(Usuario $usuario, UploadedFile $file): array
+    {
+        try {
+            $reader = IOFactory::createReaderForFile($file->getRealPath());
+            $reader->setReadDataOnly(false);
+            $spreadsheet = $reader->load($file->getRealPath());
+        } catch (\Throwable $exception) {
+            return [
+                'ok' => false,
+                'message' => 'No se pudo leer el Excel: ' . $exception->getMessage(),
+            ];
+        }
+
+        $rows = [];
+        foreach ($spreadsheet->getWorksheetIterator() as $index => $sheet) {
+            $category = match ((int) $index) {
+                0 => self::CATEGORY_TOOL,
+                1 => self::CATEGORY_CONSUMABLE,
+                default => null,
+            };
+
+            if (!$category) {
+                continue;
+            }
+
+            $rows = array_merge($rows, $this->parseCatalogSheet($sheet, $category));
+        }
+
+        if (empty($rows)) {
+            return [
+                'ok' => false,
+                'message' => 'No se encontraron descripciones para cargar al catalogo.',
+            ];
+        }
+
+        $summary = [
+            'creados' => 0,
+            'actualizados' => 0,
+            'observaciones' => 0,
+            'herramientas' => 0,
+            'consumibles' => 0,
+        ];
+
+        DB::transaction(function () use ($rows, $usuario, &$summary): void {
+            $seen = [];
+
+            foreach ($rows as $row) {
+                $key = $this->itemKey($row['descripcion'], $row['unidad']);
+                $key = $row['categoria'] . '|' . $key;
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+
+                $catalog = $this->rememberCatalogEntry(
+                    $row['descripcion'],
+                    $row['categoria'],
+                    $row['unidad'] ?? null,
+                    $usuario
+                );
+
+                if (!$catalog) {
+                    continue;
+                }
+
+                if ($catalog->wasRecentlyCreated) {
+                    $summary['creados']++;
+                } else {
+                    $summary['actualizados']++;
+                }
+
+                if ($row['categoria'] === self::CATEGORY_CONSUMABLE) {
+                    $summary['consumibles']++;
+                } else {
+                    $summary['herramientas']++;
+                }
+
+                if (!empty($row['observaciones']) && $this->rememberCatalogObservation($catalog, $row['observaciones'])) {
+                    $summary['observaciones']++;
+                }
+            }
+        });
+
+        return [
+            'ok' => true,
+            'message' => sprintf(
+                'Catalogo actualizado. Herramientas: %d. Consumibles: %d. Nuevos: %d. Actualizados: %d. Observaciones aprendidas: %d.',
+                $summary['herramientas'],
+                $summary['consumibles'],
+                $summary['creados'],
+                $summary['actualizados'],
+                $summary['observaciones'],
+            ),
+            'summary' => $summary,
+        ];
+    }
+
+    public function sugerirCatalogo(string $term = '', ?string $category = null, int $limit = 20): array
+    {
+        if (!Schema::hasTable('parada_herramienta_catalogos')) {
+            return [];
+        }
+
+        $limit = min(max($limit, 5), 50);
+        $normalized = $this->normalizeSearchText($term);
+        $category = $this->normalizeCategory($category);
+
+        $query = ParadaHerramientaCatalogo::query()
+            ->where('activo', true);
+
+        if ($category) {
+            $query->where('categoria', $category);
+        }
+
+        if ($normalized !== '') {
+            foreach (explode(' ', $normalized) as $word) {
+                $query->where('descripcion_normalizada', 'like', '%' . $word . '%');
+            }
+        }
+
+        if ($normalized !== '') {
+            $query->orderByRaw('CASE WHEN descripcion_normalizada LIKE ? THEN 0 ELSE 1 END', [$normalized . '%']);
+        } else {
+            $query->orderByDesc('updated_at');
+        }
+
+        return $query
+            ->orderBy('descripcion')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ParadaHerramientaCatalogo $catalog): array => [
+                'id' => (string) $catalog->id,
+                'categoria' => (string) $catalog->categoria,
+                'descripcion' => (string) $catalog->descripcion,
+                'unidad' => (string) ($catalog->unidad ?? ''),
+            ])
+            ->all();
+    }
+
+    public function sugerirObservaciones(string $description, ?string $category = null, int $limit = 10): array
+    {
+        if (!Schema::hasTable('parada_herramienta_catalogos') || !Schema::hasTable('parada_herramienta_catalogo_observaciones')) {
+            return [];
+        }
+
+        $normalized = $this->normalizeSearchText($description);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $category = $this->normalizeCategory($category);
+        $limit = min(max($limit, 5), 30);
+
+        $catalogQuery = ParadaHerramientaCatalogo::query()
+            ->where('activo', true)
+            ->where('descripcion_normalizada', $normalized);
+
+        if ($category) {
+            $catalogQuery->where('categoria', $category);
+        }
+
+        $catalogIds = $catalogQuery->pluck('id');
+        if ($catalogIds->isEmpty()) {
+            return [];
+        }
+
+        return ParadaHerramientaCatalogoObservacion::query()
+            ->whereIn('catalogo_id', $catalogIds->all())
+            ->orderByDesc('usos')
+            ->orderByDesc('last_used_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ParadaHerramientaCatalogoObservacion $observation): array => [
+                'observacion' => (string) $observation->observacion,
+                'usos' => (int) $observation->usos,
+            ])
+            ->all();
+    }
+
+    private function categoryForSheet(string $sheetName, int $index): ?string
+    {
+        $normalized = $this->normalizeSearchText($sheetName);
+
+        if (str_contains($normalized, 'CONSM') || str_contains($normalized, 'CONSUM')) {
+            return self::CATEGORY_CONSUMABLE;
+        }
+
+        if (str_contains($normalized, 'HRRT') || str_contains($normalized, 'HERR') || str_contains($normalized, 'UTIL')) {
+            return self::CATEGORY_TOOL;
+        }
+
+        return match ($index) {
+            0 => self::CATEGORY_TOOL,
+            1 => self::CATEGORY_CONSUMABLE,
+            default => null,
+        };
+    }
+
+    private function parseFormatoSheet(Worksheet $sheet, string $category): array
+    {
+        $headerRow = $this->findFormatoHeaderRow($sheet);
+        if (!$headerRow) {
+            return [];
+        }
+
+        $columns = $this->resolveFormatoColumns($sheet, $headerRow);
+        if (empty($columns['descripcion'])) {
+            return [];
+        }
+
+        $rows = [];
+        $seen = [];
+        $highestRow = min((int) $sheet->getHighestDataRow(), 1200);
+
+        for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
+            $descripcion = $this->cleanExcelText($this->cellValue($sheet, (int) $columns['descripcion'], $row));
+            if ($descripcion === '') {
+                continue;
+            }
+
+            $headerLike = $this->normalizeSearchText($descripcion);
+            if (str_contains($headerLike, 'DESCRIPCION')) {
+                continue;
+            }
+
+            $unidad = !empty($columns['unidad'])
+                ? $this->cleanExcelText($this->cellValue($sheet, (int) $columns['unidad'], $row))
+                : null;
+            $observacion = !empty($columns['observacion'])
+                ? $this->cleanExcelText($this->cellValue($sheet, (int) $columns['observacion'], $row))
+                : null;
+            $cantidad = !empty($columns['cantidad'])
+                ? $this->parseQuantity($this->cellValue($sheet, (int) $columns['cantidad'], $row))
+                : 0;
+
+            $key = $this->itemKey($descripcion, $category === self::CATEGORY_CONSUMABLE ? $unidad : null);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $rows[] = [
+                'tipo' => self::TYPE_BASE,
+                'categoria' => $category,
+                'descripcion' => mb_substr($descripcion, 0, 300),
+                'cantidad_solicitada' => $cantidad,
+                'unidad' => $category === self::CATEGORY_CONSUMABLE && $unidad !== '' ? mb_substr((string) $unidad, 0, 40) : null,
+                'observaciones' => $observacion !== '' ? $observacion : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function findFormatoHeaderRow(Worksheet $sheet): ?int
+    {
+        $highestRow = min((int) $sheet->getHighestDataRow(), 80);
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+
+        for ($row = 1; $row <= $highestRow; $row++) {
+            $labels = [];
+
+            for ($column = 1; $column <= $highestColumn; $column++) {
+                $labels[] = $this->normalizeSearchText($this->cellValue($sheet, $column, $row));
+            }
+
+            $joined = implode(' ', array_filter($labels));
+            if (str_contains($joined, 'DESCRIPCION') && str_contains($joined, 'CANT SOLICITADA')) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveFormatoColumns(Worksheet $sheet, int $headerRow): array
+    {
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+        $columns = [
+            'descripcion' => null,
+            'cantidad' => null,
+            'unidad' => null,
+            'observacion' => null,
+        ];
+
+        for ($column = 1; $column <= $highestColumn; $column++) {
+            $label = $this->normalizeSearchText($this->cellValue($sheet, $column, $headerRow));
+
+            if ($label === '') {
+                continue;
+            }
+
+            if (!$columns['descripcion'] && str_contains($label, 'DESCRIPCION')) {
+                $columns['descripcion'] = $column;
+                continue;
+            }
+
+            if (!$columns['cantidad'] && str_contains($label, 'CANT SOLICITADA')) {
+                $columns['cantidad'] = $column;
+                continue;
+            }
+
+            if (!$columns['unidad'] && $label === 'UNIDAD') {
+                $columns['unidad'] = $column;
+                continue;
+            }
+
+            if (!$columns['observacion'] && str_contains($label, 'OBSERVACION')) {
+                $columns['observacion'] = $column;
+            }
+        }
+
+        return $columns;
+    }
+
+    private function parseCatalogSheet(Worksheet $sheet, string $category): array
+    {
+        $headerRow = $this->findFormatoHeaderRow($sheet);
+        if (!$headerRow) {
+            $headerRow = $this->findCatalogHeaderRow($sheet);
+            if (!$headerRow) {
+                return [];
+            }
+
+            $columns = $this->resolveCatalogColumns($sheet, $headerRow, $category);
+        } else {
+            $columns = $this->resolveFormatoColumns($sheet, $headerRow);
+        }
+
+        if (empty($columns['descripcion'])) {
+            return [];
+        }
+
+        $rows = [];
+        $seen = [];
+        $highestRow = min((int) $sheet->getHighestDataRow(), 2000);
+
+        for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
+            $description = $this->cleanExcelText($this->cellValue($sheet, (int) $columns['descripcion'], $row));
+            if ($description === '') {
+                continue;
+            }
+
+            $normalized = $this->normalizeSearchText($description);
+            if ($normalized === '' || str_contains($normalized, 'DESCRIPCION')) {
+                continue;
+            }
+
+            $unit = !empty($columns['unidad'])
+                ? $this->cleanExcelText($this->cellValue($sheet, (int) $columns['unidad'], $row))
+                : null;
+            $observation = !empty($columns['observacion'])
+                ? $this->cleanExcelText($this->cellValue($sheet, (int) $columns['observacion'], $row))
+                : null;
+
+            $key = $category . '|' . $this->itemKey($description, $category === self::CATEGORY_CONSUMABLE ? $unit : null);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $rows[] = [
+                'categoria' => $category,
+                'descripcion' => mb_substr($description, 0, 300),
+                'unidad' => $category === self::CATEGORY_CONSUMABLE && $unit !== '' ? mb_substr((string) $unit, 0, 40) : null,
+                'observaciones' => $observation !== '' ? $observation : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function findCatalogHeaderRow(Worksheet $sheet): ?int
+    {
+        $highestRow = min((int) $sheet->getHighestDataRow(), 90);
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+
+        for ($row = 1; $row <= $highestRow; $row++) {
+            $hasDescription = false;
+
+            for ($column = 1; $column <= $highestColumn; $column++) {
+                $label = $this->normalizeSearchText($this->cellValue($sheet, $column, $row));
+                if (str_contains($label, 'DESCRIPCION')) {
+                    $hasDescription = true;
+                    break;
+                }
+            }
+
+            if ($hasDescription) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveCatalogColumns(Worksheet $sheet, int $headerRow, string $category): array
+    {
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+        $columns = [
+            'descripcion' => null,
+            'unidad' => null,
+            'observacion' => null,
+        ];
+
+        for ($column = 1; $column <= $highestColumn; $column++) {
+            $label = $this->normalizeSearchText($this->cellValue($sheet, $column, $headerRow));
+
+            if ($label === '') {
+                continue;
+            }
+
+            if (!$columns['descripcion'] && str_contains($label, 'DESCRIPCION')) {
+                $columns['descripcion'] = $column;
+                continue;
+            }
+
+            if (!$columns['unidad'] && ($label === 'UNIDAD' || $label === 'UND' || $label === 'U M')) {
+                $columns['unidad'] = $column;
+                continue;
+            }
+
+            if (!$columns['observacion'] && str_contains($label, 'OBSERVACION')) {
+                $columns['observacion'] = $column;
+            }
+        }
+
+        if (!$columns['unidad'] && $category === self::CATEGORY_CONSUMABLE && $columns['descripcion']) {
+            $columns['unidad'] = $this->guessUnitColumn($sheet, $headerRow, (int) $columns['descripcion']);
+        }
+
+        return $columns;
+    }
+
+    private function guessUnitColumn(Worksheet $sheet, int $headerRow, int $descriptionColumn): ?int
+    {
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+        $highestRow = min((int) $sheet->getHighestDataRow(), $headerRow + 20);
+        $bestColumn = null;
+        $bestScore = 0;
+
+        for ($column = 1; $column <= $highestColumn; $column++) {
+            if ($column === $descriptionColumn) {
+                continue;
+            }
+
+            $score = 0;
+            for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
+                $value = $this->cleanExcelText($this->cellValue($sheet, $column, $row));
+                if ($value !== '' && $this->isLikelyUnitValue($value)) {
+                    $score++;
+                }
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestColumn = $column;
+            }
+        }
+
+        return $bestScore >= 2 ? $bestColumn : null;
+    }
+
+    private function isLikelyUnitValue(string $value): bool
+    {
+        $normalized = $this->normalizeSearchText($value);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, [
+            'UND',
+            'UNID',
+            'UNIDAD',
+            'UNIDADES',
+            'PQT',
+            'PAQ',
+            'PAQUETE',
+            'CAJA',
+            'CJ',
+            'KG',
+            'GR',
+            'LT',
+            'L',
+            'M',
+            'MT',
+            'MTS',
+            'ROLLO',
+            'GLN',
+        ], true);
+    }
+
+    private function rememberCatalogRows(array $rows, ?Usuario $usuario = null): void
+    {
+        if (!Schema::hasTable('parada_herramienta_catalogos')) {
+            return;
+        }
+
+        foreach ($rows as $row) {
+            $description = trim((string) ($row['descripcion'] ?? ''));
+            if ($description === '') {
+                continue;
+            }
+
+            $catalog = $this->rememberCatalogEntry(
+                $description,
+                (string) ($row['categoria'] ?? self::CATEGORY_TOOL),
+                $row['unidad'] ?? null,
+                $usuario
+            );
+
+            if ($catalog && !empty($row['observaciones'])) {
+                $this->rememberCatalogObservation($catalog, (string) $row['observaciones']);
+            }
+        }
+    }
+
+    private function rememberCatalogEntry(
+        string $description,
+        string $category,
+        ?string $unit = null,
+        ?Usuario $usuario = null
+    ): ?ParadaHerramientaCatalogo {
+        $category = $this->normalizeCategory($category) ?? self::CATEGORY_TOOL;
+        $description = $this->cleanExcelText($description);
+        $unit = $this->cleanExcelText((string) ($unit ?? ''));
+        $normalizedDescription = $this->normalizeSearchText($description);
+        $normalizedUnit = $this->normalizeSearchText($unit);
+
+        if ($normalizedDescription === '') {
+            return null;
+        }
+
+        /** @var ParadaHerramientaCatalogo $catalog */
+        $catalog = ParadaHerramientaCatalogo::query()->firstOrNew([
+            'categoria' => $category,
+            'descripcion_normalizada' => $normalizedDescription,
+            'unidad_normalizada' => $normalizedUnit,
+        ]);
+
+        if (!$catalog->exists) {
+            $catalog->id = (string) Str::uuid();
+            $catalog->created_by_usuario_id = $usuario?->id;
+        }
+
+        $catalog->descripcion = mb_substr($description, 0, 300);
+        $catalog->unidad = $unit !== '' ? mb_substr($unit, 0, 40) : null;
+        $catalog->activo = true;
+        $catalog->updated_by_usuario_id = $usuario?->id;
+        $catalog->save();
+
+        return $catalog;
+    }
+
+    private function rememberCatalogObservation(ParadaHerramientaCatalogo $catalog, string $observation): bool
+    {
+        if (!Schema::hasTable('parada_herramienta_catalogo_observaciones')) {
+            return false;
+        }
+
+        $observation = $this->cleanExcelText($observation);
+        $normalized = $this->normalizeSearchText($observation);
+        if ($normalized === '') {
+            return false;
+        }
+
+        $hash = sha1($normalized);
+
+        /** @var ParadaHerramientaCatalogoObservacion $record */
+        $record = ParadaHerramientaCatalogoObservacion::query()->firstOrNew([
+            'catalogo_id' => $catalog->id,
+            'observacion_hash' => $hash,
+        ]);
+
+        if (!$record->exists) {
+            $record->id = (string) Str::uuid();
+            $record->usos = 0;
+        }
+
+        $record->observacion = mb_substr($observation, 0, 1000);
+        $record->observacion_normalizada = mb_substr($normalized, 0, 500);
+        $record->usos = ((int) $record->usos) + 1;
+        $record->last_used_at = now();
+        $record->save();
+
+        return true;
+    }
+
+    private function normalizeCategory(?string $category): ?string
+    {
+        $normalized = $this->normalizeSearchText((string) $category);
+
+        if (in_array($normalized, ['CONSUMIBLE', 'CONSUMIBLES', 'CONSUMO'], true)) {
+            return self::CATEGORY_CONSUMABLE;
+        }
+
+        if (in_array($normalized, ['HERRAMIENTA', 'HERRAMIENTAS', 'HERR', 'UTILAJE', 'EQUIPO', 'EQUIPOS'], true)) {
+            return self::CATEGORY_TOOL;
+        }
+
+        return null;
+    }
+
+    private function syncImportedRows(ParadaHerramientaGrupo $grupo, string $category, array $rows): array
+    {
+        if (empty($rows)) {
+            return [
+                'creados' => 0,
+                'actualizados' => 0,
+                'retirados' => 0,
+            ];
+        }
+
+        $existing = $grupo->items()
+            ->where('tipo', self::TYPE_BASE)
+            ->where('categoria', $category)
+            ->get()
+            ->keyBy(fn (ParadaHerramientaItem $item): string => $this->itemKey($item->descripcion, $item->unidad));
+
+        $keptIds = [];
+        $created = 0;
+        $updated = 0;
+
+        foreach (array_values($rows) as $index => $row) {
+            $key = $this->itemKey($row['descripcion'], $row['unidad']);
+            /** @var ParadaHerramientaItem|null $item */
+            $item = $existing->get($key);
+
+            $data = [
+                'tipo' => self::TYPE_BASE,
+                'categoria' => $category,
+                'descripcion' => $row['descripcion'],
+                'cantidad_solicitada' => $row['cantidad_solicitada'],
+                'unidad' => $row['unidad'],
+                'observaciones' => $row['observaciones'],
+                'orden' => $index + 1,
+            ];
+
+            if ($item) {
+                $item->fill($data);
+                $item->save();
+                $keptIds[] = (string) $item->id;
+                $updated++;
+                continue;
+            }
+
+            $item = ParadaHerramientaItem::query()->create(array_merge($data, [
+                'id' => (string) Str::uuid(),
+                'grupo_id' => $grupo->id,
+            ]));
+            $keptIds[] = (string) $item->id;
+            $created++;
+        }
+
+        $deleteQuery = $grupo->items()
+            ->where('tipo', self::TYPE_BASE)
+            ->where('categoria', $category);
+
+        if (!empty($keptIds)) {
+            $deleteQuery->whereNotIn('id', $keptIds);
+        }
+
+        $removed = $deleteQuery->count();
+        $deleteQuery->delete();
+
+        return [
+            'creados' => $created,
+            'actualizados' => $updated,
+            'retirados' => $removed,
+        ];
+    }
+
+    private function cellValue(Worksheet $sheet, int $column, int $row): mixed
+    {
+        return $sheet->getCell(Coordinate::stringFromColumnIndex($column) . $row)->getFormattedValue();
+    }
+
+    private function cleanExcelText(mixed $value): string
+    {
+        $text = trim((string) $value);
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+
+    private function parseQuantity(mixed $value): int
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return 0;
+        }
+
+        $normalized = str_replace(',', '.', preg_replace('/[^0-9,.-]/', '', $raw) ?? '');
+        if ($normalized === '' || $normalized === '-' || !is_numeric($normalized)) {
+            return 0;
+        }
+
+        return max(0, (int) round((float) $normalized));
+    }
+
+    private function itemKey(?string $description, ?string $unit = null): string
+    {
+        return $this->normalizeSearchText((string) $description . '|' . (string) $unit);
+    }
+
+    private function normalizeSearchText(string $value): string
+    {
+        $value = Str::ascii($value);
+        $value = strtoupper($value);
+        $value = preg_replace('/[^A-Z0-9]+/', ' ', $value) ?? $value;
+
+        return trim(preg_replace('/\s+/', ' ', $value) ?? $value);
+    }
+
     private function deadlineFor(RQMina $rq): Carbon
     {
         return Carbon::parse($rq->fecha_inicio)->subDays(7)->startOfDay();
@@ -555,7 +1420,10 @@ class ParadaHerramientaService
 
     private function canUpdatePedido(Usuario $usuario): bool
     {
-        return $this->isLogistica($usuario) || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
+        return $this->isLogistica($usuario)
+            || PermissionMatrix::userCan($usuario, 'herramientas', 'actualizar')
+            || PermissionMatrix::userCan($usuario, 'herramientas', 'administrar')
+            || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
     }
 
     private function isLogistica(Usuario $usuario): bool
@@ -576,12 +1444,45 @@ class ParadaHerramientaService
         }
 
         $minaIds = $usuario->scopesMina()->pluck('mina_id');
-        $query->whereIn('mina_id', $minaIds);
+        $personalId = (string) ($usuario->personal_id ?? '');
+
+        $query->where(function ($scope) use ($minaIds, $personalId): void {
+            $scope->whereIn('mina_id', $minaIds);
+
+            if ($personalId !== '') {
+                $scope->orWhere('supervisor_id', $personalId);
+            }
+        });
+    }
+
+    private function applySupervisorScope($query, Usuario $usuario): void
+    {
+        if ($this->isPrivileged($usuario)) {
+            return;
+        }
+
+        $personalId = (string) ($usuario->personal_id ?? '');
+        $query->where(function ($scope) use ($personalId): void {
+            $scope->whereNull('supervisor_id');
+
+            if ($personalId !== '') {
+                $scope->orWhere('supervisor_id', $personalId);
+            }
+        });
     }
 
     private function canAccessRQMina(Usuario $usuario, RQMina $rq): bool
     {
         if ($this->isPrivileged($usuario)) {
+            return true;
+        }
+
+        $supervisorId = (string) ($rq->supervisor_id ?? '');
+        if ($supervisorId !== '' && $supervisorId !== (string) ($usuario->personal_id ?? '')) {
+            return false;
+        }
+
+        if ($supervisorId !== '' && $supervisorId === (string) ($usuario->personal_id ?? '')) {
             return true;
         }
 
@@ -654,8 +1555,8 @@ class ParadaHerramientaService
                 continue;
             }
 
-            foreach (['base', 'adicional'] as $type) {
-                foreach ((array) ($group[$type] ?? []) as $item) {
+            foreach (array_keys(self::FORM_BUCKETS) as $bucket) {
+                foreach ((array) ($group[$bucket] ?? []) as $item) {
                     if (!is_array($item)) {
                         continue;
                     }
@@ -668,6 +1569,8 @@ class ParadaHerramientaService
                     $updates[$itemId] = [
                         'pedido_solicitado_at' => $this->sanitizeDate($item['pedido_solicitado_at'] ?? null),
                         'pedido_llego_at' => $this->sanitizeDate($item['pedido_llego_at'] ?? null),
+                        'cantidad_entregada' => max(0, (int) ($item['cantidad_entregada'] ?? 0)),
+                        'cantidad_recibida' => max(0, (int) ($item['cantidad_recibida'] ?? 0)),
                     ];
                 }
             }

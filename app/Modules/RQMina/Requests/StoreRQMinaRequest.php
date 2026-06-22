@@ -23,6 +23,7 @@ class StoreRQMinaRequest extends FormRequest
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
             'observaciones' => ['nullable', 'string'],
             'supervisor_id' => ['nullable', 'string', 'size:36', Rule::exists('personal', 'id')->where('es_supervisor', 1)],
+            'supervisor_pets_id' => ['nullable', 'string', 'size:36', Rule::exists('personal', 'id')->where('es_supervisor', 1)],
             'detalle' => ['required_without:plan_operativo', 'array', 'min:1'],
             'detalle.*.puesto' => ['required', 'string', 'max:191'],
             'detalle.*.cantidad' => ['required', 'integer', 'min:1'],

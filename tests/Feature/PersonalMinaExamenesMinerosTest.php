@@ -244,6 +244,70 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $this->assertSame(PersonalMina::ESTADO_NO_HABILITADO, $criticalAssignment->fresh()->estado_habilitacion);
     }
 
+    public function test_examen_vencido_reinicia_intentos_operativos_sin_borrar_historial(): void
+    {
+        Carbon::setTestNow('2026-06-10 09:00:00');
+
+        [$service, $actor, $assignment] = $this->assignmentWithExam([
+            'tiene_vigencia' => true,
+            'vigencia_dias' => 365,
+            'permite_reintento' => true,
+            'max_intentos' => 2,
+        ]);
+        $exam = $assignment->examenes->first();
+
+        $service->registerAttempt($exam, [
+            'fecha_realizacion' => '2025-05-01',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+        ], null, $actor);
+        $service->registerAttempt($exam->fresh(), [
+            'fecha_realizacion' => '2025-05-02',
+            'fecha_vencimiento' => '2026-06-01',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
+        ], null, $actor);
+
+        $this->assertSame(PersonalMinaExamen::ESTADO_VENCIDO, $exam->fresh()->estado);
+        $this->assertSame(PersonalMina::ESTADO_NO_HABILITADO, $assignment->fresh()->estado_habilitacion);
+
+        $service->registerAttempt($exam->fresh(), [
+            'fecha_programacion' => '2026-06-10',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+        ], null, $actor);
+
+        $scheduled = PersonalMinaExamenIntento::query()
+            ->where('personal_mina_examen_id', $exam->id)
+            ->orderByDesc('numero_intento')
+            ->firstOrFail();
+
+        $this->assertSame(3, $scheduled->numero_intento);
+        $this->assertSame(PersonalMinaExamen::ESTADO_PROGRAMADO, $exam->fresh()->estado);
+
+        $service->completeScheduledAttempt($scheduled, [
+            'fecha_realizacion' => '2026-06-10',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+        ], null, $actor);
+        $this->assertSame(PersonalMina::ESTADO_EN_PROCESO, $assignment->fresh()->estado_habilitacion);
+
+        $service->registerAttempt($exam->fresh(), [
+            'fecha_realizacion' => '2026-06-10',
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+        ], null, $actor);
+
+        $this->assertSame(4, PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $exam->id)->max('numero_intento'));
+        $this->assertSame(4, PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $exam->id)->count());
+        $this->assertSame(PersonalMina::ESTADO_NO_HABILITADO, $assignment->fresh()->estado_habilitacion);
+
+        try {
+            $service->registerAttempt($exam->fresh(), [
+                'fecha_realizacion' => '2026-06-10',
+                'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+            ], null, $actor);
+            $this->fail('No debio permitir tercer intento dentro del nuevo ciclo.');
+        } catch (ValidationException $exception) {
+            $this->assertSame('No se permite registrar un intento adicional.', collect($exception->errors())->flatten()->first());
+        }
+    }
+
     public function test_nota_minima_y_no_aplica(): void
     {
         [$service, $actor, $assignment] = $this->assignmentWithExam([

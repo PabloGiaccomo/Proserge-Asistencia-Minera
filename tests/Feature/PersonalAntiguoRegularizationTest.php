@@ -60,7 +60,7 @@ class PersonalAntiguoRegularizationTest extends TestCase
         $this->assertSame(1, PersonalContrato::query()->where('personal_id', $personal->id)->count());
     }
 
-    public function test_activo_existente_sin_contrato_firmado_muestra_advertencia_y_queda_pendiente(): void
+    public function test_activo_existente_sin_contrato_firmado_muestra_advertencia_y_queda_falta_contrato(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
         $personal = $this->createExistingPersonal('ACTIVO', ['numero_documento' => '73111113']);
@@ -73,14 +73,56 @@ class PersonalAntiguoRegularizationTest extends TestCase
         ], null, $actor);
 
         $personal->refresh();
-        $this->assertSame('ACTIVO', $personal->estado);
+        $this->assertSame('FALTA_CONTRATO', $personal->estado);
         $this->assertTrue((bool) $personal->pendiente_regularizacion);
+        $this->assertTrue((bool) $personal->pendiente_contrato_firmado);
         $this->assertNotEmpty($result['warnings']);
         $this->assertDatabaseHas('personal_contratos', [
             'personal_id' => $personal->id,
-            'estado' => 'PREPARACION',
+            'estado' => 'ACTIVO',
             'archivo_pendiente_regularizacion' => true,
         ]);
+    }
+
+    public function test_cesado_existente_regularizado_como_vigente_no_queda_cesado_y_aparece_en_vencimientos(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $personal = $this->createExistingPersonal('CESADO', [
+            'numero_documento' => '73111121',
+            'nombre_completo' => 'Regularizado Vigente',
+            'fecha_cese' => '2025-12-31',
+            'motivo_cese' => 'Contrato anterior',
+        ]);
+        $this->insertContract($personal, 'CERRADO', '2025-01-01', '2025-12-31', false);
+
+        app(PersonalAntiguoService::class)->regularizeExisting($personal, [
+            'origen_registro' => 'ANTIGUO',
+            'sincronizar_contrato' => true,
+            'estado_contrato' => 'VIGENTE',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-30',
+        ], null, $actor);
+
+        $this->assertDatabaseHas('personal', [
+            'id' => $personal->id,
+            'estado' => 'FALTA_CONTRATO',
+            'fecha_cese' => null,
+            'motivo_cese' => null,
+            'pendiente_contrato_firmado' => true,
+            'pendiente_regularizacion' => true,
+        ]);
+        $this->assertDatabaseHas('personal_contratos', [
+            'personal_id' => $personal->id,
+            'estado' => 'ACTIVO',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-30',
+            'archivo_pendiente_regularizacion' => true,
+        ]);
+
+        $this->withSession($this->sessionFor($actor->id))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Regularizado Vigente');
     }
 
     public function test_falta_contrato_existente_con_pdf_firmado_puede_quedar_activo(): void
@@ -181,7 +223,7 @@ class PersonalAntiguoRegularizationTest extends TestCase
         $this->assertDatabaseHas('personal_contratos', [
             'personal_id' => $personal->id,
             'fecha_inicio' => '2026-02-01',
-            'estado' => 'PREPARACION',
+            'estado' => 'ACTIVO',
             'archivo_pendiente_regularizacion' => true,
         ]);
     }

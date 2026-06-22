@@ -14,6 +14,7 @@ class PersonalFichaCatalog
     public const STATES = [
         'ACTIVO' => 'Activo',
         'FALTA_CONTRATO' => 'Falta contrato',
+        'NO_FIRMO_CONTRATO' => 'No firmo contrato',
         'INACTIVO' => 'Inactivo',
         'CESADO' => 'Cesado',
         'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente completar ficha',

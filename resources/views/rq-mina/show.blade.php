@@ -8,6 +8,7 @@
     $transporte = $item['transporte'] ?? [];
     $cambiosPedido = $item['cambios_pedido'] ?? [];
     $supervisor = $item['supervisor'] ?? null;
+    $supervisorPets = $item['supervisor_pets'] ?? null;
     $planOperativo = $item['plan_operativo'] ?? [];
     $personalParada = $item['personal_parada'] ?? [];
     $detalleConTotales = array_map(static function (array $linea): array {
@@ -203,8 +204,12 @@
                     <span class="rqm-meta-value">{{ $item['creador'] ?? '-' }}</span>
                 </div>
                 <div class="rqm-meta-item">
-                    <span class="rqm-meta-label">Supervisor a cargo</span>
+                    <span class="rqm-meta-label">Supervisor herramientas</span>
                     <span class="rqm-meta-value">{{ $supervisor['nombre'] ?? '-' }}</span>
+                </div>
+                <div class="rqm-meta-item">
+                    <span class="rqm-meta-label">Supervisor PETS</span>
+                    <span class="rqm-meta-value">{{ $supervisorPets['nombre'] ?? '-' }}</span>
                 </div>
                 <div class="rqm-meta-item">
                     <span class="rqm-meta-label">Fecha Inicio</span>

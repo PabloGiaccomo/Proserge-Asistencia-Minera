@@ -40,8 +40,26 @@
         ->sortByDesc(fn ($contrato) => (int) ($contrato->contrato_numero ?? 0))
         ->first();
     $hasActiveContract = $activeContract !== null;
-    $renewalDefaultStart = $activeContract?->fecha_fin
-        ? \Illuminate\Support\Carbon::parse($activeContract->fecha_fin)->addDay()->toDateString()
+    $today = \Illuminate\Support\Carbon::today();
+    $renewalGraceStart = $today->copy()->subDays(7)->toDateString();
+    $renewalGraceEnd = $today->toDateString();
+    $recentEndedRenewableContract = $contratos
+        ->filter(function ($contrato) use ($renewalGraceStart, $renewalGraceEnd): bool {
+            $estado = strtoupper((string) $contrato->estado);
+            $fechaFin = optional($contrato->fecha_fin)->toDateString();
+
+            return in_array($estado, ['CERRADO', 'CESADO'], true)
+                && $fechaFin
+                && $fechaFin >= $renewalGraceStart
+                && $fechaFin <= $renewalGraceEnd;
+        })
+        ->sortByDesc(fn ($contrato): string => (optional($contrato->fecha_fin)->toDateString() ?: '') . '-' . str_pad((string) (int) ($contrato->contrato_numero ?? 0), 6, '0', STR_PAD_LEFT))
+        ->first();
+    $renewableContract = $activeContract ?: $recentEndedRenewableContract;
+    $hasRenewableContract = $renewableContract !== null;
+    $isGraceRenewal = !$activeContract && $recentEndedRenewableContract !== null;
+    $renewalDefaultStart = $renewableContract?->fecha_fin
+        ? \Illuminate\Support\Carbon::parse($renewableContract->fecha_fin)->addDay()->toDateString()
         : now()->toDateString();
     $renewalsByOrigin = $contratos
         ->filter(fn ($contrato): bool => filled($contrato->origen_contrato_id))
@@ -431,12 +449,16 @@
                     </div>
                     <a href="{{ route('personal.contrato-datos.edit', $personal->id) }}" class="btn btn-primary btn-sm">Editar contrato en preparacion</a>
                 </div>
-            @elseif($hasActiveContract)
+            @elseif($hasRenewableContract)
                 <div class="contract-flow-head">
                     <div>
                         <h2 class="contract-flow-title">Renovar contrato</h2>
                         <p class="contract-flow-text">
-                            Crea un nuevo contrato en preparacion copiando los datos del contrato activo del historial. El estado laboral del trabajador no bloquea esta renovacion.
+                            @if($isGraceRenewal)
+                                El ultimo contrato ya vencio, pero aun esta dentro de los 7 dias para preparar renovacion. El trabajador seguira pendiente hasta subir el PDF firmado.
+                            @else
+                                Crea un nuevo contrato en preparacion copiando los datos del contrato activo del historial. El estado laboral del trabajador no bloquea esta renovacion.
+                            @endif
                         </p>
                     </div>
                 </div>
@@ -487,7 +509,7 @@
                 <div class="contract-flow-head">
                     <div>
                         <h2 class="contract-flow-title">Movimiento contractual no disponible</h2>
-                        <p class="contract-flow-text">Para renovar debe existir un contrato activo en el historial. Para reingresar sin contrato activo, el trabajador debe estar cesado.</p>
+                        <p class="contract-flow-text">Para renovar debe existir un contrato activo o un contrato vencido dentro de los ultimos 7 dias. Para reingresar sin contrato renovable, el trabajador debe estar cesado.</p>
                     </div>
                 </div>
             @endif

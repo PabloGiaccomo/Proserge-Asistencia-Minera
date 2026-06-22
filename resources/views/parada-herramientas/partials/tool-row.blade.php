@@ -1,29 +1,50 @@
-<div class="tool-row">
+@php
+    $showUnidad = (bool) ($showUnidad ?? false);
+@endphp
+
+<div class="tool-row {{ $showUnidad ? 'has-unit' : '' }}">
     <input
         type="hidden"
         name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][id]"
         value="{{ $row['id'] ?? '' }}"
     >
-    <input
-        type="text"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][descripcion]"
-        class="form-control"
-        placeholder="Descripcion"
-        value="{{ $row['descripcion'] ?? '' }}"
-        @readonly(!$puedeEditar)
-    >
+    <div class="tool-autocomplete-wrap">
+        <input
+            type="text"
+            name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][descripcion]"
+            class="form-control js-tool-description"
+            data-tool-category="{{ $showUnidad ? 'CONSUMIBLE' : 'HERRAMIENTA' }}"
+            placeholder="Descripcion"
+            autocomplete="off"
+            value="{{ $row['descripcion'] ?? '' }}"
+            @readonly(!$puedeEditar)
+        >
+        <div class="tool-autocomplete-menu" hidden></div>
+    </div>
     <input
         type="number"
         name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][cantidad_solicitada]"
         class="form-control qty"
-        min="1"
+        min="0"
         value="{{ $row['cantidad_solicitada'] ?? 1 }}"
         @readonly(!$puedeEditar)
     >
+    @if($showUnidad)
+        <input
+            type="text"
+            name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][unidad]"
+            class="form-control unit"
+            placeholder="Unidad"
+            value="{{ $row['unidad'] ?? '' }}"
+            @readonly(!$puedeEditar)
+        >
+    @endif
     <input
         type="text"
         name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][observaciones]"
-        class="form-control"
+        class="form-control js-tool-observation"
+        list="toolObservationSuggestions"
+        data-tool-category="{{ $showUnidad ? 'CONSUMIBLE' : 'HERRAMIENTA' }}"
         placeholder="Observaciones"
         value="{{ $row['observaciones'] ?? '' }}"
         @readonly(!$puedeEditar)
@@ -34,6 +55,16 @@
         class="form-control"
         value="{{ $row['pedido_solicitado_at'] ?? '' }}"
         @readonly(!($puedeActualizarPedido ?? false))
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][cantidad_entregada]"
+        value="{{ $row['cantidad_entregada'] ?? 0 }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][cantidad_recibida]"
+        value="{{ $row['cantidad_recibida'] ?? 0 }}"
     >
     <input
         type="date"
@@ -48,12 +79,7 @@
     <span class="tools-status {{ $pedidoCompleto ? 'sent' : 'pending' }}">
         {{ $pedidoCompleto ? 'Pedido completo' : 'Pedido pendiente' }}
     </span>
-    @if(($puedeActualizarPedido ?? false))
-        <button type="submit" class="btn-row {{ $pedidoCompleto ? 'btn-row-outline' : '' }}" @if($pedidoCompleto) disabled @endif>
-            {{ $pedidoCompleto ? 'Pedido completo' : 'Completar pedido' }}
-        </button>
-    @endif
     @if($puedeEditar)
-        <button type="button" class="btn-remove-tool" onclick="this.closest('.tool-row').remove()">Quitar</button>
+        <button type="button" class="btn-remove-tool" onclick="this.closest('.tool-row').remove()" aria-label="Quitar fila" title="Quitar fila">X</button>
     @endif
 </div>

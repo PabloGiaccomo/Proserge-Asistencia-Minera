@@ -7,6 +7,7 @@ use App\Models\Mina;
 use App\Models\Oficina;
 use App\Models\PersonalPuesto;
 use App\Models\Taller;
+use App\Modules\Personal\Resources\PersonalIndexResource;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
 use App\Modules\Personal\Services\PersonalFichaService;
@@ -20,6 +21,7 @@ use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -113,12 +115,11 @@ class PersonalPageController extends WebPageController
 
     public function index(Request $request)
     {
-        $this->fichaService->expireStaleLinks();
-        $this->service->syncExpiredContractClosures($this->requireAuthenticatedUser());
-
         if (strtolower((string) $request->query('export')) === 'excel') {
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
         }
+
+        $this->runIndexMaintenance();
 
         $filters = $request->query();
         $visibleStateFilter = strtoupper(trim((string) ($filters['estado'] ?? '')));
@@ -134,8 +135,8 @@ class PersonalPageController extends WebPageController
             unset($filters['estado']);
         }
 
-        $trabajadores = PersonalResource::collection(
-            $this->service->list($filters)
+        $trabajadores = PersonalIndexResource::collection(
+            $this->service->listForIndex($filters)
         )->resolve();
 
         if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
@@ -144,7 +145,25 @@ class PersonalPageController extends WebPageController
 
         $catalogs = $this->getLocationCatalogs();
 
-        return view('personal.index', array_merge($catalogs, compact('trabajadores')));
+        return view('personal.index', array_merge($catalogs, compact('trabajadores'), [
+            'puestoOptions' => $this->puestoOptions(),
+            'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
+        ]));
+    }
+
+    private function runIndexMaintenance(): void
+    {
+        try {
+            if (Cache::add('personal:index:expire_stale_links', true, now()->addMinutes(10))) {
+                $this->fichaService->expireStaleLinks();
+            }
+
+            if (Cache::add('personal:index:sync_expired_contracts', true, now()->addMinutes(30))) {
+                $this->service->syncExpiredContractClosures($this->requireAuthenticatedUser());
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     public function exportForm(Request $request): View
@@ -589,6 +608,55 @@ class PersonalPageController extends WebPageController
             ->with('success', 'El trabajador fue marcado como cesado.');
     }
 
+    public function addToListaNegra(Request $request, string $id): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        $validated = $request->validate([
+            'motivo_lista_negra' => ['required', 'string', 'max:2000'],
+        ], [
+            'motivo_lista_negra.required' => 'El motivo de lista negra es obligatorio.',
+            'motivo_lista_negra.max' => 'El motivo de lista negra no debe superar 2000 caracteres.',
+        ]);
+
+        try {
+            $this->service->addToListaNegra($personal, $validated['motivo_lista_negra'], $usuario);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo agregar a lista negra.');
+        }
+
+        return redirect()
+            ->route('personal.index')
+            ->with('success', 'El trabajador fue agregado a lista negra.');
+    }
+
+    public function removeFromListaNegra(string $id): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+
+        $personal = $this->service->find($id);
+        abort_if(!$personal, 404);
+
+        try {
+            $this->service->removeFromListaNegra($personal);
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('personal.index')
+                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo quitar de lista negra.');
+        }
+
+        return redirect()
+            ->route('personal.index')
+            ->with('success', 'El trabajador fue quitado de lista negra.');
+    }
+
     public function activate(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
@@ -604,12 +672,38 @@ class PersonalPageController extends WebPageController
                 ->with('error', 'Solo se puede activar a un trabajador cesado.');
         }
 
+        $contractTypeOptions = $this->contratoService->contractTypeOptions();
+        $contractTypeRules = ['nullable', 'string', 'max:40'];
+        if ($contractTypeOptions !== []) {
+            $contractTypeRules[] = Rule::in(array_keys($contractTypeOptions));
+        }
+        $puestoRules = ['nullable', 'string', 'max:191'];
+        if (Schema::hasTable('personal_puestos')) {
+            $puestoRules[] = Rule::exists('personal_puestos', 'nombre');
+        }
+
         $validated = $request->validate([
             'fecha_inicio' => ['required', 'date'],
             'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'puesto' => $puestoRules,
+            'tipo_contrato' => $contractTypeRules,
+            'ocupacion' => ['nullable', 'string', 'max:191'],
+            'area' => ['nullable', 'string', 'max:191'],
+            'remuneracion' => ['nullable', 'string', 'max:120'],
+            'costo_hora' => ['nullable', 'string', 'max:120'],
+            'banco' => ['nullable', 'string', 'max:120'],
+            'banco_otro' => ['nullable', 'string', 'max:120'],
+            'numero_cuenta' => ['nullable', 'string', 'max:60'],
+            'cci' => ['nullable', 'string', 'max:60'],
+            'sistema_pensionario' => ['nullable', 'string', 'max:120'],
+            'tipo_comision' => ['nullable', 'string', 'max:120'],
+            'tipo_afp' => ['nullable', 'string', 'max:120'],
+            'cuspp' => ['nullable', 'string', 'max:60'],
         ], [
             'fecha_inicio.required' => 'La fecha de inicio es obligatoria.',
             'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
+            'puesto.exists' => 'Selecciona un puesto registrado.',
+            'tipo_contrato.in' => 'Selecciona un tipo de contrato registrado.',
         ]);
 
         try {
@@ -618,6 +712,7 @@ class PersonalPageController extends WebPageController
                 $validated['fecha_inicio'],
                 $validated['fecha_fin'] ?? null,
                 $usuario,
+                $validated,
             );
         } catch (ValidationException $exception) {
             return redirect()
@@ -761,7 +856,7 @@ class PersonalPageController extends WebPageController
     {
         $rules = $this->manualCreateRules();
         $rules['fields.puesto'] = ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')];
-        $rules['estado'] = ['required', 'in:ACTIVO,FALTA_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'];
+        $rules['estado'] = ['required', 'in:ACTIVO,FALTA_CONTRATO,NO_FIRMO_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'];
 
         return $rules;
     }

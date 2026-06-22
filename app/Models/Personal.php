@@ -37,6 +37,11 @@ class Personal extends Model
         'origen_registro',
         'observacion_historica',
         'pendiente_regularizacion',
+        'pendiente_contrato_firmado',
+        'en_lista_negra',
+        'lista_negra_motivo',
+        'lista_negra_at',
+        'lista_negra_by_usuario_id',
         'registrado_como_antiguo_at',
         'registrado_como_antiguo_by_usuario_id',
         'telefono',
@@ -51,6 +56,9 @@ class Personal extends Model
         'fecha_cese' => 'date',
         'cesado_at' => 'datetime',
         'pendiente_regularizacion' => 'boolean',
+        'pendiente_contrato_firmado' => 'boolean',
+        'en_lista_negra' => 'boolean',
+        'lista_negra_at' => 'datetime',
         'registrado_como_antiguo_at' => 'datetime',
     ];
 
@@ -83,6 +91,11 @@ class Personal extends Model
     public function cesadoPor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'cesado_by_usuario_id');
+    }
+
+    public function listaNegraPor(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'lista_negra_by_usuario_id');
     }
 
     public function puestoCatalogo(): BelongsTo

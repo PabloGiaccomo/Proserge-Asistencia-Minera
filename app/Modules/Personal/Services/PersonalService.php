@@ -48,6 +48,65 @@ class PersonalService
             $query->with('cesadoPor.personal');
         }
 
+        if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id')) {
+            $query->with('listaNegraPor.personal');
+        }
+
+        if (Schema::hasTable('personal_bloqueo')) {
+            $query->with([
+                'bloqueos' => function ($q): void {
+                    $q->where('estado', 'ACTIVO')
+                        ->where('visible_para_planner', true)
+                        ->orderBy('fecha_inicio')
+                        ->orderBy('fecha_fin');
+                },
+            ]);
+        }
+
+        if (Schema::hasTable('rq_proserge_detalle') && Schema::hasTable('rq_proserge')) {
+            $today = Carbon::today()->toDateString();
+            $query->with([
+                'rqProsergeDetalles' => function ($q) use ($today): void {
+                    $q->whereDate('fecha_inicio', '<=', $today)
+                        ->whereDate('fecha_fin', '>=', $today)
+                        ->whereHas('rqProserge', function ($rq): void {
+                            $rq->whereNotIn('estado', ['CANCELADO', 'CERRADO']);
+                        });
+                },
+            ]);
+        }
+
+        return $query->get();
+    }
+
+    public function listForIndex(array $filters): Collection
+    {
+        $query = $this->buildFilteredQuery($filters)->with(['minas']);
+
+        if (Schema::hasTable('personal_puestos') && Schema::hasColumn('personal', 'puesto_id')) {
+            $query->with('puestoCatalogo');
+        }
+
+        if (Schema::hasTable('personal_fichas')) {
+            $query->with('fichaColaborador');
+        }
+
+        if (Schema::hasTable('personal_contratos')) {
+            $query->with(['contratosLaborales.cerradoPor.personal']);
+        }
+
+        if (Schema::hasTable('personal_contrato_datos')) {
+            $query->with('contratoDatos');
+        }
+
+        if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
+            $query->with('cesadoPor.personal');
+        }
+
+        if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id')) {
+            $query->with('listaNegraPor.personal');
+        }
+
         if (Schema::hasTable('personal_bloqueo')) {
             $query->with([
                 'bloqueos' => function ($q): void {
@@ -109,7 +168,7 @@ class PersonalService
         }
 
         $stateFilter = strtoupper((string) ($filters['estado'] ?? ''));
-        $allowedStates = ['ACTIVO', 'FALTA_CONTRATO', 'INACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'APROBADO', 'OBSERVADO', 'RECHAZADO'];
+        $allowedStates = ['ACTIVO', 'FALTA_CONTRATO', 'NO_FIRMO_CONTRATO', 'INACTIVO', 'PENDIENTE_COMPLETAR_FICHA', 'FICHA_ENVIADA', 'LINK_VENCIDO', 'APROBADO', 'OBSERVADO', 'RECHAZADO'];
         if (in_array($stateFilter, $allowedStates, true)) {
             $query->where('personal.estado', $stateFilter);
         }
@@ -188,6 +247,10 @@ class PersonalService
             $query->with('cesadoPor.personal');
         }
 
+        if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id')) {
+            $query->with('listaNegraPor.personal');
+        }
+
         if (Schema::hasTable('personal_bloqueo')) {
             $query->with([
                 'bloqueos' => function ($q): void {
@@ -217,7 +280,13 @@ class PersonalService
 
     public function syncExpiredContractClosures(?Usuario $usuario = null): void
     {
-        if (!Schema::hasTable('personal_contratos') || !Schema::hasTable('personal_fichas')) {
+        if (!Schema::hasTable('personal_contratos')) {
+            return;
+        }
+
+        app(PersonalContratoService::class)->syncExpiredActiveContracts($usuario);
+
+        if (!Schema::hasTable('personal_fichas')) {
             return;
         }
 
@@ -225,7 +294,7 @@ class PersonalService
 
         Personal::query()
             ->where('estado', '!=', 'CESADO')
-            ->with('fichaColaborador')
+            ->with(['fichaColaborador', 'contratoDatos', 'contratoLaboralActual'])
             ->chunk(100, function (Collection $workers) use ($today, $usuario): void {
                 foreach ($workers as $worker) {
                     $data = is_array($worker->fichaColaborador?->datos_json ?? null)
@@ -233,7 +302,7 @@ class PersonalService
                         : [];
                     $fechaFin = PersonalNormalizer::isoDate($data['fecha_fin_contrato'] ?? null);
 
-                    if ($fechaFin && $fechaFin < $today) {
+                    if ($fechaFin && $fechaFin < $today && !$this->hasSignedContract($worker)) {
                         $this->markCeased($worker, 'Termino de contrato', $usuario, $fechaFin);
                     }
                 }
@@ -326,6 +395,10 @@ class PersonalService
                 $data['pendiente_regularizacion'] = filter_var($payload['pendiente_regularizacion'] ?? false, FILTER_VALIDATE_BOOLEAN);
             }
 
+            if (Schema::hasColumn('personal', 'pendiente_contrato_firmado')) {
+                $data['pendiente_contrato_firmado'] = filter_var($payload['pendiente_contrato_firmado'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            }
+
             $personal = Personal::query()->create($data);
 
             $this->syncMineRelations($personal, $payload['minas'] ?? []);
@@ -401,6 +474,10 @@ class PersonalService
 
             if (Schema::hasColumn('personal', 'pendiente_regularizacion') && array_key_exists('pendiente_regularizacion', $payload)) {
                 $data['pendiente_regularizacion'] = filter_var($payload['pendiente_regularizacion'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            }
+
+            if (Schema::hasColumn('personal', 'pendiente_contrato_firmado') && array_key_exists('pendiente_contrato_firmado', $payload)) {
+                $data['pendiente_contrato_firmado'] = filter_var($payload['pendiente_contrato_firmado'] ?? false, FILTER_VALIDATE_BOOLEAN);
             }
 
             $personal->fill($data);
@@ -521,6 +598,12 @@ class PersonalService
                 ->latest('contrato_numero')
                 ->first();
 
+        $activeContractEnd = optional($activeContract?->fecha_fin)->toDateString();
+        if ($activeContract && strtoupper((string) $activeContract->estado) === PersonalContrato::ESTADO_ACTIVO
+            && $activeContractEnd && $activeContractEnd < Carbon::today()->toDateString()) {
+            return false;
+        }
+
         if (!Schema::hasTable('personal_contrato_datos')) {
             return false;
         }
@@ -617,6 +700,71 @@ class PersonalService
         }
 
         return $personal->fresh($relations);
+    }
+
+    public function addToListaNegra(Personal $personal, string $motivo, ?Usuario $usuario = null): Personal
+    {
+        $motivo = trim($motivo);
+
+        if ($motivo === '') {
+            throw ValidationException::withMessages([
+                'motivo_lista_negra' => 'El motivo de lista negra es obligatorio.',
+            ]);
+        }
+
+        if (!Schema::hasColumn('personal', 'en_lista_negra')) {
+            throw ValidationException::withMessages([
+                'lista_negra' => 'La base de datos aun no tiene habilitada la lista negra de personal.',
+            ]);
+        }
+
+        $data = [
+            'en_lista_negra' => true,
+        ];
+
+        if (Schema::hasColumn('personal', 'lista_negra_motivo')) {
+            $data['lista_negra_motivo'] = $motivo;
+        }
+
+        if (Schema::hasColumn('personal', 'lista_negra_at')) {
+            $data['lista_negra_at'] = now();
+        }
+
+        if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id') && $usuario?->id && Usuario::query()->whereKey($usuario->id)->exists()) {
+            $data['lista_negra_by_usuario_id'] = $usuario->id;
+        }
+
+        $personal->forceFill($data)->save();
+
+        $relations = ['minas', 'fichaColaborador'];
+        if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id')) {
+            $relations[] = 'listaNegraPor.personal';
+        }
+
+        return $personal->fresh($relations) ?: $personal;
+    }
+
+    public function removeFromListaNegra(Personal $personal): Personal
+    {
+        if (!Schema::hasColumn('personal', 'en_lista_negra')) {
+            throw ValidationException::withMessages([
+                'lista_negra' => 'La base de datos aun no tiene habilitada la lista negra de personal.',
+            ]);
+        }
+
+        $data = [
+            'en_lista_negra' => false,
+        ];
+
+        foreach (['lista_negra_motivo', 'lista_negra_at', 'lista_negra_by_usuario_id'] as $column) {
+            if (Schema::hasColumn('personal', $column)) {
+                $data[$column] = null;
+            }
+        }
+
+        $personal->forceFill($data)->save();
+
+        return $personal->fresh(['minas', 'fichaColaborador']) ?: $personal;
     }
 
     public function deleteCompletely(Personal $personal): void
@@ -723,6 +871,7 @@ class PersonalService
         $allowed = [
             'ACTIVO',
             'FALTA_CONTRATO',
+            'NO_FIRMO_CONTRATO',
             'INACTIVO',
             'CESADO',
             'PENDIENTE_COMPLETAR_FICHA',

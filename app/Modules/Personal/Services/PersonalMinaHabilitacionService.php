@@ -238,6 +238,166 @@ class PersonalMinaHabilitacionService
             ->get();
     }
 
+    public function upcomingExamExpirations(int $days = 60)
+    {
+        if (!Schema::hasTable('personal_mina_examenes') || !Schema::hasTable('personal_mina')) {
+            return collect();
+        }
+
+        $today = Carbon::today();
+        $until = $today->copy()->addDays(max(1, $days));
+        $activeStates = [
+            PersonalMinaExamen::ESTADO_APROBADO,
+            PersonalMinaExamen::ESTADO_VIGENTE,
+            PersonalMinaExamen::ESTADO_POR_VENCER,
+            PersonalMinaExamen::ESTADO_CONVALIDADO,
+        ];
+
+        $exams = PersonalMinaExamen::query()
+            ->with([
+                'asignacion.personal.contratoLaboralActual',
+                'asignacion.mina',
+                'asignacion.examenes.intentos',
+                'asignacion.examenes.requisitoMina',
+                'intentos',
+            ])
+            ->whereIn('estado', $activeStates)
+            ->whereNotNull('fecha_vencimiento')
+            ->whereBetween('fecha_vencimiento', [$today->toDateString(), $until->toDateString()])
+            ->whereHas('asignacion', fn ($query) => $query->where('activo', true))
+            ->orderBy('fecha_vencimiento')
+            ->orderBy('nombre_snapshot')
+            ->limit(300)
+            ->get();
+
+        return $exams
+            ->filter(fn (PersonalMinaExamen $exam) => $exam->asignacion?->personal && $exam->asignacion?->mina)
+            ->groupBy(function (PersonalMinaExamen $exam): string {
+                return implode('|', [
+                    (string) $exam->asignacion->personal_id,
+                    mb_strtolower(trim((string) $exam->nombre_snapshot)),
+                    $exam->fecha_vencimiento ? Carbon::parse($exam->fecha_vencimiento)->toDateString() : '',
+                ]);
+            })
+            ->map(function ($group) use ($today): array {
+                /** @var PersonalMinaExamen $first */
+                $first = $group->first();
+                $expiresAt = $first->fecha_vencimiento ? Carbon::parse($first->fecha_vencimiento) : null;
+
+                return [
+                    'worker' => $first->asignacion->personal,
+                    'exam_name' => $first->nombre_snapshot ?: 'Examen',
+                    'fecha_vencimiento' => $expiresAt,
+                    'dias_restantes' => $expiresAt ? (int) $today->diffInDays($expiresAt, false) : null,
+                    'estado' => $first->estado,
+                    'mines' => $group
+                        ->map(fn (PersonalMinaExamen $exam): array => [
+                            'assignment' => $exam->asignacion,
+                            'mine' => $exam->asignacion->mina,
+                            'exam' => $exam,
+                        ])
+                        ->unique(fn (array $row): string => (string) $row['assignment']->id)
+                        ->sortBy(fn (array $row): string => (string) ($row['mine']->nombre ?? ''))
+                        ->values(),
+                ];
+            })
+            ->sortBy(fn (array $row): string => sprintf(
+                '%s|%s|%s',
+                $row['fecha_vencimiento'] ? $row['fecha_vencimiento']->toDateString() : '9999-12-31',
+                $row['worker']->nombre_completo ?? '',
+                $row['exam_name']
+            ))
+            ->values();
+    }
+
+    public function scheduledExamAttempts(int $days = 60)
+    {
+        if (
+            !Schema::hasTable('personal_mina_examen_intentos')
+            || !Schema::hasTable('personal_mina_examenes')
+            || !Schema::hasTable('personal_mina')
+        ) {
+            return collect();
+        }
+
+        $today = Carbon::today();
+        $from = $today->copy()->subDays(30);
+        $until = $today->copy()->addDays(max(1, $days));
+
+        $attempts = PersonalMinaExamenIntento::query()
+            ->with([
+                'examenTrabajador.asignacion.personal.contratoLaboralActual',
+                'examenTrabajador.asignacion.mina',
+                'examenTrabajador.asignacion.examenes.intentos',
+                'examenTrabajador.asignacion.examenes.requisitoMina',
+                'examenTrabajador.intentos',
+                'examenTrabajador.requisitoMina',
+            ])
+            ->where('resultado', PersonalMinaExamenIntento::RESULTADO_PENDIENTE)
+            ->whereNotNull('fecha_programacion')
+            ->whereBetween('fecha_programacion', [$from->toDateString(), $until->toDateString()])
+            ->whereHas('examenTrabajador.asignacion', fn ($query) => $query->where('activo', true))
+            ->orderBy('fecha_programacion')
+            ->limit(500)
+            ->get();
+
+        return $attempts
+            ->filter(function (PersonalMinaExamenIntento $attempt): bool {
+                $exam = $attempt->examenTrabajador;
+
+                return (bool) ($exam?->asignacion?->personal && $exam?->asignacion?->mina);
+            })
+            ->groupBy(function (PersonalMinaExamenIntento $attempt): string {
+                $exam = $attempt->examenTrabajador;
+
+                return implode('|', [
+                    (string) $exam->asignacion->personal_id,
+                    mb_strtolower(trim((string) $exam->nombre_snapshot)),
+                    $attempt->fecha_programacion ? Carbon::parse($attempt->fecha_programacion)->toDateString() : '',
+                ]);
+            })
+            ->map(function ($group) use ($today): array {
+                /** @var PersonalMinaExamenIntento $firstAttempt */
+                $firstAttempt = $group->first();
+                $firstExam = $firstAttempt->examenTrabajador;
+                $scheduledAt = $firstAttempt->fecha_programacion ? Carbon::parse($firstAttempt->fecha_programacion) : null;
+
+                return [
+                    'worker' => $firstExam->asignacion->personal,
+                    'exam_name' => $firstExam->nombre_snapshot ?: 'Examen',
+                    'fecha_programacion' => $scheduledAt,
+                    'dias_para_programacion' => $scheduledAt ? (int) $today->diffInDays($scheduledAt, false) : null,
+                    'estado' => $firstExam->estado,
+                    'mines' => $group
+                        ->map(function (PersonalMinaExamenIntento $attempt): array {
+                            $exam = $attempt->examenTrabajador;
+
+                            return [
+                                'assignment' => $exam->asignacion,
+                                'mine' => $exam->asignacion->mina,
+                                'exam' => $exam,
+                                'attempt' => $attempt,
+                                'numero_intento' => $attempt->numero_intento,
+                            ];
+                        })
+                        ->unique(fn (array $row): string => implode('|', [
+                            (string) $row['assignment']->id,
+                            (string) $row['exam']->id,
+                            (string) $row['attempt']->id,
+                        ]))
+                        ->sortBy(fn (array $row): string => (string) ($row['mine']->nombre ?? ''))
+                        ->values(),
+                ];
+            })
+            ->sortBy(fn (array $row): string => sprintf(
+                '%s|%s|%s',
+                $row['fecha_programacion'] ? $row['fecha_programacion']->toDateString() : '9999-12-31',
+                $row['worker']->nombre_completo ?? '',
+                $row['exam_name']
+            ))
+            ->values();
+    }
+
     public function listPriceHistory(?string $examId = null)
     {
         if (!Schema::hasTable('examen_minero_precios')) {
@@ -944,7 +1104,7 @@ class PersonalMinaHabilitacionService
             ->with(['asignacion', 'intentos'])
             ->findOrFail($workerExam->id);
 
-        $isExpired = strtoupper((string) $workerExam->estado) === PersonalMinaExamen::ESTADO_VENCIDO;
+        $isExpired = $this->expiredAttemptCycleCutoff($workerExam) !== null;
 
         if (!$isExpired && in_array(strtoupper((string) $workerExam->estado), [
             PersonalMinaExamen::ESTADO_NO_APLICA,
@@ -955,7 +1115,7 @@ class PersonalMinaHabilitacionService
             throw ValidationException::withMessages(['examen' => 'Este examen ya fue resuelto.']);
         }
 
-        $currentAttempts = $workerExam->intentos->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)->count();
+        $currentAttempts = $this->currentCycleAttempts($workerExam)->count();
         $maxAttempts = $this->effectiveMaxAttempts($workerExam);
 
         $nextAttempt = $currentAttempts + 1;
@@ -972,7 +1132,7 @@ class PersonalMinaHabilitacionService
         $score = $payload['nota'] ?? null;
 
         if ($result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled) {
-            $hasPendingSchedule = $workerExam->intentos
+            $hasPendingSchedule = $this->currentCycleAttempts($workerExam)
                 ->where('resultado', PersonalMinaExamenIntento::RESULTADO_PENDIENTE)
                 ->filter(fn (PersonalMinaExamenIntento $attempt): bool => filled($attempt->fecha_programacion))
                 ->isNotEmpty();
@@ -1001,14 +1161,15 @@ class PersonalMinaHabilitacionService
         }
 
         $storedFile = $file ? $this->storeAttemptFile($workerExam, $file) : null;
+        $storedAttemptNumber = $this->nextStoredAttemptNumber($workerExam);
 
-        DB::transaction(function () use ($workerExam, $nextAttempt, $dateScheduled, $dateDone, $result, $score, $payload, $storedFile, $manualExpiration, $user): void {
+        DB::transaction(function () use ($workerExam, $storedAttemptNumber, $dateScheduled, $dateDone, $result, $score, $payload, $storedFile, $manualExpiration, $user): void {
             $priceSnapshot = $this->resolveAttemptPriceSnapshot($workerExam, Carbon::today()->toDateString(), $dateScheduled, $dateDone);
 
             PersonalMinaExamenIntento::query()->create([
                 'id' => (string) Str::uuid(),
                 'personal_mina_examen_id' => $workerExam->id,
-                'numero_intento' => $nextAttempt,
+                'numero_intento' => $storedAttemptNumber,
                 'fecha_programacion' => $dateScheduled,
                 'fecha_realizacion' => $dateDone,
                 'resultado' => $result,
@@ -1508,13 +1669,21 @@ class PersonalMinaHabilitacionService
             $state = $this->stateForApprovedExam($expiration);
         }
 
+        $expirationForExam = $expiration;
+        if ($expirationForExam === null
+            && $result !== PersonalMinaExamenIntento::RESULTADO_APROBADO
+            && $this->expiredAttemptCycleCutoff($workerExam)
+        ) {
+            $expirationForExam = optional($workerExam->fecha_vencimiento)->toDateString();
+        }
+
         $workerExam->forceFill([
             'estado' => $state,
             'resultado' => $result,
             'nota_obtenida' => $score,
             'fecha_programacion' => $dateScheduled,
             'fecha_realizacion' => $dateDone,
-            'fecha_vencimiento' => $expiration,
+            'fecha_vencimiento' => $expirationForExam,
             'observacion' => mb_substr(PersonalNormalizer::text($payload['observacion'] ?? ''), 0, 5000) ?: $workerExam->observacion,
             'usuario_actualizacion_id' => $user->id,
             'fecha_actualizacion' => now(),
@@ -1656,14 +1825,65 @@ class PersonalMinaHabilitacionService
 
     private function hasAttemptsAvailable(PersonalMinaExamen $exam): bool
     {
+        return $this->currentCycleAttempts($exam)->count() < $this->effectiveMaxAttempts($exam);
+    }
+
+    private function currentCycleAttempts(PersonalMinaExamen $exam)
+    {
         $attempts = $exam->relationLoaded('intentos')
-            ? $exam->intentos->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)->count()
+            ? $exam->intentos
             : PersonalMinaExamenIntento::query()
                 ->where('personal_mina_examen_id', $exam->id)
-                ->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)
-                ->count();
+                ->orderBy('numero_intento')
+                ->get();
 
-        return $attempts < $this->effectiveMaxAttempts($exam);
+        $attempts = $attempts
+            ->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)
+            ->values();
+
+        $cutoff = $this->expiredAttemptCycleCutoff($exam);
+        if (!$cutoff) {
+            return $attempts;
+        }
+
+        return $attempts
+            ->filter(function (PersonalMinaExamenIntento $attempt) use ($cutoff): bool {
+                $date = $this->attemptOperationalDate($attempt);
+
+                return $date !== null && $date->gt($cutoff);
+            })
+            ->values();
+    }
+
+    private function nextStoredAttemptNumber(PersonalMinaExamen $exam): int
+    {
+        $attempts = $exam->relationLoaded('intentos')
+            ? $exam->intentos
+            : PersonalMinaExamenIntento::query()
+                ->where('personal_mina_examen_id', $exam->id)
+                ->get();
+
+        return ((int) ($attempts->max('numero_intento') ?? 0)) + 1;
+    }
+
+    private function expiredAttemptCycleCutoff(PersonalMinaExamen $exam): ?Carbon
+    {
+        if (!$exam->fecha_vencimiento) {
+            return null;
+        }
+
+        $expiration = Carbon::parse($exam->fecha_vencimiento)->endOfDay();
+        $isExpiredByDate = $expiration->lt(Carbon::today()->startOfDay());
+        $isExpiredByState = strtoupper((string) $exam->estado) === PersonalMinaExamen::ESTADO_VENCIDO;
+
+        return $isExpiredByDate || $isExpiredByState ? $expiration : null;
+    }
+
+    private function attemptOperationalDate(PersonalMinaExamenIntento $attempt): ?Carbon
+    {
+        $date = $attempt->fecha_realizacion ?: $attempt->fecha_programacion ?: $attempt->created_at;
+
+        return $date ? Carbon::parse($date) : null;
     }
 
     private function isExamApprovedAndCurrent(PersonalMinaExamen $exam): bool

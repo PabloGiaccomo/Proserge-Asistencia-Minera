@@ -343,6 +343,7 @@ class RQMinaPageController extends WebPageController
                 'cantidad' => $request->input('cantidad', []),
                 'transporte' => $request->input('transporte', []),
                 'supervisor_id' => $request->input('supervisor_id'),
+                'supervisor_pets_id' => $request->input('supervisor_pets_id'),
                 'plan_operativo_count' => count((array) $request->input('plan_operativo', [])),
             ],
         ]);
@@ -400,6 +401,7 @@ class RQMinaPageController extends WebPageController
                 'cantidad' => $request->input('cantidad', []),
                 'transporte' => $request->input('transporte', []),
                 'supervisor_id' => $request->input('supervisor_id'),
+                'supervisor_pets_id' => $request->input('supervisor_pets_id'),
                 'plan_operativo_count' => count((array) $request->input('plan_operativo', [])),
             ],
         ]);
@@ -621,6 +623,8 @@ class RQMinaPageController extends WebPageController
             'destino_nombre' => $destinoNombre,
             'supervisor_id' => $rq->supervisor_id,
             'supervisor' => $this->compactPersonal($rq->supervisor ?? null),
+            'supervisor_pets_id' => $rq->supervisor_pets_id,
+            'supervisor_pets' => $this->compactPersonal($rq->supervisorPets ?? null),
             'lugar' => $destinoNombre,
             'area' => $rq->area,
             'fecha_inicio' => $rq->fecha_inicio?->format('Y-m-d'),
@@ -659,6 +663,7 @@ class RQMinaPageController extends WebPageController
         );
         $normalizedTransporte = $this->normalizeTransporteFromRequest($request);
         $supervisorId = trim((string) $request->input('supervisor_id', ''));
+        $supervisorPetsId = trim((string) $request->input('supervisor_pets_id', ''));
         $planOperativo = $this->normalizePlanOperativoFromRequest($request);
 
         $normalizedDetalle = $this->normalizeDetalleFromRequest($request);
@@ -696,6 +701,7 @@ class RQMinaPageController extends WebPageController
             'fecha_fin' => $request->input('fecha_fin'),
             'observaciones' => $request->input('observaciones'),
             'supervisor_id' => $supervisorId !== '' ? $supervisorId : null,
+            'supervisor_pets_id' => $supervisorPetsId !== '' ? $supervisorPetsId : null,
             'detalle' => $normalizedDetalle,
             'transporte' => $normalizedTransporte,
             'plan_operativo' => $planOperativo,
@@ -716,6 +722,10 @@ class RQMinaPageController extends WebPageController
         }
         if ($supervisorId !== '' && !Personal::query()->where('id', $supervisorId)->where('es_supervisor', true)->exists()) {
             $errors['supervisor_id'] = 'Selecciona un supervisor válido.';
+        }
+
+        if ($supervisorPetsId !== '' && !Personal::query()->where('id', $supervisorPetsId)->where('es_supervisor', true)->exists()) {
+            $errors['supervisor_pets_id'] = 'Selecciona un supervisor PETS valido.';
         }
 
         return [

@@ -31,6 +31,84 @@ class ExportPersonalService
         'correo' => 'Correo',
         'minas' => 'Minas Asociadas',
         'estado_mina' => 'Estados en Mina',
+        'sexo' => 'Sexo',
+        'estado_civil' => 'Estado civil',
+        'nacionalidad' => 'Nacionalidad',
+        'grupo_sanguineo' => 'G. sanguineo',
+        'brevete' => 'Brevete',
+        'fecha_nacimiento' => 'Fecha nacimiento',
+        'pais_nacimiento' => 'Pais nacimiento',
+        'departamento_nacimiento' => 'Departamento nacimiento',
+        'provincia_nacimiento' => 'Provincia nacimiento',
+        'distrito_nacimiento' => 'Distrito nacimiento',
+        'lugar_nacimiento_extranjero' => 'Lugar nacimiento extranjero',
+        'telefono_alterno' => 'Telefono alterno',
+        'domicilio_pais' => 'Pais domicilio',
+        'domicilio_departamento' => 'Departamento domicilio',
+        'domicilio_provincia' => 'Provincia domicilio',
+        'domicilio_distrito' => 'Distrito domicilio',
+        'domicilio_direccion' => 'Direccion domicilio',
+        'domicilio_referencia' => 'Referencia domicilio',
+        'domicilio_extranjero' => 'Domicilio extranjero',
+        'banco' => 'Banco',
+        'numero_cuenta' => 'Numero de cuenta',
+        'cci' => 'CCI',
+        'grado_instruccion' => 'Grado de instruccion',
+        'profesion_oficio' => 'Profesion u oficio',
+        'especialidad' => 'Especialidad',
+        'anio_experiencia' => 'Anos de experiencia',
+        'anio_egreso' => 'Anio de egreso',
+        'carrera' => 'Carrera',
+        'institucion' => 'Institucion',
+        'sistema_pensionario' => 'Sistema pensionario',
+        'tipo_afp' => 'AFP',
+        'cuspp' => 'CUSPP',
+        'talla_zapato' => 'Talla zapato/botas',
+        'talla_polo' => 'Talla camisa/chaleco',
+        'talla_pantalon' => 'Talla pantalon',
+        'talla_respirador' => 'Talla respirador',
+        'familiares_resumen' => 'Familiares o contactos',
+        'contactos_emergencia' => 'Contactos de emergencia',
+    ];
+
+    /** @var array<string, string> */
+    private const FICHA_JSON_COLUMNS = [
+        'sexo' => 'sexo',
+        'estado_civil' => 'estado_civil',
+        'nacionalidad' => 'nacionalidad',
+        'grupo_sanguineo' => 'grupo_sanguineo',
+        'brevete' => 'brevete',
+        'fecha_nacimiento' => 'fecha_nacimiento',
+        'pais_nacimiento' => 'pais_nacimiento',
+        'departamento_nacimiento' => 'departamento_nacimiento',
+        'provincia_nacimiento' => 'provincia_nacimiento',
+        'distrito_nacimiento' => 'distrito_nacimiento',
+        'lugar_nacimiento_extranjero' => 'lugar_nacimiento_extranjero',
+        'telefono_alterno' => 'telefono_alterno',
+        'domicilio_pais' => 'domicilio_tipo',
+        'domicilio_departamento' => 'domicilio_departamento',
+        'domicilio_provincia' => 'domicilio_provincia',
+        'domicilio_distrito' => 'domicilio_distrito',
+        'domicilio_direccion' => 'domicilio_direccion',
+        'domicilio_referencia' => 'domicilio_referencia',
+        'domicilio_extranjero' => 'domicilio_extranjero',
+        'banco' => 'banco',
+        'numero_cuenta' => 'numero_cuenta',
+        'cci' => 'cci',
+        'grado_instruccion' => 'grado_instruccion',
+        'profesion_oficio' => 'profesion_oficio',
+        'especialidad' => 'especialidad',
+        'anio_experiencia' => 'anio_experiencia',
+        'anio_egreso' => 'anio_egreso',
+        'carrera' => 'carrera',
+        'institucion' => 'institucion',
+        'sistema_pensionario' => 'sistema_pensionario',
+        'tipo_afp' => 'tipo_afp',
+        'cuspp' => 'cuspp',
+        'talla_zapato' => 'talla_zapato',
+        'talla_polo' => 'talla_polo',
+        'talla_pantalon' => 'talla_pantalon',
+        'talla_respirador' => 'talla_respirador',
     ];
 
     /** @var array<string, array{fill:string,font:string}> */
@@ -226,21 +304,7 @@ class ExportPersonalService
                 }
 
                 $columnKey = (string) ($definition['key'] ?? '');
-                $row[] = match ($columnKey) {
-                    'dni' => (string) $record->dni,
-                    'nombre_completo' => (string) $record->nombre_completo,
-                    'puesto' => (string) $record->puesto,
-                    'contrato' => (string) PersonalNormalizer::contractLabel($record->contrato),
-                    'ocupacion' => (string) ($record->ocupacion ?? ''),
-                    'supervisor' => $record->es_supervisor ? 'Si' : 'No',
-                    'fecha_ingreso' => (string) (optional($record->fecha_ingreso)->toDateString() ?? ''),
-                    'estado' => strtoupper((string) $record->estado),
-                    'telefono_1' => (string) ($telefono1 ?? ''),
-                    'telefono_2' => (string) ($telefono2 ?? ''),
-                    'telefono' => (string) (PersonalNormalizer::combinePhones($telefono1, $telefono2) ?? ''),
-                    'correo' => (string) ($record->correo ?? ''),
-                    default => '',
-                };
+                $row[] = $this->valueForColumn($record, $columnKey, $telefono1, $telefono2);
                 $styleRow[] = '';
             }
 
@@ -325,7 +389,10 @@ class ExportPersonalService
 
     private function recordsForConfig(PersonalExportConfig $config, ?int $limit = null): Collection
     {
-        $query = $this->buildQueryFromConfig($config)->with(['minas']);
+        $query = $this->buildQueryFromConfig($config)->with([
+            'minas',
+            'fichaColaborador.familiares',
+        ]);
         if ($limit !== null) {
             $query->limit($limit);
         } elseif ($config->limit !== null) {
@@ -333,6 +400,102 @@ class ExportPersonalService
         }
 
         return $this->sortRecordsBySelectedIds($query->get(), $config->personalIds);
+    }
+
+    private function valueForColumn(Personal $personal, string $columnKey, mixed $telefono1, mixed $telefono2): string
+    {
+        if (isset(self::FICHA_JSON_COLUMNS[$columnKey])) {
+            $fallback = match ($columnKey) {
+                'telefono_alterno' => (string) ($telefono2 ?? ''),
+                default => '',
+            };
+
+            return $this->fichaFieldValue($personal, self::FICHA_JSON_COLUMNS[$columnKey], $fallback);
+        }
+
+        return match ($columnKey) {
+            'dni' => (string) $personal->dni,
+            'nombre_completo' => (string) $personal->nombre_completo,
+            'puesto' => (string) $personal->puesto,
+            'contrato' => (string) PersonalNormalizer::contractLabel($personal->contrato),
+            'ocupacion' => (string) ($personal->ocupacion ?? ''),
+            'supervisor' => $personal->es_supervisor ? 'Si' : 'No',
+            'fecha_ingreso' => (string) (optional($personal->fecha_ingreso)->toDateString() ?? ''),
+            'estado' => strtoupper((string) $personal->estado),
+            'telefono_1' => (string) ($telefono1 ?? ''),
+            'telefono_2' => (string) ($telefono2 ?? ''),
+            'telefono' => (string) (PersonalNormalizer::combinePhones($telefono1, $telefono2) ?? ''),
+            'correo' => (string) ($personal->correo ?? ''),
+            'familiares_resumen' => $this->familiaresSummary($personal),
+            'contactos_emergencia' => $this->familiaresSummary($personal, true),
+            default => '',
+        };
+    }
+
+    private function fichaFieldValue(Personal $personal, string $fieldKey, string $fallback = ''): string
+    {
+        $data = is_array($personal->fichaColaborador?->datos_json)
+            ? $personal->fichaColaborador->datos_json
+            : [];
+
+        $value = trim((string) ($data[$fieldKey] ?? ''));
+
+        if ($fieldKey === 'estado_civil' && $value === 'Otro') {
+            return $this->appendDetail($value, $data['estado_civil_otro'] ?? '');
+        }
+
+        if ($fieldKey === 'nacionalidad' && $value === 'Otra') {
+            return $this->appendDetail($value, $data['nacionalidad_otra'] ?? '');
+        }
+
+        if ($fieldKey === 'pais_nacimiento' && $value === 'Otro') {
+            return $this->appendDetail($value, $data['pais_nacimiento_otro'] ?? '');
+        }
+
+        if ($fieldKey === 'domicilio_tipo' && $value === 'Extranjero') {
+            return $this->appendDetail($value, $data['domicilio_pais_otro'] ?? '');
+        }
+
+        if ($fieldKey === 'banco' && $value === 'Otro') {
+            return $this->appendDetail($value, $data['banco_otro'] ?? '');
+        }
+
+        return $value !== '' ? $value : $fallback;
+    }
+
+    private function appendDetail(string $value, mixed $detail): string
+    {
+        $detail = trim((string) $detail);
+
+        return $detail !== '' ? $value . ': ' . $detail : $value;
+    }
+
+    private function familiaresSummary(Personal $personal, bool $onlyEmergency = false): string
+    {
+        $familiares = $personal->fichaColaborador?->familiares;
+        if (!$familiares instanceof Collection || $familiares->isEmpty()) {
+            return '';
+        }
+
+        return $familiares
+            ->filter(fn ($familiar): bool => !$onlyEmergency || (bool) $familiar->contacto_emergencia)
+            ->map(function ($familiar): string {
+                $parts = collect([
+                    trim((string) $familiar->parentesco),
+                    trim((string) $familiar->nombres_apellidos),
+                    trim((string) $familiar->numero_documento) !== '' ? 'Doc. ' . trim((string) $familiar->numero_documento) : '',
+                    trim((string) $familiar->telefono) !== '' ? 'Tel. ' . trim((string) $familiar->telefono) : '',
+                    $familiar->fecha_nacimiento ? 'Nac. ' . $familiar->fecha_nacimiento->toDateString() : '',
+                    $familiar->vive_con_trabajador ? 'Vive con trabajador' : '',
+                    $familiar->estudia ? 'Estudia' : '',
+                    $familiar->contacto_emergencia ? 'Contacto emergencia' : '',
+                ])->filter()->values();
+
+                return $parts->implode(' - ');
+            })
+            ->filter()
+            ->values()
+            ->implode(' | ');
     }
 
     private function sortRecordsBySelectedIds(Collection $records, array $personalIds): Collection

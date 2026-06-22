@@ -406,7 +406,17 @@ $calcTransporteTotal = static function (array $transporte): int {
                 @include('rq-mina.partials.supervisor-selector', [
                     'selectorId' => 'rqModalSupervisorSelector',
                     'selectedSupervisor' => null,
+                    'title' => 'Supervisor a cargo de herramientas',
                 ])
+                <div style="margin-top: 14px;">
+                    @include('rq-mina.partials.supervisor-selector', [
+                        'selectorId' => 'rqModalSupervisorPetsSelector',
+                        'selectedSupervisor' => null,
+                        'title' => 'Supervisor a cargo de PETS',
+                        'fieldName' => 'supervisor_pets_id',
+                        'emptyText' => 'Sin supervisor PETS seleccionado.',
+                    ])
+                </div>
             </div>
             <div class="form-section">
                 @include('rq-mina.partials.plan-operativo-editor', [
@@ -496,6 +506,7 @@ function openModalRQ(mode = 'create', rqId = null) {
     transporte.innerHTML = createTransporteRow('', 1);
     if (window.rqMinaSupervisorSelectorSet) {
         window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', null);
+        window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', null);
     }
     if (window.rqMinaPlanEditorSet) {
         window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', []);
@@ -530,6 +541,7 @@ function openModalRQ(mode = 'create', rqId = null) {
         });
         if (window.rqMinaSupervisorSelectorSet) {
             window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
+            window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', rq.supervisor_pets || null);
         }
         if (window.rqMinaPlanEditorSet) {
             window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);
@@ -563,6 +575,7 @@ function openModalRQ(mode = 'create', rqId = null) {
         });
         if (window.rqMinaSupervisorSelectorSet) {
             window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
+            window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', rq.supervisor_pets || null);
         }
         if (window.rqMinaPlanEditorSet) {
             window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);

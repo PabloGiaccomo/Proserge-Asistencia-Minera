@@ -22,6 +22,7 @@ class RQMina extends Model
         'destino_id',
         'destino_nombre',
         'supervisor_id',
+        'supervisor_pets_id',
         'area',
         'fecha_inicio',
         'fecha_fin',
@@ -50,6 +51,11 @@ class RQMina extends Model
     public function supervisor(): BelongsTo
     {
         return $this->belongsTo(Personal::class, 'supervisor_id');
+    }
+
+    public function supervisorPets(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'supervisor_pets_id');
     }
 
     public function detalle(): HasMany

@@ -2,10 +2,12 @@ ALTER TABLE rq_mina
   ADD COLUMN IF NOT EXISTS destino_tipo VARCHAR(20) NULL AFTER mina_id,
   ADD COLUMN IF NOT EXISTS destino_id CHAR(36) NULL AFTER destino_tipo,
   ADD COLUMN IF NOT EXISTS destino_nombre VARCHAR(191) NULL AFTER destino_id,
-  ADD COLUMN IF NOT EXISTS supervisor_id CHAR(36) NULL AFTER destino_nombre;
+  ADD COLUMN IF NOT EXISTS supervisor_id CHAR(36) NULL AFTER destino_nombre,
+  ADD COLUMN IF NOT EXISTS supervisor_pets_id CHAR(36) NULL AFTER supervisor_id;
 
 ALTER TABLE rq_mina
-  ADD INDEX IF NOT EXISTS idx_rq_mina_supervisor (supervisor_id);
+  ADD INDEX IF NOT EXISTS idx_rq_mina_supervisor (supervisor_id),
+  ADD INDEX IF NOT EXISTS idx_rq_mina_supervisor_pets (supervisor_pets_id);
 
 UPDATE rq_mina rm
 LEFT JOIN minas m ON m.id = rm.mina_id

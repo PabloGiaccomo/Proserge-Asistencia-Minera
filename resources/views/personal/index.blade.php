@@ -323,6 +323,11 @@
     display: block;
 }
 
+.personal-page.is-filter-popover-open .personal-grid-scroll-top {
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .dg-pop-left {
     min-width: 210px;
 }
@@ -334,6 +339,13 @@
 .dg-pop-wide {
     min-width: 310px;
     max-width: min(390px, calc(100vw - 24px));
+}
+
+#dgFilterOcupacion {
+    max-height: min(420px, calc(100vh - 96px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable both-edges;
 }
 
 .dg-filter-popover .filter-compact-select,
@@ -385,6 +397,67 @@
     background: #fef3c7;
     color: #92400e;
     border-color: #fcd34d;
+}
+
+.dg-pill-estado-no-firmo {
+    background: #ffedd5;
+    color: #9a3412;
+    border-color: #fdba74;
+}
+
+.personal-contract-warning {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.personal-page .data-table tr.blacklisted-worker td {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.personal-page .data-table tr.contract-missing td[data-column="contrato"] {
+    background: rgba(251, 146, 60, 0.18);
+}
+
+.personal-page .data-table tr.contract-file-pending td[data-column="contrato"] {
+    background: rgba(250, 204, 21, 0.22);
+}
+
+.personal-page .data-table td.contract-attention-cell {
+    box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.18);
+}
+
+.personal-page .data-table td.contract-file-pending-cell {
+    box-shadow: inset 0 0 0 1px rgba(234, 179, 8, 0.22);
+}
+
+.personal-page .data-table tr.blacklisted-worker td[data-column="acciones"] .personal-icon-btn,
+.personal-page .data-table tr.blacklisted-worker td[data-column="acciones"] form .personal-icon-btn {
+    background: #ffffff;
+}
+
+.personal-page .data-table tr.blacklisted-worker .personal-worker-name::after {
+    content: "Lista negra";
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
 }
 
 .dg-pill-estado-inactivo,
@@ -1014,6 +1087,58 @@
     margin: 0;
 }
 
+.dg-filter-helper {
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.35;
+    margin-top: 4px;
+}
+
+.dg-quick-filter-checks {
+    display: grid;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+    margin-top: 8px;
+    padding-right: 2px;
+}
+
+.dg-filter-check-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.25;
+}
+
+.dg-filter-check-option input {
+    margin: 0;
+}
+
+.dg-filter-row-mode {
+    align-items: flex-start;
+    background: #f8fafc;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    color: #0f172a;
+    padding: 8px;
+}
+
+.dg-filter-row-mode strong {
+    display: block;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.dg-filter-row-mode small {
+    color: #64748b;
+    display: block;
+    font-size: 11px;
+    line-height: 1.35;
+    margin-top: 2px;
+}
+
 .personal-grid-shell.is-ocup-grouped .dg-ocup-flat {
     display: none;
 }
@@ -1208,6 +1333,37 @@
 .personal-cease-modal .modal-header {
     padding-bottom: 12px;
     margin-bottom: 12px;
+}
+
+.personal-activate-modal {
+    width: min(860px, calc(100vw - 32px));
+}
+
+.personal-activate-section {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.personal-activate-section-title {
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .02em;
+    color: #475569;
+    text-transform: uppercase;
+}
+
+.personal-activate-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+}
+
+.personal-activate-wide {
+    grid-column: 1 / -1;
 }
 
 .personal-cease-textarea {
@@ -1796,7 +1952,7 @@
                                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                             </svg>
-                            Temporales y links
+                            Ingresos
                         </a>
                         <div class="accion-divider"></div>
                         <a class="accion-item" href="{{ route('personal.importar') }}">
@@ -2141,7 +2297,8 @@
                                         </button>
                                         <div id="dgFilterPuesto" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Puesto</label>
-                                            <select id="dgPuesto" class="filter-compact-select"><option value="">Todos</option></select>
+                                            <div class="dg-filter-helper">Marca uno o varios puestos. Si no marcas nada, se muestran todos.</div>
+                                            <div id="dgPuestoChecks" class="dg-quick-filter-checks"></div>
                                         </div>
                                     </div>
                                 </th>
@@ -2153,7 +2310,8 @@
                                         </button>
                                         <div id="dgFilterContrato" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Contrato</label>
-                                            <select id="dgContrato" class="filter-compact-select"><option value="">Todos</option></select>
+                                            <div class="dg-filter-helper">Puedes seleccionar mas de un tipo de contrato.</div>
+                                            <div id="dgContratoChecks" class="dg-quick-filter-checks"></div>
                                         </div>
                                     </div>
                                 </th>
@@ -2165,12 +2323,21 @@
                                         </button>
                                         <div id="dgFilterEstado" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Estado</label>
-                                            <select id="dgEstado" class="filter-compact-select">
-                                                <option value="">Todos</option>
-                                                <option value="activo">Activo</option>
-                                                <option value="inactivo">Inactivo</option>
-                                                <option value="cesado">Cesado</option>
-                                            </select>
+                                            <div class="dg-filter-helper">Marca uno o varios estados.</div>
+                                            <div id="dgEstadoChecks" class="dg-quick-filter-checks">
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-estado-check" value="activo">
+                                                    <span>Activo</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-estado-check" value="inactivo">
+                                                    <span>Inactivo</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-estado-check" value="cesado">
+                                                    <span>Cesado</span>
+                                                </label>
+                                            </div>
                                         </div>
                                     </div>
                                 </th>
@@ -2182,19 +2349,49 @@
                                         </button>
                                         <div id="dgFilterBienestar" class="dg-filter-popover dg-pop-center" onclick="event.stopPropagation()">
                                             <label class="dg-popover-label">Situación</label>
-                                            <select id="dgBienestar" class="filter-compact-select">
-                                                <option value="">Todos</option>
-                                                <option value="parada">En parada</option>
-                                                <option value="oficina">En oficina</option>
-                                                <option value="taller">En taller</option>
-                                                <option value="habilitado">Habilitado</option>
-                                                <option value="no_habilitado">No habilitado</option>
-                                                <option value="vacaciones">Vacaciones</option>
-                                                <option value="descanso_medico">Descanso medico</option>
-                                                <option value="gestacion">Gestacion</option>
-                                                <option value="revisar_ficha">Revisar ficha</option>
-                                                <option value="terminar_ficha">Terminar ficha</option>
-                                            </select>
+                                            <div class="dg-filter-helper">Marca una o varias situaciones.</div>
+                                            <div id="dgBienestarChecks" class="dg-quick-filter-checks">
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="parada">
+                                                    <span>En parada</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="oficina">
+                                                    <span>En oficina</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="taller">
+                                                    <span>En taller</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="habilitado">
+                                                    <span>Habilitado</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="no_habilitado">
+                                                    <span>No habilitado</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="vacaciones">
+                                                    <span>Vacaciones</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="descanso_medico">
+                                                    <span>Descanso medico</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="gestacion">
+                                                    <span>Gestacion</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="revisar_ficha">
+                                                    <span>Revisar ficha</span>
+                                                </label>
+                                                <label class="dg-filter-check-option">
+                                                    <input type="checkbox" class="js-dg-bienestar-check" value="terminar_ficha">
+                                                    <span>Terminar ficha</span>
+                                                </label>
+                                            </div>
                                         </div>
                                     </div>
                                 </th>
@@ -2205,9 +2402,19 @@
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
                                         </button>
                                         <div id="dgFilterOcupacion" class="dg-filter-popover dg-pop-center dg-pop-wide" onclick="event.stopPropagation()">
-                                            <label class="personal-column-option" style="margin-bottom:8px;">
+                                            <label class="personal-column-option dg-filter-row-mode" style="margin-bottom:8px;">
                                                 <input type="checkbox" id="dgOcupGrouped" checked>
-                                                Agrupar
+                                                <span>
+                                                    <strong>Agrupar</strong>
+                                                    <small>Si esta activo, las minas, oficinas y talleres se ordenan por secciones dentro de la columna para leerlas mas rapido.</small>
+                                                </span>
+                                            </label>
+                                            <label class="personal-column-option dg-filter-row-mode" style="margin-bottom:8px;">
+                                                <input type="checkbox" id="dgOcupFilterRows">
+                                                <span>
+                                                    <strong>Ocultar trabajadores fuera del filtro</strong>
+                                                    <small>Si esta activo, solo quedan filas que coincidan con las minas, oficinas, talleres o estados marcados.</small>
+                                                </span>
                                             </label>
                                             <label class="dg-popover-label">Estado de minas visible</label>
                                             <div class="dg-ocup-filter-checks" style="margin-top:0;">
@@ -2218,6 +2425,10 @@
                                                 <label class="dg-ocup-filter-option">
                                                     <input type="checkbox" id="dgOcupShowProceso" checked>
                                                     <span>En proceso</span>
+                                                </label>
+                                                <label class="dg-ocup-filter-option">
+                                                    <input type="checkbox" id="dgOcupShowNoHabilitado" checked>
+                                                    <span>No habilitados</span>
                                                 </label>
                                             </div>
                                             <label class="dg-popover-label">Minas visibles en filtro</label>
@@ -2261,6 +2472,7 @@
                                     $situacionLabel = (string) ($trabajador['situacion_label'] ?? 'Habilitado');
                                     $estadoClass = match (mb_strtolower($estadoText)) {
                                         'falta contrato' => 'dg-pill-estado-contrato',
+                                        'no firmo contrato' => 'dg-pill-estado-no-firmo',
                                         'activo' => 'dg-pill-estado-activo',
                                         'ficha enviada', 'ficha observada', 'pendiente completar ficha', 'link vencido' => 'dg-pill-estado-contrato',
                                         'inactivo' => 'dg-pill-estado-inactivo',
@@ -2288,7 +2500,7 @@
                                         'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
-                                        'revisar_ficha', 'ficha_observada', 'falta_contrato' => 'dg-pill-situacion-revision',
+                                        'revisar_ficha', 'ficha_observada', 'falta_contrato', 'contrato_pendiente_archivo', 'no_firmo_contrato' => 'dg-pill-situacion-revision',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
                                         'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',
@@ -2305,8 +2517,14 @@
 
                                     $ocupPrincipal = $ocupAll[0] ?? null;
                                     $documentDisplay = trim((string) (($trabajador['tipo_documento'] ?? 'DNI') . ' ' . ($trabajador['numero_documento'] ?? $trabajador['dni'] ?? '')));
+                                    $pendienteContratoFirmado = (bool) ($trabajador['pendiente_contrato_firmado'] ?? false);
+                                    $sinContratosLaborales = ((int) ($trabajador['contratos_count'] ?? 0)) === 0;
+                                    $contratoAttentionCellClass = $sinContratosLaborales
+                                        ? 'contract-attention-cell'
+                                        : ($pendienteContratoFirmado ? 'contract-file-pending-cell' : '');
+                                    $enListaNegra = (bool) ($trabajador['en_lista_negra'] ?? false);
                                 @endphp
-                                <tr class="js-person-row {{ !$trabajador['activo'] ? 'inactive' : '' }}"
+                                <tr class="js-person-row {{ !$trabajador['activo'] ? 'inactive' : '' }} {{ $sinContratosLaborales ? 'contract-missing' : '' }} {{ $pendienteContratoFirmado && !$sinContratosLaborales ? 'contract-file-pending' : '' }} {{ $enListaNegra ? 'blacklisted-worker' : '' }}"
                                     style="cursor:pointer;"
                                     data-worker='@json($trabajador)'
                                     data-nombre="{{ $trabajador['nombre'] ?? '' }}"
@@ -2388,7 +2606,34 @@
                                                     <circle cx="12" cy="15" r="1"/>
                                                 </svg>
                                             </a>
-                                            @if($canEditContractData && $estadoRaw === 'FALTA_CONTRATO')
+                                            @if($enListaNegra)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Ver motivo de lista negra"
+                                                    aria-label="Ver motivo de lista negra"
+                                                    onclick="event.stopPropagation(); showListaNegraReasonFromRow(this.closest('tr'))">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                                        <path d="M12 9v4"/>
+                                                        <path d="M12 17h.01"/>
+                                                    </svg>
+                                                </button>
+                                            @elseif($canUpdatePersonal)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Agregar a lista negra"
+                                                    aria-label="Agregar a lista negra"
+                                                    onclick="event.stopPropagation(); openListaNegraModalFromRow(this.closest('tr'))">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                                        <path d="M12 9v4"/>
+                                                        <path d="M12 17h.01"/>
+                                                    </svg>
+                                                </button>
+                                            @endif
+                                            @if($canEditContractData && ($estadoRaw === 'FALTA_CONTRATO' || $pendienteContratoFirmado))
                                                 <a
                                                     href="{{ route('personal.contrato-datos.edit', $trabajador['id'] ?? '') }}"
                                                     class="btn btn-outline btn-xs personal-icon-btn"
@@ -2477,9 +2722,9 @@
                                     <td data-column="celular">{{ $trabajador['telefono'] ?? ($trabajador['telefono_1'] ?? '-') }}</td>
                                     <td data-column="correo">{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '-') }}</td>
                                     <td data-column="puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
-                                    <td data-column="contrato"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
+                                    <td data-column="contrato" class="{{ $contratoAttentionCellClass }}"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
                                     <td data-column="estado">
-                                        @if($canEditContractData && $estadoRaw === 'FALTA_CONTRATO')
+                                        @if($canEditContractData && ($estadoRaw === 'FALTA_CONTRATO' || $pendienteContratoFirmado))
                                             <a
                                                 href="{{ route('personal.contrato-datos.edit', $trabajador['id'] ?? '') }}"
                                                 class="dg-pill dg-pill-button {{ $estadoClass }}"
@@ -2496,6 +2741,9 @@
                                             </button>
                                         @else
                                             <span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span>
+                                        @endif
+                                        @if($pendienteContratoFirmado)
+                                            <span class="personal-contract-warning">Adjuntar contrato firmado</span>
                                         @endif
                                     </td>
                                     <td data-column="situacion">
@@ -2523,6 +2771,7 @@
                                                         data-ocup-item-key="{{ $ocup }}"
                                                         data-ocup-item-category="mina"
                                                         data-ocup-item-state="{{ $hasOcup ? $ocupState : 'no_habilitado' }}"
+                                                        data-ocup-item-present="{{ $hasOcup ? '1' : '0' }}"
                                                         data-ocup-filter-type="ocupMina"
                                                         data-ocup-filter-value="{{ $ocup }}"
                                                         title="Filtrar por {{ $ocup }}"
@@ -2540,6 +2789,7 @@
                                                         class="dg-ocup-chip-btn"
                                                         data-ocup-item-key="{{ $ocup }}"
                                                         data-ocup-item-category="oficina"
+                                                        data-ocup-item-present="{{ $hasOcup ? '1' : '0' }}"
                                                         data-ocup-filter-type="ocupOffice"
                                                         data-ocup-filter-value="{{ $ocup }}"
                                                         title="Filtrar por {{ $ocup }}"
@@ -2557,6 +2807,7 @@
                                                         class="dg-ocup-chip-btn"
                                                         data-ocup-item-key="{{ $ocup }}"
                                                         data-ocup-item-category="taller"
+                                                        data-ocup-item-present="{{ $hasOcup ? '1' : '0' }}"
                                                         data-ocup-filter-type="ocupWorkshop"
                                                         data-ocup-filter-value="{{ $ocup }}"
                                                         title="Filtrar por {{ $ocup }}"
@@ -2585,6 +2836,7 @@
                                                                 data-ocup-item-key="{{ $ocup }}"
                                                                 data-ocup-item-category="mina"
                                                                 data-ocup-item-state="{{ $ocupState }}"
+                                                                data-ocup-item-present="1"
                                                                 data-ocup-filter-type="ocupMina"
                                                                 data-ocup-filter-value="{{ $ocup }}"
                                                                 title="Filtrar por {{ $ocup }}"
@@ -2605,6 +2857,7 @@
                                                                 class="dg-ocup-chip-btn"
                                                                 data-ocup-item-key="{{ $ocup }}"
                                                                 data-ocup-item-category="oficina"
+                                                                data-ocup-item-present="1"
                                                                 data-ocup-filter-type="ocupOffice"
                                                                 data-ocup-filter-value="{{ $ocup }}"
                                                                 title="Filtrar por {{ $ocup }}"
@@ -2625,6 +2878,7 @@
                                                                 class="dg-ocup-chip-btn"
                                                                 data-ocup-item-key="{{ $ocup }}"
                                                                 data-ocup-item-category="taller"
+                                                                data-ocup-item-present="1"
                                                                 data-ocup-filter-type="ocupWorkshop"
                                                                 data-ocup-filter-value="{{ $ocup }}"
                                                                 title="Filtrar por {{ $ocup }}"
@@ -2716,9 +2970,68 @@
         </div>
     </div>
 
+    <div id="listaNegraModal" class="modal" style="display:none;" onclick="if (event.target === this) closeListaNegraModal()">
+        <div class="modal-backdrop" onclick="closeListaNegraModal()"></div>
+        <form id="listaNegraForm" method="POST" action="" class="modal-content personal-cease-modal" onsubmit="return submitListaNegraForm()">
+            @csrf
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Agregar a lista negra</h2>
+                    <p class="modal-subtitle" id="listaNegraSubtitle">Registra el motivo para tomarlo en cuenta en futuras activaciones.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeListaNegraModal()" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <label class="ficha-label" for="listaNegraTextarea">Motivo de lista negra <span class="ficha-required">*</span></label>
+                <textarea id="listaNegraTextarea" class="ficha-input personal-cease-textarea" name="motivo_lista_negra" maxlength="2000" placeholder="Escribe que sucedio con el trabajador" required></textarea>
+                <div id="listaNegraError" class="personal-cease-error">El motivo de lista negra es obligatorio.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeListaNegraModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="listaNegraViewModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('listaNegraViewModal')">
+        <div class="modal-backdrop" onclick="closeModal('listaNegraViewModal')"></div>
+        <div class="modal-content personal-cease-modal">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">Motivo de lista negra</h2>
+                    <p class="modal-subtitle" id="listaNegraViewSubtitle">Detalle registrado para futuras activaciones.</p>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('listaNegraViewModal')" aria-label="Cerrar">X</button>
+            </div>
+            <div class="modal-body">
+                <div class="personal-cease-view">
+                    <p class="personal-cease-view-name" id="listaNegraViewName"></p>
+                    <div class="personal-cease-view-meta">
+                        <span>Registrado por</span>
+                        <span id="listaNegraViewUser">-</span>
+                    </div>
+                    <div class="personal-cease-view-meta">
+                        <span>Fecha</span>
+                        <span id="listaNegraViewDate">-</span>
+                    </div>
+                    <p class="personal-cease-view-reason" id="listaNegraViewText">Motivo no registrado</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                @if($canUpdatePersonal)
+                    <form id="listaNegraRemoveForm" method="POST" action="" style="display:none;">
+                        @csrf
+                        <button type="submit" class="btn btn-outline">Sacar de lista negra</button>
+                    </form>
+                @endif
+                <button type="button" class="btn btn-primary" onclick="closeModal('listaNegraViewModal')">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
     <div id="activateWorkerModal" class="modal" style="display:none;" onclick="if (event.target === this) closeActivateWorkerModal()">
         <div class="modal-backdrop" onclick="closeActivateWorkerModal()"></div>
-        <form id="activateWorkerForm" method="POST" action="" class="modal-content personal-cease-modal">
+        <form id="activateWorkerForm" method="POST" action="" class="modal-content personal-cease-modal personal-activate-modal">
             @csrf
             <div class="modal-header">
                 <div>
@@ -2732,14 +3045,111 @@
                     <p class="personal-cease-view-name" id="activateWorkerName"></p>
                     <p class="personal-cease-view-reason" id="activateWorkerReason">Los datos actuales se usaran como base para el siguiente contrato y podran editarse despues.</p>
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px;">
-                    <div>
-                        <label class="ficha-label" for="activateFechaInicio">Fecha de inicio <span class="ficha-required">*</span></label>
-                        <input id="activateFechaInicio" class="ficha-input" type="date" name="fecha_inicio" value="{{ now()->toDateString() }}" required>
+                <div class="personal-activate-section">
+                    <p class="personal-activate-section-title">Nuevo contrato</p>
+                    <div class="personal-activate-grid">
+                        <div>
+                            <label class="ficha-label" for="activateFechaInicio">Fecha de inicio <span class="ficha-required">*</span></label>
+                            <input id="activateFechaInicio" class="ficha-input" type="date" name="fecha_inicio" value="{{ now()->toDateString() }}" required>
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateFechaFin">Fecha de fin</label>
+                            <input id="activateFechaFin" class="ficha-input" type="date" name="fecha_fin">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateTipoContrato">Tipo de contrato</label>
+                            <select id="activateTipoContrato" class="ficha-input" name="tipo_contrato">
+                                <option value="">Seleccionar</option>
+                                @foreach(($contractTypeOptions ?? []) as $contractTypeValue => $contractTypeLabel)
+                                    <option value="{{ $contractTypeValue }}">{{ $contractTypeLabel }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activatePuesto">Puesto / cargo</label>
+                            @include('personal.partials.puesto-autocomplete', [
+                                'name' => 'puesto',
+                                'value' => '',
+                                'inputId' => 'activatePuesto',
+                                'listId' => 'puestos_catalogo_activate',
+                                'class' => 'ficha-input',
+                                'required' => false,
+                                'options' => $puestoOptions ?? [],
+                                'placeholder' => 'Buscar puesto registrado',
+                            ])
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateOcupacion">Ocupacion</label>
+                            <input id="activateOcupacion" class="ficha-input" type="text" name="ocupacion" maxlength="191">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateArea">Area</label>
+                            <input id="activateArea" class="ficha-input" type="text" name="area" maxlength="191">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateRemuneracion">Remuneracion nueva</label>
+                            <input id="activateRemuneracion" class="ficha-input" type="text" name="remuneracion" maxlength="120" inputmode="decimal">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateCostoHora">Costo hora</label>
+                            <input id="activateCostoHora" class="ficha-input" type="text" name="costo_hora" maxlength="120" inputmode="decimal">
+                        </div>
                     </div>
-                    <div>
-                        <label class="ficha-label" for="activateFechaFin">Fecha de fin</label>
-                        <input id="activateFechaFin" class="ficha-input" type="date" name="fecha_fin">
+                </div>
+
+                <div class="personal-activate-section">
+                    <p class="personal-activate-section-title">Datos bancarios</p>
+                    <div class="personal-activate-grid">
+                        <div>
+                            <label class="ficha-label" for="activateBanco">Banco</label>
+                            <select id="activateBanco" class="ficha-input" name="banco">
+                                <option value="">Seleccionar</option>
+                                <option value="BCP">BCP</option>
+                                <option value="Interbank">Interbank</option>
+                                <option value="BBVA">BBVA</option>
+                                <option value="Scotiabank">Scotiabank</option>
+                                <option value="BanBif">BanBif</option>
+                                <option value="Otro">Otro</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateBancoOtro">Otro banco</label>
+                            <input id="activateBancoOtro" class="ficha-input" type="text" name="banco_otro" maxlength="120">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateNumeroCuenta">Numero de cuenta</label>
+                            <input id="activateNumeroCuenta" class="ficha-input" type="text" name="numero_cuenta" maxlength="60">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateCci">CCI</label>
+                            <input id="activateCci" class="ficha-input" type="text" name="cci" maxlength="60">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="personal-activate-section">
+                    <p class="personal-activate-section-title">Sistema pensionario</p>
+                    <div class="personal-activate-grid">
+                        <div>
+                            <label class="ficha-label" for="activateSistemaPensionario">Eleccion del sistema pensionario</label>
+                            <select id="activateSistemaPensionario" class="ficha-input" name="sistema_pensionario">
+                                <option value="">Seleccionar</option>
+                                <option value="Sistema Nacional de Pensiones">Sistema Nacional de Pensiones</option>
+                                <option value="Sistema Privado de Pensiones">Sistema Privado de Pensiones</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateTipoComision">Tipo de comision</label>
+                            <input id="activateTipoComision" class="ficha-input" type="text" name="tipo_comision" maxlength="120">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateTipoAfp">AFP</label>
+                            <input id="activateTipoAfp" class="ficha-input" type="text" name="tipo_afp" maxlength="120">
+                        </div>
+                        <div>
+                            <label class="ficha-label" for="activateCuspp">CUSPP</label>
+                            <input id="activateCuspp" class="ficha-input" type="text" name="cuspp" maxlength="60">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2880,6 +3290,8 @@ let pendingCeaseForm = null;
 const todayForActivation = @json(now()->toDateString());
 const personalCsrfToken = @json(csrf_token());
 const signedContractRouteTemplate = @json(route('personal.contrato-datos.signed', '__ID__'));
+const listaNegraRouteTemplate = @json(route('personal.lista-negra.store', '__ID__'));
+const listaNegraRemoveRouteTemplate = @json(route('personal.lista-negra.remove', '__ID__'));
 const canDownloadDocuments = @json($canDownloadDocuments);
 const canDownloadContractFormats = @json($canDownloadContractFormats);
 const contractFormatEndpoints = {
@@ -3519,6 +3931,130 @@ function showCeaseReasonFromRow(row) {
     }
 }
 
+function openListaNegraModal(worker) {
+    if (!worker || !worker.id) {
+        return;
+    }
+
+    const form = document.getElementById('listaNegraForm');
+    const subtitle = document.getElementById('listaNegraSubtitle');
+    const textarea = document.getElementById('listaNegraTextarea');
+    const error = document.getElementById('listaNegraError');
+    const workerName = String(worker.nombre || worker.nombre_completo || 'este trabajador').trim();
+
+    if (form) {
+        form.action = listaNegraRouteTemplate.replace('__ID__', encodeURIComponent(worker.id));
+    }
+    if (subtitle) {
+        subtitle.textContent = 'Registra el motivo para tomar en cuenta a ' + workerName + ' en futuras activaciones.';
+    }
+    if (textarea) {
+        textarea.value = '';
+    }
+    if (error) {
+        error.style.display = 'none';
+    }
+
+    openModal('listaNegraModal');
+    window.setTimeout(function () {
+        textarea?.focus();
+    }, 50);
+}
+
+function openListaNegraModalFromRow(row) {
+    if (!row) return;
+
+    try {
+        openListaNegraModal(JSON.parse(row.dataset.worker || '{}'));
+    } catch (error) {
+        openListaNegraModal({});
+    }
+}
+
+function closeListaNegraModal() {
+    const form = document.getElementById('listaNegraForm');
+    const textarea = document.getElementById('listaNegraTextarea');
+    const error = document.getElementById('listaNegraError');
+
+    if (form) {
+        form.action = '';
+    }
+    if (textarea) {
+        textarea.value = '';
+    }
+    if (error) {
+        error.style.display = 'none';
+    }
+
+    closeModal('listaNegraModal');
+}
+
+function submitListaNegraForm() {
+    const textarea = document.getElementById('listaNegraTextarea');
+    const error = document.getElementById('listaNegraError');
+    const trimmedReason = String(textarea?.value || '').trim();
+
+    if (trimmedReason === '') {
+        if (error) {
+            error.style.display = 'block';
+        }
+        textarea?.focus();
+        return false;
+    }
+
+    if (textarea) {
+        textarea.value = trimmedReason;
+    }
+
+    return true;
+}
+
+function showListaNegraReason(worker) {
+    const reason = String(worker?.lista_negra_motivo || '').trim() || 'Motivo no registrado';
+    const name = String(worker?.nombre || worker?.nombre_completo || 'Trabajador').trim();
+    const userName = String(worker?.lista_negra_por_nombre || '').trim() || 'No registrado';
+    const date = String(worker?.lista_negra_fecha || '').trim() || 'No registrada';
+    const nameNode = document.getElementById('listaNegraViewName');
+    const textNode = document.getElementById('listaNegraViewText');
+    const userNode = document.getElementById('listaNegraViewUser');
+    const dateNode = document.getElementById('listaNegraViewDate');
+    const removeForm = document.getElementById('listaNegraRemoveForm');
+
+    if (nameNode) {
+        nameNode.textContent = name;
+    }
+    if (textNode) {
+        textNode.textContent = reason;
+    }
+    if (userNode) {
+        userNode.textContent = userName;
+    }
+    if (dateNode) {
+        dateNode.textContent = date;
+    }
+    if (removeForm) {
+        if (worker?.id) {
+            removeForm.action = listaNegraRemoveRouteTemplate.replace('__ID__', encodeURIComponent(worker.id));
+            removeForm.style.display = 'inline-flex';
+        } else {
+            removeForm.action = '';
+            removeForm.style.display = 'none';
+        }
+    }
+
+    openModal('listaNegraViewModal');
+}
+
+function showListaNegraReasonFromRow(row) {
+    if (!row) return;
+
+    try {
+        showListaNegraReason(JSON.parse(row.dataset.worker || '{}'));
+    } catch (error) {
+        showListaNegraReason({lista_negra_motivo: 'Motivo de lista negra no disponible.'});
+    }
+}
+
 function openActivateWorker(worker) {
     if (!worker || !worker.id) {
         return;
@@ -3532,6 +4068,34 @@ function openActivateWorker(worker) {
     const finInput = document.getElementById('activateFechaFin');
     const workerName = String(worker.nombre || worker.nombre_completo || 'Trabajador').trim();
     const lastClosed = worker.ultimo_contrato_cerrado || null;
+    const reentryData = worker.reactivacion_datos || {};
+    const setFieldValue = function (id, value) {
+        const field = document.getElementById(id);
+        if (!field) return;
+        field.value = value == null ? '' : String(value);
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+    };
+    const setSelectValue = function (id, value) {
+        const field = document.getElementById(id);
+        if (!field) return false;
+
+        const normalizedValue = normalizeText(value || '');
+        if (!normalizedValue) {
+            field.value = '';
+            field.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+        }
+
+        const match = Array.from(field.options || []).find(function (option) {
+            return normalizeText(option.value) === normalizedValue || normalizeText(option.textContent) === normalizedValue;
+        });
+
+        if (!match) return false;
+
+        field.value = match.value;
+        field.dispatchEvent(new Event('change', {bubbles: true}));
+        return true;
+    };
 
     if (form) {
         form.action = '/personal/' + encodeURIComponent(worker.id) + '/activar';
@@ -3552,6 +4116,27 @@ function openActivateWorker(worker) {
     }
     if (finInput) {
         finInput.value = '';
+    }
+
+    setSelectValue('activateTipoContrato', reentryData.tipo_contrato || worker.contrato || '');
+    setFieldValue('activatePuesto', reentryData.puesto || worker.puesto || '');
+    setFieldValue('activateOcupacion', reentryData.ocupacion || worker.ocupacion || '');
+    setFieldValue('activateArea', reentryData.area || '');
+    setFieldValue('activateRemuneracion', reentryData.remuneracion || '');
+    setFieldValue('activateCostoHora', reentryData.costo_hora || '');
+    setFieldValue('activateNumeroCuenta', reentryData.numero_cuenta || '');
+    setFieldValue('activateCci', reentryData.cci || '');
+    setSelectValue('activateSistemaPensionario', reentryData.sistema_pensionario || '');
+    setFieldValue('activateTipoComision', reentryData.tipo_comision || '');
+    setFieldValue('activateTipoAfp', reentryData.tipo_afp || '');
+    setFieldValue('activateCuspp', reentryData.cuspp || '');
+
+    const bankValue = String(reentryData.banco || '').trim();
+    if (!setSelectValue('activateBanco', bankValue)) {
+        setSelectValue('activateBanco', 'Otro');
+        setFieldValue('activateBancoOtro', bankValue || reentryData.banco_otro || '');
+    } else {
+        setFieldValue('activateBancoOtro', reentryData.banco_otro || '');
     }
 
     openModal('activateWorkerModal');
@@ -3582,6 +4167,7 @@ function showWorkerDetail(card) {
     const worker = JSON.parse(card.dataset.worker || '{}');
     const modal = document.getElementById('workerDetailModal');
     const canCeasePersonal = @json($canCeasePersonal);
+    const canUpdatePersonal = @json($canUpdatePersonal);
     const csrfToken = @json(csrf_token());
     if (!modal || !worker.nombre) return;
 
@@ -3607,6 +4193,7 @@ function showWorkerDetail(card) {
     switch (String(worker.estado || worker.estado_actual || '').toUpperCase()) {
         case 'ACTIVO': estadoClass = 'status-active'; estadoLabel = 'Activo'; break;
         case 'FALTA_CONTRATO': estadoClass = 'status-parada'; estadoLabel = 'Falta contrato'; break;
+        case 'NO_FIRMO_CONTRATO': estadoClass = 'status-parada'; estadoLabel = 'No firmo contrato'; break;
         case 'FICHA_ENVIADA': estadoClass = 'status-parada'; estadoLabel = 'Ficha enviada'; break;
         case 'OBSERVADO': estadoClass = 'status-parada'; estadoLabel = 'Ficha observada'; break;
         case 'PENDIENTE_COMPLETAR_FICHA': estadoClass = 'status-parada'; estadoLabel = 'Pendiente completar ficha'; break;
@@ -3752,6 +4339,7 @@ function showWorkerDetail(card) {
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
                 <a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>
                 <a href="/personal/${worker.id}/contratos" class="btn btn-outline">Contratos</a>
+                ${worker.en_lista_negra ? `<button type="button" class="btn btn-outline" data-lista-negra-reason-btn>Ver motivo de lista negra</button>` : (canUpdatePersonal ? `<button type="button" class="btn btn-outline" data-lista-negra-btn>Lista negra</button>` : '')}
                 <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
                 ${worker.estado_actual === 'cesado' ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
                 ${worker.estado_actual === 'cesado' && canCeasePersonal ? `<button type="button" class="btn btn-primary" data-activate-worker-btn>Activar trabajador</button>` : ''}
@@ -3763,6 +4351,12 @@ function showWorkerDetail(card) {
     modal.querySelector('.modal-content').innerHTML = detailContent;
     modal.querySelector('[data-cease-reason-btn]')?.addEventListener('click', function () {
         showCeaseReason(worker);
+    });
+    modal.querySelector('[data-lista-negra-reason-btn]')?.addEventListener('click', function () {
+        showListaNegraReason(worker);
+    });
+    modal.querySelector('[data-lista-negra-btn]')?.addEventListener('click', function () {
+        openListaNegraModal(worker);
     });
     modal.querySelector('[data-activate-worker-btn]')?.addEventListener('click', function () {
         openActivateWorker(worker);
@@ -3808,13 +4402,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const searchInput = document.getElementById('personal-search');
     const sortNombre = document.getElementById('dgSortNombre');
     const sortDni = document.getElementById('dgSortDni');
-    const puestoFilter = document.getElementById('dgPuesto');
-    const contratoFilter = document.getElementById('dgContrato');
-    const estadoFilter = document.getElementById('dgEstado');
-    const bienestarFilter = document.getElementById('dgBienestar');
+    const puestoFilterChecks = document.getElementById('dgPuestoChecks');
+    const contratoFilterChecks = document.getElementById('dgContratoChecks');
+    let puestoFilterCheckboxes = [];
+    let contratoFilterCheckboxes = [];
+    const estadoFilterCheckboxes = Array.from(document.querySelectorAll('.js-dg-estado-check'));
+    const bienestarFilterCheckboxes = Array.from(document.querySelectorAll('.js-dg-bienestar-check'));
     const ocupGroupedToggle = document.getElementById('dgOcupGrouped');
+    const ocupFilterRowsToggle = document.getElementById('dgOcupFilterRows');
     const ocupShowHabilitadoToggle = document.getElementById('dgOcupShowHabilitado');
     const ocupShowProcesoToggle = document.getElementById('dgOcupShowProceso');
+    const ocupShowNoHabilitadoToggle = document.getElementById('dgOcupShowNoHabilitado');
     const ocupMineCheckboxes = Array.from(document.querySelectorAll('.js-ocup-mine-check'));
     const ocupOfficeCheckboxes = Array.from(document.querySelectorAll('.js-ocup-office-check'));
     const ocupWorkshopCheckboxes = Array.from(document.querySelectorAll('.js-ocup-workshop-check'));
@@ -3956,48 +4554,102 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    const collectSelectedOcupMinas = function () {
-        return ocupMineCheckboxes
+    const collectCheckedValues = function (checkboxes) {
+        return (checkboxes || [])
             .filter(function (input) { return input.checked; })
             .map(function (input) { return input.value; });
+    };
+
+    const normalizeSavedFilterValues = function (values, fallbackValue) {
+        if (Array.isArray(values)) {
+            return values.filter(Boolean);
+        }
+
+        if (typeof values === 'string' && values.trim() !== '') {
+            return [values];
+        }
+
+        if (typeof fallbackValue === 'string' && fallbackValue.trim() !== '') {
+            return [fallbackValue];
+        }
+
+        return [];
+    };
+
+    const applyCheckedValues = function (checkboxes, values) {
+        const selected = new Set(normalizeSavedFilterValues(values));
+        (checkboxes || []).forEach(function (input) {
+            input.checked = selected.has(input.value);
+        });
+    };
+
+    const collectSelectedPuestos = function () {
+        return collectCheckedValues(puestoFilterCheckboxes);
+    };
+
+    const collectSelectedContratos = function () {
+        return collectCheckedValues(contratoFilterCheckboxes);
+    };
+
+    const collectSelectedEstados = function () {
+        return collectCheckedValues(estadoFilterCheckboxes);
+    };
+
+    const collectSelectedBienestares = function () {
+        return collectCheckedValues(bienestarFilterCheckboxes);
+    };
+
+    const collectSelectedOcupMinas = function () {
+        return collectCheckedValues(ocupMineCheckboxes);
     };
 
     const collectSelectedOcupOffices = function () {
-        return ocupOfficeCheckboxes
-            .filter(function (input) { return input.checked; })
-            .map(function (input) { return input.value; });
+        return collectCheckedValues(ocupOfficeCheckboxes);
     };
 
     const collectSelectedOcupWorkshops = function () {
-        return ocupWorkshopCheckboxes
-            .filter(function (input) { return input.checked; })
-            .map(function (input) { return input.value; });
+        return collectCheckedValues(ocupWorkshopCheckboxes);
+    };
+
+    const areAllChecked = function (checkboxes) {
+        return (checkboxes || []).every(function (input) {
+            return input.checked;
+        });
+    };
+
+    const areAllUnchecked = function (checkboxes) {
+        return (checkboxes || []).every(function (input) {
+            return !input.checked;
+        });
+    };
+
+    const isOccupationSelectionDefault = function () {
+        return areAllChecked(ocupMineCheckboxes) &&
+            areAllUnchecked(ocupOfficeCheckboxes) &&
+            areAllUnchecked(ocupWorkshopCheckboxes) &&
+            ocupShowHabilitadoToggle?.checked !== false &&
+            ocupShowProcesoToggle?.checked !== false &&
+            ocupShowNoHabilitadoToggle?.checked !== false;
+    };
+
+    const enableOccupationRowFiltering = function () {
+        if (ocupFilterRowsToggle && !isOccupationSelectionDefault()) {
+            ocupFilterRowsToggle.checked = true;
+        }
     };
 
     const syncFilterIndicators = function () {
-        const allMinesSelected = ocupMineCheckboxes.every(function (input) {
-            return input.checked;
-        });
-        const noOfficeSelected = ocupOfficeCheckboxes.every(function (input) {
-            return !input.checked;
-        });
-        const noWorkshopSelected = ocupWorkshopCheckboxes.every(function (input) {
-            return !input.checked;
-        });
         const occupationFilterActive =
-            !allMinesSelected ||
-            !noOfficeSelected ||
-            !noWorkshopSelected ||
-            ocupShowHabilitadoToggle?.checked === false ||
-            ocupShowProcesoToggle?.checked === false;
+            !isOccupationSelectionDefault() ||
+            !!ocupFilterRowsToggle?.checked;
 
         const states = {
             dgFilterNombre: !!(sortNombre?.value || ''),
             dgFilterDni: !!(sortDni?.value || ''),
-            dgFilterPuesto: !!(puestoFilter?.value || ''),
-            dgFilterContrato: !!(contratoFilter?.value || ''),
-            dgFilterEstado: !!(estadoFilter?.value || ''),
-            dgFilterBienestar: !!(bienestarFilter?.value || ''),
+            dgFilterPuesto: collectSelectedPuestos().length > 0,
+            dgFilterContrato: collectSelectedContratos().length > 0,
+            dgFilterEstado: collectSelectedEstados().length > 0,
+            dgFilterBienestar: collectSelectedBienestares().length > 0,
             dgFilterOcupacion: occupationFilterActive,
         };
 
@@ -4015,6 +4667,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const visibleWorkshops = new Set(collectSelectedOcupWorkshops());
         const showHabilitado = !!ocupShowHabilitadoToggle?.checked;
         const showProceso = !!ocupShowProcesoToggle?.checked;
+        const showNoHabilitado = !!ocupShowNoHabilitadoToggle?.checked;
 
         document.querySelectorAll('.dg-ocup-chip-btn[data-ocup-item-key]').forEach(function (button) {
             const key = button.dataset.ocupItemKey || '';
@@ -4026,15 +4679,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (category === 'mina') {
                 visible = visibleMinas.has(key);
                 if (visible) {
-                    if (showHabilitado && showProceso) {
-                        matchesState = true;
-                    } else if (showHabilitado && !showProceso) {
-                        matchesState = state === 'habilitado';
-                    } else if (!showHabilitado && showProceso) {
-                        matchesState = state === 'proceso';
-                    } else {
-                        matchesState = state === 'no_habilitado';
-                    }
+                    matchesState =
+                        (state === 'habilitado' && showHabilitado) ||
+                        (state === 'proceso' && showProceso) ||
+                        (state === 'no_habilitado' && showNoHabilitado);
                 }
             } else if (category === 'oficina') {
                 visible = visibleOffices.has(key);
@@ -4042,8 +4690,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 visible = visibleWorkshops.has(key);
             }
 
-            button.style.display = visible ? '' : 'none';
-            button.classList.toggle('is-ocup-state-hidden', visible && !matchesState);
+            button.style.display = visible && matchesState ? '' : 'none';
+            button.classList.remove('is-ocup-state-hidden');
         });
 
         document.querySelectorAll('.dg-ocup-row[data-ocup-section]').forEach(function (row) {
@@ -4237,6 +4885,7 @@ document.addEventListener('DOMContentLoaded', function () {
             panel.classList.remove('is-open');
             panel._triggerEl = null;
         });
+        pageRoot?.classList.remove('is-filter-popover-open');
     };
 
     const positionPopover = function (panel, triggerEl) {
@@ -4328,6 +4977,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (willOpen) {
                 panel.classList.add('is-open');
                 panel._triggerEl = trigger;
+                pageRoot?.classList.add('is-filter-popover-open');
                 fitPopoverWithinViewport(panel);
             }
         });
@@ -4403,25 +5053,43 @@ document.addEventListener('DOMContentLoaded', function () {
             .trim();
     };
 
-    const populateSelect = function(selectEl, values) {
-        if (!selectEl) return;
-        const current = selectEl.value;
-        const options = Array.from(new Set(values.filter(Boolean))).sort();
-        options.forEach(function(value) {
-            const opt = document.createElement('option');
-            opt.value = value;
-            opt.textContent = value;
-            selectEl.appendChild(opt);
+    const savedState = readViewState();
+
+    const populateCheckboxGroup = function (container, values, inputClassName) {
+        if (!container) return [];
+
+        container.innerHTML = '';
+        const options = Array.from(new Set(values.filter(function (value) {
+            return String(value || '').trim() !== '';
+        }))).sort(function (a, b) {
+            return String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
         });
-        if (current) selectEl.value = current;
+
+        options.forEach(function (value) {
+            const label = document.createElement('label');
+            label.className = 'dg-filter-check-option';
+
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.className = inputClassName;
+            input.value = value;
+
+            const span = document.createElement('span');
+            span.textContent = value;
+
+            label.appendChild(input);
+            label.appendChild(span);
+            container.appendChild(label);
+        });
+
+        return Array.from(container.querySelectorAll('input[type="checkbox"]'));
     };
 
-    populateSelect(puestoFilter, rows.map(r => r.dataset.puesto || ''));
-    populateSelect(contratoFilter, rows.map(r => r.dataset.contrato || ''));
+    puestoFilterCheckboxes = populateCheckboxGroup(puestoFilterChecks, rows.map(r => r.dataset.puesto || ''), 'js-dg-puesto-check');
+    contratoFilterCheckboxes = populateCheckboxGroup(contratoFilterChecks, rows.map(r => r.dataset.contrato || ''), 'js-dg-contrato-check');
 
     let currentPage = 1;
     let pageSize = Number((pageSizeSelect || pageSizeSelectTop)?.value || 9);
-    const savedState = readViewState();
     setBootProgress(18, 'Cargando preferencias...');
 
     buildPageSizeOptions(rows.length, savedState.pageSize || pageSize);
@@ -4450,10 +5118,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
     if (sortDni && typeof savedState.sortDni === 'string') sortDni.value = savedState.sortDni;
-    if (puestoFilter && typeof savedState.puesto === 'string') puestoFilter.value = savedState.puesto;
-    if (contratoFilter && typeof savedState.contrato === 'string') contratoFilter.value = savedState.contrato;
-    if (estadoFilter && typeof savedState.estado === 'string') estadoFilter.value = savedState.estado;
-    if (bienestarFilter && typeof savedState.bienestar === 'string') bienestarFilter.value = savedState.bienestar;
+    applyCheckedValues(puestoFilterCheckboxes, normalizeSavedFilterValues(savedState.puestos, savedState.puesto));
+    applyCheckedValues(contratoFilterCheckboxes, normalizeSavedFilterValues(savedState.contratos, savedState.contrato));
+    applyCheckedValues(estadoFilterCheckboxes, normalizeSavedFilterValues(savedState.estados, savedState.estado));
+    applyCheckedValues(bienestarFilterCheckboxes, normalizeSavedFilterValues(savedState.bienestares, savedState.bienestar));
 
     setBootProgress(42, 'Aplicando columnas y filtros...');
     applyVisibleColumns(savedState.visibleColumns || defaultVisibleColumns);
@@ -4480,17 +5148,83 @@ document.addEventListener('DOMContentLoaded', function () {
     if (ocupShowProcesoToggle) {
         ocupShowProcesoToggle.checked = savedState.showOcupProceso !== false;
     }
+    if (ocupShowNoHabilitadoToggle) {
+        ocupShowNoHabilitadoToggle.checked = savedState.showOcupNoHabilitado !== false;
+    }
+    if (ocupFilterRowsToggle) {
+        ocupFilterRowsToggle.checked = !!savedState.filterRowsByOccupation;
+        if (!isOccupationSelectionDefault()) {
+            ocupFilterRowsToggle.checked = true;
+        }
+    }
     applyOccupationVisibility();
     setBootProgress(64, 'Preparando tabla...');
     currentPage = Number(savedState.currentPage || 1);
 
+    const normalizeFilterValues = function (values) {
+        return values.map(function (value) {
+            return normalizeText(value);
+        }).filter(Boolean);
+    };
+
+    const ocupMineStateMatches = function (state) {
+        const showHabilitado = !!ocupShowHabilitadoToggle?.checked;
+        const showProceso = !!ocupShowProcesoToggle?.checked;
+        const showNoHabilitado = !!ocupShowNoHabilitadoToggle?.checked;
+
+        return (state === 'habilitado' && showHabilitado) ||
+            (state === 'proceso' && showProceso) ||
+            (state === 'no_habilitado' && showNoHabilitado);
+    };
+
+    const rowMatchesOccupationFilter = function (row) {
+        if (!ocupFilterRowsToggle?.checked) {
+            return true;
+        }
+
+        const selectedMinas = new Set(normalizeFilterValues(collectSelectedOcupMinas()));
+        const selectedOffices = new Set(normalizeFilterValues(collectSelectedOcupOffices()));
+        const selectedWorkshops = new Set(normalizeFilterValues(collectSelectedOcupWorkshops()));
+        const chips = Array.from(row.querySelectorAll('.dg-ocup-chip-btn[data-ocup-item-key]')).filter(function (button) {
+            return button.dataset.ocupItemPresent !== '0';
+        });
+
+        if (chips.length === 0) {
+            return false;
+        }
+
+        return chips.some(function (button) {
+            if (button.dataset.ocupItemPresent === '0') {
+                return false;
+            }
+
+            const key = normalizeText(button.dataset.ocupItemKey || '');
+            const category = button.dataset.ocupItemCategory || '';
+            const state = button.dataset.ocupItemState || '';
+
+            if (category === 'mina') {
+                return selectedMinas.has(key) && ocupMineStateMatches(state);
+            }
+
+            if (category === 'oficina') {
+                return selectedOffices.has(key);
+            }
+
+            if (category === 'taller') {
+                return selectedWorkshops.has(key);
+            }
+
+            return false;
+        });
+    };
+
     const applyFiltersAndSort = function() {
         const search = normalizeText(searchInput?.value || '');
         const searchTokens = search.split(' ').filter(Boolean);
-        const puesto = normalizeText(puestoFilter?.value || '');
-        const contrato = normalizeText(contratoFilter?.value || '');
-        const estado = normalizeText(estadoFilter?.value || '');
-        const bienestar = normalizeText(bienestarFilter?.value || '');
+        const puestos = normalizeFilterValues(collectSelectedPuestos());
+        const contratos = normalizeFilterValues(collectSelectedContratos());
+        const estados = normalizeFilterValues(collectSelectedEstados());
+        const bienestares = normalizeFilterValues(collectSelectedBienestares());
 
         let filtered = rows.filter(function(row) {
             const searchable = normalizeText([
@@ -4502,10 +5236,11 @@ document.addEventListener('DOMContentLoaded', function () {
             ].join(' '));
 
             if (searchTokens.length && !searchTokens.every(t => searchable.includes(t))) return false;
-            if (puesto && normalizeText(row.dataset.puesto).indexOf(puesto) === -1) return false;
-            if (contrato && normalizeText(row.dataset.contrato).indexOf(contrato) === -1) return false;
-            if (estado && normalizeText(row.dataset.estado) !== estado) return false;
-            if (bienestar && normalizeText(row.dataset.bienestar) !== bienestar) return false;
+            if (puestos.length && !puestos.some(function (puesto) { return normalizeText(row.dataset.puesto).indexOf(puesto) !== -1; })) return false;
+            if (contratos.length && !contratos.some(function (contrato) { return normalizeText(row.dataset.contrato).indexOf(contrato) !== -1; })) return false;
+            if (estados.length && estados.indexOf(normalizeText(row.dataset.estado)) === -1) return false;
+            if (bienestares.length && bienestares.indexOf(normalizeText(row.dataset.bienestar)) === -1) return false;
+            if (!rowMatchesOccupationFilter(row)) return false;
             return true;
         });
 
@@ -4616,16 +5351,18 @@ document.addEventListener('DOMContentLoaded', function () {
             pageSize: pageSize,
             sortNombre: sortNombre?.value || '',
             sortDni: sortDni?.value || '',
-            puesto: puestoFilter?.value || '',
-            contrato: contratoFilter?.value || '',
-            estado: estadoFilter?.value || '',
-            bienestar: bienestarFilter?.value || '',
+            puestos: collectSelectedPuestos(),
+            contratos: collectSelectedContratos(),
+            estados: collectSelectedEstados(),
+            bienestares: collectSelectedBienestares(),
             visibleColumns: collectVisibleColumns(),
             selectedOcupMinas: collectSelectedOcupMinas(),
             selectedOcupOffices: collectSelectedOcupOffices(),
             selectedOcupWorkshops: collectSelectedOcupWorkshops(),
             showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
             showOcupProceso: !!ocupShowProcesoToggle?.checked,
+            showOcupNoHabilitado: !!ocupShowNoHabilitadoToggle?.checked,
+            filterRowsByOccupation: !!ocupFilterRowsToggle?.checked,
             occupationGrouped: !!ocupGroupedToggle?.checked,
             expanded: !!gridShell?.classList.contains('is-expanded'),
         });
@@ -4652,9 +5389,16 @@ document.addEventListener('DOMContentLoaded', function () {
         syncSearchClear();
     }
 
-    [sortNombre, sortDni, puestoFilter, contratoFilter, estadoFilter, bienestarFilter].forEach(function(el) {
+    [sortNombre, sortDni].forEach(function(el) {
         if (!el) return;
         el.addEventListener('change', function () { renderGrid(true); });
+    });
+    [puestoFilterCheckboxes, contratoFilterCheckboxes, estadoFilterCheckboxes, bienestarFilterCheckboxes].forEach(function (checkboxGroup) {
+        checkboxGroup.forEach(function (input) {
+            input.addEventListener('change', function () {
+                renderGrid(true);
+            });
+        });
     });
     pageSizeSelects.forEach(function (select) {
         select.addEventListener('change', function () {
@@ -4682,55 +5426,35 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    const handleOccupationFilterSelectionChange = function () {
+        enableOccupationRowFiltering();
+        applyOccupationVisibility();
+        renderGrid(true);
+    };
+
     ocupMineCheckboxes.forEach(function (input) {
-        input.addEventListener('change', function () {
-            applyOccupationVisibility();
-            saveViewState({
-                selectedOcupMinas: collectSelectedOcupMinas(),
-                selectedOcupOffices: collectSelectedOcupOffices(),
-                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
-            });
-            scheduleScrollbarSync();
-        });
+        input.addEventListener('change', handleOccupationFilterSelectionChange);
     });
 
     ocupOfficeCheckboxes.forEach(function (input) {
-        input.addEventListener('change', function () {
-            applyOccupationVisibility();
-            saveViewState({
-                selectedOcupMinas: collectSelectedOcupMinas(),
-                selectedOcupOffices: collectSelectedOcupOffices(),
-                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
-            });
-            window.requestAnimationFrame(syncTopScrollbar);
-        });
+        input.addEventListener('change', handleOccupationFilterSelectionChange);
     });
 
     ocupWorkshopCheckboxes.forEach(function (input) {
-        input.addEventListener('change', function () {
-            applyOccupationVisibility();
-            saveViewState({
-                selectedOcupMinas: collectSelectedOcupMinas(),
-                selectedOcupOffices: collectSelectedOcupOffices(),
-                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
-                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
-                showOcupProceso: !!ocupShowProcesoToggle?.checked,
-            });
-            window.requestAnimationFrame(syncTopScrollbar);
-        });
+        input.addEventListener('change', handleOccupationFilterSelectionChange);
     });
 
-    [ocupShowHabilitadoToggle, ocupShowProcesoToggle].forEach(function (input) {
+    [ocupShowHabilitadoToggle, ocupShowProcesoToggle, ocupShowNoHabilitadoToggle].forEach(function (input) {
         if (!input) return;
-        input.addEventListener('change', function () {
-            applyOccupationVisibility();
-            saveViewState({
-                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
-                showOcupProceso: !!ocupShowProcesoToggle?.checked,
-            });
-            window.requestAnimationFrame(syncTopScrollbar);
-        });
+        input.addEventListener('change', handleOccupationFilterSelectionChange);
     });
+
+    if (ocupFilterRowsToggle) {
+        ocupFilterRowsToggle.addEventListener('change', function () {
+            applyOccupationVisibility();
+            renderGrid(true);
+        });
+    }
 
     if (ocupGroupedToggle) {
         ocupGroupedToggle.addEventListener('change', function () {
@@ -4847,42 +5571,62 @@ document.addEventListener('DOMContentLoaded', function () {
         personalGridResizeObserver.observe(dataGrid);
     }
 
+    const updateOcupCheckboxSelectionFromChip = function (checkboxes, value) {
+        const target = (checkboxes || []).find(function (input) {
+            return input.value === value;
+        });
+
+        if (!target) {
+            return false;
+        }
+
+        const selectedCount = checkboxes.filter(function (input) { return input.checked; }).length;
+        const allSelected = checkboxes.length > 0 && selectedCount === checkboxes.length;
+
+        if (allSelected) {
+            checkboxes.forEach(function (input) { input.checked = false; });
+            target.checked = true;
+            return true;
+        }
+
+        if (target.checked) {
+            if (selectedCount > 1) {
+                target.checked = false;
+            }
+            return true;
+        }
+
+        target.checked = true;
+        return true;
+    };
+
     document.querySelectorAll('.dg-ocup-chip-btn').forEach(function (button) {
         button.addEventListener('click', function (event) {
             event.preventDefault();
             event.stopPropagation();
             const filterType = button.dataset.ocupFilterType;
             const value = button.dataset.ocupFilterValue || '';
+            let updated = false;
             if (filterType === 'ocupMina') {
-                ocupMineCheckboxes.forEach(function (input) {
-                    input.checked = input.value === value;
-                });
-                ocupOfficeCheckboxes.forEach(function (input) { input.checked = false; });
-                ocupWorkshopCheckboxes.forEach(function (input) { input.checked = false; });
+                updated = updateOcupCheckboxSelectionFromChip(ocupMineCheckboxes, value);
             } else if (filterType === 'ocupOffice') {
-                ocupOfficeCheckboxes.forEach(function (input) {
-                    input.checked = input.value === value;
-                });
-                ocupMineCheckboxes.forEach(function (input) { input.checked = false; });
-                ocupWorkshopCheckboxes.forEach(function (input) { input.checked = false; });
+                updated = updateOcupCheckboxSelectionFromChip(ocupOfficeCheckboxes, value);
             } else if (filterType === 'ocupWorkshop') {
-                ocupWorkshopCheckboxes.forEach(function (input) {
-                    input.checked = input.value === value;
-                });
-                ocupMineCheckboxes.forEach(function (input) { input.checked = false; });
-                ocupOfficeCheckboxes.forEach(function (input) { input.checked = false; });
+                updated = updateOcupCheckboxSelectionFromChip(ocupWorkshopCheckboxes, value);
             } else {
                 return;
             }
+
+            if (!updated) {
+                return;
+            }
+
+            if (ocupFilterRowsToggle) {
+                ocupFilterRowsToggle.checked = true;
+            }
+
             applyOccupationVisibility();
-            saveViewState({
-                selectedOcupMinas: collectSelectedOcupMinas(),
-                selectedOcupOffices: collectSelectedOcupOffices(),
-                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
-                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
-                showOcupProceso: !!ocupShowProcesoToggle?.checked,
-            });
-            scheduleScrollbarSync();
+            renderGrid(true);
         });
     });
     

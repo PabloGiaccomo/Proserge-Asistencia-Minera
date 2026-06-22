@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\Usuario;
+use App\Modules\RQProserge\Services\RQProsergeService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -36,6 +39,13 @@ class RQProsergeApiTest extends TestCase
                 'estado' => 'ACTIVO',
             ],
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_rrhh_con_scope_si_accede(): void
@@ -154,6 +164,32 @@ class RQProsergeApiTest extends TestCase
             ->assertJsonPath('code', 'RQ_PROSERGE_ASSIGN_FORBIDDEN');
     }
 
+    public function test_listado_operativo_oculta_vencidos_y_ordena_por_fecha_y_faltante(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-19 08:00:00'));
+
+        $minaId = $this->crearMina();
+        $plannerId = $this->crearUsuario($this->rolPlannerId);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+
+        $rqVencido = $this->crearRQProsergeConDetalle($minaId, $plannerId, $rrhhId, '2026-05-01', '2026-06-01', 100);
+        $rqCercanoBajo = $this->crearRQProsergeConDetalle($minaId, $plannerId, $rrhhId, '2026-06-20', '2026-06-25', 2);
+        $rqCercanoAlto = $this->crearRQProsergeConDetalle($minaId, $plannerId, $rrhhId, '2026-06-21', '2026-06-28', 20);
+        $rqFuturo = $this->crearRQProsergeConDetalle($minaId, $plannerId, $rrhhId, '2026-07-15', '2026-07-20', 50);
+        $rqRecientePasado = $this->crearRQProsergeConDetalle($minaId, $plannerId, $rrhhId, '2026-06-01', '2026-06-12', 80);
+
+        $usuario = Usuario::query()->findOrFail($rrhhId);
+        $items = app(RQProsergeService::class)->listOperationalForUser($usuario, ['mina_id' => $minaId]);
+        $ids = $items->pluck('id')->all();
+
+        $this->assertNotContains($rqVencido, $ids);
+        $this->assertSame(
+            [$rqCercanoAlto, $rqCercanoBajo, $rqFuturo, $rqRecientePasado],
+            $ids
+        );
+    }
+
     private function crearEscenarioBase(bool $returnDetalle = false, bool $returnRQMinaId = false): array
     {
         $minaId = $this->crearMina();
@@ -230,7 +266,12 @@ class RQProsergeApiTest extends TestCase
         ]);
     }
 
-    private function crearRQMina(string $minaId, string $creadorId): string
+    private function crearRQMina(
+        string $minaId,
+        string $creadorId,
+        string $fechaInicio = '2026-05-01',
+        string $fechaFin = '2026-05-05'
+    ): string
     {
         $id = (string) Str::uuid();
 
@@ -238,8 +279,8 @@ class RQProsergeApiTest extends TestCase
             'id' => $id,
             'mina_id' => $minaId,
             'area' => 'Operacion',
-            'fecha_inicio' => '2026-05-01',
-            'fecha_fin' => '2026-05-05',
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
             'estado' => 'ENVIADO',
             'created_by_usuario_id' => $creadorId,
             'created_at' => now(),
@@ -249,7 +290,21 @@ class RQProsergeApiTest extends TestCase
         return $id;
     }
 
-    private function crearRQMinaDetalle(string $rqMinaId): string
+    private function crearRQProsergeConDetalle(
+        string $minaId,
+        string $plannerId,
+        string $rrhhId,
+        string $fechaInicio,
+        string $fechaFin,
+        int $cantidad
+    ): string {
+        $rqMinaId = $this->crearRQMina($minaId, $plannerId, $fechaInicio, $fechaFin);
+        $this->crearRQMinaDetalle($rqMinaId, $cantidad);
+
+        return $this->crearRQProserge($rqMinaId, $minaId, $rrhhId);
+    }
+
+    private function crearRQMinaDetalle(string $rqMinaId, int $cantidad = 3): string
     {
         $id = (string) Str::uuid();
 
@@ -257,7 +312,7 @@ class RQProsergeApiTest extends TestCase
             'id' => $id,
             'rq_mina_id' => $rqMinaId,
             'puesto' => 'Tecnico',
-            'cantidad' => 3,
+            'cantidad' => $cantidad,
             'cantidad_atendida' => 0,
             'created_at' => now(),
             'updated_at' => now(),

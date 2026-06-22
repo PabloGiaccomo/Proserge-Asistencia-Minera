@@ -151,6 +151,32 @@ class PersonalNormalizer
         };
     }
 
+    public static function finalizedContractStates(): array
+    {
+        return ['CERRADO', 'CESADO', 'NO_RENOVADO'];
+    }
+
+    public static function isFinalizedContractState(mixed $state): bool
+    {
+        return in_array(strtoupper(self::text($state)), self::finalizedContractStates(), true);
+    }
+
+    public static function contractHistorySortKey(mixed $contract): string
+    {
+        $inicio = optional($contract?->fecha_inicio)->toDateString();
+        $fin = optional($contract?->fecha_fin)->toDateString();
+        $createdAt = optional($contract?->created_at)->toDateString();
+        $numero = str_pad((string) (int) ($contract->contrato_numero ?? 0), 8, '0', STR_PAD_LEFT);
+
+        return implode('|', [
+            $inicio ?: '0000-00-00',
+            $fin ?: '9999-12-31',
+            $numero,
+            $createdAt ?: '0000-00-00',
+            (string) ($contract->id ?? ''),
+        ]);
+    }
+
     public static function mineStatus(mixed $value): ?string
     {
         $text = strtoupper(self::text($value));

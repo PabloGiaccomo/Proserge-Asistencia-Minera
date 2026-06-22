@@ -82,7 +82,7 @@ class PersonalContratoController extends WebPageController
             'contrato' => $contrato,
             'snapshot' => $contrato->snapshot_json ?: ($contrato->snapshot_inicial_json ?: []),
             'contratoService' => $this->contratoService,
-            'signedContractFileExists' => $contrato->hasSignedFile()
+            'signedContractFileExists' => trim((string) $contrato->signed_contract_path) !== ''
                 && Storage::disk('local')->exists($contrato->signed_contract_path),
         ]);
     }
@@ -94,7 +94,11 @@ class PersonalContratoController extends WebPageController
 
         $contract = $this->contratoService->findForPersonal($personal, $contractId);
         abort_if(!$contract, 404);
-        abort_unless($contract->hasSignedFile() && Storage::disk('local')->exists($contract->signed_contract_path), 404);
+        abort_unless(
+            trim((string) $contract->signed_contract_path) !== ''
+                && Storage::disk('local')->exists($contract->signed_contract_path),
+            404
+        );
 
         $filename = $contract->signed_contract_original_name
             ?: 'contrato_firmado_' . $this->contratoService->contractFileSlug($contract) . '.pdf';

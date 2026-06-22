@@ -7,12 +7,14 @@ use App\Modules\Personal\Controllers\PersonalPageController;
 use App\Modules\Personal\Controllers\PersonalImportController;
 use App\Modules\Personal\Controllers\PersonalDocumentoController;
 use App\Modules\Personal\Controllers\PersonalFichaController;
+use App\Modules\Personal\Controllers\PersonalIngresoController;
 use App\Modules\Personal\Controllers\PersonalContratoController;
 use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
 use App\Modules\Personal\Controllers\PersonalContratoDatoController;
 use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
 use App\Modules\Personal\Controllers\PersonalPuestoController;
 use App\Modules\Personal\Controllers\PublicPersonalFichaController;
+use App\Modules\Personal\Controllers\PublicPersonalIngresoController;
 use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
 use App\Modules\ManPower\Controllers\ManPowerPageController;
@@ -82,6 +84,9 @@ Route::get('/login', [LoginPageController::class, 'showLoginForm'])->name('login
 Route::post('/login', [LoginPageController::class, 'login'])->name('login.post');
 Route::post('/logout', [LoginPageController::class, 'logout'])->name('logout');
 
+Route::get('/ficha-colaborador', [PublicPersonalIngresoController::class, 'show'])->name('personal.ingresos.public.show');
+Route::post('/ficha-colaborador/clave', [PublicPersonalIngresoController::class, 'verifyKey'])->name('personal.ingresos.public.key');
+Route::post('/ficha-colaborador', [PublicPersonalIngresoController::class, 'submit'])->name('personal.ingresos.public.submit');
 Route::get('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'show'])->name('ficha-colaborador.show');
 Route::post('/ficha-colaborador/{token}/archivo-borrador', [PublicPersonalFichaController::class, 'storeDraftArchivo'])->name('ficha-colaborador.archivo-borrador');
 Route::post('/ficha-colaborador/{token}/datos-borrador', [PublicPersonalFichaController::class, 'storeDraftData'])->name('ficha-colaborador.datos-borrador');
@@ -130,7 +135,14 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/fichas/importar', [PersonalFichaController::class, 'parseMacro'])->middleware('web.permission:personal,importar')->name('personal.fichas.parse');
     Route::post('/personal/fichas/generar-link', [PersonalFichaController::class, 'generateLink'])->middleware('web.permission:personal,crear')->name('personal.fichas.generate-link');
     Route::post('/personal/fichas/cancelar-importacion', [PersonalFichaController::class, 'cancelImport'])->middleware('web.permission:personal,importar')->name('personal.fichas.cancel-import');
-    Route::get('/personal/fichas/temporales', [PersonalFichaController::class, 'temporales'])->middleware('web.permission:personal,ver')->name('personal.fichas.temporales');
+    Route::get('/personal/fichas/temporales', [PersonalIngresoController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.fichas.temporales');
+    Route::get('/personal/ingresos/{id}', [PersonalIngresoController::class, 'show'])->middleware('web.permission:personal,ver')->name('personal.ingresos.show');
+    Route::get('/personal/ingresos/{id}/editar', [PersonalIngresoController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.ingresos.edit');
+    Route::get('/personal/ingresos/{id}/archivos/{archivoId}', [PersonalIngresoController::class, 'downloadArchivo'])->middleware('web.permission:personal,ver')->name('personal.ingresos.archivos.download');
+    Route::put('/personal/ingresos/{id}', [PersonalIngresoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.update');
+    Route::post('/personal/ingresos/{id}/agregar', [PersonalIngresoController::class, 'accept'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.accept');
+    Route::post('/personal/ingresos/{id}/contrato-no-firmado', [PersonalIngresoController::class, 'contractNotSigned'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.contract-not-signed');
+    Route::delete('/personal/ingresos/{id}', [PersonalIngresoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.ingresos.destroy');
     Route::get('/personal/fichas/activar-link/buscar', [PersonalFichaController::class, 'searchActivateLinkWorkers'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link.search');
     Route::post('/personal/fichas/activar-link', [PersonalFichaController::class, 'activateLinkForWorker'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link');
     Route::post('/personal/fichas/correo-envio', [PersonalFichaController::class, 'updateEmailTemplate'])->middleware('web.permission:personal,editar')->name('personal.fichas.email-template.update');
@@ -191,6 +203,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.edit');
     Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.update');
     Route::post('/personal/{id}/cesar', [PersonalPageController::class, 'cease'])->middleware('web.permission:personal,actualizar')->name('personal.cease');
+    Route::post('/personal/{id}/lista-negra', [PersonalPageController::class, 'addToListaNegra'])->middleware('web.permission:personal,actualizar')->name('personal.lista-negra.store');
+    Route::post('/personal/{id}/lista-negra/quitar', [PersonalPageController::class, 'removeFromListaNegra'])->middleware('web.permission:personal,actualizar')->name('personal.lista-negra.remove');
     Route::post('/personal/{id}/activar', [PersonalPageController::class, 'activate'])->middleware('web.permission:personal,actualizar')->name('personal.activate');
     Route::post('/personal/{id}/eliminar', [PersonalPageController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.destroy');
     Route::get('/personal/importar', [PersonalImportController::class, 'showImportForm'])->middleware('web.permission:personal,importar')->name('personal.importar');
@@ -211,10 +225,15 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Herramientas por parada
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
+    Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.catalogo.importar');
+    Route::get('/herramientas-parada/catalogo/sugerencias', [ParadaHerramientaPageController::class, 'sugerenciasCatalogo'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.catalogo.sugerencias');
+    Route::get('/herramientas-parada/catalogo/observaciones', [ParadaHerramientaPageController::class, 'sugerenciasObservaciones'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.catalogo.observaciones');
+    Route::get('/herramientas-parada/{rqMinaId}/confirmar-pedido', [ParadaHerramientaPageController::class, 'confirmarPedido'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.confirmar-pedido');
     Route::get('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'show'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.show');
     Route::post('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'save'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.save');
     Route::post('/herramientas-parada/{rqMinaId}/pedido', [ParadaHerramientaPageController::class, 'updatePedido'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.pedido');
     Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.enviar');
+    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/importar-formato', [ParadaHerramientaPageController::class, 'importarFormato'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.importar-formato');
     Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/recordatorio-supervisor', [ParadaHerramientaPageController::class, 'recordarSupervisor'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.recordar-supervisor');
 
     // RQ Mina

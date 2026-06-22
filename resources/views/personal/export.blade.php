@@ -302,6 +302,102 @@
     font-size: 13px;
 }
 
+.export-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(3px);
+}
+
+.export-loading-overlay.is-open {
+    display: flex;
+}
+
+.export-loading-panel {
+    width: min(460px, 100%);
+    border: 1px solid #ccfbf1;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+    padding: 24px;
+    text-align: center;
+}
+
+.export-loading-spinner {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 16px;
+    border: 5px solid #ccfbf1;
+    border-top-color: #0d9488;
+    border-radius: 999px;
+    animation: export-spin 0.9s linear infinite;
+}
+
+.export-loading-title {
+    margin: 0;
+    color: #0f172a;
+    font-size: 20px;
+    font-weight: 900;
+}
+
+.export-loading-message {
+    margin: 8px 0 0;
+    color: #475569;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.export-loading-bar {
+    position: relative;
+    height: 8px;
+    margin-top: 18px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+}
+
+.export-loading-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 42%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #0d9488, #2dd4bf);
+    animation: export-loading-bar 1.25s ease-in-out infinite;
+}
+
+.export-loading-meta {
+    margin: 12px 0 0;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+@keyframes export-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes export-loading-bar {
+    0% {
+        transform: translateX(-110%);
+    }
+
+    50% {
+        transform: translateX(80%);
+    }
+
+    100% {
+        transform: translateX(240%);
+    }
+}
+
 @media (max-width: 760px) {
     .export-card-header,
     .export-preview-toolbar {
@@ -394,6 +490,16 @@
         </div>
     </section>
 </div>
+
+<div id="exportLoadingOverlay" class="export-loading-overlay" role="status" aria-live="polite" aria-hidden="true">
+    <div class="export-loading-panel">
+        <div class="export-loading-spinner" aria-hidden="true"></div>
+        <h2 id="exportLoadingTitle" class="export-loading-title">Preparando Excel</h2>
+        <p id="exportLoadingMessage" class="export-loading-message">Validando columnas y trabajadores seleccionados.</p>
+        <div class="export-loading-bar" aria-hidden="true"></div>
+        <p id="exportLoadingMeta" class="export-loading-meta">No cierres esta pestaña hasta que empiece la descarga.</p>
+    </div>
+</div>
 @endsection
 
 @push('scripts')
@@ -417,9 +523,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const exportButton = document.getElementById('exportExcelButton');
     const selectAllColumns = document.getElementById('selectAllColumns');
     const resetRecommendedColumns = document.getElementById('resetRecommendedColumns');
+    const loadingOverlay = document.getElementById('exportLoadingOverlay');
+    const loadingTitle = document.getElementById('exportLoadingTitle');
+    const loadingMessage = document.getElementById('exportLoadingMessage');
+    const loadingMeta = document.getElementById('exportLoadingMeta');
     const selectedWorkers = new Map();
     let searchTimer = null;
     let previewTimer = null;
+    let loadingTimer = null;
+    let loadingStep = 0;
     let exportState = 'idle';
 
     selectedWorkersInitial.forEach(function (worker) {
@@ -471,6 +583,76 @@ document.addEventListener('DOMContentLoaded', function () {
     function setExportState(state) {
         exportState = state;
         updateExportButtonState();
+    }
+
+    function updateLoadingCopy(title, message, meta) {
+        if (loadingTitle) {
+            loadingTitle.textContent = title;
+        }
+        if (loadingMessage) {
+            loadingMessage.textContent = message;
+        }
+        if (loadingMeta) {
+            loadingMeta.textContent = meta;
+        }
+    }
+
+    function showExportLoading() {
+        if (!loadingOverlay) {
+            return;
+        }
+
+        loadingStep = 0;
+        updateLoadingCopy(
+            'Preparando Excel',
+            'Validando columnas y trabajadores seleccionados.',
+            'No cierres esta pestaña hasta que empiece la descarga.'
+        );
+        loadingOverlay.classList.add('is-open');
+        loadingOverlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+
+        window.clearInterval(loadingTimer);
+        loadingTimer = window.setInterval(function () {
+            loadingStep += 1;
+
+            if (loadingStep === 1) {
+                updateLoadingCopy(
+                    'Armando el archivo',
+                    'Estamos generando el Excel con la informacion seleccionada.',
+                    'Si elegiste muchos trabajadores, puede tardar un poco mas.'
+                );
+                return;
+            }
+
+            if (loadingStep === 2) {
+                updateLoadingCopy(
+                    'Procesando datos',
+                    'La descarga sigue en curso. Evita volver a presionar el boton.',
+                    'El archivo se descargara automaticamente cuando termine.'
+                );
+                return;
+            }
+
+            updateLoadingCopy(
+                'Casi listo',
+                'Seguimos preparando el archivo. Gracias por esperar.',
+                'Mantente en esta pantalla para recibir la descarga.'
+            );
+        }, 5500);
+    }
+
+    function hideExportLoading() {
+        window.clearInterval(loadingTimer);
+        loadingTimer = null;
+
+        if (!loadingOverlay) {
+            return;
+        }
+
+        loadingOverlay.classList.remove('is-open');
+        loadingOverlay.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
     }
 
     function markExportDirty() {
@@ -765,6 +947,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         setExportState('exporting');
+        showExportLoading();
 
         try {
             const response = await fetch(form.action, {
@@ -787,9 +970,16 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             const blob = await response.blob();
+            updateLoadingCopy(
+                'Excel listo',
+                'La descarga esta por iniciar en tu navegador.',
+                'Puedes continuar trabajando cuando aparezca el archivo.'
+            );
             triggerExcelDownload(blob, filenameFromDisposition(response.headers.get('content-disposition')));
             setExportState('exported');
+            window.setTimeout(hideExportLoading, 900);
         } catch (error) {
+            hideExportLoading();
             previewContent.innerHTML = '<div class="export-empty-state">' + escapeHtml(error.message || 'No se pudo exportar el Excel.') + '</div>';
             setExportState('idle');
         }

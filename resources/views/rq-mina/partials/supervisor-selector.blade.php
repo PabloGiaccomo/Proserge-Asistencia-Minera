@@ -2,6 +2,9 @@
     $selectorId = $selectorId ?? 'rqSupervisorSelector';
     $selectedSupervisor = $selectedSupervisor ?? null;
     $title = $title ?? 'Supervisor a cargo';
+    $fieldName = $fieldName ?? 'supervisor_id';
+    $placeholder = $placeholder ?? 'Buscar supervisor por nombre, DNI o puesto';
+    $emptyText = $emptyText ?? 'Sin supervisor seleccionado.';
 @endphp
 
 @once
@@ -78,7 +81,7 @@ function initRQMinaSupervisorSelector(root) {
         clearButton.classList.toggle('is-visible', !!selected);
         selectedBox.innerHTML = selected
             ? 'Seleccionado: <strong>' + escapeHtml(selected.nombre) + '</strong> <span>' + escapeHtml(personLabel(selected)) + '</span>'
-            : 'Sin supervisor seleccionado.';
+            : selectedBox.dataset.emptyText;
     }
 
     function clearSelection(keepText) {
@@ -178,12 +181,12 @@ document.addEventListener('DOMContentLoaded', function() {
         <h3 class="rq-supervisor-selector-title">{{ $title }}</h3>
     </div>
     <div class="rq-supervisor-search-wrap">
-        <input type="hidden" name="supervisor_id" data-rq-supervisor-id>
-        <input type="text" class="rq-supervisor-search-input" data-rq-supervisor-search placeholder="Buscar supervisor por nombre, DNI o puesto" autocomplete="off">
+        <input type="hidden" name="{{ $fieldName }}" data-rq-supervisor-id>
+        <input type="text" class="rq-supervisor-search-input" data-rq-supervisor-search placeholder="{{ $placeholder }}" autocomplete="off">
         <button type="button" class="rq-supervisor-clear" data-rq-supervisor-clear aria-label="Quitar supervisor" title="Quitar supervisor">&times;</button>
         <div class="rq-supervisor-results" data-rq-supervisor-results></div>
     </div>
-    <div class="rq-supervisor-selected" data-rq-supervisor-selected>Sin supervisor seleccionado.</div>
+    <div class="rq-supervisor-selected" data-rq-supervisor-selected data-empty-text="{{ $emptyText }}">{{ $emptyText }}</div>
 </div>
 
 <script type="application/json" data-rq-supervisor-initial="{{ $selectorId }}">@json($selectedSupervisor)</script>

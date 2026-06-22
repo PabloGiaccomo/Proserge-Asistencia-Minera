@@ -164,6 +164,68 @@ class PersonalContratoServiceTest extends TestCase
         ]);
     }
 
+    public function test_anular_contrato_en_preparacion_deja_cesado_si_solo_queda_contrato_vencido(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $this->createFicha($personalId);
+        DB::table('personal')->where('id', $personalId)->update([
+            'estado' => PersonalContratoDatoService::PENDING_STATE,
+        ]);
+
+        $closedId = (string) Str::uuid();
+        $preparingId = (string) Str::uuid();
+        DB::table('personal_contratos')->insert([
+            [
+                'id' => $closedId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 1,
+                'estado' => 'CERRADO',
+                'fecha_inicio' => '2026-05-30',
+                'fecha_fin' => '2026-06-18',
+                'motivo_cese' => 'Termino de contrato',
+                'signed_at' => '2026-05-30 08:00:00',
+                'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_vencido.pdf',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => $preparingId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 2,
+                'estado' => 'PREPARACION',
+                'fecha_inicio' => '2026-06-20',
+                'fecha_fin' => null,
+                'motivo_cese' => null,
+                'signed_at' => null,
+                'signed_contract_path' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        app(PersonalContratoService::class)->annulContract(
+            Personal::query()->findOrFail($personalId),
+            $preparingId,
+            'Contrato creado por error',
+            $actor,
+        );
+
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $preparingId,
+            'estado' => 'ANULADO',
+            'motivo_anulacion' => 'Contrato creado por error',
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => 'CESADO',
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+    }
+
     public function test_contract_correction_updates_dates_and_keeps_audit(): void
     {
         $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
@@ -214,6 +276,192 @@ class PersonalContratoServiceTest extends TestCase
         $this->assertSame('2026-06-02', data_get($snapshot, 'rango.fecha_inicio'));
         $this->assertSame('2026-11-01', data_get($snapshot, 'rango.fecha_fin'));
         $this->assertSame('Fecha digitada por error', data_get($snapshot, 'extra.motivo_correccion'));
+    }
+
+    public function test_correcting_active_contract_to_expired_end_ceases_worker(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $this->createFicha($personalId);
+        $contractId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            'id' => $contractId,
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'ACTIVO',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-12-31',
+            'tipo_contrato' => 'FIJO',
+            'puesto' => 'Operario',
+            'signed_at' => '2026-06-01 08:00:00',
+            'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_actual.pdf',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $contract = app(PersonalContratoService::class)->correctContract(
+            Personal::query()->findOrFail($personalId),
+            $contractId,
+            [
+                'fecha_inicio' => '2026-06-01',
+                'fecha_fin' => '2026-06-18',
+                'tipo_contrato' => 'FIJO',
+                'puesto' => 'Operario',
+                'motivo_correccion' => 'Fecha fin corregida',
+            ],
+            $actor,
+        );
+
+        $this->assertSame('CERRADO', strtoupper((string) $contract->estado));
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $contractId,
+            'estado' => 'CERRADO',
+            'fecha_fin' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => 'CESADO',
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+    }
+
+    public function test_expired_active_contract_marks_worker_ceased_without_another_current_signed_contract(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $this->createFicha($personalId);
+        $contractId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            'id' => $contractId,
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'ACTIVO',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-18',
+            'signed_at' => '2026-06-01 08:00:00',
+            'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_actual.pdf',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $closed = app(PersonalContratoService::class)->syncExpiredActiveContracts($actor);
+
+        $this->assertSame(1, $closed);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $contractId,
+            'estado' => 'CERRADO',
+            'fecha_fin' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => 'CESADO',
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+    }
+
+    public function test_sync_corrige_personal_no_cesado_que_solo_tiene_contrato_cerrado_vencido(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $this->createFicha($personalId);
+        DB::table('personal')->where('id', $personalId)->update([
+            'estado' => PersonalContratoDatoService::PENDING_STATE,
+        ]);
+        $contractId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            'id' => $contractId,
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'CERRADO',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+            'signed_at' => '2026-06-01 08:00:00',
+            'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_vencido.pdf',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $closed = app(PersonalContratoService::class)->syncExpiredActiveContracts($actor);
+
+        $this->assertSame(0, $closed);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $contractId,
+            'estado' => 'CERRADO',
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => 'CESADO',
+            'fecha_cese' => '2026-06-18',
+            'motivo_cese' => 'Termino de contrato',
+        ]);
+    }
+
+    public function test_expired_active_contract_does_not_cease_worker_with_another_current_signed_contract(): void
+    {
+        Carbon::setTestNow('2026-06-19 09:00:00');
+
+        $actor = Usuario::query()->find($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personalId = $this->createPersonal();
+        $this->createFicha($personalId);
+        $expiredId = (string) Str::uuid();
+        $currentId = (string) Str::uuid();
+
+        DB::table('personal_contratos')->insert([
+            [
+                'id' => $expiredId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 1,
+                'estado' => 'ACTIVO',
+                'fecha_inicio' => '2026-06-01',
+                'fecha_fin' => '2026-06-18',
+                'signed_at' => '2026-06-01 08:00:00',
+                'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_vencido.pdf',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => $currentId,
+                'personal_id' => $personalId,
+                'contrato_numero' => 2,
+                'estado' => 'ACTIVO',
+                'fecha_inicio' => '2026-06-19',
+                'fecha_fin' => '2026-12-31',
+                'signed_at' => '2026-06-19 08:00:00',
+                'signed_contract_path' => 'personal_contratos/' . $personalId . '/contrato_vigente.pdf',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $closed = app(PersonalContratoService::class)->syncExpiredActiveContracts($actor);
+
+        $this->assertSame(1, $closed);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $expiredId,
+            'estado' => 'CERRADO',
+        ]);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $currentId,
+            'estado' => 'ACTIVO',
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'estado' => 'ACTIVO',
+        ]);
     }
 
     public function test_closed_contract_correction_refreshes_historical_snapshot(): void

@@ -43,6 +43,8 @@ class PersonalMinaHabilitacionController extends WebPageController
         $allowedWorkerLimits = [10, 20, 50, 80, 200];
         $filters['worker_limit'] = in_array($filters['worker_limit'], $allowedWorkerLimits, true) ? $filters['worker_limit'] : 20;
         $selectedWorker = $this->service->findWorker($filters['worker_id']);
+        $upcomingExpirationDays = 60;
+        $scheduledExamDays = 60;
 
         return view('personal.habilitacion-minera.index', [
             'filters' => $filters,
@@ -55,6 +57,10 @@ class PersonalMinaHabilitacionController extends WebPageController
             'workers' => $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit'], $filters['worker_page']),
             'workersTotal' => $this->service->workerOptionsTotal($filters['trabajador'] ?: null),
             'selectedWorker' => $selectedWorker,
+            'upcomingExpirationDays' => $upcomingExpirationDays,
+            'upcomingExpirations' => $this->service->upcomingExamExpirations($upcomingExpirationDays),
+            'scheduledExamDays' => $scheduledExamDays,
+            'scheduledExams' => $this->service->scheduledExamAttempts($scheduledExamDays),
             'stateOptions' => $this->service->habilitationStateOptions(),
             'examStateOptions' => $this->service->examStateOptions(),
             'attemptResultOptions' => $this->service->attemptResultOptions(),

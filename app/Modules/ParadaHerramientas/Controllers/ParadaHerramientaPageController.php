@@ -4,6 +4,7 @@ namespace App\Modules\ParadaHerramientas\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -55,6 +56,21 @@ class ParadaHerramientaPageController extends WebPageController
         $item = $this->service->toDetailView($rq, $usuario);
 
         return view('parada-herramientas.show', compact('item'));
+    }
+
+    public function confirmarPedido(Request $request, string $rqMinaId): View|RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
+
+        if (!$rq) {
+            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+        }
+
+        $item = $this->service->toDetailView($rq, $usuario);
+        $modo = $request->query('modo') === 'recepcion' ? 'recepcion' : 'entrega';
+
+        return view('parada-herramientas.pedido', compact('item', 'modo'));
     }
 
     public function save(Request $request, string $rqMinaId): RedirectResponse
@@ -114,6 +130,67 @@ class ParadaHerramientaPageController extends WebPageController
         return back()->with(($result['ok'] ?? false) ? 'success' : 'error', $result['message'] ?? 'No se pudo enviar el correo.');
     }
 
+    public function importarFormato(Request $request, string $rqMinaId, string $grupoId): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
+
+        if (!$rq) {
+            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+        }
+
+        $request->validate([
+            'archivo' => ['required', 'file', 'mimes:xlsx,xls,xlsm', 'max:20480'],
+        ]);
+
+        $result = $this->service->importarFormatoGrupo($usuario, $rq, $grupoId, $request->file('archivo'));
+
+        return redirect()
+            ->route('herramientas-parada.show', $rqMinaId)
+            ->with(($result['ok'] ?? false) ? 'success' : 'error', $result['message'] ?? 'No se pudo importar el formato.');
+    }
+
+    public function importarCatalogo(Request $request): RedirectResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+
+        $request->validate([
+            'archivo' => ['required', 'file', 'mimes:xlsx,xls,xlsm', 'max:20480'],
+        ]);
+
+        $result = $this->service->importarCatalogo($usuario, $request->file('archivo'));
+
+        return redirect()
+            ->route('herramientas-parada.index')
+            ->with(($result['ok'] ?? false) ? 'success' : 'error', $result['message'] ?? 'No se pudo actualizar el catalogo.');
+    }
+
+    public function sugerenciasCatalogo(Request $request): JsonResponse
+    {
+        $this->requireAuthenticatedUser();
+
+        return response()->json([
+            'items' => $this->service->sugerirCatalogo(
+                trim((string) $request->query('q', '')),
+                trim((string) $request->query('categoria', '')),
+                (int) $request->query('limit', 20)
+            ),
+        ]);
+    }
+
+    public function sugerenciasObservaciones(Request $request): JsonResponse
+    {
+        $this->requireAuthenticatedUser();
+
+        return response()->json([
+            'items' => $this->service->sugerirObservaciones(
+                trim((string) $request->query('descripcion', '')),
+                trim((string) $request->query('categoria', '')),
+                (int) $request->query('limit', 10)
+            ),
+        ]);
+    }
+
     public function updatePedido(Request $request, string $rqMinaId): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
@@ -124,6 +201,7 @@ class ParadaHerramientaPageController extends WebPageController
         }
 
         $result = $this->service->updatePedido($usuario, $rq, [
+            'modo' => $request->input('modo'),
             'grupos' => $request->input('grupos', []),
         ]);
 
@@ -131,8 +209,6 @@ class ParadaHerramientaPageController extends WebPageController
             return back()->with('error', $result['message'] ?? 'No se pudo actualizar el pedido.')->withInput();
         }
 
-        return redirect()
-            ->route('herramientas-parada.show', $rqMinaId)
-            ->with('success', $result['message'] ?? 'Pedido actualizado correctamente.');
+        return back()->with('success', $result['message'] ?? 'Pedido actualizado correctamente.');
     }
 }

@@ -7,6 +7,13 @@
     $permissions = session('user.permissions', []);
     $canManage = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
     $currentQuery = request()->query();
+    $activeMineView = in_array(request('vista'), ['worker', 'matrix', 'expiring', 'scheduled'], true) ? request('vista') : 'worker';
+    $upcomingExpirationAllRows = collect($upcomingExpirations ?? []);
+    $upcomingExpirationRows = $upcomingExpirationAllRows;
+    $upcomingExpirationCount = $upcomingExpirationRows->count();
+    $scheduledExamAllRows = collect($scheduledExams ?? []);
+    $scheduledExamRows = $scheduledExamAllRows;
+    $scheduledExamCount = $scheduledExamRows->count();
 
     $formatDate = function ($date): string {
         if (!$date) {
@@ -79,13 +86,56 @@
         };
     };
 
-    $attemptCountFor = function ($exam): int {
+    $attemptOperationalDateFor = function ($attempt) {
+        $date = $attempt->fecha_realizacion ?: $attempt->fecha_programacion ?: $attempt->created_at;
+        if (!$date) {
+            return null;
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::parse($date);
+        } catch (\Throwable) {
+            return null;
+        }
+    };
+
+    $expiredAttemptCycleCutoffFor = function ($exam) {
+        if (!$exam || !$exam->fecha_vencimiento) {
+            return null;
+        }
+
+        try {
+            $expiration = \Illuminate\Support\Carbon::parse($exam->fecha_vencimiento)->endOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $isExpiredByDate = $expiration->lt(\Illuminate\Support\Carbon::today()->startOfDay());
+        $isExpiredByState = strtoupper((string) $exam->estado) === \App\Models\PersonalMinaExamen::ESTADO_VENCIDO;
+
+        return $isExpiredByDate || $isExpiredByState ? $expiration : null;
+    };
+
+    $attemptCountFor = function ($exam) use ($attemptOperationalDateFor, $expiredAttemptCycleCutoffFor): int {
         if (!$exam || !$exam->relationLoaded('intentos')) {
             return 0;
         }
 
-        return $exam->intentos
+        $attempts = $exam->intentos
             ->where('resultado', '!=', \App\Models\PersonalMinaExamenIntento::RESULTADO_ANULADO)
+            ->values();
+
+        $cutoff = $expiredAttemptCycleCutoffFor($exam);
+        if (!$cutoff) {
+            return $attempts->count();
+        }
+
+        return $attempts
+            ->filter(function ($attempt) use ($attemptOperationalDateFor, $cutoff): bool {
+                $date = $attemptOperationalDateFor($attempt);
+
+                return $date !== null && $date->gt($cutoff);
+            })
             ->count();
     };
 
@@ -181,6 +231,124 @@
             : 'Revisar proceso';
     };
 
+    $normalizeForFilter = function ($value): string {
+        return mb_strtolower(trim(\Illuminate\Support\Str::ascii((string) $value)));
+    };
+
+    $dateForFilter = function ($date): string {
+        if (!$date) {
+            return '';
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::parse($date)->toDateString();
+        } catch (\Throwable) {
+            return '';
+        }
+    };
+
+    $upcomingExpirationWorkerSearch = trim((string) request('expiring_worker', ''));
+    $upcomingExpirationExamFilter = trim((string) request('expiring_exam', ''));
+    $upcomingExpirationMineFilter = trim((string) request('expiring_mine', ''));
+    $upcomingExpirationDateFilter = trim((string) request('expiring_due', ''));
+    $upcomingExpirationStateFilter = trim((string) request('expiring_state', ''));
+
+    $upcomingExpirationExamOptions = $upcomingExpirationAllRows
+        ->pluck('exam_name')
+        ->filter()
+        ->unique()
+        ->sort()
+        ->values();
+    $upcomingExpirationMineOptions = $upcomingExpirationAllRows
+        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->map(fn ($mineRow) => $mineRow['mine']?->nombre)->filter())
+        ->unique()
+        ->sort()
+        ->values();
+    $upcomingExpirationDateOptions = $upcomingExpirationAllRows
+        ->map(fn ($row) => $dateForFilter($row['fecha_vencimiento'] ?? null))
+        ->filter()
+        ->unique()
+        ->sort()
+        ->values();
+    $upcomingExpirationCalendarDates = $upcomingExpirationAllRows
+        ->map(fn ($row) => $dateForFilter($row['fecha_vencimiento'] ?? null))
+        ->filter()
+        ->countBy()
+        ->sortKeys()
+        ->map(fn ($count, $date) => [
+            'date' => (string) $date,
+            'label' => $formatDate($date),
+            'count' => (int) $count,
+        ])
+        ->values();
+    $upcomingExpirationStateOptions = $upcomingExpirationAllRows
+        ->pluck('estado')
+        ->filter()
+        ->unique()
+        ->sortBy(fn ($state) => $examStateLabel($state))
+        ->values();
+
+    $upcomingExpirationRows = $upcomingExpirationAllRows
+        ->filter(function ($row) use (
+            $dateForFilter,
+            $normalizeForFilter,
+            $upcomingExpirationDateFilter,
+            $upcomingExpirationExamFilter,
+            $upcomingExpirationMineFilter,
+            $upcomingExpirationStateFilter,
+            $upcomingExpirationWorkerSearch
+        ) {
+            $worker = $row['worker'] ?? null;
+            $mineNames = collect($row['mines'] ?? [])
+                ->map(fn ($mineRow) => $mineRow['mine']?->nombre)
+                ->filter()
+                ->values();
+
+            if ($upcomingExpirationWorkerSearch !== '') {
+                $needleTokens = collect(explode(' ', $normalizeForFilter($upcomingExpirationWorkerSearch)))
+                    ->filter()
+                    ->values();
+                $haystack = $normalizeForFilter(implode(' ', [
+                    $worker?->nombre_completo,
+                    $worker?->tipo_documento,
+                    $worker?->numero_documento,
+                    $worker?->dni,
+                    $worker?->puesto,
+                ]));
+
+                if ($needleTokens->contains(fn ($token) => !str_contains($haystack, $token))) {
+                    return false;
+                }
+            }
+
+            if ($upcomingExpirationExamFilter !== '' && (string) ($row['exam_name'] ?? '') !== $upcomingExpirationExamFilter) {
+                return false;
+            }
+
+            if ($upcomingExpirationMineFilter !== '' && !$mineNames->contains(fn ($mineName) => (string) $mineName === $upcomingExpirationMineFilter)) {
+                return false;
+            }
+
+            if ($upcomingExpirationDateFilter !== '' && $dateForFilter($row['fecha_vencimiento'] ?? null) !== $upcomingExpirationDateFilter) {
+                return false;
+            }
+
+            if ($upcomingExpirationStateFilter !== '' && (string) ($row['estado'] ?? '') !== $upcomingExpirationStateFilter) {
+                return false;
+            }
+
+            return true;
+        })
+        ->values();
+    $upcomingExpirationCount = $upcomingExpirationRows->count();
+    $upcomingExpirationActiveFilterCount = collect([
+        $upcomingExpirationWorkerSearch,
+        $upcomingExpirationExamFilter,
+        $upcomingExpirationMineFilter,
+        $upcomingExpirationDateFilter,
+        $upcomingExpirationStateFilter,
+    ])->filter(fn ($value) => $value !== '')->count();
+
     $workerLimitOptions = [10, 20, 50, 80, 200];
     $assignmentPerPageOptions = [10, 15, 25, 50, 100];
     $workerLimit = (int) ($filters['worker_limit'] ?? request('worker_limit', 20));
@@ -226,6 +394,237 @@
     };
     $workerPaginationWindow = $paginationWindow($workers);
 
+    $upcomingExpirationLimitOptions = [10, 20, 50, 100, 200];
+    $upcomingExpirationLimit = (int) request('expiring_limit', 10);
+    if (!in_array($upcomingExpirationLimit, $upcomingExpirationLimitOptions, true)) {
+        $upcomingExpirationLimit = 10;
+    }
+
+    $upcomingExpirationPage = max(1, (int) request('expiring_page', 1));
+    $upcomingExpirationLastPage = max(1, (int) ceil($upcomingExpirationCount / max(1, $upcomingExpirationLimit)));
+    if ($upcomingExpirationPage > $upcomingExpirationLastPage) {
+        $upcomingExpirationPage = $upcomingExpirationLastPage;
+    }
+
+    $upcomingExpirationOffset = ($upcomingExpirationPage - 1) * $upcomingExpirationLimit;
+    $upcomingExpirationRows = $upcomingExpirationRows
+        ->slice($upcomingExpirationOffset, $upcomingExpirationLimit)
+        ->values();
+    $upcomingExpirationVisibleCount = $upcomingExpirationRows->count();
+    $upcomingExpirationFirstItem = $upcomingExpirationCount > 0 ? $upcomingExpirationOffset + 1 : 0;
+    $upcomingExpirationLastItem = $upcomingExpirationCount > 0
+        ? min($upcomingExpirationOffset + $upcomingExpirationVisibleCount, $upcomingExpirationCount)
+        : 0;
+    $upcomingExpirationPaginationWindow = $upcomingExpirationLastPage <= 1
+        ? []
+        : ($upcomingExpirationLastPage <= 9
+            ? range(1, $upcomingExpirationLastPage)
+            : collect([1, 2, $upcomingExpirationPage - 1, $upcomingExpirationPage, $upcomingExpirationPage + 1, $upcomingExpirationLastPage - 1, $upcomingExpirationLastPage])
+                ->filter(fn ($page) => $page >= 1 && $page <= $upcomingExpirationLastPage)
+                ->unique()
+                ->sort()
+                ->values()
+                ->reduce(function (array $window, int $page): array {
+                    $previous = collect($window)->last(fn ($item) => is_int($item));
+                    if ($previous !== null && $page > $previous + 1) {
+                        $window[] = '...';
+                    }
+                    $window[] = $page;
+                    return $window;
+                }, []));
+    $upcomingExpirationPageUrl = function (int $page) use ($currentQuery, $upcomingExpirationLimit): string {
+        return route('personal.habilitacion-minera.index', array_merge($currentQuery, [
+            'vista' => 'expiring',
+            'expiring_limit' => $upcomingExpirationLimit,
+            'expiring_page' => $page,
+        ]));
+    };
+    $upcomingExpirationFormQuery = array_merge(
+        collect($currentQuery)->except([
+            'expiring_limit',
+            'expiring_page',
+            'expiring_worker',
+            'expiring_exam',
+            'expiring_mine',
+            'expiring_due',
+            'expiring_state',
+        ])->all(),
+        ['vista' => 'expiring']
+    );
+    $upcomingExpirationClearUrl = route('personal.habilitacion-minera.index', array_merge(
+        collect($currentQuery)->except([
+            'expiring_limit',
+            'expiring_page',
+            'expiring_worker',
+            'expiring_exam',
+            'expiring_mine',
+            'expiring_due',
+            'expiring_state',
+        ])->all(),
+        ['vista' => 'expiring']
+    ));
+
+    $scheduledExamWorkerSearch = trim((string) request('scheduled_worker', ''));
+    $scheduledExamExamFilter = trim((string) request('scheduled_exam', ''));
+    $scheduledExamMineFilter = trim((string) request('scheduled_mine', ''));
+    $scheduledExamDateFilter = trim((string) request('scheduled_date', ''));
+    $scheduledExamStateFilter = trim((string) request('scheduled_state', ''));
+
+    $scheduledExamExamOptions = $scheduledExamAllRows
+        ->pluck('exam_name')
+        ->filter()
+        ->unique()
+        ->sort()
+        ->values();
+    $scheduledExamMineOptions = $scheduledExamAllRows
+        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->map(fn ($mineRow) => $mineRow['mine']?->nombre)->filter())
+        ->unique()
+        ->sort()
+        ->values();
+    $scheduledExamDateOptions = $scheduledExamAllRows
+        ->map(fn ($row) => $dateForFilter($row['fecha_programacion'] ?? null))
+        ->filter()
+        ->unique()
+        ->sort()
+        ->values();
+    $scheduledExamStateOptions = $scheduledExamAllRows
+        ->pluck('estado')
+        ->filter()
+        ->unique()
+        ->sortBy(fn ($state) => $examStateLabel($state))
+        ->values();
+
+    $scheduledExamRows = $scheduledExamAllRows
+        ->filter(function ($row) use (
+            $dateForFilter,
+            $normalizeForFilter,
+            $scheduledExamDateFilter,
+            $scheduledExamExamFilter,
+            $scheduledExamMineFilter,
+            $scheduledExamStateFilter,
+            $scheduledExamWorkerSearch
+        ) {
+            $worker = $row['worker'] ?? null;
+            $mineNames = collect($row['mines'] ?? [])
+                ->map(fn ($mineRow) => $mineRow['mine']?->nombre)
+                ->filter()
+                ->values();
+
+            if ($scheduledExamWorkerSearch !== '') {
+                $needleTokens = collect(explode(' ', $normalizeForFilter($scheduledExamWorkerSearch)))
+                    ->filter()
+                    ->values();
+                $haystack = $normalizeForFilter(implode(' ', [
+                    $worker?->nombre_completo,
+                    $worker?->tipo_documento,
+                    $worker?->numero_documento,
+                    $worker?->dni,
+                    $worker?->puesto,
+                ]));
+
+                if ($needleTokens->contains(fn ($token) => !str_contains($haystack, $token))) {
+                    return false;
+                }
+            }
+
+            if ($scheduledExamExamFilter !== '' && (string) ($row['exam_name'] ?? '') !== $scheduledExamExamFilter) {
+                return false;
+            }
+
+            if ($scheduledExamMineFilter !== '' && !$mineNames->contains(fn ($mineName) => (string) $mineName === $scheduledExamMineFilter)) {
+                return false;
+            }
+
+            if ($scheduledExamDateFilter !== '' && $dateForFilter($row['fecha_programacion'] ?? null) !== $scheduledExamDateFilter) {
+                return false;
+            }
+
+            if ($scheduledExamStateFilter !== '' && (string) ($row['estado'] ?? '') !== $scheduledExamStateFilter) {
+                return false;
+            }
+
+            return true;
+        })
+        ->values();
+    $scheduledExamCount = $scheduledExamRows->count();
+    $scheduledExamActiveFilterCount = collect([
+        $scheduledExamWorkerSearch,
+        $scheduledExamExamFilter,
+        $scheduledExamMineFilter,
+        $scheduledExamDateFilter,
+        $scheduledExamStateFilter,
+    ])->filter(fn ($value) => $value !== '')->count();
+
+    $scheduledExamLimitOptions = [10, 20, 50, 100, 200];
+    $scheduledExamLimit = (int) request('scheduled_limit', 10);
+    if (!in_array($scheduledExamLimit, $scheduledExamLimitOptions, true)) {
+        $scheduledExamLimit = 10;
+    }
+
+    $scheduledExamPage = max(1, (int) request('scheduled_page', 1));
+    $scheduledExamLastPage = max(1, (int) ceil($scheduledExamCount / max(1, $scheduledExamLimit)));
+    if ($scheduledExamPage > $scheduledExamLastPage) {
+        $scheduledExamPage = $scheduledExamLastPage;
+    }
+
+    $scheduledExamOffset = ($scheduledExamPage - 1) * $scheduledExamLimit;
+    $scheduledExamRows = $scheduledExamRows
+        ->slice($scheduledExamOffset, $scheduledExamLimit)
+        ->values();
+    $scheduledExamVisibleCount = $scheduledExamRows->count();
+    $scheduledExamFirstItem = $scheduledExamCount > 0 ? $scheduledExamOffset + 1 : 0;
+    $scheduledExamLastItem = $scheduledExamCount > 0
+        ? min($scheduledExamOffset + $scheduledExamVisibleCount, $scheduledExamCount)
+        : 0;
+    $scheduledExamPaginationWindow = $scheduledExamLastPage <= 1
+        ? []
+        : ($scheduledExamLastPage <= 9
+            ? range(1, $scheduledExamLastPage)
+            : collect([1, 2, $scheduledExamPage - 1, $scheduledExamPage, $scheduledExamPage + 1, $scheduledExamLastPage - 1, $scheduledExamLastPage])
+                ->filter(fn ($page) => $page >= 1 && $page <= $scheduledExamLastPage)
+                ->unique()
+                ->sort()
+                ->values()
+                ->reduce(function (array $window, int $page): array {
+                    $previous = collect($window)->last(fn ($item) => is_int($item));
+                    if ($previous !== null && $page > $previous + 1) {
+                        $window[] = '...';
+                    }
+                    $window[] = $page;
+                    return $window;
+                }, []));
+    $scheduledExamPageUrl = function (int $page) use ($currentQuery, $scheduledExamLimit): string {
+        return route('personal.habilitacion-minera.index', array_merge($currentQuery, [
+            'vista' => 'scheduled',
+            'scheduled_limit' => $scheduledExamLimit,
+            'scheduled_page' => $page,
+        ]));
+    };
+    $scheduledExamFormQuery = array_merge(
+        collect($currentQuery)->except([
+            'scheduled_limit',
+            'scheduled_page',
+            'scheduled_worker',
+            'scheduled_exam',
+            'scheduled_mine',
+            'scheduled_date',
+            'scheduled_state',
+        ])->all(),
+        ['vista' => 'scheduled']
+    );
+    $scheduledExamClearUrl = route('personal.habilitacion-minera.index', array_merge(
+        collect($currentQuery)->except([
+            'scheduled_limit',
+            'scheduled_page',
+            'scheduled_worker',
+            'scheduled_exam',
+            'scheduled_mine',
+            'scheduled_date',
+            'scheduled_state',
+        ])->all(),
+        ['vista' => 'scheduled']
+    ));
+
     $workerActiveFilters = [
         'trabajador' => filled($filters['trabajador'] ?? request('trabajador')),
     ];
@@ -252,14 +651,22 @@
     $selectedWorkerAssignmentsForJson = $mineBoardCollection
         ->pluck('assignment')
         ->filter();
+    $upcomingAssignmentSource = $upcomingExpirationRows
+        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->pluck('assignment'))
+        ->filter();
+    $scheduledAssignmentSource = $scheduledExamRows
+        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->pluck('assignment'))
+        ->filter();
     $assignmentSource = $assignmentSource
         ->flatten(1)
         ->concat($selectedWorkerAssignmentsForJson)
+        ->concat($upcomingAssignmentSource)
+        ->concat($scheduledAssignmentSource)
         ->filter()
         ->unique(fn ($assignment) => $assignment->id)
         ->values();
 
-    $assignmentsJson = $assignmentSource->map(function ($a) use ($service, $currentQuery) {
+    $assignmentsJson = $assignmentSource->map(function ($a) use ($service, $currentQuery, $attemptCountFor) {
         return [
             'id' => $a->id,
             'personal_id' => $a->personal_id,
@@ -268,9 +675,9 @@
             'mina_nombre' => $a->mina?->nombre,
             'estado_habilitacion' => $a->estadoHabilitacionActual(),
             'generate_exams_url' => route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $a->id], $currentQuery)),
-            'examenes' => $a->examenes->map(function ($e) {
+            'examenes' => $a->examenes->map(function ($e) use ($attemptCountFor) {
                 $attempts = $e->intentos;
-                $attemptCount = $attempts->where('resultado', '!=', \App\Models\PersonalMinaExamenIntento::RESULTADO_ANULADO)->count();
+                $attemptCount = $attemptCountFor($e);
 
                 return [
                     'id' => $e->id,
@@ -316,7 +723,9 @@
     }
 
     .mine-page.is-ajax-loading .mine-mines-card,
-    .mine-page.is-ajax-loading .mine-assignments-card {
+    .mine-page.is-ajax-loading .mine-assignments-card,
+    .mine-page.is-ajax-loading .mine-expiring-card,
+    .mine-page.is-ajax-loading .mine-scheduled-card {
         opacity: 0.58;
         pointer-events: none;
         transition: opacity 0.16s ease;
@@ -381,6 +790,15 @@
         order: 1;
     }
 
+    .mine-expiring-card,
+    .mine-scheduled-card {
+        order: 4;
+    }
+
+    [data-mine-view-panel].is-hidden {
+        display: none !important;
+    }
+
     .mine-toolbar {
         display: flex;
         align-items: center;
@@ -391,6 +809,50 @@
 
     .mine-toolbar .page-subtitle {
         margin-top: 4px;
+    }
+
+    .mine-view-switch {
+        order: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: fit-content;
+        max-width: 100%;
+        padding: 6px;
+        border: 1px solid #dbe3ef;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        overflow-x: auto;
+    }
+
+    .mine-view-tab {
+        flex: 0 0 auto;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        background: transparent;
+        color: #475569;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 900;
+        line-height: 1;
+        padding: 11px 14px;
+        white-space: nowrap;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .mine-view-tab:hover,
+    .mine-view-tab:focus-visible {
+        border-color: #99f6e4;
+        color: #0f766e;
+        outline: none;
+    }
+
+    .mine-view-tab.is-active {
+        border-color: #99f6e4;
+        background: #ecfeff;
+        color: #0f766e;
+        box-shadow: 0 10px 22px rgba(13, 148, 136, 0.14);
     }
 
     .mine-page .card {
@@ -724,6 +1186,241 @@
         font-size: 11px;
     }
 
+    .mine-expiring-filter-panel {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        background: #f8fafc;
+    }
+
+    .mine-expiring-filter-panel .mine-filter-row {
+        align-items: flex-end;
+    }
+
+    .mine-filter-clear-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 8px 12px;
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #ffffff;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 800;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .mine-filter-clear-link:hover {
+        border-color: #94a3b8;
+        color: #0f172a;
+    }
+
+    .mine-table-filter-row th {
+        padding: 8px 10px;
+        background: #ffffff;
+        border-bottom-color: #e2e8f0;
+    }
+
+    .mine-table-filter-control {
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid #dbe3ef;
+        border-radius: 9px;
+        padding: 6px 8px;
+        background: #ffffff;
+        color: #0f172a;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: none;
+        letter-spacing: 0;
+    }
+
+    .mine-table-filter-control:focus {
+        outline: none;
+        border-color: #19d3c5;
+        box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
+    }
+
+    .mine-calendar-filter {
+        position: relative;
+        min-width: 210px;
+    }
+
+    .mine-calendar-filter.is-active .mine-calendar-trigger {
+        border-color: #0d9488;
+        background: #f0fdfa;
+        color: #0f766e;
+        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.08);
+    }
+
+    .mine-calendar-trigger {
+        width: 100%;
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid #dbe3ef;
+        border-radius: 9px;
+        padding: 6px 8px;
+        background: #ffffff;
+        color: #0f172a;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-align: left;
+    }
+
+    .mine-calendar-trigger:focus-visible {
+        outline: none;
+        border-color: #19d3c5;
+        box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
+    }
+
+    .mine-calendar-trigger-icon {
+        color: #64748b;
+        font-size: 12px;
+    }
+
+    .mine-calendar-popover {
+        position: fixed;
+        top: var(--mine-calendar-top, 120px);
+        left: var(--mine-calendar-left, 24px);
+        z-index: 80;
+        width: 300px;
+        max-width: min(86vw, 300px);
+        border: 1px solid #dbe3ef;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+        padding: 12px;
+    }
+
+    .mine-calendar-head,
+    .mine-calendar-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .mine-calendar-title {
+        color: #0f172a;
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: capitalize;
+    }
+
+    .mine-calendar-nav,
+    .mine-calendar-clear {
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #ffffff;
+        color: #334155;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 900;
+        min-height: 30px;
+        padding: 5px 9px;
+    }
+
+    .mine-calendar-nav:hover,
+    .mine-calendar-clear:hover {
+        border-color: #99f6e4;
+        color: #0f766e;
+    }
+
+    .mine-calendar-weekdays,
+    .mine-calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 4px;
+    }
+
+    .mine-calendar-weekdays {
+        margin-top: 12px;
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 900;
+        text-align: center;
+        text-transform: uppercase;
+    }
+
+    .mine-calendar-grid {
+        margin-top: 6px;
+    }
+
+    .mine-calendar-day {
+        position: relative;
+        min-height: 36px;
+        border: 1px solid transparent;
+        border-radius: 11px;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    button.mine-calendar-day {
+        cursor: default;
+    }
+
+    .mine-calendar-day.has-expiration {
+        border-color: #fbbf24;
+        background: #fffbeb;
+        color: #92400e;
+        cursor: pointer;
+    }
+
+    .mine-calendar-day.has-expiration:hover {
+        border-color: #0d9488;
+        background: #ecfeff;
+        color: #0f766e;
+    }
+
+    .mine-calendar-day.is-selected {
+        border-color: #0d9488;
+        background: #14b8a6;
+        color: #ffffff;
+        box-shadow: 0 8px 16px rgba(13, 148, 136, 0.2);
+    }
+
+    .mine-calendar-day.is-today:not(.is-selected) {
+        outline: 2px solid rgba(59, 130, 246, 0.24);
+        outline-offset: 1px;
+    }
+
+    .mine-calendar-day.is-empty {
+        visibility: hidden;
+    }
+
+    .mine-calendar-day-count {
+        position: absolute;
+        right: 3px;
+        bottom: 2px;
+        min-width: 13px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.08);
+        color: inherit;
+        font-size: 9px;
+        line-height: 13px;
+        text-align: center;
+    }
+
+    .mine-calendar-help {
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+
     .mine-view-toolbar {
         display: flex;
         justify-content: space-between;
@@ -784,6 +1481,27 @@
 
     .mine-table {
         min-width: 820px;
+    }
+
+    .mine-expiring-table {
+        min-width: 920px;
+    }
+
+    .mine-expiring-worker {
+        display: grid;
+        gap: 3px;
+    }
+
+    .mine-expiring-mines {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .mine-expiring-date {
+        display: grid;
+        gap: 4px;
+        justify-items: start;
     }
 
     .worker-table {
@@ -2084,7 +2802,7 @@
 
 <div class="module-page mine-page">
     <script type="application/json" id="mineRuntimeData">
-        @json(['requirements' => $mineReqsJson, 'assignments' => $assignmentsJson])
+        @json(['requirements' => $mineReqsJson, 'assignments' => $assignmentsJson, 'expiringCalendarDates' => $upcomingExpirationCalendarDates])
     </script>
 
     <div class="mine-ajax-status" id="mineAjaxStatus" role="status" aria-live="polite">
@@ -2144,7 +2862,22 @@
         <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
 
-    <div class="card mine-mines-card">
+    <div class="mine-view-switch" data-mine-view-switch aria-label="Cambiar vista de habilitacion minera">
+        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'worker']) data-mine-view-tab="worker" aria-selected="{{ $activeMineView === 'worker' ? 'true' : 'false' }}">
+            Seleccionar trabajador
+        </button>
+        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'matrix']) data-mine-view-tab="matrix" aria-selected="{{ $activeMineView === 'matrix' ? 'true' : 'false' }}">
+            Matriz operativa
+        </button>
+        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'expiring']) data-mine-view-tab="expiring" aria-selected="{{ $activeMineView === 'expiring' ? 'true' : 'false' }}">
+            Proximos vencimientos
+        </button>
+        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'scheduled']) data-mine-view-tab="scheduled" aria-selected="{{ $activeMineView === 'scheduled' ? 'true' : 'false' }}">
+            Examenes programados
+        </button>
+    </div>
+
+    <div @class(['card', 'mine-mines-card', 'is-hidden' => $activeMineView !== 'worker']) data-mine-view-panel="worker">
         <div class="card-header mine-card-header">
             <div>
                 <span class="card-title">Minas disponibles {{ $selectedWorker ? 'para ' . $selectedWorker->nombre_completo : '' }}</span>
@@ -2276,7 +3009,7 @@
         </div>
     </div>
 
-    <div class="card mine-worker-card">
+    <div @class(['card', 'mine-worker-card', 'is-hidden' => $activeMineView !== 'worker']) data-mine-view-panel="worker">
         <div class="card-header mine-worker-header">
             <div>
                 <span class="card-title">Seleccionar trabajador</span>
@@ -2485,7 +3218,7 @@
         </div>
     </div>
 
-    <div class="card mine-assignments-card">
+    <div @class(['card', 'mine-assignments-card', 'is-hidden' => $activeMineView !== 'matrix']) data-mine-view-panel="matrix">
         <div class="card-header mine-list-header">
             <div>
                 <span class="card-title">Matriz operativa</span>
@@ -2922,6 +3655,634 @@
                         </div>
                     @endif
                 </div>
+            @endif
+        </div>
+    </div>
+
+    <div @class(['card', 'mine-expiring-card', 'is-hidden' => $activeMineView !== 'expiring']) data-mine-view-panel="expiring">
+        <div class="card-header mine-list-header">
+            <div>
+                <span class="card-title">Proximos vencimientos</span>
+                <p class="mine-header-copy">
+                    Examenes asignados que vencen en los proximos {{ (int) ($upcomingExpirationDays ?? 60) }} dias.
+                </p>
+            </div>
+
+            <span class="mine-filter-count">
+                {{ $upcomingExpirationCount }} vencimiento{{ $upcomingExpirationCount === 1 ? '' : 's' }}
+            </span>
+        </div>
+
+        <div class="card-body">
+            <form
+                method="GET"
+                action="{{ route('personal.habilitacion-minera.index') }}"
+                id="expiringPaginationForm"
+                class="sr-only"
+                autocomplete="off"
+            >
+                @foreach($upcomingExpirationFormQuery as $key => $value)
+                    @continue(is_array($value))
+                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                @endforeach
+            </form>
+
+            <div class="mine-expiring-filter-panel" aria-label="Filtros de proximos vencimientos">
+                <div class="mine-filter-row">
+                    <label @class(['mine-filter-group', 'is-wide', 'is-active' => filled($upcomingExpirationWorkerSearch)])>
+                        <span class="mine-filter-label">Buscar trabajador</span>
+                        <input
+                            type="search"
+                            id="expiringWorkerInput"
+                            name="expiring_worker"
+                            value="{{ $upcomingExpirationWorkerSearch }}"
+                            class="mine-filter-control"
+                            form="expiringPaginationForm"
+                            placeholder="Buscar por nombre, DNI o puesto"
+                            data-expiring-filter-input
+                            data-ignore-active="true"
+                        >
+                    </label>
+
+                    @if($upcomingExpirationActiveFilterCount > 0)
+                        <a class="mine-filter-clear-link" href="{{ $upcomingExpirationClearUrl }}">
+                            Limpiar filtros
+                        </a>
+                    @endif
+                </div>
+            </div>
+
+            <div class="mine-view-toolbar" aria-label="Control de visualizacion de proximos vencimientos">
+                <label class="mine-view-size">
+                    <span>Mostrar</span>
+                    <select
+                        name="expiring_limit"
+                        class="mine-view-select"
+                        form="expiringPaginationForm"
+                        data-external-filter-change
+                        data-ignore-active="true"
+                    >
+                        @foreach($upcomingExpirationLimitOptions as $amount)
+                            <option value="{{ $amount }}" @selected($upcomingExpirationLimit === $amount)>
+                                {{ $amount }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <span>vencimientos</span>
+                </label>
+
+                <span class="mine-view-summary">
+                    @if($upcomingExpirationCount > 0)
+                        Mostrando {{ $upcomingExpirationFirstItem }}-{{ $upcomingExpirationLastItem }} de {{ $upcomingExpirationCount }}
+                    @else
+                        Sin vencimientos para mostrar
+                    @endif
+                </span>
+            </div>
+
+            @if($upcomingExpirationRows->isEmpty())
+                <div class="mine-operational-note">
+                    <strong>Sin examenes por vencer.</strong>
+                    <span>No hay examenes vigentes con fecha de vencimiento cercana para las minas asignadas.</span>
+                </div>
+            @else
+                <div class="mine-table-wrap">
+                    <table class="mine-table mine-expiring-table" data-testid="mine-upcoming-expirations">
+                        <thead>
+                            <tr>
+                                <th>Trabajador</th>
+                                <th>Examen</th>
+                                <th>Mina(s) asignadas</th>
+                                <th>Vencimiento</th>
+                                <th>Estado examen</th>
+                            </tr>
+                            <tr class="mine-table-filter-row">
+                                <th>
+                                    <span class="mine-muted">Usa el buscador superior</span>
+                                </th>
+                                <th>
+                                    <select
+                                        name="expiring_exam"
+                                        class="mine-table-filter-control"
+                                        form="expiringPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por examen"
+                                    >
+                                        <option value="">Todos los examenes</option>
+                                        @foreach($upcomingExpirationExamOptions as $examName)
+                                            <option value="{{ $examName }}" @selected($upcomingExpirationExamFilter === (string) $examName)>
+                                                {{ $examName }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <select
+                                        name="expiring_mine"
+                                        class="mine-table-filter-control"
+                                        form="expiringPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por mina"
+                                    >
+                                        <option value="">Todas las minas</option>
+                                        @foreach($upcomingExpirationMineOptions as $mineName)
+                                            <option value="{{ $mineName }}" @selected($upcomingExpirationMineFilter === (string) $mineName)>
+                                                {{ $mineName }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <div @class(['mine-calendar-filter', 'is-active' => filled($upcomingExpirationDateFilter)]) data-expiring-calendar data-selected-date="{{ $upcomingExpirationDateFilter }}">
+                                        <input
+                                            type="hidden"
+                                            name="expiring_due"
+                                            value="{{ $upcomingExpirationDateFilter }}"
+                                            form="expiringPaginationForm"
+                                            data-expiring-calendar-input
+                                        >
+                                        <button
+                                            type="button"
+                                            class="mine-calendar-trigger"
+                                            data-expiring-calendar-toggle
+                                            aria-haspopup="dialog"
+                                            aria-expanded="false"
+                                            aria-label="Filtrar por calendario de vencimiento"
+                                        >
+                                            <span data-expiring-calendar-label>
+                                                {{ $upcomingExpirationDateFilter !== '' ? $formatDate($upcomingExpirationDateFilter) : 'Todas las fechas' }}
+                                            </span>
+                                            <span class="mine-calendar-trigger-icon" aria-hidden="true">&#9662;</span>
+                                        </button>
+
+                                        <div class="mine-calendar-popover" data-expiring-calendar-popover hidden>
+                                            <div class="mine-calendar-head">
+                                                <button type="button" class="mine-calendar-nav" data-expiring-calendar-prev aria-label="Mes anterior">&lsaquo;</button>
+                                                <strong class="mine-calendar-title" data-expiring-calendar-title></strong>
+                                                <button type="button" class="mine-calendar-nav" data-expiring-calendar-next aria-label="Mes siguiente">&rsaquo;</button>
+                                            </div>
+
+                                            <div class="mine-calendar-weekdays" aria-hidden="true">
+                                                <span>Lun</span>
+                                                <span>Mar</span>
+                                                <span>Mie</span>
+                                                <span>Jue</span>
+                                                <span>Vie</span>
+                                                <span>Sab</span>
+                                                <span>Dom</span>
+                                            </div>
+
+                                            <div class="mine-calendar-grid" data-expiring-calendar-grid></div>
+
+                                            <div class="mine-calendar-actions">
+                                                <button type="button" class="mine-calendar-clear" data-expiring-calendar-clear>
+                                                    Todas
+                                                </button>
+                                                <span class="mine-calendar-help">
+                                                    Los dias pintados tienen vencimientos.
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <noscript>
+                                        <select
+                                            name="expiring_due"
+                                            class="mine-table-filter-control"
+                                            form="expiringPaginationForm"
+                                            data-external-filter-change
+                                            data-ignore-active="true"
+                                            aria-label="Filtrar por vencimiento"
+                                        >
+                                            <option value="">Todas las fechas</option>
+                                            @foreach($upcomingExpirationDateOptions as $dueDate)
+                                                <option value="{{ $dueDate }}" @selected($upcomingExpirationDateFilter === (string) $dueDate)>
+                                                    {{ $formatDate($dueDate) }}
+                                                </option>
+                                            @endforeach
+                                        </select>
+                                    </noscript>
+                                </th>
+                                <th>
+                                    <select
+                                        name="expiring_state"
+                                        class="mine-table-filter-control"
+                                        form="expiringPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por estado de examen"
+                                    >
+                                        <option value="">Todos los estados</option>
+                                        @foreach($upcomingExpirationStateOptions as $state)
+                                            <option value="{{ $state }}" @selected($upcomingExpirationStateFilter === (string) $state)>
+                                                {{ $examStateLabel($state) }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($upcomingExpirationRows as $row)
+                                @php
+                                    $worker = $row['worker'] ?? null;
+                                    $remainingDays = $row['dias_restantes'];
+                                    $examState = $row['estado'] ?? null;
+                                    $examBadge = $badgeForExamState($examState);
+                                    $expirationLabel = $formatDate($row['fecha_vencimiento'] ?? null);
+                                    $remainingLabel = $remainingDays === 0
+                                        ? 'Vence hoy'
+                                        : 'Faltan ' . $remainingDays . ' dia(s)';
+                                @endphp
+
+                                <tr>
+                                    <td>
+                                        <div class="mine-expiring-worker">
+                                            <strong>{{ $worker?->nombre_completo ?: '-' }}</strong>
+                                            <span class="mine-muted">
+                                                {{ $worker?->tipo_documento ?: 'DNI' }} {{ $worker?->numero_documento ?: $worker?->dni ?: '-' }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <strong>{{ $row['exam_name'] ?? 'Examen' }}</strong>
+                                    </td>
+                                    <td>
+                                        <div class="mine-expiring-mines">
+                                            @foreach(collect($row['mines'] ?? []) as $mineRow)
+                                                @php
+                                                    $assignment = $mineRow['assignment'] ?? null;
+                                                    $mine = $mineRow['mine'] ?? null;
+                                                    $exam = $mineRow['exam'] ?? null;
+                                                    $assignmentState = $assignment?->estadoHabilitacionActual();
+                                                @endphp
+
+                                                @if($assignment && $mine)
+                                                    <button
+                                                        type="button"
+                                                        class="mine-badge {{ $badgeForHabilitationState($assignmentState) }} mine-btn-link"
+                                                        onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($mine->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($exam?->id) }})"
+                                                        title="Abrir examenes de {{ $worker?->nombre_completo }} en {{ $mine->nombre }}"
+                                                    >
+                                                        {{ $mine->nombre }}
+                                                    </button>
+                                                @endif
+                                            @endforeach
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="mine-expiring-date">
+                                            <span class="mine-state-chip {{ $remainingDays !== null && $remainingDays <= 7 ? 'danger' : 'warn' }}">
+                                                {{ $expirationLabel }}
+                                            </span>
+                                            <span class="mine-muted">{{ $remainingLabel }}</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="mine-state-chip {{ $examBadge }}">{{ $examStateLabel($examState) }}</span>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                @if($upcomingExpirationLastPage > 1)
+                    <div class="mine-pagination-controls">
+                        <div class="mine-pagination-summary">
+                            Mostrando {{ $upcomingExpirationFirstItem }} - {{ $upcomingExpirationLastItem }} de {{ $upcomingExpirationCount }} vencimientos
+                        </div>
+
+                        <div class="mine-pagination-links">
+                            <nav class="mine-page-buttons" aria-label="Paginacion de proximos vencimientos">
+                                @if($upcomingExpirationPage <= 1)
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">&lsaquo;</span>
+                                @else
+                                    <a class="mine-page-button" href="{{ $upcomingExpirationPageUrl($upcomingExpirationPage - 1) }}" rel="prev" aria-label="Pagina anterior">&lsaquo;</a>
+                                @endif
+
+                                @foreach($upcomingExpirationPaginationWindow as $page)
+                                    @if($page === '...')
+                                        <span class="mine-page-ellipsis" aria-hidden="true">...</span>
+                                    @elseif((int) $page === $upcomingExpirationPage)
+                                        <span class="mine-page-button is-active" aria-current="page">{{ $page }}</span>
+                                    @else
+                                        <a class="mine-page-button" href="{{ $upcomingExpirationPageUrl((int) $page) }}" aria-label="Ir a pagina {{ $page }}">{{ $page }}</a>
+                                    @endif
+                                @endforeach
+
+                                @if($upcomingExpirationPage < $upcomingExpirationLastPage)
+                                    <a class="mine-page-button" href="{{ $upcomingExpirationPageUrl($upcomingExpirationPage + 1) }}" rel="next" aria-label="Pagina siguiente">&rsaquo;</a>
+                                @else
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">&rsaquo;</span>
+                                @endif
+                            </nav>
+                        </div>
+                    </div>
+                @endif
+            @endif
+        </div>
+    </div>
+
+    <div @class(['card', 'mine-scheduled-card', 'is-hidden' => $activeMineView !== 'scheduled']) data-mine-view-panel="scheduled">
+        <div class="card-header mine-list-header">
+            <div>
+                <span class="card-title">Examenes programados</span>
+                <p class="mine-header-copy">
+                    Programaciones pendientes dentro de los proximos {{ (int) ($scheduledExamDays ?? 60) }} dias y pendientes recientes.
+                </p>
+            </div>
+
+            <span class="mine-filter-count">
+                {{ $scheduledExamCount }} programado{{ $scheduledExamCount === 1 ? '' : 's' }}
+            </span>
+        </div>
+
+        <div class="card-body">
+            <form
+                method="GET"
+                action="{{ route('personal.habilitacion-minera.index') }}"
+                id="scheduledPaginationForm"
+                class="sr-only"
+                autocomplete="off"
+            >
+                @foreach($scheduledExamFormQuery as $key => $value)
+                    @continue(is_array($value))
+                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                @endforeach
+            </form>
+
+            <div class="mine-expiring-filter-panel" aria-label="Filtros de examenes programados">
+                <div class="mine-filter-row">
+                    <label @class(['mine-filter-group', 'is-wide', 'is-active' => filled($scheduledExamWorkerSearch)])>
+                        <span class="mine-filter-label">Buscar trabajador</span>
+                        <input
+                            type="search"
+                            id="scheduledWorkerInput"
+                            name="scheduled_worker"
+                            value="{{ $scheduledExamWorkerSearch }}"
+                            class="mine-filter-control"
+                            form="scheduledPaginationForm"
+                            placeholder="Buscar por nombre, DNI o puesto"
+                            data-scheduled-filter-input
+                            data-ignore-active="true"
+                        >
+                    </label>
+
+                    @if($scheduledExamActiveFilterCount > 0)
+                        <a class="mine-filter-clear-link" href="{{ $scheduledExamClearUrl }}">
+                            Limpiar filtros
+                        </a>
+                    @endif
+                </div>
+            </div>
+
+            <div class="mine-view-toolbar" aria-label="Control de visualizacion de examenes programados">
+                <label class="mine-view-size">
+                    <span>Mostrar</span>
+                    <select
+                        name="scheduled_limit"
+                        class="mine-view-select"
+                        form="scheduledPaginationForm"
+                        data-external-filter-change
+                        data-ignore-active="true"
+                    >
+                        @foreach($scheduledExamLimitOptions as $amount)
+                            <option value="{{ $amount }}" @selected($scheduledExamLimit === $amount)>
+                                {{ $amount }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <span>programados</span>
+                </label>
+
+                <span class="mine-view-summary">
+                    @if($scheduledExamCount > 0)
+                        Mostrando {{ $scheduledExamFirstItem }}-{{ $scheduledExamLastItem }} de {{ $scheduledExamCount }}
+                    @else
+                        Sin examenes programados para mostrar
+                    @endif
+                </span>
+            </div>
+
+            @if($scheduledExamRows->isEmpty())
+                <div class="mine-operational-note">
+                    <strong>Sin examenes programados.</strong>
+                    <span>No hay programaciones pendientes para las minas asignadas con los filtros actuales.</span>
+                </div>
+            @else
+                <div class="mine-table-wrap">
+                    <table class="mine-table mine-expiring-table" data-testid="mine-scheduled-exams">
+                        <thead>
+                            <tr>
+                                <th>Trabajador</th>
+                                <th>Examen</th>
+                                <th>Mina(s) asignadas</th>
+                                <th>Programacion</th>
+                                <th>Estado examen</th>
+                                <th>Accion</th>
+                            </tr>
+                            <tr class="mine-table-filter-row">
+                                <th>
+                                    <span class="mine-muted">Usa el buscador superior</span>
+                                </th>
+                                <th>
+                                    <select
+                                        name="scheduled_exam"
+                                        class="mine-table-filter-control"
+                                        form="scheduledPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por examen programado"
+                                    >
+                                        <option value="">Todos los examenes</option>
+                                        @foreach($scheduledExamExamOptions as $examName)
+                                            <option value="{{ $examName }}" @selected($scheduledExamExamFilter === (string) $examName)>
+                                                {{ $examName }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <select
+                                        name="scheduled_mine"
+                                        class="mine-table-filter-control"
+                                        form="scheduledPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por mina programada"
+                                    >
+                                        <option value="">Todas las minas</option>
+                                        @foreach($scheduledExamMineOptions as $mineName)
+                                            <option value="{{ $mineName }}" @selected($scheduledExamMineFilter === (string) $mineName)>
+                                                {{ $mineName }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <select
+                                        name="scheduled_date"
+                                        class="mine-table-filter-control"
+                                        form="scheduledPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por fecha programada"
+                                    >
+                                        <option value="">Todas las fechas</option>
+                                        @foreach($scheduledExamDateOptions as $scheduledDate)
+                                            <option value="{{ $scheduledDate }}" @selected($scheduledExamDateFilter === (string) $scheduledDate)>
+                                                {{ $formatDate($scheduledDate) }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <select
+                                        name="scheduled_state"
+                                        class="mine-table-filter-control"
+                                        form="scheduledPaginationForm"
+                                        data-external-filter-change
+                                        data-ignore-active="true"
+                                        aria-label="Filtrar por estado de examen programado"
+                                    >
+                                        <option value="">Todos los estados</option>
+                                        @foreach($scheduledExamStateOptions as $state)
+                                            <option value="{{ $state }}" @selected($scheduledExamStateFilter === (string) $state)>
+                                                {{ $examStateLabel($state) }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </th>
+                                <th>
+                                    <span class="mine-muted">Abrir gestion</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($scheduledExamRows as $row)
+                                @php
+                                    $worker = $row['worker'] ?? null;
+                                    $scheduledDays = $row['dias_para_programacion'];
+                                    $examState = $row['estado'] ?? null;
+                                    $examBadge = $badgeForExamState($examState);
+                                    $scheduledLabel = $formatDate($row['fecha_programacion'] ?? null);
+                                    $scheduledStatusLabel = $scheduledDays === null
+                                        ? '-'
+                                        : ($scheduledDays === 0
+                                            ? 'Programado hoy'
+                                            : ($scheduledDays < 0
+                                                ? 'Pendiente hace ' . abs($scheduledDays) . ' dia(s)'
+                                                : 'Faltan ' . $scheduledDays . ' dia(s)'));
+                                    $firstMineRow = collect($row['mines'] ?? [])->first();
+                                @endphp
+
+                                <tr>
+                                    <td>
+                                        <div class="mine-expiring-worker">
+                                            <strong>{{ $worker?->nombre_completo ?: '-' }}</strong>
+                                            <span class="mine-muted">
+                                                {{ $worker?->tipo_documento ?: 'DNI' }} {{ $worker?->numero_documento ?: $worker?->dni ?: '-' }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <strong>{{ $row['exam_name'] ?? 'Examen' }}</strong>
+                                    </td>
+                                    <td>
+                                        <div class="mine-expiring-mines">
+                                            @foreach(collect($row['mines'] ?? []) as $mineRow)
+                                                @php
+                                                    $assignment = $mineRow['assignment'] ?? null;
+                                                    $mine = $mineRow['mine'] ?? null;
+                                                    $exam = $mineRow['exam'] ?? null;
+                                                    $attemptNumber = $mineRow['numero_intento'] ?? null;
+                                                    $assignmentState = $assignment?->estadoHabilitacionActual();
+                                                @endphp
+
+                                                @if($assignment && $mine)
+                                                    <button
+                                                        type="button"
+                                                        class="mine-badge {{ $badgeForHabilitationState($assignmentState) }} mine-btn-link"
+                                                        onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($mine->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($exam?->id) }})"
+                                                        title="Abrir programados de {{ $worker?->nombre_completo }} en {{ $mine->nombre }}"
+                                                    >
+                                                        {{ $mine->nombre }}{{ $attemptNumber ? ' - I' . $attemptNumber : '' }}
+                                                    </button>
+                                                @endif
+                                            @endforeach
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="mine-expiring-date">
+                                            <span class="mine-state-chip {{ $scheduledDays !== null && $scheduledDays < 0 ? 'danger' : 'warn' }}">
+                                                {{ $scheduledLabel }}
+                                            </span>
+                                            <span class="mine-muted">{{ $scheduledStatusLabel }}</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="mine-state-chip {{ $examBadge }}">{{ $examStateLabel($examState) }}</span>
+                                    </td>
+                                    <td>
+                                        @if($firstMineRow)
+                                            @php
+                                                $assignment = $firstMineRow['assignment'] ?? null;
+                                                $mine = $firstMineRow['mine'] ?? null;
+                                                $exam = $firstMineRow['exam'] ?? null;
+                                            @endphp
+
+                                            @if($assignment && $mine)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs"
+                                                    onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($mine->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($exam?->id) }})"
+                                                >
+                                                    Ver programados
+                                                </button>
+                                            @endif
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                @if($scheduledExamLastPage > 1)
+                    <div class="mine-pagination-controls">
+                        <div class="mine-pagination-summary">
+                            Mostrando {{ $scheduledExamFirstItem }} - {{ $scheduledExamLastItem }} de {{ $scheduledExamCount }} programados
+                        </div>
+
+                        <div class="mine-pagination-links">
+                            <nav class="mine-page-buttons" aria-label="Paginacion de examenes programados">
+                                @if($scheduledExamPage <= 1)
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">&lsaquo;</span>
+                                @else
+                                    <a class="mine-page-button" href="{{ $scheduledExamPageUrl($scheduledExamPage - 1) }}" rel="prev" aria-label="Pagina anterior">&lsaquo;</a>
+                                @endif
+
+                                @foreach($scheduledExamPaginationWindow as $page)
+                                    @if($page === '...')
+                                        <span class="mine-page-ellipsis" aria-hidden="true">...</span>
+                                    @elseif((int) $page === $scheduledExamPage)
+                                        <span class="mine-page-button is-active" aria-current="page">{{ $page }}</span>
+                                    @else
+                                        <a class="mine-page-button" href="{{ $scheduledExamPageUrl((int) $page) }}" aria-label="Ir a pagina {{ $page }}">{{ $page }}</a>
+                                    @endif
+                                @endforeach
+
+                                @if($scheduledExamPage < $scheduledExamLastPage)
+                                    <a class="mine-page-button" href="{{ $scheduledExamPageUrl($scheduledExamPage + 1) }}" rel="next" aria-label="Pagina siguiente">&rsaquo;</a>
+                                @else
+                                    <span class="mine-page-button is-disabled" aria-disabled="true">&rsaquo;</span>
+                                @endif
+                            </nav>
+                        </div>
+                    </div>
+                @endif
             @endif
         </div>
     </div>
@@ -3833,6 +5194,7 @@ function updateMineRuntimeData(sourceDocument) {
         const data = JSON.parse((target || source)?.textContent || '{}');
         mineRequirementsData = data.requirements || {};
         assignmentsData = data.assignments || [];
+        expiringCalendarDates = data.expiringCalendarDates || [];
     } catch (error) {
         console.warn('No se pudo actualizar la data de habilitacion minera.', error);
     }
@@ -3849,6 +5211,40 @@ function updateMineActiveFilters(scope) {
     });
 }
 
+const mineViewStorageKey = 'proserge.mine.habilitacion.view';
+const defaultMineView = @json($activeMineView);
+
+function preferredMineView() {
+    try {
+        return window.localStorage.getItem(mineViewStorageKey) || defaultMineView || 'worker';
+    } catch (error) {
+        return defaultMineView || 'worker';
+    }
+}
+
+function setMineView(view, persist) {
+    const allowedViews = ['worker', 'matrix', 'expiring', 'scheduled'];
+    const nextView = allowedViews.includes(view) ? view : 'worker';
+
+    document.querySelectorAll('[data-mine-view-tab]').forEach(function(tab) {
+        const active = tab.dataset.mineViewTab === nextView;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+
+    document.querySelectorAll('[data-mine-view-panel]').forEach(function(panel) {
+        panel.classList.toggle('is-hidden', panel.dataset.mineViewPanel !== nextView);
+    });
+
+    if (persist !== false) {
+        try {
+            window.localStorage.setItem(mineViewStorageKey, nextView);
+        } catch (error) {
+            // Local storage may be unavailable in private browsing.
+        }
+    }
+}
+
 function captureMineFocusState() {
     const active = document.activeElement;
 
@@ -3856,8 +5252,9 @@ function captureMineFocusState() {
         return null;
     }
 
-    const form = active.closest('form');
-    if (!form || !['workerSearchForm', 'matrixFilterForm'].includes(form.id)) {
+    const formId = active.getAttribute('form');
+    const form = active.closest('form') || (formId ? document.getElementById(formId) : null);
+    if (!form || !['workerSearchForm', 'matrixFilterForm', 'expiringPaginationForm', 'scheduledPaginationForm'].includes(form.id)) {
         return null;
     }
 
@@ -3868,7 +5265,7 @@ function captureMineFocusState() {
         value: active.value,
         selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
         selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
-        preserveValue: active.id === 'trabajadorInput',
+        preserveValue: active.id === 'trabajadorInput' || active.id === 'expiringWorkerInput' || active.id === 'scheduledWorkerInput',
     };
 }
 
@@ -3904,7 +5301,7 @@ function restoreMineFocusState(state) {
 }
 
 function replaceMineAjaxSections(sourceDocument, focusState) {
-    ['.mine-mines-card', '.mine-worker-card', '.mine-assignments-card'].forEach(function(selector) {
+    ['.mine-view-switch', '.mine-mines-card', '.mine-worker-card', '.mine-assignments-card', '.mine-expiring-card', '.mine-scheduled-card'].forEach(function(selector) {
         const next = sourceDocument.querySelector(selector);
         const current = document.querySelector(selector);
 
@@ -3925,6 +5322,7 @@ function replaceMineAjaxSections(sourceDocument, focusState) {
     updateMineRuntimeData(sourceDocument);
     updateMineActiveFilters(document);
     bindMineDialogBackdrop(document);
+    setMineView(preferredMineView(), false);
     restoreMineFocusState(focusState);
 }
 
@@ -3935,6 +5333,8 @@ function mineUrlFromForm(form, resetPagination) {
     if (resetPagination) {
         params.delete('page');
         params.delete('worker_page');
+        params.delete('expiring_page');
+        params.delete('scheduled_page');
     }
 
     Array.from(params.keys()).forEach(function(key) {
@@ -4012,11 +5412,230 @@ function submitMineFilterForm(form, delay) {
     }, delay || 0);
 }
 
+function parseIsoDate(value) {
+    const parts = String(value || '').split('-').map(Number);
+    if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
+
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function formatIsoDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    return year + '-' + month + '-' + day;
+}
+
+function closeExpiringCalendars(exceptRoot) {
+    document.querySelectorAll('[data-expiring-calendar]').forEach(function(root) {
+        if (exceptRoot && root === exceptRoot) return;
+
+        const popover = root.querySelector('[data-expiring-calendar-popover]');
+        const toggle = root.querySelector('[data-expiring-calendar-toggle]');
+        if (popover) popover.hidden = true;
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function positionExpiringCalendar(root) {
+    const popover = root.querySelector('[data-expiring-calendar-popover]');
+    const toggle = root.querySelector('[data-expiring-calendar-toggle]');
+    if (!popover || !toggle || popover.hidden) return;
+
+    const rect = toggle.getBoundingClientRect();
+    const width = popover.offsetWidth || 300;
+    const height = popover.offsetHeight || 360;
+    const margin = 12;
+    const left = Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin));
+    const topBelow = rect.bottom + 8;
+    const topAbove = rect.top - height - 8;
+    const top = topBelow + height + margin <= window.innerHeight
+        ? topBelow
+        : Math.max(margin, topAbove);
+
+    popover.style.setProperty('--mine-calendar-left', left + 'px');
+    popover.style.setProperty('--mine-calendar-top', top + 'px');
+}
+
+function selectedExpiringCalendarDate(root) {
+    const input = root.querySelector('[data-expiring-calendar-input]');
+    return parseIsoDate(input?.value || root.dataset.selectedDate || '');
+}
+
+function firstExpiringCalendarDate() {
+    const first = Array.isArray(expiringCalendarDates) ? expiringCalendarDates[0] : null;
+    return parseIsoDate(first?.date || '');
+}
+
+function expiringCalendarDateMap() {
+    const map = new Map();
+    (Array.isArray(expiringCalendarDates) ? expiringCalendarDates : []).forEach(function(item) {
+        if (!item || !item.date) return;
+        map.set(String(item.date), item);
+    });
+
+    return map;
+}
+
+function renderExpiringCalendar(root) {
+    const grid = root.querySelector('[data-expiring-calendar-grid]');
+    const title = root.querySelector('[data-expiring-calendar-title]');
+    if (!grid || !title) return;
+
+    const dateMap = expiringCalendarDateMap();
+    const selectedDate = selectedExpiringCalendarDate(root);
+    let visibleDate = parseIsoDate(root.dataset.visibleMonth || '');
+
+    if (!visibleDate) {
+        visibleDate = selectedDate || firstExpiringCalendarDate() || new Date();
+    }
+
+    visibleDate = new Date(visibleDate.getFullYear(), visibleDate.getMonth(), 1);
+    root.dataset.visibleMonth = formatIsoDate(visibleDate);
+
+    title.textContent = visibleDate.toLocaleDateString('es-PE', {
+        month: 'long',
+        year: 'numeric',
+    });
+
+    grid.innerHTML = '';
+
+    const firstDay = new Date(visibleDate.getFullYear(), visibleDate.getMonth(), 1);
+    const daysInMonth = new Date(visibleDate.getFullYear(), visibleDate.getMonth() + 1, 0).getDate();
+    const mondayOffset = (firstDay.getDay() + 6) % 7;
+    const todayIso = formatIsoDate(new Date());
+    const selectedIso = selectedDate ? formatIsoDate(selectedDate) : '';
+
+    for (let index = 0; index < mondayOffset; index++) {
+        const empty = document.createElement('span');
+        empty.className = 'mine-calendar-day is-empty';
+        empty.setAttribute('aria-hidden', 'true');
+        grid.appendChild(empty);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(visibleDate.getFullYear(), visibleDate.getMonth(), day);
+        const iso = formatIsoDate(date);
+        const meta = dateMap.get(iso);
+        const button = document.createElement('button');
+
+        button.type = 'button';
+        button.className = 'mine-calendar-day';
+        button.textContent = String(day);
+        button.dataset.expiringCalendarDay = iso;
+
+        if (meta) {
+            button.classList.add('has-expiration');
+            button.title = (meta.label || iso) + ' - ' + (Number(meta.count) || 0) + ' vencimiento(s)';
+            button.setAttribute('aria-label', button.title);
+
+            const count = document.createElement('span');
+            count.className = 'mine-calendar-day-count';
+            count.textContent = String(meta.count || 0);
+            button.appendChild(count);
+        } else {
+            button.disabled = true;
+            button.setAttribute('aria-label', 'Sin vencimientos');
+        }
+
+        if (iso === selectedIso) {
+            button.classList.add('is-selected');
+        }
+
+        if (iso === todayIso) {
+            button.classList.add('is-today');
+        }
+
+        grid.appendChild(button);
+    }
+}
+
+function applyExpiringCalendarFilter(root, value) {
+    const input = root.querySelector('[data-expiring-calendar-input]');
+    const label = root.querySelector('[data-expiring-calendar-label]');
+    const meta = expiringCalendarDateMap().get(value);
+    const formId = input?.getAttribute('form');
+    const form = formId ? document.getElementById(formId) : null;
+
+    if (!input || !form) return;
+
+    input.value = value || '';
+    root.dataset.selectedDate = value || '';
+    root.classList.toggle('is-active', Boolean(value));
+    if (label) label.textContent = value && meta ? meta.label : 'Todas las fechas';
+
+    closeExpiringCalendars();
+    updateMineActiveFilters(form);
+    submitMineFilterForm(form, 0);
+}
+
+document.addEventListener('click', function(event) {
+    const toggle = event.target.closest('[data-expiring-calendar-toggle]');
+    if (toggle) {
+        const root = toggle.closest('[data-expiring-calendar]');
+        const popover = root?.querySelector('[data-expiring-calendar-popover]');
+        if (!root || !popover) return;
+
+        const willOpen = popover.hidden;
+        closeExpiringCalendars(root);
+        popover.hidden = !willOpen;
+        toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        if (willOpen) {
+            renderExpiringCalendar(root);
+            positionExpiringCalendar(root);
+        }
+        return;
+    }
+
+    const nav = event.target.closest('[data-expiring-calendar-prev], [data-expiring-calendar-next]');
+    if (nav) {
+        const root = nav.closest('[data-expiring-calendar]');
+        if (!root) return;
+
+        const current = parseIsoDate(root.dataset.visibleMonth || '') || firstExpiringCalendarDate() || new Date();
+        const delta = nav.matches('[data-expiring-calendar-prev]') ? -1 : 1;
+        root.dataset.visibleMonth = formatIsoDate(new Date(current.getFullYear(), current.getMonth() + delta, 1));
+        renderExpiringCalendar(root);
+        positionExpiringCalendar(root);
+        return;
+    }
+
+    const day = event.target.closest('[data-expiring-calendar-day]');
+    if (day && !day.disabled) {
+        const root = day.closest('[data-expiring-calendar]');
+        if (root) applyExpiringCalendarFilter(root, day.dataset.expiringCalendarDay || '');
+        return;
+    }
+
+    const clear = event.target.closest('[data-expiring-calendar-clear]');
+    if (clear) {
+        const root = clear.closest('[data-expiring-calendar]');
+        if (root) applyExpiringCalendarFilter(root, '');
+        return;
+    }
+
+    if (!event.target.closest('[data-expiring-calendar]')) {
+        closeExpiringCalendars();
+    }
+});
+
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeExpiringCalendars();
+    }
+});
+
+window.addEventListener('resize', function() {
+    document.querySelectorAll('[data-expiring-calendar]').forEach(positionExpiringCalendar);
+});
+
 document.addEventListener('input', function(event) {
     const field = event.target;
-    if (!field || field.id !== 'trabajadorInput') return;
+    if (!field || (!field.matches('[data-expiring-filter-input], [data-scheduled-filter-input]') && field.id !== 'trabajadorInput')) return;
 
-    const form = field.closest('form');
+    const formId = field.getAttribute('form');
+    const form = field.closest('form') || (formId ? document.getElementById(formId) : null);
     if (!form) return;
 
     updateMineActiveFilters(form);
@@ -4031,14 +5650,20 @@ document.addEventListener('change', function(event) {
     const form = field.closest('form') || (formId ? document.getElementById(formId) : null);
     const isFilterField = field.matches('select[data-filter-change], [data-external-filter-change]');
 
-    if (!form || !isFilterField || !['workerSearchForm', 'matrixFilterForm'].includes(form.id)) return;
+    if (!form || !isFilterField || !['workerSearchForm', 'matrixFilterForm', 'expiringPaginationForm', 'scheduledPaginationForm'].includes(form.id)) return;
 
     updateMineActiveFilters(form);
     submitMineFilterForm(form, 0);
 });
 
 document.addEventListener('click', function(event) {
-    const link = event.target.closest('.mine-mines-card a[href], .mine-worker-card a[href], .mine-assignments-card a[href]');
+    const tab = event.target.closest('[data-mine-view-tab]');
+    if (tab) {
+        setMineView(tab.dataset.mineViewTab);
+        return;
+    }
+
+    const link = event.target.closest('.mine-mines-card a[href], .mine-worker-card a[href], .mine-assignments-card a[href], .mine-expiring-card a[href], .mine-scheduled-card a[href]');
     if (!link || link.target || link.hasAttribute('download')) return;
 
     const url = new URL(link.href, window.location.origin);
@@ -4053,8 +5678,11 @@ window.addEventListener('popstate', function() {
 });
 
 updateMineActiveFilters(document);
+setMineView(preferredMineView(), false);
 
 window.addEventListener('DOMContentLoaded', function() {
+    setMineView(preferredMineView(), false);
+
     if (@json((bool) request('open_assign'))) {
         openDialog('modal-asignar-mina');
     }
@@ -4085,6 +5713,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 let mineRequirementsData = @json($mineReqsJson);
 let assignmentsData = @json($assignmentsJson);
+let expiringCalendarDates = @json($upcomingExpirationCalendarDates);
 const attemptsUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.store', ['workerExamId' => '__EXAM__']));
 const completeAttemptUrlTemplate = @json(route('personal.habilitacion-minera.exam-attempts.complete', ['attemptId' => '__ATTEMPT__']));
 const noAplicaUrlTemplate = @json(route('personal.habilitacion-minera.exam.not-applicable', ['workerExamId' => '__EXAM__']));

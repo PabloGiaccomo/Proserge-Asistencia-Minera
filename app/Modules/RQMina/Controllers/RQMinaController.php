@@ -171,7 +171,7 @@ class RQMinaController extends Controller
         $usuario = $request->user();
 
         $rqMina = RQMina::query()
-            ->with(['mina:id,nombre', 'creador:id,email', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'detalle'])
+            ->with(['mina:id,nombre', 'creador:id,email', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor', 'detalle'])
             ->find($id);
 
         if (!$rqMina) {

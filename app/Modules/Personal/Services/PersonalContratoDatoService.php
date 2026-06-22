@@ -112,6 +112,9 @@ class PersonalContratoDatoService
 
             $record = $record->fresh();
             app(PersonalContratoService::class)->markEditableContractSigned($personal, $record, $user);
+            if (Schema::hasColumn('personal', 'pendiente_contrato_firmado')) {
+                $personal->forceFill(['pendiente_contrato_firmado' => false])->save();
+            }
 
             return $record;
         });

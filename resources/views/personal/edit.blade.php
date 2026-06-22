@@ -42,13 +42,6 @@
     }
 </style>
 <div class="module-page ficha-workspace">
-    @if(session('regularization_link'))
-        <div class="ficha-alert" style="margin-bottom:12px;">
-            Link temporal habilitado:
-            <a href="{{ session('regularization_link') }}" target="_blank" rel="noopener">{{ session('regularization_link') }}</a>
-        </div>
-    @endif
-
     <div class="page-header">
         <div class="page-header-top">
             <div>
@@ -88,17 +81,12 @@
         @if(!empty($ficha) && (($regularizationSummary['can_regularize'] ?? false) || count($missingRequiredDocuments ?? []) > 0))
             <div class="page-header-top" style="margin-top:10px;">
                 <div class="ficha-alert ficha-alert-warning" style="width:100%; margin:0;">
-                    Esta ficha todavia tiene informacion pendiente por regularizar. Usa el bloque de regularizacion dentro de la ficha para generar o copiar el link temporal del trabajador.
+                    Esta ficha todavia tiene informacion pendiente por regularizar. Usa la vista de Ingresos para copiar el link publico y pedir al trabajador que envie una ficha con su DNI.
                 </div>
             </div>
         @endif
     </div>
 
-    @if(!empty($ficha))
-        <form id="regularizeLinkForm" method="POST" action="{{ route('personal.fichas.regularize-link', $ficha->id) }}" style="display:none;">
-            @csrf
-        </form>
-    @endif
     @if(!empty($trabajador['puede_cesar']))
         <form id="ceaseWorkerForm" method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? request('id')) }}" style="display:none;">
             @csrf
@@ -126,72 +114,6 @@
                 <span class="ficha-status">{{ \App\Modules\Personal\Support\PersonalFichaCatalog::stateLabel($ficha?->estado ?? ($trabajador['estado'] ?? 'ACTIVO')) }}</span>
             </div>
             <div class="ficha-card-body" id="ficha-trabajador-panel-body">
-                @if(!empty($ficha))
-                    @php
-                        $fieldCatalog = \App\Modules\Personal\Support\PersonalFichaCatalog::fields();
-                        $documentCatalog = \App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements();
-                        $missingFieldLabels = collect($regularizationSummary['missing_fields'] ?? [])
-                            ->map(fn ($key) => $fieldCatalog[$key]['label'] ?? $key)
-                            ->values();
-                        $missingDocumentLabels = collect($regularizationSummary['missing_documents'] ?? [])
-                            ->map(fn ($key) => $documentCatalog[$key]['label'] ?? $key)
-                            ->values();
-                        $activeRegularizationLink = session('regularization_link') ?: ($regularizationSummary['url'] ?? null);
-                        $activeRegularizationMeta = $regularizationSummary['link'] ?? null;
-                        $hasActiveRegularizationLink = filled($activeRegularizationLink);
-                    @endphp
-                    <section class="ficha-section">
-                        <div class="ficha-section-header">
-                            <h3 class="ficha-section-title">Regularizacion por link temporal</h3>
-                        </div>
-                        <div class="ficha-fields">
-                            <div class="ficha-field ficha-field-wide">
-                                @if(($regularizationSummary['can_regularize'] ?? false))
-                                    <div class="ficha-alert ficha-alert-warning" style="margin:0 0 12px 0;">
-                                        @if($missingFieldLabels->isNotEmpty())
-                                            <div><strong>Datos por completar:</strong> {{ $missingFieldLabels->implode(' | ') }}</div>
-                                        @endif
-                                        @if($missingDocumentLabels->isNotEmpty())
-                                            <div style="margin-top:6px;"><strong>Documentos por adjuntar:</strong> {{ $missingDocumentLabels->implode(' | ') }}</div>
-                                        @endif
-                                        @if(in_array($ficha->estado, ['OBSERVADO', 'RECHAZADO', 'LINK_VENCIDO'], true))
-                                            <div style="margin-top:6px;"><strong>Estado de ficha:</strong> {{ \App\Modules\Personal\Support\PersonalFichaCatalog::stateLabel($ficha->estado) }}</div>
-                                        @endif
-                                    </div>
-                                    @if($hasActiveRegularizationLink)
-                                        <div class="ficha-alert" style="margin:0 0 12px 0;">
-                                            Este link temporal ya fue habilitado y ya aparece en <strong>Personal temporal y links</strong>.
-                                            @if($activeRegularizationMeta?->expires_at)
-                                                Vigente hasta {{ $activeRegularizationMeta->expires_at->format('d/m/Y H:i') }}.
-                                            @endif
-                                        </div>
-                                    @else
-                                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-                                            <button
-                                                type="submit"
-                                                form="regularizeLinkForm"
-                                                class="btn btn-primary">
-                                                Habilitar link temporal
-                                            </button>
-                                        </div>
-                                    @endif
-                                @else
-                                    <div class="ficha-alert" style="margin:0 0 12px 0;">
-                                        Esta ficha no tiene pendientes de regularizacion por ahora.
-                                    </div>
-                                @endif
-
-                                @if($activeRegularizationLink)
-                                    <div class="ficha-link-box">
-                                        <input id="workerRegularizationLink" class="ficha-input" type="text" value="{{ $activeRegularizationLink }}" readonly>
-                                        <button type="button" class="btn btn-primary js-copy-ficha-link" data-target="workerRegularizationLink">Copiar</button>
-                                    </div>
-                                @endif
-                            </div>
-                        </div>
-                    </section>
-                @endif
-
                 @foreach($sections as $section)
                     <section class="ficha-section">
                         <div class="ficha-section-header">

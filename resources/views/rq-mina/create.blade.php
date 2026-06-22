@@ -5,6 +5,7 @@
 @php
 $copyData = $copyData ?? null;
 $selectedSupervisor = $copyData['supervisor'] ?? null;
+$selectedSupervisorPets = $copyData['supervisor_pets'] ?? null;
 $lugares = $lugares ?? [];
 $selectedDestino = (($copyData['destino_tipo'] ?? 'MINA') . '|' . ($copyData['destino_id'] ?? $copyData['mina_id'] ?? ''));
 $formMode = $formMode ?? 'create';
@@ -105,6 +106,15 @@ $isEdit = $formMode === 'edit';
                 'selectedSupervisor' => $selectedSupervisor,
                 'title' => 'Supervisor a cargo de herramientas',
             ])
+            <div style="margin-top: 14px;">
+                @include('rq-mina.partials.supervisor-selector', [
+                    'selectorId' => 'rqCreateSupervisorPetsSelector',
+                    'selectedSupervisor' => $selectedSupervisorPets,
+                    'title' => 'Supervisor a cargo de PETS',
+                    'fieldName' => 'supervisor_pets_id',
+                    'emptyText' => 'Sin supervisor PETS seleccionado.',
+                ])
+            </div>
         </div>
     </div>
 

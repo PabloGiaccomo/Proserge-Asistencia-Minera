@@ -184,6 +184,29 @@
 .expiry-contract-row.is-selected {
     background: #ecfeff;
 }
+.expiry-contract-row.blacklisted-worker,
+.expiry-contract-row.blacklisted-worker td {
+    background: #f1f5f9;
+    color: #475569;
+}
+.expiry-contract-row.blacklisted-worker:hover,
+.expiry-contract-row.blacklisted-worker:hover td {
+    background: #e2e8f0;
+}
+.expiry-contract-row.blacklisted-worker.is-selected,
+.expiry-contract-row.blacklisted-worker.is-selected td {
+    background: #ecfeff;
+}
+.expiry-blacklist-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 900;
+}
 .expiry-badge {
     display: inline-flex;
     border-radius: 999px;
@@ -332,6 +355,30 @@
     background: #ffffff;
     box-shadow: 0 28px 70px rgba(15, 23, 42, 0.25);
     overflow: hidden;
+}
+.expiry-blacklist-card {
+    width: min(560px, calc(100vw - 28px));
+}
+.expiry-blacklist-detail {
+    display: grid;
+    gap: 10px;
+}
+.expiry-blacklist-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+.expiry-blacklist-reason {
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 12px;
+    background: #f8fafc;
+    color: #0f172a;
+    line-height: 1.45;
+    white-space: pre-wrap;
 }
 .expiry-modal-header,
 .expiry-modal-footer {
@@ -602,11 +649,27 @@ textarea.expiry-field {
                                     $workerDocument = $personal?->numero_documento ?: $personal?->dni;
                                     $contractType = $contrato->getAttribute('tipo_contrato_visual') ?: 'SIN_TIPO';
                                     $contractTypeLabel = $contrato->getAttribute('tipo_contrato_label') ?: ($contractType === 'SIN_TIPO' ? '-' : $contractType);
+                                    $enListaNegra = (bool) ($personal?->en_lista_negra ?? false);
+                                    $listaNegraMotivo = trim((string) ($personal?->lista_negra_motivo ?? ''));
+                                    $listaNegraPor = $personal?->relationLoaded('listaNegraPor') ? $personal?->listaNegraPor : null;
+                                    $listaNegraPorNombre = trim((string) ($listaNegraPor?->personal?->nombre_completo ?: $listaNegraPor?->email ?: 'No registrado'));
+                                    $listaNegraFecha = '-';
+                                    if ($personal?->lista_negra_at) {
+                                        try {
+                                            $listaNegraFecha = \Illuminate\Support\Carbon::parse($personal->lista_negra_at)->format('d/m/Y H:i');
+                                        } catch (\Throwable) {
+                                            $listaNegraFecha = '-';
+                                        }
+                                    }
                                     $workerPayload = [
                                         'id' => (string) ($personal?->id ?? ''),
                                         'nombre' => (string) ($personal?->nombre_completo ?: 'Trabajador'),
                                         'documento' => (string) ($workerDocument ?: ''),
                                         'puesto' => (string) ($contrato->puesto ?: $personal?->puesto ?: ''),
+                                        'en_lista_negra' => $enListaNegra,
+                                        'lista_negra_motivo' => $listaNegraMotivo,
+                                        'lista_negra_fecha' => $listaNegraFecha,
+                                        'lista_negra_por_nombre' => $listaNegraPorNombre,
                                     ];
                                     $previousContractsPayload = collect($contrato->getAttribute('previous_contracts_summary') ?? [])
                                         ->map(fn ($item): array => [
@@ -618,7 +681,7 @@ textarea.expiry-field {
                                         ])
                                         ->values();
                                 @endphp
-                                <tr class="expiry-contract-row"
+                                <tr class="expiry-contract-row {{ $enListaNegra ? 'blacklisted-worker' : '' }}"
                                     data-contract-id="{{ $contrato->id }}"
                                     data-can-decision="{{ $canRegisterDecision ? '1' : '0' }}"
                                     data-contract-type="{{ $contractType }}"
@@ -658,6 +721,11 @@ textarea.expiry-field {
                                             </span>
                                         @else
                                             <strong class="expiry-worker-name">{{ $personal?->nombre_completo ?: 'Sin trabajador' }}</strong>
+                                        @endif
+                                        @if($enListaNegra)
+                                            <div style="margin-top:6px;">
+                                                <span class="expiry-blacklist-pill">Lista negra</span>
+                                            </div>
                                         @endif
                                         <div class="expiry-muted">{{ $contratoService->contractDisplayLabel($contrato) }}</div>
                                     </td>
@@ -725,7 +793,21 @@ textarea.expiry-field {
                                                         <path d="M5 4H19C20.1 4 21 4.9 21 6V18C21 19.1 20.1 20 19 20H5C3.9 20 3 19.1 3 18V6C3 4.9 3.9 4 5 4Z" stroke="currentColor" stroke-width="2"/>
                                                     </svg>
                                                 </button>
-                                            @else
+                                            @endif
+                                            @if($enListaNegra)
+                                                <button
+                                                    type="button"
+                                                    class="expiry-icon-action js-expiry-blacklist-reason"
+                                                    title="Ver motivo de lista negra"
+                                                    aria-label="Ver motivo de lista negra"
+                                                    data-blacklist-worker='@json($workerPayload)'>
+                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                        <path d="M12 9V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                        <path d="M12 17H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                        <path d="M10.3 4.2L2.8 17.2C2 18.6 3 20.3 4.6 20.3H19.4C21 20.3 22 18.6 21.2 17.2L13.7 4.2C12.9 2.8 11.1 2.8 10.3 4.2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                                                    </svg>
+                                                </button>
+                                            @elseif(!$canManage)
                                                 <span class="expiry-muted">-</span>
                                             @endif
                                         </div>
@@ -741,6 +823,32 @@ textarea.expiry-field {
 </div>
 
 <div id="expiryWorkerHistoryTooltip" class="expiry-worker-history-tooltip" hidden></div>
+
+<div id="expiryBlacklistModal" class="expiry-modal" hidden>
+    <div class="expiry-modal-backdrop" data-expiry-blacklist-close></div>
+    <div class="expiry-modal-card expiry-blacklist-card" role="dialog" aria-modal="true" aria-labelledby="expiryBlacklistTitle">
+        <div class="expiry-modal-header">
+            <div>
+                <h2 class="expiry-modal-title" id="expiryBlacklistTitle">Motivo de lista negra</h2>
+                <p class="expiry-modal-subtitle" id="expiryBlacklistWorker">Trabajador</p>
+            </div>
+            <button type="button" class="expiry-modal-close" data-expiry-blacklist-close aria-label="Cerrar">X</button>
+        </div>
+        <div class="expiry-modal-body">
+            <div class="expiry-blacklist-detail">
+                <div class="expiry-blacklist-meta">
+                    <span id="expiryBlacklistDocument">Documento no registrado</span>
+                    <span id="expiryBlacklistDate">Fecha no registrada</span>
+                    <span id="expiryBlacklistUser">Usuario no registrado</span>
+                </div>
+                <div class="expiry-blacklist-reason" id="expiryBlacklistReason">Sin motivo registrado.</div>
+            </div>
+        </div>
+        <div class="expiry-modal-footer">
+            <button type="button" class="btn btn-secondary" data-expiry-blacklist-close>Cerrar</button>
+        </div>
+    </div>
+</div>
 
 @if($canManage)
     <div id="expiryDecisionModal" class="expiry-modal" hidden>
@@ -934,6 +1042,72 @@ textarea.expiry-field {
 
     window.addEventListener('scroll', hideTooltip, true);
     window.addEventListener('resize', hideTooltip);
+})();
+
+(function () {
+    const modal = document.getElementById('expiryBlacklistModal');
+    const workerName = document.getElementById('expiryBlacklistWorker');
+    const workerDocument = document.getElementById('expiryBlacklistDocument');
+    const registryDate = document.getElementById('expiryBlacklistDate');
+    const registryUser = document.getElementById('expiryBlacklistUser');
+    const reason = document.getElementById('expiryBlacklistReason');
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, function (char) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[char];
+        });
+    }
+
+    function parsePayload(button) {
+        try {
+            return JSON.parse(button.dataset.blacklistWorker || button.closest('tr')?.dataset.contractWorker || '{}');
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function openModal(worker) {
+        if (!modal) return;
+
+        if (workerName) {
+            workerName.textContent = worker.nombre || 'Trabajador';
+        }
+        if (workerDocument) {
+            workerDocument.textContent = worker.documento ? 'Documento: ' + worker.documento : 'Documento no registrado';
+        }
+        if (registryDate) {
+            registryDate.textContent = worker.lista_negra_fecha && worker.lista_negra_fecha !== '-'
+                ? 'Registrado: ' + worker.lista_negra_fecha
+                : 'Fecha no registrada';
+        }
+        if (registryUser) {
+            registryUser.textContent = worker.lista_negra_por_nombre
+                ? 'Por: ' + worker.lista_negra_por_nombre
+                : 'Usuario no registrado';
+        }
+        if (reason) {
+            reason.innerHTML = escapeHtml(worker.lista_negra_motivo || 'Sin motivo registrado.').replace(/\n/g, '<br>');
+        }
+
+        modal.removeAttribute('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+        modal?.setAttribute('hidden', '');
+        document.body.style.overflow = '';
+    }
+
+    document.querySelectorAll('.js-expiry-blacklist-reason').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.stopPropagation();
+            openModal(parsePayload(button));
+        });
+    });
+
+    document.querySelectorAll('[data-expiry-blacklist-close]').forEach(function (button) {
+        button.addEventListener('click', closeModal);
+    });
 })();
 
 (function () {

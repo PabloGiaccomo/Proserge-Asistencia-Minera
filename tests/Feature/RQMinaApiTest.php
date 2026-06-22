@@ -156,6 +156,7 @@ class RQMinaApiTest extends TestCase
     {
         $minaId = $this->createMina();
         $supervisorId = $this->createPersonal($minaId, true, 'Supervisor Prueba Uno', 'Supervisor');
+        $supervisorPetsId = $this->createPersonal($minaId, true, 'Supervisor PETS Prueba', 'Supervisor PETS');
         $usuarioId = $this->createUsuario($this->userRoleId);
         $this->assignMinaScope($usuarioId, $minaId);
         $token = $this->createToken($usuarioId);
@@ -169,14 +170,18 @@ class RQMinaApiTest extends TestCase
                 ['puesto' => 'Tecnico', 'cantidad' => 1],
             ],
             'supervisor_id' => $supervisorId,
+            'supervisor_pets_id' => $supervisorPetsId,
         ]);
 
         $response->assertStatus(201)
             ->assertJsonPath('data.supervisor_id', $supervisorId)
-            ->assertJsonPath('data.supervisor.nombre', 'Supervisor Prueba Uno');
+            ->assertJsonPath('data.supervisor.nombre', 'Supervisor Prueba Uno')
+            ->assertJsonPath('data.supervisor_pets_id', $supervisorPetsId)
+            ->assertJsonPath('data.supervisor_pets.nombre', 'Supervisor PETS Prueba');
 
         $this->assertDatabaseHas('rq_mina', [
             'supervisor_id' => $supervisorId,
+            'supervisor_pets_id' => $supervisorPetsId,
         ]);
     }
 

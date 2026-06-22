@@ -13,6 +13,8 @@ use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\RQProserge\Policies\RQProsergePolicy;
 use App\Shared\Services\DisponibilidadPersonalService;
 use App\Support\Rbac\PermissionMatrix;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -168,6 +170,9 @@ class RQProsergeService
 
     public function listOperationalForUser(Usuario $usuario, array $filters = []): Collection
     {
+        $today = CarbonImmutable::now()->startOfDay();
+        $recentPastLimit = $today->subDays(14);
+
         $query = RQProserge::query()->with([
             'mina:id,nombre',
             'responsableRrhh:id,email',
@@ -176,7 +181,11 @@ class RQProsergeService
             'rqMina.detalle.asignaciones.personal:id,dni,nombre_completo,puesto',
             'rqMina.detalle.cambios',
             'cambiosRqMina',
-        ]);
+        ])->whereHas('rqMina', function ($rqMinaQuery) use ($recentPastLimit): void {
+            $rqMinaQuery
+                ->whereNull('fecha_fin')
+                ->orWhereDate('fecha_fin', '>=', $recentPastLimit->toDateString());
+        });
 
         if (!empty($filters['mina_id'])) {
             $query->where('mina_id', $filters['mina_id']);
@@ -195,7 +204,9 @@ class RQProsergeService
             $query->whereIn('mina_id', $minaIds);
         }
 
-        return $query->orderByDesc('created_at')->get();
+        return $query->get()
+            ->sort(fn (RQProserge $left, RQProserge $right): int => $this->compareOperationalPriority($left, $right, $today))
+            ->values();
     }
 
     public function assignPersonal(Usuario $usuario, RQProserge $rq, array $payload): array
@@ -429,6 +440,104 @@ class RQProsergeService
             PersonalMina::ESTADO_EN_PROCESO,
             PersonalMina::ESTADO_HABILITADO,
         ];
+    }
+
+    private function compareOperationalPriority(RQProserge $left, RQProserge $right, CarbonImmutable $today): int
+    {
+        $leftKey = $this->operationalPriorityKey($left, $today);
+        $rightKey = $this->operationalPriorityKey($right, $today);
+
+        foreach ($leftKey as $index => $leftValue) {
+            $rightValue = $rightKey[$index] ?? null;
+
+            if ($leftValue === $rightValue) {
+                continue;
+            }
+
+            return $leftValue <=> $rightValue;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Orden operativo:
+     * 1. Paradas activas o futuras antes que las ya vencidas.
+     * 2. Fechas de inicio cercanas en grupos de 3 dias.
+     * 3. Dentro de fechas cercanas, mayor faltante y solicitado primero.
+     */
+    private function operationalPriorityKey(RQProserge $rq, CarbonImmutable $today): array
+    {
+        $rqMina = $rq->rqMina;
+        $start = $this->immutableDate($rqMina?->fecha_inicio);
+        $end = $this->immutableDate($rqMina?->fecha_fin);
+        $needs = $this->operationalNeeds($rq);
+        $createdAt = $this->immutableDate($rq->created_at);
+
+        $isPast = $end !== null && $end->lt($today);
+
+        if ($isPast) {
+            $daysExpired = (int) abs($end->diffInDays($today, false));
+
+            return [
+                1,
+                $daysExpired,
+                -$needs['faltante'],
+                -$needs['solicitado'],
+                -($end?->getTimestamp() ?? 0),
+                -($createdAt?->getTimestamp() ?? 0),
+            ];
+        }
+
+        $startDistance = $start ? (int) abs($today->diffInDays($start, false)) : 99999;
+        $closeDateBand = intdiv($startDistance, 3);
+
+        return [
+            0,
+            $closeDateBand,
+            -$needs['faltante'],
+            -$needs['solicitado'],
+            $start?->getTimestamp() ?? PHP_INT_MAX,
+            -($createdAt?->getTimestamp() ?? 0),
+        ];
+    }
+
+    private function operationalNeeds(RQProserge $rq): array
+    {
+        $detalles = $rq->rqMina?->detalle ?? collect();
+
+        $solicitado = 0;
+        $atendido = 0;
+
+        foreach ($detalles as $detalle) {
+            $solicitado += (int) ($detalle->cantidad_total ?: $detalle->cantidad);
+            $atendido += $detalle->relationLoaded('asignaciones')
+                ? $detalle->asignaciones->count()
+                : (int) $detalle->cantidad_atendida;
+        }
+
+        return [
+            'solicitado' => $solicitado,
+            'atendido' => $atendido,
+            'faltante' => max(0, $solicitado - $atendido),
+        ];
+    }
+
+    private function immutableDate(mixed $date): ?CarbonImmutable
+    {
+        if ($date instanceof CarbonImmutable) {
+            return $date->startOfDay();
+        }
+
+        if ($date instanceof CarbonInterface) {
+            return CarbonImmutable::instance($date)->startOfDay();
+        }
+
+        if (!$date) {
+            return null;
+        }
+
+        return CarbonImmutable::parse((string) $date)->startOfDay();
     }
 
     private function recalculateEstado(RQProserge $rq, ?Usuario $actor = null): bool

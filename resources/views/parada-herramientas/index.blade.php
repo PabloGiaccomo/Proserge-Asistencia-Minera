@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Herramientas por Parada')
+@section('title', 'Herramientas y consumibles por parada')
 
 @php
     $estadoClass = static function (string $estado): string {
@@ -10,8 +10,6 @@
             default => 'pending',
         };
     };
-    $roles = array_map('strtoupper', session('user.roles', []));
-    $isLogistica = collect($roles)->contains(static fn ($rol) => str_contains($rol, 'LOGIST'));
     $deadlineAlerts = $deadlineAlerts ?? [];
 @endphp
 
@@ -48,9 +46,14 @@
 
     <div class="page-header-custom">
         <div>
-            <h1 class="page-title">Herramientas por Parada</h1>
-            <p class="page-subtitle">Listas semanales de equipos, herramientas y utillaje por grupo</p>
+            <h1 class="page-title">Herramientas y consumibles por parada</h1>
+            <p class="page-subtitle">Listas semanales de equipos, herramientas, utillaje y consumibles por grupo</p>
         </div>
+        @allowed('herramientas', 'actualizar')
+            <button type="button" class="btn-filter tools-catalog-button" onclick="openToolsCatalogImport()">
+                Subir catalogo
+            </button>
+        @endallowed
     </div>
 
     @if(session('success'))
@@ -115,6 +118,8 @@
                             @php
                                 $dias = (int) ($item['dias_para_limite'] ?? 0);
                                 $deadlineClass = $dias < 0 ? 'expired' : ($dias <= 2 ? 'urgent' : 'ok');
+                                $paradaIniciada = (bool) ($item['parada_iniciada'] ?? false);
+                                $paradaFinalizada = (bool) ($item['parada_finalizada'] ?? false);
                             @endphp
                             <tr>
                                 <td>
@@ -145,10 +150,51 @@
                                 <td>{{ (int) ($item['grupos_count'] ?? 0) }}</td>
                                 <td><span class="tools-status {{ $estadoClass($item['estado_lista'] ?? 'PENDIENTE') }}">{{ ucfirst(strtolower($item['estado_lista'] ?? 'Pendiente')) }}</span></td>
                                 <td>
-                                    <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row btn-row-outline">Ver lista</a>
-                                    @if($isLogistica)
-                                        <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row">Completar pedido</a>
-                                    @endif
+                                    <div class="tools-row-actions">
+                                        <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row btn-row-outline tools-action-link">
+                                            <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M12 5v14"></path>
+                                                <path d="M5 12h14"></path>
+                                            </svg>
+                                            <span>Completar requerimiento</span>
+                                        </a>
+                                        @if($paradaIniciada)
+                                            <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => 'entrega']) }}" class="btn-row tools-action-link">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M4 7h11v10H4z"></path>
+                                                    <path d="M15 10h3l2 3v4h-5z"></path>
+                                                    <path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                    <path d="M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                </svg>
+                                                <span>Ver entregas</span>
+                                            </a>
+                                        @else
+                                            <span class="btn-row btn-row-outline tools-action-link is-disabled" title="Disponible cuando inicie la parada" aria-disabled="true">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M4 7h11v10H4z"></path>
+                                                    <path d="M15 10h3l2 3v4h-5z"></path>
+                                                    <path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                    <path d="M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                </svg>
+                                                <span>Ver entregas</span>
+                                            </span>
+                                        @endif
+                                        @if($paradaFinalizada)
+                                            <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => 'recepcion']) }}" class="btn-row tools-action-link tools-action-final">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M20 7L10 17l-5-5"></path>
+                                                </svg>
+                                                <span>Registrar recepcion</span>
+                                            </a>
+                                        @else
+                                            <span class="btn-row btn-row-outline tools-action-link is-disabled" title="Disponible al finalizar la parada" aria-disabled="true">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M20 7L10 17l-5-5"></path>
+                                                </svg>
+                                                <span>Registrar recepcion</span>
+                                            </span>
+                                        @endif
+                                    </div>
                                 </td>
                             </tr>
                         @endforeach
@@ -157,5 +203,60 @@
             </div>
         @endif
     </div>
+
+    @allowed('herramientas', 'actualizar')
+        <dialog class="tools-import-dialog" id="toolsCatalogImportDialog">
+            <form method="POST" action="{{ route('herramientas-parada.catalogo.importar') }}" enctype="multipart/form-data">
+                @csrf
+                <div class="tools-dialog-head">
+                    <div>
+                        <span>Catalogo global</span>
+                        <h2>Subir herramientas y consumibles</h2>
+                        <p>Registra solo las descripciones del formato para usarlas como autocompletado. No modifica pedidos existentes.</p>
+                    </div>
+                    <button type="button" class="tools-dialog-close" onclick="closeToolsCatalogImport()" aria-label="Cerrar">X</button>
+                </div>
+                <div class="tools-dialog-body">
+                    <label class="form-label" for="toolsCatalogImportFile">Archivo Excel</label>
+                    <input id="toolsCatalogImportFile" type="file" name="archivo" class="form-control" accept=".xlsx,.xls,.xlsm" required>
+                    <p class="tools-catalog-help">
+                        Tambien se aprenderan observaciones asociadas a cada descripcion cuando el archivo las incluya.
+                    </p>
+                </div>
+                <div class="tools-dialog-actions">
+                    <button type="button" class="btn-row btn-row-outline" onclick="closeToolsCatalogImport()">Cancelar</button>
+                    <button type="submit" class="btn-row">Actualizar catalogo</button>
+                </div>
+            </form>
+        </dialog>
+    @endallowed
 </div>
+
+@push('scripts')
+<script>
+function openToolsCatalogImport() {
+    const dialog = document.getElementById('toolsCatalogImportDialog');
+    const file = document.getElementById('toolsCatalogImportFile');
+
+    if (file) {
+        file.value = '';
+    }
+
+    dialog?.showModal();
+}
+
+function closeToolsCatalogImport() {
+    const dialog = document.getElementById('toolsCatalogImportDialog');
+    if (dialog?.open) {
+        dialog.close();
+    }
+}
+
+document.getElementById('toolsCatalogImportDialog')?.addEventListener('click', function (event) {
+    if (event.target === this) {
+        closeToolsCatalogImport();
+    }
+});
+</script>
+@endpush
 @endsection
