@@ -2,8 +2,8 @@
     $permissions = session('user.permissions', []);
     $canUpdateEpps = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'epps', 'actualizar');
     $embedded = (bool) ($embedded ?? false);
-    $eppFilterAction = $embedded ? route('logistica.index') : route('epps.index');
-    $eppResetUrl = $embedded ? route('logistica.index', ['tab' => 'entregas']) : route('epps.index');
+    $eppFilterAction = $embedded ? url('/logistica') : route('epps.index');
+    $eppResetUrl = $embedded ? url('/logistica?tab=entregas') : route('epps.index');
 @endphp
 
 <div

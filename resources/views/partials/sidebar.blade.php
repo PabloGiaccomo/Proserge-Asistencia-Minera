@@ -112,7 +112,7 @@
                     </a>
                     @endif
                     @if($canEpps)
-                    <a href="{{ route('logistica.index') }}" class="nav-item {{ request()->is('logistica*') ? 'active' : '' }}">
+                    <a href="{{ url('/logistica') }}" class="nav-item {{ request()->is('logistica*') ? 'active' : '' }}">
                         <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="10" width="3" height="6" rx="1"/><rect x="12" y="7" width="3" height="9" rx="1"/><rect x="17" y="12" width="3" height="4" rx="1"/><path d="M7 5h10"/></svg></span>
                         <span class="nav-label">Logistica</span>
                     </a>

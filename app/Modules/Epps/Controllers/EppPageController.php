@@ -19,12 +19,14 @@ class EppPageController extends WebPageController
     {
         $this->requireAuthenticatedUser();
 
-        return redirect()->route('logistica.index', array_filter([
+        $query = array_filter([
             'tab' => 'entregas',
             'q' => $request->query('q'),
             'estado' => $request->query('estado'),
             'per_page' => $request->query('per_page'),
-        ], static fn ($value): bool => $value !== null && $value !== ''));
+        ], static fn ($value): bool => $value !== null && $value !== '');
+
+        return redirect()->to(url('/logistica').'?'.http_build_query($query));
     }
 
     public function buscarPersonal(Request $request): JsonResponse
