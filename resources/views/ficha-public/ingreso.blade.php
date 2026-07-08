@@ -249,51 +249,7 @@
                 </div>
             </div>
             <div class="ficha-card-body">
-                <div class="ingreso-guide-grid">
-                    <div class="ingreso-guide-step">
-                        <span class="ingreso-guide-number">1</span>
-                        <div>
-                            <strong>Completa tus datos.</strong>
-                            <p>Escribe nombres, apellidos, DNI, telefono, correo, domicilio, banco, cargo y tipo de contrato. Usa mayusculas cuando corresponda.</p>
-                        </div>
-                    </div>
-                    <div class="ingreso-guide-step">
-                        <span class="ingreso-guide-number">2</span>
-                        <div>
-                            <strong>Registra tu experiencia.</strong>
-                            <p>Completa el reporte de experiencia indicando cuantas veces realizaste cada trabajo.</p>
-                            <a href="https://docs.google.com/forms/d/e/1FAIpQLSejSTKeugA4BE7zxbP3Za1bJNaiDMqPWfh47JO0vWrPA_hs0Q/formResponse" target="_blank" rel="noopener">Abrir reporte</a>
-                        </div>
-                    </div>
-                    <div class="ingreso-guide-step">
-                        <span class="ingreso-guide-number">3</span>
-                        <div>
-                            <strong>Adjunta documentos si los tienes.</strong>
-                            <p>Los documentos no bloquean el envio, pero subirlos ahora evita retrasos en RRHH.</p>
-                        </div>
-                    </div>
-                    <div class="ingreso-guide-step">
-                        <span class="ingreso-guide-number">4</span>
-                        <div>
-                            <strong>Firma, sube tu huella y envia.</strong>
-                            <p>Firma dentro del recuadro y adjunta una foto clara de tu huella marcada en papel.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <details class="public-guide-details">
-                    <summary>Ver documentos y enlaces de apoyo</summary>
-                    <ul class="ingreso-doc-list">
-                        <li>CV documentado con certificados de trabajo y estudios.</li>
-                        <li>DNI vigente.</li>
-                        <li>Certiadulto o Certijoven.</li>
-                        <li>Recibo de luz o agua.</li>
-                        <li>Renta de quinta o certificado de retenciones.</li>
-                        <li>Declaracion jurada de Vida Ley.</li>
-                        <li>Foto tipo carnet con fondo blanco.</li>
-                        <li>Documentos familiares solo si corresponde.</li>
-                    </ul>
-                </details>
+                @include('ficha-public.partials.quick-guide')
             </div>
         </div>
 

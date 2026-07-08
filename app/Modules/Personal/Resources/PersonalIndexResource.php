@@ -101,7 +101,7 @@ class PersonalIndexResource extends JsonResource
         $mineStates = [];
         foreach ($this->whenLoaded('minas', fn () => $this->minas, collect()) as $mina) {
             $mineNames[] = $mina->nombre;
-            $mineStates[$mina->nombre] = PersonalNormalizer::mineStatusLabel($mina->pivot?->estado);
+            $mineStates[$mina->nombre] = PersonalNormalizer::mineStatusLabel($mina->pivot?->estado_habilitacion ?: $mina->pivot?->estado);
         }
 
         $ubicacionSituacion = collect($mineNames)
@@ -176,7 +176,6 @@ class PersonalIndexResource extends JsonResource
             $ubicacionSituacion === 'taller' => 'taller',
             $contrato === 'INTER' => 'habilitado',
             collect($mineStates)->contains(fn ($state) => in_array($state, ['habilitado', 'proceso'], true)) => 'habilitado',
-            collect($mineStates)->contains('no_habilitado') => 'no_habilitado',
             default => 'habilitado',
         };
 

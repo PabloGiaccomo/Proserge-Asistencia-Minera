@@ -7,7 +7,6 @@ use App\Modules\Epps\Services\EppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
 use InvalidArgumentException;
 
 class EppPageController extends WebPageController
@@ -16,17 +15,16 @@ class EppPageController extends WebPageController
     {
     }
 
-    public function index(Request $request): View
+    public function index(Request $request): RedirectResponse
     {
         $this->requireAuthenticatedUser();
 
-        $data = $this->service->pageData([
+        return redirect()->route('logistica.index', array_filter([
+            'tab' => 'entregas',
             'q' => $request->query('q'),
             'estado' => $request->query('estado'),
             'per_page' => $request->query('per_page'),
-        ]);
-
-        return view('epps.index', $data);
+        ], static fn ($value): bool => $value !== null && $value !== ''));
     }
 
     public function buscarPersonal(Request $request): JsonResponse

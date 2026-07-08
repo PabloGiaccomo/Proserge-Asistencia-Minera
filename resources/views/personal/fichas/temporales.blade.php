@@ -704,9 +704,6 @@
                 <div class="temporales-actions-wrap">
                     <button type="button" class="btn btn-primary" id="temporalesActionsButton" aria-expanded="false" aria-haspopup="true">Acciones</button>
                     <div class="temporales-actions-menu" id="temporalesActionsMenu">
-                        @allowed('personal', 'importar')
-                            <a href="{{ route('personal.fichas.import') }}" class="temporales-action-item">Importar macro</a>
-                        @endallowed
                         @allowed('personal', 'editar')
                             <button type="button" class="temporales-action-item" id="openActivateLinkModal">Activar link</button>
                             <button type="button" class="temporales-action-item" id="openEmailTemplateModal">Editar correo de envio</button>

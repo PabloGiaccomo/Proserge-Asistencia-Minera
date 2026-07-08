@@ -100,6 +100,180 @@ class ImportPersonalLifecycleStateTest extends TestCase
         ]);
     }
 
+    public function test_personnel_data_import_creates_worker_with_approved_ficha_and_contract_dates(): void
+    {
+        $user = $this->createUser();
+
+        $result = app(ImportPersonalService::class)->import($this->personnelDataUpload([
+            [
+                'JUAN CARLOS',
+                'IMPORTADO',
+                'PRUEBA',
+                'MASCULINO',
+                'SOLTERO',
+                'PERUANO',
+                'O+',
+                '-',
+                'DNI',
+                '71000110',
+                '1990-01-15',
+                'PERU',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                '959111222',
+                'juan.importado@test.local',
+                'AV. TEST 123',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                'OPERARIO IMPORTADO',
+                'SE',
+                'BCP',
+                '00123456789',
+                '00212345678901234567',
+                'SECUNDARIA COMPLETA',
+                'OPERARIO',
+                '-',
+                'IE TEST',
+                '2010',
+                '5 ANOS',
+                'SISTEMA PRIVADO DE PENSIONES',
+                'AFP PRIMA',
+                '2500',
+                '42',
+                'L',
+                '34',
+                'M',
+                'CONTACTO TEST',
+                'HERMANO',
+                '959333444',
+                '2026-07-01',
+                '2026-07-01',
+                '2026-09-29',
+                '2026-12-31',
+            ],
+        ]), $user);
+
+        $this->assertSame('datos_personal', $result['tipoImportacion']);
+        $this->assertSame(1, $result['nuevos']);
+
+        $personal = DB::table('personal')->where('numero_documento', '71000110')->first();
+        $this->assertNotNull($personal);
+        $this->assertSame('FALTA_CONTRATO', $personal->estado);
+        $this->assertSame('FIJO', $personal->contrato);
+        $this->assertSame('OPERARIO IMPORTADO', $personal->puesto);
+
+        $this->assertDatabaseHas('personal_fichas', [
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_APROBADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '71000110',
+        ]);
+
+        $fichaData = json_decode((string) DB::table('personal_fichas')->where('personal_id', $personal->id)->value('datos_json'), true);
+        $this->assertSame('JUAN CARLOS', $fichaData['nombres']);
+        $this->assertSame('OPERARIO IMPORTADO', $fichaData['puesto']);
+        $this->assertSame('00123456789', $fichaData['numero_cuenta']);
+        $this->assertSame('00212345678901234567', $fichaData['cci']);
+        $this->assertSame('2026-09-29', $fichaData['periodo_prueba_fin']);
+
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personal->id,
+            'fecha_inicio_contrato' => '2026-07-01',
+            'fecha_fin_contrato' => '2026-12-31',
+            'periodo_prueba_fin' => '2026-09-29',
+            'sueldo_num' => '2500',
+        ]);
+
+        $this->assertDatabaseHas('personal_contratos', [
+            'personal_id' => $personal->id,
+            'estado' => 'PREPARACION',
+            'fecha_inicio' => '2026-07-01',
+            'fecha_fin' => '2026-12-31',
+        ]);
+    }
+
+    public function test_personnel_data_import_updates_existing_worker_and_clears_dash_contract_end(): void
+    {
+        $personalId = $this->createPersonal('71000111', PersonalFicha::ESTADO_PENDIENTE);
+        $this->createFicha($personalId, PersonalFicha::ESTADO_OBSERVADO);
+
+        app(ImportPersonalService::class)->import($this->personnelDataUpload([
+            [
+                'MARIA',
+                'ACTUALIZADA',
+                'EXISTENTE',
+                'FEMENINO',
+                'CASADA',
+                'PERUANO',
+                'A+',
+                '-',
+                'DNI',
+                '71000111',
+                '1992-02-20',
+                'PERU',
+                'LIMA',
+                'LIMA',
+                'LIMA',
+                '-',
+                '-',
+                'JR. NUEVO 456',
+                'LIMA',
+                'LIMA',
+                'LIMA',
+                'ASISTENTE ACTUALIZADA',
+                'INDET',
+                'INTERBANK',
+                '999888777',
+                '-',
+                'UNIVERSITARIA TITULADO',
+                'ADMINISTRACION',
+                'TITULADO',
+                'UNIVERSIDAD TEST',
+                '2015',
+                '8 ANOS',
+                'SISTEMA NACIONAL DE PENSIONES',
+                '-',
+                '3200',
+                '-',
+                'M',
+                '-',
+                '-',
+                '-',
+                '-',
+                '-',
+                '2026-01-10',
+                '2026-01-10',
+                '2026-04-10',
+                '-',
+            ],
+        ]));
+
+        $this->assertDatabaseHas('personal', [
+            'id' => $personalId,
+            'nombre_completo' => 'ACTUALIZADA EXISTENTE MARIA',
+            'puesto' => 'ASISTENTE ACTUALIZADA',
+            'contrato' => 'INDET',
+            'estado' => 'FALTA_CONTRATO',
+            'telefono' => null,
+            'correo' => null,
+        ]);
+
+        $fichaData = json_decode((string) DB::table('personal_fichas')->where('personal_id', $personalId)->value('datos_json'), true);
+        $this->assertSame('APROBADO', DB::table('personal_fichas')->where('personal_id', $personalId)->value('estado'));
+        $this->assertSame('', $fichaData['cci']);
+        $this->assertSame('ONP', $fichaData['sistema_pensionario']);
+        $this->assertSame('2026-04-10', $fichaData['periodo_prueba_fin']);
+
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personalId,
+            'fecha_inicio_contrato' => '2026-01-10',
+            'fecha_fin_contrato' => null,
+            'periodo_prueba_fin' => '2026-04-10',
+        ]);
+    }
+
     private function createPersonal(string $dni, string $estado): string
     {
         $id = (string) Str::uuid();
@@ -182,6 +356,89 @@ class ImportPersonalLifecycleStateTest extends TestCase
             $rows,
             'contactos.xlsx',
         );
+    }
+
+    private function personnelDataUpload(array $rows): UploadedFile
+    {
+        return $this->xlsxUpload(
+            [
+                'Nombres',
+                'Apellido paterno',
+                'Apellido materno',
+                'SEXO',
+                'ESTADO CIVIL',
+                'NACIONALIDAD',
+                'Grupo sanguineo',
+                'Brevete / licencia de conducir',
+                'TIPO DE DOCUMENTO ',
+                'NUMERO DE DOCUMENTO',
+                'FECHA DE NACIMIENTO',
+                'PAIS DE NACIMIENTO',
+                'DEPARTAMENTO DE NACIMIENTO',
+                'PROVINCIA DE NACIMIENTO',
+                'DISTRITO DE NACIMIENTO',
+                'CELULAR PARTICULAR',
+                'CORREO ELECTRONICO',
+                'DIRECCION',
+                'DEPARTAMENTO',
+                'PROVINCIA',
+                'DISTRITO',
+                'CARGO / PUESTO',
+                'CONTRATO',
+                'BANCO',
+                'CUENTA SUELDO',
+                'CCI SUENTA SUELDO',
+                'GRADO DE INSTRUCCION',
+                'PROFESION Y/O CARRERA',
+                'TITULADO',
+                'CENTRO DE ESTUDIOS',
+                'Año de egreso',
+                'AÑOS DE EXPERIENCIA',
+                'SISTEMA DE PENSION',
+                'Elección del sistema pensionario',
+                'REMUNERACION',
+                'ZAPATOS',
+                'CAMISA',
+                'PANTALON',
+                'RESPIRADOR',
+                'EN CASO DE EMERGENCIA ',
+                'PARENTEZCO',
+                'CELULAR',
+                'FECHA INGRESO',
+                'Fecha de contrato',
+                'Fecha de término del periodo de prueba',
+                'FECHA FIN',
+            ],
+            $rows,
+            'datos_personal.xlsx',
+        );
+    }
+
+    private function createUser(): \App\Models\Usuario
+    {
+        $roleId = (string) Str::uuid();
+        $userId = (string) Str::uuid();
+
+        DB::table('roles')->insert([
+            'id' => $roleId,
+            'nombre' => 'IMPORT_PERSONAL_' . Str::upper(Str::random(6)),
+            'permisos' => json_encode(['personal' => ['importar', 'crear', 'actualizar']]),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('usuarios')->insert([
+            'id' => $userId,
+            'email' => 'import-personal-' . Str::lower(Str::random(6)) . '@test.local',
+            'password' => bcrypt('password'),
+            'rol_id' => $roleId,
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return \App\Models\Usuario::query()->findOrFail($userId);
     }
 
     private function xlsxUpload(array $headers, array $rows, string $name): UploadedFile

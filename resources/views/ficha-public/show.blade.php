@@ -259,71 +259,7 @@
                     </div>
                 </div>
                 <div class="ficha-card-body">
-                    <div class="public-guide-steps">
-                        <div class="public-guide-step">
-                            <span class="public-guide-number">1</span>
-                            <div>
-                                <strong>Completa y revisa tus datos.</strong>
-                                <p>Llena la ficha con informacion correcta. Usa letra mayuscula cuando corresponda y revisa nombres, documento, telefono, correo, domicilio, banco, cargo y tipo de contrato antes de enviar.</p>
-                            </div>
-                        </div>
-                        <div class="public-guide-step">
-                            <span class="public-guide-number">2</span>
-                            <div>
-                                <strong>Registra tu experiencia en servicios.</strong>
-                                <p>Completa el reporte de experiencia indicando cuantas veces realizaste cada trabajo.</p>
-                                <a class="public-guide-link" href="https://docs.google.com/forms/d/e/1FAIpQLSejSTKeugA4BE7zxbP3Za1bJNaiDMqPWfh47JO0vWrPA_hs0Q/formResponse" target="_blank" rel="noopener">Abrir reporte de experiencia</a>
-                            </div>
-                        </div>
-                        <div class="public-guide-step">
-                            <span class="public-guide-number">3</span>
-                            <div>
-                                <strong>Adjunta documentos si los tienes a la mano.</strong>
-                                <p>Los documentos se cargan dentro de esta ficha. Si te falta alguno, puedes enviar la ficha y quedara pendiente de regularizacion documentaria con RRHH.</p>
-                            </div>
-                        </div>
-                        <div class="public-guide-step">
-                            <span class="public-guide-number">4</span>
-                            <div>
-                                <strong>Firma, sube tu huella y envia.</strong>
-                                <p>La firma digital y la huella son necesarias para enviar. Despues de enviar, RRHH revisara tu ficha; si observa algo, te indicara que corrijas.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <details class="public-guide-details">
-                        <summary>Ver documentos y enlaces de apoyo</summary>
-                        <div class="public-guide-docs">
-                            <div>
-                                <h3>Documentos que puedes adjuntar aqui</h3>
-                                <ul>
-                                    <li>CV documentado con certificados de trabajo y estudios. Si corresponde, incluye tu experiencia con P&S PROSERGE S.R.L.</li>
-                                    <li>DNI vigente.</li>
-                                    <li>Certiadulto o Certijoven vigente.</li>
-                                    <li>Recibo de luz o agua del domicilio declarado.</li>
-                                    <li>Renta de quinta o certificado de retenciones.</li>
-                                    <li>Declaracion jurada de Vida Ley. La entrega fisica se regularizara segun indicacion de RRHH.</li>
-                                    <li>Foto tipo carnet.</li>
-                                    <li>Documentos familiares solo si corresponde: DNI de hijos, partida de matrimonio o documento de union de hecho.</li>
-                                </ul>
-                            </div>
-                            <div>
-                                <h3>Enlaces de apoyo</h3>
-                                <ul>
-                                    <li><a href="https://www.empleosperu.gob.pe/portal-mtpe/#/login" target="_blank" rel="noopener">Crear o descargar Certificado Unico Laboral</a></li>
-                                    <li><a href="https://www.youtube.com/watch?v=WuPQDC4B3Eo" target="_blank" rel="noopener">Guia para descargar retenciones de quinta categoria</a></li>
-                                    <li><a href="https://drive.google.com/file/d/1enh_NO7JLd1C9HgTUXZYYCYiUPF2MnUR/view?usp=sharing" target="_blank" rel="noopener">Formato de Declaracion Jurada Vida Ley</a></li>
-                                </ul>
-                                <div class="public-guide-photo">
-                                    <strong>Foto tipo carnet:</strong> formato JPG, fondo blanco, mirada frontal, ojos abiertos, sin sombra, cuello descubierto y sin anteojos, gorro, capucha, chalina u otros accesorios. Recomendado: 480 x 640 px.
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <div class="ficha-alert ficha-alert-warning public-guide-warning">
-                        Si el enlace no abre, copia y pega la direccion en tu navegador o solicita a RRHH que te reenvie el link. No compartas este enlace con otra persona.
-                    </div>
+                    @include('ficha-public.partials.quick-guide')
                 </div>
             </div>
         @endif

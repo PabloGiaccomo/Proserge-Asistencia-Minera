@@ -123,12 +123,6 @@
                         <span class="nav-label">Herramientas</span>
                     </a>
                     @endif
-                    @if($canEpps)
-                    <a href="{{ route('epps.index') }}" class="nav-item {{ request()->is('epps*') ? 'active' : '' }}">
-                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M8 2h8l2 7v4a6 6 0 0 1-12 0V9z"/><path d="M6 9h12"/></svg></span>
-                        <span class="nav-label">EPP</span>
-                    </a>
-                    @endif
                     @if($canMiAsistencia)
                     <a href="{{ route('mi-asistencia.index') }}" class="nav-item {{ request()->is('mi-asistencia*') ? 'active' : '' }}">
                         <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>

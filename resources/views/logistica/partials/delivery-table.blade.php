@@ -47,6 +47,7 @@
                     <th>Fecha vencimiento</th>
                     @if($showDays ?? false)
                         <th>Dias restantes</th>
+                        <th>Dias efectivos usados</th>
                     @endif
                     <th>Estado</th>
                 </tr>
@@ -108,6 +109,19 @@
                             'remaining_days',
                         ]);
 
+                        $effectiveUsage = $resolve($row, [
+                            'uso_efectivo',
+                            'dias_uso_efectivo_label',
+                        ]);
+
+                        if ($effectiveUsage === $fallback) {
+                            $effectiveDays = data_get($row, 'dias_uso_efectivo');
+                            $lifeDays = data_get($row, 'vida_dias');
+                            $effectiveUsage = $effectiveDays !== null && $lifeDays !== null
+                                ? ((int) $effectiveDays) . ' / ' . ((int) $lifeDays) . ' dias'
+                                : $fallback;
+                        }
+
                         $state = $resolve($row, [
                             'estado_label',
                             'estado_visual',
@@ -124,6 +138,7 @@
                         <td>{{ $expirationDate }}</td>
                         @if($showDays ?? false)
                             <td>{{ $days }}</td>
+                            <td>{{ $effectiveUsage }}</td>
                         @endif
                         <td>{{ $state }}</td>
                     </tr>

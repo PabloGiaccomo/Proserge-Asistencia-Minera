@@ -3,6 +3,7 @@
 namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Personal\Requests\ImportPersonalRequest;
 use App\Modules\Personal\Services\ImportPersonalService;
@@ -26,7 +27,10 @@ class PersonalImportController extends Controller
     public function import(ImportPersonalRequest $request): RedirectResponse
     {
         try {
-            $result = $this->service->import($request->file('file'));
+            $result = $this->service->import(
+                $request->file('file'),
+                Usuario::query()->find(session('user.id'))
+            );
             $summaryLines = $this->buildSummaryLines($result);
 
             if (($result['tipoImportacion'] ?? null) === 'contactos') {
@@ -35,6 +39,17 @@ class PersonalImportController extends Controller
                     $result['actualizados'] ?? 0,
                     $result['camposActualizados'] ?? 0,
                 );
+            } elseif (($result['tipoImportacion'] ?? null) === 'datos_personal') {
+                $message = sprintf(
+                    'Importacion de datos del personal completada: %d nuevo(s), %d actualizado(s), %d ficha(s) actualizada(s), %d dato(s) de contrato sincronizado(s).',
+                    $result['nuevos'] ?? 0,
+                    $result['actualizados'] ?? 0,
+                    $result['fichasActualizadas'] ?? 0,
+                    $result['contratoDatosActualizados'] ?? 0,
+                );
+                if (($result['activacionesBloqueadas'] ?? 0) > 0) {
+                    $message .= ' ' . ($result['activacionesBloqueadas'] ?? 0) . ' trabajador(es) quedaron pendientes por contrato firmado vigente.';
+                }
             } else {
                 $message = sprintf(
                     'Importacion completada: %d nuevos, %d actualizados, %d reactivados, %d inactivados y %d campos modificados.',
@@ -110,6 +125,9 @@ class PersonalImportController extends Controller
         $correosInvalidos = (int) ($result['correosInvalidos'] ?? 0);
         $sinCambios = (int) ($result['sinCambios'] ?? 0);
         $activacionesBloqueadas = (int) ($result['activacionesBloqueadas'] ?? 0);
+        $fichasActualizadas = (int) ($result['fichasActualizadas'] ?? 0);
+        $contratoDatosActualizados = (int) ($result['contratoDatosActualizados'] ?? 0);
+        $contratosPreparados = (int) ($result['contratosPreparados'] ?? 0);
 
         if (!empty($result['formatoDetectado'])) {
             $lines[] = 'Formato detectado: ' . $result['formatoDetectado'] . '.';
@@ -136,6 +154,15 @@ class PersonalImportController extends Controller
             }
             if ($activacionesBloqueadas > 0) {
                 $parts[] = $activacionesBloqueadas . ' activacion(es) bloqueada(s)';
+            }
+            if ($fichasActualizadas > 0) {
+                $parts[] = $fichasActualizadas . ' ficha(s) actualizada(s)';
+            }
+            if ($contratoDatosActualizados > 0) {
+                $parts[] = $contratoDatosActualizados . ' dato(s) de contrato sincronizado(s)';
+            }
+            if ($contratosPreparados > 0) {
+                $parts[] = $contratosPreparados . ' contrato(s) en preparacion';
             }
 
             if ($parts !== []) {

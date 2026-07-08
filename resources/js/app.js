@@ -125,7 +125,196 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         document.body.classList.add('notif-panel-open');
     }
-    
+
+    document.querySelectorAll('[data-logistics-tabs]').forEach(function(tabNav) {
+        const viewport = document.querySelector('[data-logistics-tab-viewport]');
+        const track = viewport ? viewport.querySelector('[data-logistics-tab-track]') : null;
+        const links = Array.from(tabNav.querySelectorAll('[data-logistics-tab-link]'));
+        const panels = track ? Array.from(track.querySelectorAll('[data-logistics-tab-panel]')) : [];
+
+        if (!viewport || !track || links.length === 0 || panels.length === 0) {
+            return;
+        }
+
+        const orderedTabs = panels.map(function(panel) {
+            return panel.dataset.logisticsTabPanel;
+        });
+
+        const panelFor = function(tab) {
+            return panels.find(function(panel) {
+                return panel.dataset.logisticsTabPanel === tab;
+            }) || null;
+        };
+
+        const normalizeTab = function(tab) {
+            return orderedTabs.includes(tab) ? tab : orderedTabs[0];
+        };
+
+        const currentTabFromUrl = function() {
+            return normalizeTab(new URLSearchParams(window.location.search).get('tab') || orderedTabs[0]);
+        };
+
+        let activeTab = currentTabFromUrl();
+        let resizeObserver = null;
+
+        const setViewportHeight = function(tab) {
+            const activePanel = panelFor(tab);
+
+            if (!activePanel) {
+                return;
+            }
+
+            window.requestAnimationFrame(function() {
+                viewport.style.height = activePanel.offsetHeight + 'px';
+            });
+        };
+
+        const observeActivePanel = function(tab) {
+            if (resizeObserver) {
+                resizeObserver.disconnect();
+                resizeObserver = null;
+            }
+
+            if (!('ResizeObserver' in window)) {
+                return;
+            }
+
+            const activePanel = panelFor(tab);
+            if (!activePanel) {
+                return;
+            }
+
+            resizeObserver = new ResizeObserver(function() {
+                setViewportHeight(tab);
+            });
+            resizeObserver.observe(activePanel);
+        };
+
+        const activateTab = function(tab, pushHistory, href) {
+            const nextTab = normalizeTab(tab);
+            const nextIndex = orderedTabs.indexOf(nextTab);
+
+            activeTab = nextTab;
+            track.style.setProperty('--lgt-active-index', String(nextIndex));
+
+            panels.forEach(function(panel) {
+                const isActive = panel.dataset.logisticsTabPanel === nextTab;
+                panel.classList.toggle('is-active', isActive);
+                panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+            });
+
+            links.forEach(function(link) {
+                const isActive = link.dataset.logisticsTabLink === nextTab;
+                link.classList.toggle('active', isActive);
+                link.setAttribute('aria-selected', isActive ? 'true' : 'false');
+
+                if (isActive) {
+                    link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                }
+            });
+
+            setViewportHeight(nextTab);
+            observeActivePanel(nextTab);
+
+            if (pushHistory && href) {
+                window.history.pushState({ logisticsTab: nextTab }, '', href);
+            }
+        };
+
+        links.forEach(function(link) {
+            link.addEventListener('click', function(event) {
+                if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+                    return;
+                }
+
+                const targetUrl = new URL(link.href, window.location.origin);
+                const currentUrl = new URL(window.location.href);
+
+                if (targetUrl.pathname !== currentUrl.pathname) {
+                    return;
+                }
+
+                const targetTab = normalizeTab(link.dataset.logisticsTabLink || targetUrl.searchParams.get('tab'));
+
+                event.preventDefault();
+                activateTab(targetTab, targetTab !== activeTab || targetUrl.search !== currentUrl.search, targetUrl.toString());
+            });
+        });
+
+        window.addEventListener('popstate', function() {
+            activateTab(currentTabFromUrl(), false);
+        });
+
+        window.addEventListener('resize', function() {
+            setViewportHeight(activeTab);
+        });
+
+        activateTab(activeTab, false);
+    });
+
+    document.querySelectorAll('[data-logistics-dashboard-filters]').forEach(function(form) {
+        const debounceMs = 650;
+        const fastDebounceMs = 80;
+        let timer = null;
+        let isComposing = false;
+
+        const buildTargetUrl = function() {
+            const targetUrl = new URL(form.getAttribute('action') || window.location.href, window.location.origin);
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            formData.forEach(function(value, key) {
+                const textValue = String(value || '').trim();
+                if (textValue === '') {
+                    return;
+                }
+
+                params.append(key, textValue);
+            });
+
+            targetUrl.search = params.toString();
+            return targetUrl;
+        };
+
+        const scheduleSubmit = function(delay) {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(function() {
+                const targetUrl = buildTargetUrl();
+                const currentUrl = new URL(window.location.href);
+
+                if (targetUrl.pathname === currentUrl.pathname && targetUrl.search === currentUrl.search) {
+                    return;
+                }
+
+                form.classList.add('is-submitting');
+                window.location.assign(targetUrl.toString());
+            }, delay);
+        };
+
+        form.querySelectorAll('select').forEach(function(select) {
+            select.addEventListener('change', function() {
+                scheduleSubmit(fastDebounceMs);
+            });
+        });
+
+        form.querySelectorAll('input[type="search"], input[type="text"]').forEach(function(input) {
+            input.addEventListener('compositionstart', function() {
+                isComposing = true;
+            });
+
+            input.addEventListener('compositionend', function() {
+                isComposing = false;
+                scheduleSubmit(debounceMs);
+            });
+
+            input.addEventListener('input', function() {
+                if (!isComposing) {
+                    scheduleSubmit(debounceMs);
+                }
+            });
+        });
+    });
+
     if (!sidebar) {
         return;
     }

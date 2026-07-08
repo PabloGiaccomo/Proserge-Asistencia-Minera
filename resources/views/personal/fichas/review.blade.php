@@ -3,6 +3,11 @@
 @section('title', 'Revision de ficha - Proserge')
 
 @section('content')
+@php
+    $canViewSensitiveFichaData = (bool) ($canViewSensitiveFichaData ?? false);
+    $canExportSensitiveFichaPdf = (bool) ($canExportSensitiveFichaPdf ?? false);
+    $sensitiveFichaSections = ['Datos bancarios', 'Sistema pensionario'];
+@endphp
 <div class="module-page ficha-workspace">
     <div class="page-header">
         <div class="page-header-top">
@@ -12,7 +17,9 @@
             </div>
             <div class="page-actions">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Personal</a>
-                <a href="{{ route('personal.fichas.pdf', $ficha->id) }}" class="btn btn-outline">Exportar PDF</a>
+                @if($canExportSensitiveFichaPdf)
+                    <a href="{{ route('personal.fichas.pdf', $ficha->id) }}" class="btn btn-outline">Exportar PDF</a>
+                @endif
             </div>
         </div>
     </div>
@@ -47,6 +54,9 @@
                 $currentFieldValue = fn (string $key): string => (string) ($data[$key] ?? '');
             @endphp
             @foreach($sections as $section)
+                @if(!$canViewSensitiveFichaData && in_array($section['title'] ?? '', $sensitiveFichaSections, true))
+                    @continue
+                @endif
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">{{ $section['title'] }}</h3>
@@ -148,31 +158,33 @@
                 </div>
             </section>
 
-            <section class="ficha-section">
-                <div class="ficha-section-header">
-                    <h3 class="ficha-section-title">Firma y huella</h3>
-                </div>
-                <div class="ficha-card-body">
-                    <div class="ficha-grid">
-                        <div style="grid-column:span 6;">
-                            <span class="ficha-label">Firma digital</span><br>
-                            @if($ficha->firma_base64)
-                                <img class="ficha-preview-image" src="{{ $ficha->firma_base64 }}" alt="Firma digital">
-                            @else
-                                <div class="ficha-alert ficha-alert-warning">Sin firma registrada.</div>
-                            @endif
-                        </div>
-                        <div style="grid-column:span 6;">
-                            <span class="ficha-label">Huella digital</span><br>
-                            @if($huellaDataUrl)
-                                <img class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
-                            @else
-                                <div class="ficha-alert ficha-alert-warning">Sin huella registrada.</div>
-                            @endif
+            @if($canViewSensitiveFichaData)
+                <section class="ficha-section">
+                    <div class="ficha-section-header">
+                        <h3 class="ficha-section-title">Firma y huella</h3>
+                    </div>
+                    <div class="ficha-card-body">
+                        <div class="ficha-grid">
+                            <div style="grid-column:span 6;">
+                                <span class="ficha-label">Firma digital</span><br>
+                                @if($ficha->firma_base64)
+                                    <img class="ficha-preview-image" src="{{ $ficha->firma_base64 }}" alt="Firma digital">
+                                @else
+                                    <div class="ficha-alert ficha-alert-warning">Sin firma registrada.</div>
+                                @endif
+                            </div>
+                            <div style="grid-column:span 6;">
+                                <span class="ficha-label">Huella digital</span><br>
+                                @if($huellaDataUrl)
+                                    <img class="ficha-preview-image" src="{{ $huellaDataUrl }}" alt="Huella digital">
+                                @else
+                                    <div class="ficha-alert ficha-alert-warning">Sin huella registrada.</div>
+                                @endif
+                            </div>
                         </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            @endif
         </div>
     </div>
 

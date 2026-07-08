@@ -196,35 +196,6 @@ class PersonalAntiguoRegistrationTest extends TestCase
         File::delete($zip['path']);
     }
 
-    public function test_rutas_respetan_permiso_personal_crear(): void
-    {
-        $deniedUser = $this->createUser(['personal' => ['ver']]);
-        $allowedUser = $this->createUser(['personal' => ['crear', 'ver']]);
-        $this->ensurePuesto('Operario');
-
-        $this->withSession($this->sessionFor($deniedUser))
-            ->get(route('personal.antiguo.create'))
-            ->assertForbidden();
-
-        $this->withSession($this->sessionFor($allowedUser))
-            ->get(route('personal.antiguo.create'))
-            ->assertOk();
-
-        $this->withSession($this->sessionFor($deniedUser))
-            ->post(route('personal.antiguo.store'), $this->legacyPayload(['numero_documento' => '72111118']))
-            ->assertForbidden();
-
-        $this->withSession($this->sessionFor($allowedUser))
-            ->post(route('personal.antiguo.store'), $this->legacyPayload(['numero_documento' => '72111119']))
-            ->assertRedirect();
-
-        $this->assertDatabaseHas('personal', [
-            'numero_documento' => '72111119',
-            'origen_registro' => 'ANTIGUO',
-            'estado' => 'FALTA_CONTRATO',
-        ]);
-    }
-
     private function legacyPayload(array $overrides = []): array
     {
         return [

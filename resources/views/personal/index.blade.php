@@ -12,11 +12,25 @@
         request('contrato'),
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
-    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
-    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
-    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['actualizar', 'administrar']);
-    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['ver', 'administrar']);
-    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows(session('user.permissions', []), 'personal', 'exportar');
+    $personalPermissions = session('user.permissions', []);
+    $canViewDetail = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_detalle');
+    $canViewIngresos = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ingresos');
+    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ficha');
+    $canViewDocuments = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_documentos');
+    $canViewContracts = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_contratos');
+    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar');
+    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar_datos_contrato');
+    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'actualizar');
+    $canExportExcel = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'exportar_excel');
+    $canImportMasterGeneral = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'importar_master_general');
+    $canActivatePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'activar_trabajador');
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'cesar_trabajador');
+    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'descargar_documentos');
+    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'descargar_formato_contrato');
+    $canUploadSignedContract = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'subir_contrato_firmado');
+    $canViewReason = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_motivo');
+    $canManageBlacklist = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'gestionar_lista_negra');
+    $canManagePuestos = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'gestionar_puestos');
     $documentDownloadOptions = \App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements();
 @endphp
 <style>
@@ -2148,59 +2162,40 @@
                         </svg>
                     </button>
                     <div id="accionesMenu" class="acciones-dropdown" style="display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 260px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 8px; z-index: 9999;">
-                        <a class="accion-item" href="{{ route('personal.create') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <line x1="12" y1="5" x2="12" y2="19"/>
-                                <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Añadir manualmente
-                        </a>
-                        <a class="accion-item" href="{{ route('personal.antiguo.create') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                                <circle cx="9" cy="7" r="4"/>
-                                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                            </svg>
-                            Registrar personal antiguo
-                        </a>
-                        <a class="accion-item" href="{{ route('personal.fichas.import') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                                <line x1="12" y1="18" x2="12" y2="12"/>
-                                <polyline points="9 15 12 18 15 15"/>
-                            </svg>
-                            Importar macro / contrato
-                        </a>
-                        <a class="accion-item" href="{{ route('personal.fichas.temporales') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                            </svg>
-                            Ingresos
-                        </a>
-                        <div class="accion-divider"></div>
-                        <a class="accion-item" href="{{ route('personal.importar') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="17 8 12 3 7 8"/>
-                                <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                            Importar Master General
-                        </a>
-                        <a
-                            class="accion-item"
-                            id="personalExportExcelAction"
-                            href="{{ route('personal.export.form', request()->query()) }}"
-                            data-base-url="{{ route('personal.export.form') }}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Exportar en Excel
-                        </a>
+                        @if($canViewIngresos)
+                            <a class="accion-item" href="{{ route('personal.fichas.temporales') }}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                </svg>
+                                Ingresos
+                            </a>
+                            <div class="accion-divider"></div>
+                        @endif
+                        @if($canImportMasterGeneral)
+                            <a class="accion-item" href="{{ route('personal.importar') }}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                Importar Master General
+                            </a>
+                        @endif
+                        @if($canExportExcel)
+                            <a
+                                class="accion-item"
+                                id="personalExportExcelAction"
+                                href="{{ route('personal.export.form', request()->query()) }}"
+                                data-base-url="{{ route('personal.export.form') }}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Exportar en Excel
+                            </a>
+                        @endif
                         @if($canDownloadDocuments)
                             <button type="button" class="accion-item" onclick="openDocumentDownloadModal(); document.getElementById('accionesMenu').style.display = 'none';">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
@@ -2224,7 +2219,7 @@
                                 Descargar formato de contrato
                             </button>
                         @endif
-                        @if($canUpdatePersonal && \Illuminate\Support\Facades\Route::has('personal.puestos.index'))
+                        @if($canManagePuestos && \Illuminate\Support\Facades\Route::has('personal.puestos.index'))
                             <a href="{{ route('personal.puestos.index') }}" class="accion-item">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #0d9488;">
                                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
@@ -2447,15 +2442,6 @@
                     </div>
                     <h3 class="empty-title">Aún no hay personal registrado</h3>
                     <p class="empty-description">Una vez que se integren trabajadores al sistema, aparecerán aquí.</p>
-                    <div class="empty-action">
-                        <a href="{{ route('personal.create') }}" class="btn btn-primary btn-sm">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19"/>
-                                <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Agregar Trabajador
-                        </a>
-                    </div>
                 </div>
             @else
                 <div class="personal-grid-shell" id="personalGridShell">
@@ -2751,7 +2737,7 @@
                                     $enListaNegra = (bool) ($trabajador['en_lista_negra'] ?? false);
                                 @endphp
                                 <tr class="js-person-row {{ !$trabajador['activo'] ? 'inactive' : '' }} {{ $sinContratosLaborales ? 'contract-missing' : '' }} {{ $pendienteContratoFirmado && !$sinContratosLaborales ? 'contract-file-pending' : '' }} {{ $enListaNegra ? 'blacklisted-worker' : '' }}"
-                                    style="cursor:pointer;"
+                                    style="{{ $canViewDetail ? 'cursor:pointer;' : '' }}"
                                     data-worker='@json($trabajador)'
                                     data-nombre="{{ $trabajador['nombre'] ?? '' }}"
                                     data-dni="{{ $trabajador['numero_documento'] ?? $trabajador['dni'] ?? '' }}"
@@ -2770,7 +2756,7 @@
                                     data-ocup-minas-list="{{ implode('||', $ocupMinas) }}"
                                     data-ocup-oficina="{{ implode(' ', $ocupOficinas) }}"
                                     data-ocup-taller="{{ implode(' ', $ocupTalleres) }}"
-                                    onclick="showWorkerDetail(this)">
+                                    @if($canViewDetail) onclick="showWorkerDetail(this)" @endif>
                                     @if($canDownloadDocuments)
                                         <td data-column="seleccion" data-label="Seleccion" onclick="event.stopPropagation()">
                                             <input
@@ -2783,17 +2769,19 @@
                                     @endif
                                     <td data-column="acciones" data-label="Acciones" onclick="event.stopPropagation()">
                                         <div class="personal-action-buttons">
-                                            <a
-                                                href="{{ route('personal.edit', $trabajador['id'] ?? '') }}"
-                                                class="btn btn-outline btn-xs personal-icon-btn"
-                                                title="Editar trabajador"
-                                                aria-label="Editar trabajador">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M12 20h9"/>
-                                                    <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
-                                                </svg>
-                                            </a>
-                                            @if(!empty($trabajador['ficha_id']))
+                                            @if($canEditPersonal)
+                                                <a
+                                                    href="{{ route('personal.edit', $trabajador['id'] ?? '') }}"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Editar trabajador"
+                                                    aria-label="Editar trabajador">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M12 20h9"/>
+                                                        <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+                                                    </svg>
+                                                </a>
+                                            @endif
+                                            @if($canViewFicha && !empty($trabajador['ficha_id']))
                                                 <a
                                                     href="{{ route('personal.fichas.review', $trabajador['ficha_id']) }}"
                                                     class="btn btn-outline btn-xs personal-icon-btn"
@@ -2808,32 +2796,36 @@
                                                     </svg>
                                                 </a>
                                             @endif
-                                            <a
-                                                href="{{ route('personal.documentos.index', $trabajador['id'] ?? '') }}"
-                                                class="btn btn-outline btn-xs personal-icon-btn"
-                                                title="Ver documentos"
-                                                aria-label="Ver documentos">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M4 4h16v16H4z"/>
-                                                    <path d="M8 2v4"/>
-                                                    <path d="M16 2v4"/>
-                                                    <path d="M8 11h8"/>
-                                                    <path d="M8 15h5"/>
-                                                </svg>
-                                            </a>
-                                            <a
-                                                href="{{ route('personal.contratos.index', $trabajador['id'] ?? '') }}"
-                                                class="btn btn-outline btn-xs personal-icon-btn"
-                                                title="Visualizar contratos"
-                                                aria-label="Visualizar contratos">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                                    <path d="M14 2v6h6"/>
-                                                    <path d="M9 15s1.2-2 3-2 3 2 3 2-1.2 2-3 2-3-2-3-2z"/>
-                                                    <circle cx="12" cy="15" r="1"/>
-                                                </svg>
-                                            </a>
-                                            @if($enListaNegra)
+                                            @if($canViewDocuments)
+                                                <a
+                                                    href="{{ route('personal.documentos.index', $trabajador['id'] ?? '') }}"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Ver documentos"
+                                                    aria-label="Ver documentos">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M4 4h16v16H4z"/>
+                                                        <path d="M8 2v4"/>
+                                                        <path d="M16 2v4"/>
+                                                        <path d="M8 11h8"/>
+                                                        <path d="M8 15h5"/>
+                                                    </svg>
+                                                </a>
+                                            @endif
+                                            @if($canViewContracts)
+                                                <a
+                                                    href="{{ route('personal.contratos.index', $trabajador['id'] ?? '') }}"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Visualizar contratos"
+                                                    aria-label="Visualizar contratos">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                        <path d="M14 2v6h6"/>
+                                                        <path d="M9 15s1.2-2 3-2 3 2 3 2-1.2 2-3 2-3-2-3-2z"/>
+                                                        <circle cx="12" cy="15" r="1"/>
+                                                    </svg>
+                                                </a>
+                                            @endif
+                                            @if($enListaNegra && $canViewReason)
                                                 <button
                                                     type="button"
                                                     class="btn btn-outline btn-xs personal-icon-btn"
@@ -2846,7 +2838,7 @@
                                                         <path d="M12 17h.01"/>
                                                     </svg>
                                                 </button>
-                                            @elseif($canUpdatePersonal)
+                                            @elseif(!$enListaNegra && $canManageBlacklist)
                                                 <button
                                                     type="button"
                                                     class="btn btn-outline btn-xs personal-icon-btn"
@@ -2873,7 +2865,7 @@
                                                         <path d="M8 17h5"/>
                                                     </svg>
                                                 </a>
-                                                @if($canUpdatePersonal && !empty($trabajador['contrato_datos']) && empty($trabajador['contrato_firmado']))
+                                                @if($canUploadSignedContract && !empty($trabajador['contrato_datos']) && empty($trabajador['contrato_firmado']))
                                                     <button
                                                         type="button"
                                                         class="btn btn-outline btn-xs personal-icon-btn"
@@ -2887,19 +2879,21 @@
                                                 @endif
                                             @endif
                                             @if($estadoRaw === 'CESADO')
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-outline btn-xs personal-icon-btn"
-                                                    title="Ver motivo de cese"
-                                                    aria-label="Ver motivo de cese"
-                                                    onclick="event.stopPropagation(); showCeaseReasonFromRow(this.closest('tr'))">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <circle cx="12" cy="12" r="10"/>
-                                                        <path d="M12 16v-4"/>
-                                                        <path d="M12 8h.01"/>
-                                                    </svg>
-                                                </button>
-                                                @if($canCeasePersonal && !empty($trabajador['puede_activar']))
+                                                @if($canViewReason)
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-outline btn-xs personal-icon-btn"
+                                                        title="Ver motivo de cese"
+                                                        aria-label="Ver motivo de cese"
+                                                        onclick="event.stopPropagation(); showCeaseReasonFromRow(this.closest('tr'))">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <circle cx="12" cy="12" r="10"/>
+                                                            <path d="M12 16v-4"/>
+                                                            <path d="M12 8h.01"/>
+                                                        </svg>
+                                                    </button>
+                                                @endif
+                                                @if($canActivatePersonal && !empty($trabajador['puede_activar']))
                                                     <button
                                                         type="button"
                                                         class="btn btn-outline btn-xs personal-icon-btn"
@@ -2929,17 +2923,19 @@
                                                     </button>
                                                 </form>
                                             @endif
-                                            <button
-                                                type="button"
-                                                class="btn btn-outline btn-xs personal-icon-btn"
-                                                title="Mostrar detalle"
-                                                aria-label="Mostrar detalle"
-                                                onclick="event.stopPropagation(); showWorkerDetail(this.closest('tr'))">
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                                    <circle cx="12" cy="12" r="3"/>
-                                                </svg>
-                                            </button>
+                                            @if($canViewDetail)
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline btn-xs personal-icon-btn"
+                                                    title="Mostrar detalle"
+                                                    aria-label="Mostrar detalle"
+                                                    onclick="event.stopPropagation(); showWorkerDetail(this.closest('tr'))">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                        <circle cx="12" cy="12" r="3"/>
+                                                    </svg>
+                                                </button>
+                                            @endif
                                         </div>
                                     </td>
                                     <td data-column="trabajador" data-label="Trabajador">
@@ -2959,7 +2955,7 @@
                                                 onclick="event.stopPropagation();">
                                                 {{ $estadoText }}
                                             </a>
-                                        @elseif($estadoRaw === 'CESADO')
+                                        @elseif($estadoRaw === 'CESADO' && $canViewReason)
                                             <button
                                                 type="button"
                                                 class="dg-pill dg-pill-button {{ $estadoClass }}"
@@ -2969,7 +2965,7 @@
                                         @else
                                             <span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span>
                                         @endif
-                                        @if($pendienteContratoFirmado && $canUpdatePersonal)
+                                        @if($pendienteContratoFirmado && $canUploadSignedContract)
                                             <button
                                                 type="button"
                                                 class="personal-contract-warning dg-pill-button"
@@ -3254,7 +3250,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                @if($canUpdatePersonal)
+                @if($canManageBlacklist)
                     <form id="listaNegraRemoveForm" method="POST" action="" style="display:none;">
                         @csrf
                         <button type="submit" class="btn btn-outline">Sacar de lista negra</button>
@@ -4402,8 +4398,14 @@ function showWorkerDetail(card) {
 
     const worker = JSON.parse(card.dataset.worker || '{}');
     const modal = document.getElementById('workerDetailModal');
+    const canViewFicha = @json($canViewFicha);
+    const canViewDocuments = @json($canViewDocuments);
+    const canViewContracts = @json($canViewContracts);
+    const canEditPersonal = @json($canEditPersonal);
+    const canManageBlacklist = @json($canManageBlacklist);
+    const canViewReason = @json($canViewReason);
     const canCeasePersonal = @json($canCeasePersonal);
-    const canUpdatePersonal = @json($canUpdatePersonal);
+    const canActivatePersonal = @json($canActivatePersonal);
     const csrfToken = @json(csrf_token());
     if (!modal || !worker.nombre) return;
 
@@ -4571,14 +4573,14 @@ function showWorkerDetail(card) {
                 ${contractHistoryHtml}
             </div>
             <div class="detail-footer">
-                ${worker.ficha_id ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
+                ${worker.ficha_id && canViewFicha ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
                 <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
-                <a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>
-                <a href="/personal/${worker.id}/contratos" class="btn btn-outline">Contratos</a>
-                ${worker.en_lista_negra ? `<button type="button" class="btn btn-outline" data-lista-negra-reason-btn>Ver motivo de lista negra</button>` : (canUpdatePersonal ? `<button type="button" class="btn btn-outline" data-lista-negra-btn>Lista negra</button>` : '')}
-                <a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>
-                ${worker.estado_actual === 'cesado' ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
-                ${worker.estado_actual === 'cesado' && canCeasePersonal ? `<button type="button" class="btn btn-primary" data-activate-worker-btn>Activar trabajador</button>` : ''}
+                ${canViewDocuments ? `<a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>` : ''}
+                ${canViewContracts ? `<a href="/personal/${worker.id}/contratos" class="btn btn-outline">Contratos</a>` : ''}
+                ${worker.en_lista_negra && canViewReason ? `<button type="button" class="btn btn-outline" data-lista-negra-reason-btn>Ver motivo de lista negra</button>` : (!worker.en_lista_negra && canManageBlacklist ? `<button type="button" class="btn btn-outline" data-lista-negra-btn>Lista negra</button>` : '')}
+                ${canEditPersonal ? `<a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>` : ''}
+                ${worker.estado_actual === 'cesado' && canViewReason ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
+                ${worker.estado_actual === 'cesado' && canActivatePersonal ? `<button type="button" class="btn btn-primary" data-activate-worker-btn>Activar trabajador</button>` : ''}
                 ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" data-worker-name="${escapeHtml(worker.nombre || worker.nombre_completo || 'este trabajador')}" onsubmit="return requestCeaseReason(this);"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
             </div>
         </div>

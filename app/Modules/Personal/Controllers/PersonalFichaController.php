@@ -8,7 +8,6 @@ use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
 use App\Models\PersonalFichaLink;
 use App\Modules\Personal\Services\PersonalFichaExportService;
-use App\Modules\Personal\Services\PersonalFichaMacroExtractor;
 use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaEmailTemplateService;
 use App\Modules\Personal\Services\PersonalFichaService;
@@ -21,25 +20,18 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class PersonalFichaController extends WebPageController
 {
     public function __construct(
-        private readonly PersonalFichaMacroExtractor $extractor,
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalFichaPdfService $pdfService,
         private readonly PersonalFichaExportService $exportService,
         private readonly PersonalFichaEmailTemplateService $emailTemplateService,
         private readonly PersonalService $personalService,
     ) {
-    }
-
-    public function importForm(): View
-    {
-        return view('personal.fichas.import');
     }
 
     public function temporales(Request $request): View
@@ -118,142 +110,30 @@ class PersonalFichaController extends WebPageController
             ->with('success', 'Plantilla de correo actualizada.');
     }
 
-    public function parseMacro(Request $request): View|RedirectResponse
-    {
-        $validated = $request->validate([
-            'macro' => ['required', 'file', 'max:20480', 'extensions:xlsx,xls,xlsm,csv,txt,docx,pdf'],
-        ]);
-
-        $file = $validated['macro'];
-        $key = (string) Str::uuid();
-        $safeBase = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'macro';
-        $extension = strtolower($file->getClientOriginalExtension() ?: 'bin');
-        $path = $file->storeAs('personal_fichas/imports/tmp/' . $key, $safeBase . '.' . $extension, 'local');
-
-        $batchExtraction = $this->extractor->extractMany($file);
-        $items = $this->annotateImportItems($batchExtraction['items'] ?? []);
-        $firstExtraction = $items[0] ?? $this->extractor->extract($file);
-        $source = [
-            'key' => $key,
-            'path' => $path,
-            'original_name' => $file->getClientOriginalName(),
-            'mime' => $file->getMimeType(),
-            'size' => $file->getSize(),
-            'detected' => $firstExtraction['fields'] ?? [],
-            'items' => $items,
-            'warnings' => array_values(array_unique(array_merge($batchExtraction['warnings'] ?? [], $firstExtraction['warnings'] ?? []))),
-        ];
-
-        if (count($items) === 0) {
-            $items = [[
-                'row_number' => 1,
-                'fields' => $firstExtraction['fields'] ?? [],
-                'warnings' => $firstExtraction['warnings'] ?? [],
-                'availability' => $firstExtraction['availability'] ?? $this->fichaService->documentAvailability($firstExtraction['fields'] ?? []),
-            ]];
-            $source['items'] = $items;
-        }
-
-        $result = $this->fichaService->createManyFromConfirmation(
-            $items,
-            $this->workerReviewFieldKeys(),
-            $source,
-            $this->requireAuthenticatedUser(),
-        );
-
-        $message = $result['created_count'] . ' link(s) temporal(es) generado(s).';
-        if ($result['skipped_count'] > 0) {
-            $message .= ' ' . $result['skipped_count'] . ' registro(s) omitido(s).';
-        }
-
-        $warningLines = collect($source['warnings'] ?? [])
-            ->merge(collect($result['skipped'] ?? [])->map(fn (array $skip): string => 'Fila ' . ($skip['row_number'] ?? '-') . ': ' . ($skip['message'] ?? 'Registro omitido.')))
-            ->values()
-            ->all();
-
-        return redirect()
-            ->route('personal.fichas.temporales')
-            ->with('success', $message)
-            ->with('warning_lines', $warningLines);
-    }
-
-    public function generateLink(Request $request): RedirectResponse|View
-    {
-        $validated = $request->validate([
-            'session_key' => ['required', 'string'],
-            'fields' => ['nullable', 'array'],
-            'fields.tipo_documento' => ['required_without:items', 'string', 'max:40'],
-            'fields.numero_documento' => ['required_without:items', 'string', 'max:40'],
-            'items' => ['nullable', 'array'],
-            'items.*.fields' => ['nullable', 'array'],
-            'verify_fields' => ['nullable', 'array'],
-        ]);
-
-        $source = session('personal_ficha_import.' . $validated['session_key']);
-        if (!$source) {
-            return redirect()
-                ->route('personal.fichas.import')
-                ->with('error', 'La carga temporal ya no esta disponible. Vuelve a subir el archivo.');
-        }
-
-        $user = $this->requireAuthenticatedUser();
-        if (count($source['items'] ?? []) > 1) {
-            $items = $this->hydrateBatchItemsFromRequest($request, $source['items']);
-            $result = $this->fichaService->createManyFromConfirmation(
-                $items,
-                $validated['verify_fields'] ?? [],
-                $source,
-                $user,
-            );
-
-            session()->forget('personal_ficha_import.' . $validated['session_key']);
-
-            return view('personal.fichas.link', [
-                'batchResult' => $result,
-                'results' => $result['created'],
-                'skipped' => $result['skipped'],
-            ]);
-        }
-
-        $fields = $this->mergeSubmittedFields($source['detected'] ?? [], $validated['fields'] ?? []);
-        $source['detected'] = $fields;
-
-        $result = $this->fichaService->createFromConfirmation(
-            $fields,
-            $validated['verify_fields'] ?? [],
-            $source,
-            $user,
-        );
-
-        session()->forget('personal_ficha_import.' . $validated['session_key']);
-
-        return view('personal.fichas.link', [
-            'result' => $result,
-            'ficha' => $result['ficha'],
-            'trabajador' => $result['personal'],
-            'url' => $result['url'],
-        ]);
-    }
-
     public function review(string $id): View
     {
         $ficha = PersonalFicha::query()
             ->with(['personal', 'familiares', 'link', 'archivos', 'documentoEstados'])
             ->findOrFail($id);
         $permissions = session('user.permissions', []);
+        $canViewSensitiveFichaData = PermissionMatrix::allows($permissions, 'personal', 'ver_datos_sensibles');
+        $canExportSensitiveFichaPdf = $canViewSensitiveFichaData
+            && PermissionMatrix::allows($permissions, 'personal', 'exportar');
 
         return view('personal.fichas.review', [
             'ficha' => $ficha,
             'data' => $ficha->datos_json ?? [],
             'sections' => PersonalFichaCatalog::sections(),
             'estadoLabel' => PersonalFichaCatalog::stateLabel($ficha->estado),
-            'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha->huella_path),
+            'huellaDataUrl' => $canViewSensitiveFichaData ? $this->fichaService->imageDataUrl($ficha->huella_path) : null,
             'documentMatrix' => $this->fichaService->documentMatrix($ficha),
             'documentSummary' => $this->fichaService->documentSummary($ficha),
             'documentStateLabels' => PersonalFichaCatalog::documentStateLabels(),
             'vidaLeyPhysicalStateLabels' => PersonalFichaCatalog::vidaLeyPhysicalStateLabels(),
             'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
             'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
+            'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
+            'canExportSensitiveFichaPdf' => $canExportSensitiveFichaPdf,
         ]);
     }
 
@@ -319,6 +199,11 @@ class PersonalFichaController extends WebPageController
 
     public function pdf(string $id): Response
     {
+        abort_unless(
+            PermissionMatrix::allows(session('user.permissions', []), 'personal', 'ver_datos_sensibles'),
+            403
+        );
+
         $ficha = PersonalFicha::query()
             ->with(['personal', 'familiares'])
             ->findOrFail($id);
@@ -679,96 +564,6 @@ class PersonalFichaController extends WebPageController
         return redirect()
             ->route('personal.fichas.temporales')
             ->with('success', 'Registro eliminado de Temporales y links.');
-    }
-
-    public function cancelImport(Request $request): RedirectResponse
-    {
-        $key = (string) $request->input('session_key');
-        $source = session('personal_ficha_import.' . $key);
-        if ($source && !empty($source['path'])) {
-            Storage::disk('local')->delete($source['path']);
-        }
-        session()->forget('personal_ficha_import.' . $key);
-
-        return redirect()->route('personal.index');
-    }
-
-    private function annotateImportItems(array $items): array
-    {
-        $seen = [];
-
-        return collect($items)
-            ->map(function (array $item) use (&$seen): array {
-                $fields = $item['fields'] ?? [];
-                $availability = $this->fichaService->documentAvailability($fields);
-                $docKey = ($availability['type'] ?? '') . ':' . ($availability['number'] ?? '');
-
-                if (($availability['available'] ?? false) && $docKey !== ':' && isset($seen[$docKey])) {
-                    $availability = [
-                        ...$availability,
-                        'available' => false,
-                        'message' => 'Documento duplicado dentro del archivo en la fila ' . $seen[$docKey] . '.',
-                    ];
-                }
-
-                if ($docKey !== ':') {
-                    $seen[$docKey] = $item['row_number'] ?? '?';
-                }
-
-                return [
-                    ...$item,
-                    'availability' => $availability,
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
-    private function hydrateBatchItemsFromRequest(Request $request, array $sessionItems): array
-    {
-        $requestItems = $request->input('items', []);
-
-        return collect($sessionItems)
-            ->map(function (array $item, int $index) use ($requestItems): array {
-                $requestFields = $requestItems[$index]['fields'] ?? [];
-
-                return [
-                    ...$item,
-                    'fields' => $this->mergeSubmittedFields($item['fields'] ?? [], is_array($requestFields) ? $requestFields : []),
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
-    private function mergeSubmittedFields(array $detected, array $submitted): array
-    {
-        $merged = $detected;
-
-        foreach ($submitted as $key => $value) {
-            if (is_array($value)) {
-                continue;
-            }
-
-            $text = trim((string) $value);
-            if ($text === '' && trim((string) ($merged[$key] ?? '')) !== '') {
-                continue;
-            }
-
-            $merged[$key] = $value;
-        }
-
-        return $merged;
-    }
-
-    private function workerReviewFieldKeys(): array
-    {
-        return collect(PersonalFichaCatalog::fields())
-            ->reject(fn (array $field): bool => ($field['type'] ?? '') === 'hidden')
-            ->reject(fn (array $field): bool => (bool) ($field['locked_public'] ?? false))
-            ->keys()
-            ->values()
-            ->all();
     }
 
     private function temporaryRowResponse(PersonalFicha $ficha): array

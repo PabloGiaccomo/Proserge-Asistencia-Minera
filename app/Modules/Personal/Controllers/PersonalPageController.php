@@ -245,83 +245,6 @@ class PersonalPageController extends WebPageController
         return redirect()->route('personal.edit', $id);
     }
 
-    public function create(): View
-    {
-        return view('personal.create', array_merge($this->getLocationCatalogs(), [
-            'sections' => PersonalFichaCatalog::sections(),
-            'initialFields' => PersonalFichaCatalog::emptyData(),
-            'puestoOptions' => $this->puestoOptions(),
-        ]));
-    }
-
-    public function store(Request $request): View|RedirectResponse
-    {
-        $validated = $request->validate($this->manualCreateRules());
-
-        try {
-            $result = $this->fichaService->createManual(
-                $validated['fields'] ?? [],
-                [
-                    'es_supervisor' => $validated['es_supervisor'] ?? false,
-                    'minas' => $this->buildMinePayload($validated),
-                ],
-                $this->requireAuthenticatedUser(),
-            );
-        } catch (ValidationException $exception) {
-            throw $exception;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return redirect()
-                ->back()
-                ->withInput()
-                ->with('error', 'No se pudo crear el trabajador. Revisa la configuracion del servidor o intenta nuevamente.');
-        }
-
-        return view('personal.fichas.link', [
-            'result' => $result,
-            'url' => $result['url'],
-            'trabajador' => $result['personal'],
-            'ficha' => $result['ficha'],
-        ]);
-    }
-
-    public function createAntiguo(): View
-    {
-        return view('personal.antiguo.create', [
-            'puestoOptions' => $this->puestoOptions(),
-        ]);
-    }
-
-    public function storeAntiguo(Request $request): RedirectResponse
-    {
-        $validated = $request->validate($this->legacyCreateRules(), [
-            'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
-            'contrato_firmado.mimes' => 'El contrato firmado debe ser un PDF.',
-        ]);
-
-        try {
-            $personal = $this->personalAntiguoService->create(
-                $validated,
-                $request->file('contrato_firmado'),
-                $this->requireAuthenticatedUser(),
-            );
-        } catch (ValidationException $exception) {
-            throw $exception;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return redirect()
-                ->back()
-                ->withInput()
-                ->with('error', 'No se pudo registrar el personal antiguo. Revisa los datos o intenta nuevamente.');
-        }
-
-        return redirect()
-            ->route('personal.contratos.index', $personal->id)
-            ->with('success', 'Personal antiguo registrado correctamente. El historial contractual quedo guardado.');
-    }
-
     public function regularizeAntiguo(string $id): View
     {
         $personal = $this->service->find($id);
@@ -607,7 +530,7 @@ class PersonalPageController extends WebPageController
     public function cease(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'cesar_trabajador'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -635,7 +558,7 @@ class PersonalPageController extends WebPageController
     public function addToListaNegra(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'gestionar_lista_negra'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -663,7 +586,7 @@ class PersonalPageController extends WebPageController
     public function removeFromListaNegra(string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'gestionar_lista_negra'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -684,7 +607,7 @@ class PersonalPageController extends WebPageController
     public function activate(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCanAny($usuario, 'personal', ['editar', 'actualizar', 'administrar']), 403);
+        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'activar_trabajador'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -825,35 +748,6 @@ class PersonalPageController extends WebPageController
         $rules['huella'] = ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'];
 
         return $rules;
-    }
-
-    private function legacyCreateRules(): array
-    {
-        return [
-            'tipo_documento' => ['required', 'string', 'in:' . implode(',', array_map('strval', array_keys(PersonalFichaCatalog::DOCUMENT_TYPES)))],
-            'numero_documento' => ['required', 'string', 'max:40'],
-            'nombres' => ['required', 'string', 'max:191'],
-            'apellido_paterno' => ['required', 'string', 'max:191'],
-            'apellido_materno' => ['required', 'string', 'max:191'],
-            'telefono' => ['nullable', 'string', 'max:30'],
-            'correo' => ['nullable', 'email', 'max:191'],
-            'puesto' => ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')],
-            'ocupacion' => ['nullable', 'string', 'max:191'],
-            'contrato' => ['required', 'string', 'in:REG,FIJO,INTER,INDET'],
-            'estado_laboral' => ['required', 'string', 'in:ACTIVO,FALTA_CONTRATO,CESADO'],
-            'estado_contrato' => ['required', 'string', 'in:VIGENTE,CERRADO'],
-            'fecha_inicio' => ['required', 'date'],
-            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
-            'fecha_firma' => ['nullable', 'date'],
-            'area' => ['nullable', 'string', 'max:191'],
-            'mina' => ['nullable', 'string', 'max:191'],
-            'remuneracion' => ['nullable', 'string', 'max:120'],
-            'costo_hora' => ['nullable', 'string', 'max:120'],
-            'es_supervisor' => ['nullable', 'boolean'],
-            'motivo_cese' => ['nullable', 'string', 'max:2000'],
-            'observacion_historica' => ['nullable', 'string', 'max:5000'],
-            'contrato_firmado' => ['nullable', 'file', 'max:15360', 'mimes:pdf'],
-        ];
     }
 
     private function legacyRegularizationRules(): array

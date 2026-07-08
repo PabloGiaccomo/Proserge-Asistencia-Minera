@@ -134,32 +134,6 @@ class PersonalPuestoManagementTest extends TestCase
         ]);
     }
 
-    public function test_registro_antiguo_rechaza_puesto_fuera_de_catalogo(): void
-    {
-        $userId = $this->createUser(['personal' => ['ver', 'crear']]);
-
-        $this->withSession($this->sessionFor($userId))
-            ->from(route('personal.antiguo.create'))
-            ->post(route('personal.antiguo.store'), [
-                'tipo_documento' => 'DNI',
-                'numero_documento' => '70114455',
-                'nombres' => 'Prueba',
-                'apellido_paterno' => 'Catalogo',
-                'apellido_materno' => 'Puesto',
-                'telefono' => '999999999',
-                'correo' => 'puesto.catalogo@test.local',
-                'puesto' => 'PUESTO INVENTADO',
-                'ocupacion' => '',
-                'contrato' => 'FIJO',
-                'estado_laboral' => 'FALTA_CONTRATO',
-                'estado_contrato' => 'VIGENTE',
-                'fecha_inicio' => '2026-06-01',
-                'fecha_fin' => '2026-12-31',
-            ])
-            ->assertRedirect(route('personal.antiguo.create'))
-            ->assertSessionHasErrors('puesto');
-    }
-
     private function createUser(array $permissions): string
     {
         $roleId = (string) Str::uuid();

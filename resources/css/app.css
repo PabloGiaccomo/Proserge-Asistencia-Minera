@@ -10,6 +10,7 @@
 @import "./modules/asistencia-resumen.css";
 @import "./modules/asistencia-supervisor.css";
 @import "./modules/personal-fichas.css";
+@import "./modules/personal-import.css";
 
 @theme {
     /* Color primario - Turquesa */

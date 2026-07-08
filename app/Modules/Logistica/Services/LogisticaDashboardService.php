@@ -10,6 +10,7 @@ use App\Models\Personal;
 use App\Models\PersonalMina;
 use App\Models\RQMina;
 use App\Models\RQProsergeDetalle;
+use App\Modules\Epps\Services\EppService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
@@ -25,6 +26,42 @@ class LogisticaDashboardService
     private const TAB_IDENTIFICACION = 'identificacion';
     private const TAB_COSTOS = 'costos';
 
+    private const EPP_ITEMS = [
+        'casco' => 'Casco',
+        'chaleco' => 'Chaleco',
+        'zapatos' => 'Zapatos',
+        'camisa' => 'Camisa',
+        'pantalon' => 'Pantalon',
+        'respirador' => 'Respirador',
+    ];
+
+    private const SIZE_FIELDS = [
+        'zapatos' => [
+            'label' => 'Zapatos',
+            'keys' => ['talla_zapato', 'zapato_botas', 'zapato', 'botas', 'talla_calzado'],
+            'valid' => ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'],
+        ],
+        'camisa' => [
+            'label' => 'Camisa',
+            'keys' => ['talla_polo', 'camisa_chaleco', 'camisa', 'talla_camisa', 'talla_chaleco'],
+            'valid' => ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
+        ],
+        'pantalon' => [
+            'label' => 'Pantalon',
+            'keys' => ['talla_pantalon', 'pantalon'],
+            'valid' => ['28', '30', '32', '34', '36', '38', '40', '42', '44'],
+        ],
+        'respirador' => [
+            'label' => 'Respirador',
+            'keys' => ['talla_respirador', 'respirador'],
+            'valid' => ['S', 'M', 'L', 'XL'],
+        ],
+    ];
+
+    public function __construct(private readonly EppService $eppService)
+    {
+    }
+
     public function pageData(array $query): array
     {
         $tabs = $this->tabs();
@@ -32,44 +69,78 @@ class LogisticaDashboardService
         $options = $this->options();
         $workers = $this->workers($filters);
         $catalog = $this->eppCatalog($filters);
-        $deliveries = $this->deliveries($workers->pluck('id'), $catalog->pluck('id'));
+        $deliveries = $this->deliveries($workers->pluck('id'), $catalog->pluck('id'), $filters);
         $activeDeliveries = $deliveries->where('estado', EppEntrega::ESTADO_ENTREGADO);
+        $trackedCatalog = $this->trackedCatalog($catalog);
+        $workers = $this->filterWorkersByProfile($workers, $filters);
+        $activeDeliveries = $activeDeliveries->whereIn('personal_id', $workers->pluck('id')->all());
+        $deliveries = $deliveries->whereIn('personal_id', $workers->pluck('id')->all())->values();
+        $workerEppRows = $this->workerEppRows($workers, $trackedCatalog, $activeDeliveries, $filters);
+        if ($filters['epp_estado'] !== []) {
+            $workers = $workers->whereIn('id', $workerEppRows->pluck('personal_id')->all())->values();
+            $activeDeliveries = $activeDeliveries->whereIn('personal_id', $workers->pluck('id')->all())->values();
+            $deliveries = $deliveries->whereIn('personal_id', $workers->pluck('id')->all())->values();
+            $workerEppRows = $this->workerEppRows($workers, $trackedCatalog, $activeDeliveries, $filters);
+        }
+        $requirements = $this->requirements($workers, $trackedCatalog, $activeDeliveries);
+        $coverageByItem = $this->coverageByItem($trackedCatalog, $workers, $activeDeliveries);
         $sizeSummary = $this->sizeSummary($workers);
-        $requirements = $this->requirements($workers, $catalog, $activeDeliveries);
+        $missingSizeWorkers = $this->missingSizeWorkers($workers);
+        $stockRows = $this->stockRows($requirements, $workers);
         $expiringDeliveries = $this->expiringDeliveries($activeDeliveries);
         $mineSummary = $this->mineSummary($workers);
         $cargoSummary = $this->cargoSummary($workers);
+        $heatmap = $this->missingHeatmap($workerEppRows);
+        $urgentActions = $this->urgentActions($missingSizeWorkers, $requirements, $expiringDeliveries, $heatmap, $stockRows);
+        $filterChips = $this->filterChips($filters, $options);
         $pendingEpp = $requirements->sum('pendiente_entrega');
+        $requiredEpp = $requirements->sum('requerido');
+        $deliveredEpp = $requirements->sum('entregado');
         $expiringEpp = $expiringDeliveries->where('estado_visual', 'POR_VENCER')->count();
         $expiredEpp = $expiringDeliveries->where('estado_visual', 'VENCIDO')->count();
+        $habilitatedWorkers = $this->habilitatedWorkersCount($workers, $filters);
+        $coveragePct = $requiredEpp > 0 ? round(($deliveredEpp / $requiredEpp) * 100, 1) : 0;
 
         return [
             'tabs' => $this->tabOptions($tabs),
             'activeTab' => $filters['tab'],
             'filters' => $filters,
             'options' => $options,
+            'filterChips' => $filterChips,
             'metrics' => [
                 'workers' => $workers->count(),
-                'habilitados' => $this->habilitatedWorkersCount($workers, $filters),
-                'required_epp' => $requirements->sum('requerido'),
+                'habilitados' => $habilitatedWorkers,
+                'habilitados_pct' => $workers->isNotEmpty() ? round(($habilitatedWorkers / $workers->count()) * 100, 1) : 0,
+                'required_epp' => $requiredEpp,
+                'delivered_epp' => $deliveredEpp,
+                'coverage_pct' => $coveragePct,
                 'pending_epp' => $pendingEpp,
                 'expired_epp' => $expiredEpp,
                 'expiring_epp' => $expiringEpp,
+                'expiring_7' => $expiringDeliveries->filter(fn (array $row): bool => (int) $row['dias'] >= 0 && (int) $row['dias'] <= 7)->count(),
+                'expiring_15' => $expiringDeliveries->filter(fn (array $row): bool => (int) $row['dias'] >= 0 && (int) $row['dias'] <= 15)->count(),
+                'expiring_30' => $expiringDeliveries->filter(fn (array $row): bool => (int) $row['dias'] >= 0 && (int) $row['dias'] <= 30)->count(),
                 'minas' => $mineSummary->count(),
                 'cargos' => $cargoSummary->count(),
                 'faltantes' => $pendingEpp,
                 'porVencer' => $expiringEpp,
                 'vencidos' => $expiredEpp,
                 'entregasRecientes' => $deliveries->count(),
-                'stockCritico' => $requirements->where('stock_estado', 'FALTANTE')->count(),
+                'stockCritico' => $stockRows->whereIn('estado', ['Critico', 'Sin stock'])->count(),
+                'fichas_incompletas_tallas' => $missingSizeWorkers->count(),
             ],
             'mineSummary' => $mineSummary,
             'cargoSummary' => $cargoSummary,
             'sizeSummary' => $sizeSummary,
             'requirements' => $requirements,
-            'missingWorkers' => $this->missingWorkers($workers, $catalog, $activeDeliveries),
+            'coverageByItem' => $coverageByItem,
+            'missingHeatmap' => $heatmap,
+            'missingWorkers' => $this->missingWorkers($workers, $trackedCatalog, $activeDeliveries),
+            'missingSizeWorkers' => $missingSizeWorkers,
+            'stockRows' => $stockRows,
             'recentDeliveries' => $this->recentDeliveries($deliveries),
             'expiringDeliveries' => $expiringDeliveries,
+            'urgentActions' => $urgentActions,
             'toolsRows' => $this->toolsRows(),
             'serviceRows' => $this->serviceRows(),
             'identityRows' => $this->identityRows($catalog),
@@ -112,6 +183,11 @@ class LogisticaDashboardService
             'minas' => $this->arrayFilter($query['minas'] ?? []),
             'cargos' => $this->arrayFilter($query['cargos'] ?? []),
             'estados' => $this->arrayFilter($query['estados'] ?? []),
+            'epp_estado' => $this->arrayFilter($query['epp_estado'] ?? []),
+            'ficha' => trim((string) ($query['ficha'] ?? '')),
+            'talla_estado' => trim((string) ($query['talla_estado'] ?? '')),
+            'fecha_desde' => trim((string) ($query['fecha_desde'] ?? '')),
+            'fecha_hasta' => trim((string) ($query['fecha_hasta'] ?? '')),
             'epps' => $this->arrayFilter($query['epps'] ?? []),
             'tallas' => $this->arrayFilter($query['tallas'] ?? []),
         ];
@@ -147,12 +223,21 @@ class LogisticaDashboardService
                 : collect(),
             'paradas' => $this->paradaOptions(),
             'estados' => collect([
-                'ACTIVO' => 'Activo',
-                'FALTA_CONTRATO' => 'Falta contrato',
-                'CESADO' => 'Cesado',
-                PersonalMina::ESTADO_HABILITADO => 'Habilitado en mina',
-                PersonalMina::ESTADO_EN_PROCESO => 'En proceso de mina',
-                PersonalMina::ESTADO_NO_HABILITADO => 'No habilitado en mina',
+                'ENTREGADO' => 'Entregado',
+                'PENDIENTE' => 'Pendiente',
+                'VENCIDO' => 'Vencido',
+                'POR_VENCER' => 'Por vencer',
+                'NO_APLICA' => 'No aplica',
+            ]),
+            'fichas' => collect([
+                '' => 'Todas',
+                'completa' => 'Completa',
+                'incompleta' => 'Incompleta',
+            ]),
+            'talla_estados' => collect([
+                '' => 'Todas',
+                'con_talla' => 'Con talla',
+                'sin_talla' => 'Sin talla',
             ]),
             'epps' => $epps,
             'tallas' => $this->tallaOptions($epps),
@@ -264,6 +349,8 @@ class LogisticaDashboardService
             });
         }
 
+        $this->applyReachableWorkerScope($query);
+
         $paradaPersonalIds = $this->paradaPersonalIds($filters['parada_id']);
         if ($filters['parada_id'] !== '') {
             $query->whereIn('id', $paradaPersonalIds);
@@ -281,6 +368,32 @@ class LogisticaDashboardService
         }
 
         return $workers;
+    }
+
+    private function applyReachableWorkerScope($query): void
+    {
+        $query->where(function ($scope): void {
+            $scope->where('estado', 'ACTIVO');
+
+            if (! $this->hasTable('personal_mina')) {
+                return;
+            }
+
+            $scope->orWhereHas('relacionesMina', function ($relation): void {
+                $relation
+                    ->where(function ($active): void {
+                        $active->where('activo', true)->orWhereNull('activo');
+                    })
+                    ->where(function ($state): void {
+                        $state->where('estado_habilitacion', PersonalMina::ESTADO_HABILITADO)
+                            ->orWhere(function ($legacy): void {
+                                $legacy
+                                    ->whereNull('estado_habilitacion')
+                                    ->where('estado', PersonalMina::ESTADO_HABILITADO);
+                            });
+                    });
+            });
+        });
     }
 
     private function paradaPersonalIds(string $rqMinaId): array
@@ -315,23 +428,51 @@ class LogisticaDashboardService
         return $query->get();
     }
 
-    private function deliveries(Collection $workerIds, Collection $eppIds): Collection
+    private function deliveries(Collection $workerIds, Collection $eppIds, array $filters): Collection
     {
-        if (! $this->hasTable('epp_entregas')) {
+        if (! $this->hasTable('epp_entregas') || $workerIds->isEmpty()) {
             return collect();
         }
 
         $query = EppEntrega::query()
-            ->with(['personal:id,nombre_completo,dni,numero_documento,puesto', 'epp:id,codigo,nombre,vida_util_dias,estado'])
+            ->with([
+                'personal:id,nombre_completo,dni,numero_documento,puesto',
+                'personal.fichaColaborador' => fn ($query) => $query->select([
+                    'personal_fichas.id',
+                    'personal_fichas.personal_id',
+                    'personal_fichas.datos_json',
+                ]),
+                'personal.relacionesMina' => fn ($relation) => $relation
+                    ->where(function ($active): void {
+                        $active->where('activo', true)->orWhereNull('activo');
+                    })
+                    ->with('mina:id,nombre'),
+                'epp:id,codigo,nombre,vida_util_dias,estado,precio_unitario,precio_alquiler,proveedor,stock,requiere_talla,tallas',
+                'registradoPor:id,email',
+            ])
             ->latest('fecha_entrega')
-            ->limit(800);
+            ->limit(1500);
 
-        if ($workerIds->isNotEmpty()) {
-            $query->whereIn('personal_id', $workerIds->values()->all());
-        }
+        $query->whereIn('personal_id', $workerIds->values()->all());
 
         if ($eppIds->isNotEmpty()) {
             $query->whereIn('epp_id', $eppIds->values()->all());
+        }
+
+        if ($filters['fecha_desde'] !== '') {
+            try {
+                $query->whereDate('fecha_entrega', '>=', Carbon::parse($filters['fecha_desde'])->toDateString());
+            } catch (\Throwable) {
+                // Invalid UI dates are ignored to keep the dashboard available.
+            }
+        }
+
+        if ($filters['fecha_hasta'] !== '') {
+            try {
+                $query->whereDate('fecha_entrega', '<=', Carbon::parse($filters['fecha_hasta'])->toDateString());
+            } catch (\Throwable) {
+                // Invalid UI dates are ignored to keep the dashboard available.
+            }
         }
 
         return $query->get();
@@ -404,11 +545,9 @@ class LogisticaDashboardService
         $rows = collect();
 
         foreach ($workers as $worker) {
-            foreach ($this->workerSizes($worker) as $tipo => $talla) {
-                if ($talla === '') {
-                    continue;
-                }
-
+            foreach ($this->workerSizeStatuses($worker) as $status) {
+                $tipo = $status['label'];
+                $talla = $status['missing'] ? 'Sin talla' : $status['value'];
                 $key = $tipo . '|' . $talla;
                 $current = $rows->get($key, [
                     'tipo' => $tipo,
@@ -431,8 +570,8 @@ class LogisticaDashboardService
                         ->map(static fn (array $size): array => [
                             'talla' => $size['talla'] ?? '',
                             'total' => (int) ($size['total'] ?? 0),
+                            'tone' => ($size['talla'] ?? '') === 'Sin talla' ? 'danger' : 'ok',
                         ])
-                        ->filter(static fn (array $size): bool => $size['talla'] !== '')
                         ->values(),
                 ];
             })
@@ -443,14 +582,11 @@ class LogisticaDashboardService
     {
         $data = $personal->fichaColaborador?->datos_json ?? [];
 
-        return [
-            'Zapatos' => $this->firstData($data, ['zapato_botas', 'zapato', 'botas', 'talla_zapato', 'talla_calzado']),
-            'Pantalon' => $this->firstData($data, ['pantalon', 'talla_pantalon']),
-            'Camisa / chaleco' => $this->firstData($data, ['camisa_chaleco', 'camisa', 'chaleco', 'talla_camisa', 'talla_chaleco']),
-            'Respirador' => $this->firstData($data, ['respirador', 'talla_respirador']),
-            'Guantes' => $this->firstData($data, ['guantes', 'talla_guantes']),
-            'Casco' => $this->firstData($data, ['casco', 'talla_casco']),
-        ];
+        return collect(self::SIZE_FIELDS)
+            ->mapWithKeys(fn (array $config, string $key): array => [
+                $config['label'] => $this->firstData($data, $config['keys']),
+            ])
+            ->all();
     }
 
     private function firstData(array $data, array $keys): string
@@ -465,37 +601,467 @@ class LogisticaDashboardService
         return '';
     }
 
+    private function filterWorkersByProfile(Collection $workers, array $filters): Collection
+    {
+        if ($filters['ficha'] === '' && $filters['talla_estado'] === '') {
+            return $workers->values();
+        }
+
+        return $workers
+            ->filter(function (Personal $worker) use ($filters): bool {
+                $incomplete = $this->workerHasMissingSizes($worker);
+
+                if ($filters['ficha'] === 'completa' && $incomplete) {
+                    return false;
+                }
+
+                if ($filters['ficha'] === 'incompleta' && ! $incomplete) {
+                    return false;
+                }
+
+                if ($filters['talla_estado'] === 'con_talla' && $incomplete) {
+                    return false;
+                }
+
+                if ($filters['talla_estado'] === 'sin_talla' && ! $incomplete) {
+                    return false;
+                }
+
+                return true;
+            })
+            ->values();
+    }
+
+    private function workerSizeStatuses(Personal $worker): array
+    {
+        $data = $worker->fichaColaborador?->datos_json ?? [];
+
+        return collect(self::SIZE_FIELDS)
+            ->map(function (array $config, string $key) use ($data): array {
+                $value = $this->firstData($data, $config['keys']);
+
+                return [
+                    'key' => $key,
+                    'label' => $config['label'],
+                    'value' => $value,
+                    'missing' => $this->isMissingSizeValue($value, $config['valid']),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function workerHasMissingSizes(Personal $worker): bool
+    {
+        return collect($this->workerSizeStatuses($worker))->contains('missing', true);
+    }
+
+    private function isMissingSizeValue(mixed $value, array $valid): bool
+    {
+        $normalized = $this->normalizeText($value);
+        $normalized = str_replace(['.', '-'], '', $normalized);
+
+        if ($normalized === '' || $normalized === '0') {
+            return true;
+        }
+
+        $invalidTexts = ['NA', 'N/A', 'NO APLICA', 'NO REGISTRA', 'SIN TALLA', 'SINTALLA', 'NINGUNA'];
+        if (in_array($normalized, $invalidTexts, true)) {
+            return true;
+        }
+
+        return ! in_array($normalized, $valid, true);
+    }
+
+    private function missingSizeWorkers(Collection $workers): Collection
+    {
+        return $workers
+            ->map(function (Personal $worker): ?array {
+                $statuses = collect($this->workerSizeStatuses($worker))->keyBy('key');
+                $missing = $statuses->filter(fn (array $status): bool => (bool) $status['missing']);
+
+                if ($missing->isEmpty()) {
+                    return null;
+                }
+
+                return [
+                    'personal_id' => $worker->id,
+                    'trabajador' => $worker->nombre_completo ?: 'Sin nombre',
+                    'documento' => $worker->dni ?: $worker->numero_documento ?: '-',
+                    'mina' => $this->workerMines($worker),
+                    'cargo' => $worker->puesto ?: 'Por definir',
+                    'zapatos' => (bool) data_get($statuses, 'zapatos.missing', false),
+                    'camisa' => (bool) data_get($statuses, 'camisa.missing', false),
+                    'pantalon' => (bool) data_get($statuses, 'pantalon.missing', false),
+                    'respirador' => (bool) data_get($statuses, 'respirador.missing', false),
+                    'estado_ficha' => 'Incompleta',
+                ];
+            })
+            ->filter()
+            ->values();
+    }
+
+    private function workerMines(Personal $worker): string
+    {
+        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+
+        return $relations
+            ->pluck('mina.nombre')
+            ->filter()
+            ->unique()
+            ->values()
+            ->implode(', ') ?: 'Sin mina';
+    }
+
+    private function workerPrimaryMine(Personal $worker): string
+    {
+        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+
+        return (string) ($relations->first()?->mina?->nombre ?: 'Sin mina');
+    }
+
+    private function classifyDeliveryState(?EppEntrega $delivery): string
+    {
+        if (! $delivery) {
+            return 'PENDIENTE';
+        }
+
+        if (! $delivery->fecha_vencimiento_calendario) {
+            return 'ENTREGADO';
+        }
+
+        $days = now()->startOfDay()->diffInDays($delivery->fecha_vencimiento_calendario, false);
+
+        if ($days < 0) {
+            return 'VENCIDO';
+        }
+
+        if ($days <= 30) {
+            return 'POR_VENCER';
+        }
+
+        return 'ENTREGADO';
+    }
+
+    private function stateLabel(string $state): string
+    {
+        return match ($state) {
+            'ENTREGADO' => 'Entregado',
+            'PENDIENTE' => 'Pendiente',
+            'VENCIDO' => 'Vencido',
+            'POR_VENCER' => 'Por vencer',
+            'NO_APLICA' => 'No aplica',
+            'SIN_STOCK' => 'Sin stock',
+            default => Str::headline(Str::lower($state)),
+        };
+    }
+
+    private function workerEppRows(Collection $workers, Collection $trackedCatalog, Collection $activeDeliveries, array $filters): Collection
+    {
+        $rows = $workers->map(function (Personal $worker) use ($trackedCatalog, $activeDeliveries): array {
+            $deliveries = $activeDeliveries->where('personal_id', $worker->id);
+            $items = [];
+            $pendingCost = 0.0;
+            $nextExpiration = null;
+            $overall = 'Entregado';
+
+            foreach ($trackedCatalog as $item) {
+                $ids = collect($item['ids'] ?? []);
+                $delivery = $deliveries
+                    ->filter(fn (EppEntrega $row): bool => $ids->contains($row->epp_id))
+                    ->sortByDesc('fecha_entrega')
+                    ->first();
+                $state = $this->classifyDeliveryState($delivery);
+                $stock = (int) ($item['stock'] ?? 0);
+
+                if ($state === 'PENDIENTE' && $stock <= 0) {
+                    $state = 'SIN_STOCK';
+                }
+
+                if (in_array($state, ['PENDIENTE', 'SIN_STOCK'], true)) {
+                    $pendingCost += (float) ($item['precio_unitario'] ?? 0);
+                }
+
+                if ($delivery?->fecha_vencimiento_calendario) {
+                    $expiration = $delivery->fecha_vencimiento_calendario->format('d/m/Y');
+                    $nextExpiration = $nextExpiration === null ? $expiration : $nextExpiration;
+                }
+
+                if (in_array($state, ['VENCIDO', 'SIN_STOCK'], true)) {
+                    $overall = 'Critico';
+                } elseif ($overall !== 'Critico' && in_array($state, ['PENDIENTE', 'POR_VENCER'], true)) {
+                    $overall = 'Pendiente';
+                }
+
+                $items[$item['key']] = [
+                    'estado' => $state,
+                    'label' => $this->stateLabel($state),
+                    'tone' => $this->stateTone($state),
+                ];
+            }
+
+            $sizesIncomplete = $this->workerHasMissingSizes($worker);
+
+            return [
+                'personal_id' => $worker->id,
+                'trabajador' => $worker->nombre_completo ?: 'Sin nombre',
+                'documento' => $worker->dni ?: $worker->numero_documento ?: '-',
+                'mina' => $this->workerPrimaryMine($worker),
+                'minas' => $this->workerMines($worker),
+                'cargo' => $worker->puesto ?: 'Por definir',
+                'items' => $items,
+                'estado_epp' => $overall,
+                'estado_ficha' => $sizesIncomplete ? 'Incompleta' : 'Completa',
+                'proximo_vencimiento' => $nextExpiration ?: '-',
+                'costo_pendiente' => round($pendingCost, 2),
+            ];
+        });
+
+        if ($filters['epp_estado'] === []) {
+            return $rows->values();
+        }
+
+        return $rows
+            ->filter(function (array $row) use ($filters): bool {
+                $states = collect($row['items'] ?? [])->pluck('estado')->all();
+
+                return collect($filters['epp_estado'])->contains(fn (string $state): bool => in_array($state, $states, true));
+            })
+            ->values();
+    }
+
+    private function coverageByItem(Collection $trackedCatalog, Collection $workers, Collection $activeDeliveries): Collection
+    {
+        $totalWorkers = $workers->count();
+
+        return $trackedCatalog
+            ->map(function (array $item) use ($activeDeliveries, $totalWorkers): array {
+                $ids = collect($item['ids'] ?? []);
+                $states = [
+                    'entregado' => 0,
+                    'pendiente' => 0,
+                    'vencido' => 0,
+                    'por_vencer' => 0,
+                    'no_aplica' => 0,
+                ];
+
+                $deliveredByWorker = $activeDeliveries
+                    ->filter(fn (EppEntrega $delivery): bool => $ids->contains($delivery->epp_id))
+                    ->groupBy('personal_id')
+                    ->map(function (Collection $rows): string {
+                        return $this->classifyDeliveryState($rows->sortByDesc('fecha_entrega')->first());
+                    });
+
+                foreach ($deliveredByWorker as $state) {
+                    if ($state === 'VENCIDO') {
+                        $states['vencido']++;
+                    } elseif ($state === 'POR_VENCER') {
+                        $states['por_vencer']++;
+                    } else {
+                        $states['entregado']++;
+                    }
+                }
+
+                $states['pendiente'] = max(0, $totalWorkers - array_sum($states));
+                $covered = $states['entregado'] + $states['por_vencer'] + $states['vencido'];
+
+                return [
+                    'key' => $item['key'],
+                    'nombre' => $item['label'],
+                    'requerido' => $totalWorkers,
+                    'entregado' => $covered,
+                    'pendiente' => $states['pendiente'],
+                    'vencido' => $states['vencido'],
+                    'por_vencer' => $states['por_vencer'],
+                    'no_aplica' => $states['no_aplica'],
+                    'coverage_pct' => $totalWorkers > 0 ? round(($covered / $totalWorkers) * 100, 1) : 0,
+                    'segments' => $states,
+                ];
+            })
+            ->values();
+    }
+
+    private function missingHeatmap(Collection $workerEppRows): Collection
+    {
+        $matrix = [];
+
+        foreach ($workerEppRows as $row) {
+            $mine = (string) ($row['mina'] ?? 'Sin mina');
+            $matrix[$mine] ??= [
+                'mina' => $mine,
+                'items' => collect(self::EPP_ITEMS)->mapWithKeys(fn (string $label, string $key): array => [$key => 0])->all(),
+                'total' => 0,
+            ];
+
+            foreach (($row['items'] ?? []) as $key => $item) {
+                if (in_array($item['estado'] ?? '', ['PENDIENTE', 'SIN_STOCK', 'VENCIDO'], true)) {
+                    $matrix[$mine]['items'][$key] = ($matrix[$mine]['items'][$key] ?? 0) + 1;
+                    $matrix[$mine]['total']++;
+                }
+            }
+        }
+
+        $max = max(1, collect($matrix)->flatMap(fn (array $row): array => array_values($row['items']))->max() ?: 1);
+
+        return collect($matrix)
+            ->map(function (array $row) use ($max): array {
+                $row['cells'] = collect($row['items'])
+                    ->map(function (int $value, string $key) use ($max): array {
+                        $ratio = $value / $max;
+
+                        return [
+                            'key' => $key,
+                            'label' => self::EPP_ITEMS[$key] ?? $key,
+                            'value' => $value,
+                            'tone' => $value === 0 ? 'ok' : ($ratio >= .66 ? 'danger' : ($ratio >= .33 ? 'warning' : 'low')),
+                        ];
+                    })
+                    ->values();
+
+                return $row;
+            })
+            ->sortByDesc('total')
+            ->values();
+    }
+
+    private function stockRows(Collection $requirements, Collection $workers): Collection
+    {
+        return $requirements
+            ->flatMap(function (array $row) use ($workers): array {
+                $sizes = collect($row['tallas'] ?? []);
+
+                if ($sizes->isEmpty()) {
+                    return [[
+                        'item' => $row['nombre'],
+                        'talla' => 'No aplica',
+                        'requerido' => (int) $row['requerido'],
+                        'stock' => (int) $row['stock'],
+                        'pendiente_compra' => (int) $row['pendiente_compra'],
+                        'estado' => $this->stockState((int) $row['stock'], (int) $row['pendiente_entrega']),
+                    ]];
+                }
+
+                return $sizes->map(function (array $size) use ($row, $workers): array {
+                    $required = (int) ($size['total'] ?? 0);
+                    $stock = (int) $row['stock'];
+                    $pending = max(0, $required - $stock);
+
+                    return [
+                        'item' => $row['nombre'],
+                        'talla' => $size['talla'] ?: 'Sin talla',
+                        'requerido' => $required,
+                        'stock' => $stock,
+                        'pendiente_compra' => $pending,
+                        'estado' => $this->stockState($stock, $pending),
+                    ];
+                })->all();
+            })
+            ->sortByDesc('pendiente_compra')
+            ->values();
+    }
+
+    private function stockState(int $stock, int $pending): string
+    {
+        if ($pending <= 0) {
+            return 'OK';
+        }
+
+        if ($stock <= 0) {
+            return 'Sin stock';
+        }
+
+        if ($stock < $pending) {
+            return 'Critico';
+        }
+
+        return 'Bajo';
+    }
+
+    private function stateTone(string $state): string
+    {
+        return match ($state) {
+            'ENTREGADO', 'OK' => 'ok',
+            'POR_VENCER', 'PENDIENTE', 'Bajo' => 'warning',
+            'VENCIDO', 'SIN_STOCK', 'Critico', 'Sin stock' => 'danger',
+            'NO_APLICA' => 'muted',
+            default => 'info',
+        };
+    }
+
+    private function urgentActions(Collection $missingSizeWorkers, Collection $requirements, Collection $expiringDeliveries, Collection $heatmap, Collection $stockRows): Collection
+    {
+        $actions = collect();
+
+        if ($missingSizeWorkers->isNotEmpty()) {
+            $actions->push('Completar tallas de ' . number_format($missingSizeWorkers->count()) . ' trabajadores.');
+        }
+
+        $pendingItems = $requirements->where('pendiente_entrega', '>', 0)->sortByDesc('pendiente_entrega')->take(3);
+        foreach ($pendingItems as $item) {
+            $actions->push('Regularizar entrega de ' . number_format((int) $item['pendiente_entrega']) . ' ' . Str::lower($item['nombre']) . '.');
+        }
+
+        $expired = $expiringDeliveries->where('estado_visual', 'VENCIDO')->count();
+        if ($expired > 0) {
+            $actions->push('Revisar ' . number_format($expired) . ' EPP vencidos.');
+        }
+
+        $expiring = $expiringDeliveries->where('estado_visual', 'POR_VENCER')->count();
+        if ($expiring > 0) {
+            $actions->push('Programar cambio de ' . number_format($expiring) . ' EPP proximos a vencer.');
+        }
+
+        $criticalStock = $stockRows->whereIn('estado', ['Critico', 'Sin stock'])->first();
+        if ($criticalStock) {
+            $actions->push('Revisar stock critico de ' . Str::lower($criticalStock['item']) . ' talla ' . $criticalStock['talla'] . '.');
+        }
+
+        $topMine = $heatmap->first();
+        if ($topMine && (int) ($topMine['total'] ?? 0) > 0) {
+            $actions->push('Atender faltantes de ' . $topMine['mina'] . ' (' . number_format((int) $topMine['total']) . ' pendientes).');
+        }
+
+        return $actions->take(8)->values();
+    }
+
     private function requirements(Collection $workers, Collection $catalog, Collection $activeDeliveries): Collection
     {
         $workersCount = $workers->count();
 
-        return $catalog->map(function (EppRegistro $epp) use ($workers, $workersCount, $activeDeliveries): array {
+        return $catalog->map(function (array $item) use ($workers, $workersCount, $activeDeliveries): array {
+            $ids = collect($item['ids'] ?? []);
             $covered = $activeDeliveries
-                ->where('epp_id', $epp->id)
+                ->filter(fn (EppEntrega $delivery): bool => $ids->contains($delivery->epp_id))
                 ->pluck('personal_id')
                 ->unique()
                 ->count();
-            $stock = (int) ($epp->stock ?? 0);
+            $stock = (int) ($item['stock'] ?? 0);
             $required = $workersCount;
             $pending = max(0, $required - $covered);
+            $pendingPurchase = max(0, $pending - $stock);
 
             return [
-                'id' => $epp->id,
-                'nombre' => $epp->nombre,
-                'vida_util_dias' => $epp->vida_util_dias,
+                'id' => $ids->first(),
+                'key' => $item['key'],
+                'nombre' => $item['label'],
+                'vida_util_dias' => data_get($item, 'catalog.vida_util_dias', 0),
                 'requerido' => $required,
                 'entregado' => $covered,
                 'pendiente_entrega' => $pending,
                 'stock' => $stock,
-                'stock_estado' => $stock >= $pending ? 'OK' : 'FALTANTE',
-                'tallas' => $this->sizesForEpp($workers, $epp),
+                'pendiente_compra' => $pendingPurchase,
+                'stock_estado' => $this->stockState($stock, $pending),
+                'precio_unitario' => (float) ($item['precio_unitario'] ?? 0),
+                'costo_pendiente' => $pending * (float) ($item['precio_unitario'] ?? 0),
+                'proveedor' => $item['proveedor'] ?? 'Sin proveedor',
+                'tallas' => $this->sizesForEpp($workers, $item),
             ];
         })->values();
     }
 
-    private function sizesForEpp(Collection $workers, EppRegistro $epp): Collection
+    private function sizesForEpp(Collection $workers, array $item): Collection
     {
-        $type = $this->eppSizeType($epp->nombre);
+        $type = $this->eppSizeType((string) ($item['label'] ?? ''));
 
         if ($type === '') {
             return collect();
@@ -517,12 +1083,50 @@ class LogisticaDashboardService
         return match (true) {
             str_contains($name, 'ZAP') || str_contains($name, 'BOTA') => 'Zapatos',
             str_contains($name, 'PANT') => 'Pantalon',
-            str_contains($name, 'CAMISA') || str_contains($name, 'CHALECO') || str_contains($name, 'CASACA') => 'Camisa / chaleco',
+            str_contains($name, 'CAMISA') || str_contains($name, 'POLO') || str_contains($name, 'CASACA') => 'Camisa',
+            str_contains($name, 'CHALECO') => 'Camisa',
             str_contains($name, 'RESP') => 'Respirador',
-            str_contains($name, 'GUANTE') => 'Guantes',
-            str_contains($name, 'CASCO') => 'Casco',
             default => '',
         };
+    }
+
+    private function eppItemKey(?string $name): string
+    {
+        $name = Str::upper((string) $name);
+
+        return match (true) {
+            str_contains($name, 'CASCO') => 'casco',
+            str_contains($name, 'CHALECO') => 'chaleco',
+            str_contains($name, 'ZAP') || str_contains($name, 'BOTA') => 'zapatos',
+            str_contains($name, 'CAMISA') || str_contains($name, 'POLO') || str_contains($name, 'CASACA') => 'camisa',
+            str_contains($name, 'PANT') => 'pantalon',
+            str_contains($name, 'RESP') => 'respirador',
+            default => Str::slug((string) $name, '_'),
+        };
+    }
+
+    private function trackedCatalog(Collection $catalog): Collection
+    {
+        return collect(self::EPP_ITEMS)
+            ->map(function (string $label, string $key) use ($catalog): array {
+                $matches = $catalog
+                    ->filter(fn (EppRegistro $epp): bool => $this->eppItemKey($epp->nombre) === $key)
+                    ->values();
+                $primary = $matches->first();
+
+                return [
+                    'key' => $key,
+                    'label' => $label,
+                    'ids' => $matches->pluck('id')->values(),
+                    'catalog' => $primary,
+                    'nombre' => $primary?->nombre ?: $label,
+                    'stock' => (int) ($primary?->stock ?? 0),
+                    'precio_unitario' => (float) ($primary?->precio_unitario ?? 0),
+                    'proveedor' => $primary?->proveedor ?: 'Sin proveedor',
+                    'requiere_talla' => in_array($key, ['zapatos', 'camisa', 'pantalon', 'respirador'], true),
+                ];
+            })
+            ->values();
     }
 
     private function missingWorkers(Collection $workers, Collection $catalog, Collection $activeDeliveries): Collection
@@ -533,8 +1137,8 @@ class LogisticaDashboardService
                 ->pluck('epp_id')
                 ->unique();
             $missing = $catalog
-                ->reject(fn (EppRegistro $epp): bool => $delivered->contains($epp->id))
-                ->pluck('nombre')
+                ->reject(fn (array $item): bool => collect($item['ids'] ?? [])->intersect($delivered)->isNotEmpty())
+                ->pluck('label')
                 ->take(5)
                 ->values();
 
@@ -568,13 +1172,22 @@ class LogisticaDashboardService
             ->filter(fn (EppEntrega $delivery): bool => $delivery->fecha_vencimiento_calendario !== null)
             ->map(function (EppEntrega $delivery) use ($today): array {
                 $row = $this->deliveryRow($delivery);
+                $effectiveUsage = $this->eppService->presentEntrega($delivery);
                 $days = $today->diffInDays($delivery->fecha_vencimiento_calendario, false);
                 $row['dias'] = (int) $days;
                 $row['estado_visual'] = $days < 0 ? 'VENCIDO' : ($days <= 30 ? 'POR_VENCER' : 'VIGENTE');
+                $row['dias_uso_efectivo'] = (int) data_get($effectiveUsage, 'dias_uso_efectivo', 0);
+                $row['vida_dias'] = (int) data_get($effectiveUsage, 'vida_dias', 0);
+                $row['dias_restantes_uso'] = (int) data_get($effectiveUsage, 'dias_restantes_uso', 0);
+                $row['uso_efectivo'] = sprintf(
+                    '%d / %d dias',
+                    $row['dias_uso_efectivo'],
+                    $row['vida_dias']
+                );
 
                 return $row;
             })
-            ->filter(fn (array $row): bool => $row['dias'] <= 60)
+            ->filter(fn (array $row): bool => $row['dias'] <= 30)
             ->sortBy('dias')
             ->take(100)
             ->values();
@@ -582,17 +1195,42 @@ class LogisticaDashboardService
 
     private function deliveryRow(EppEntrega $delivery): array
     {
+        $mine = $delivery->personal ? $this->workerPrimaryMine($delivery->personal) : 'Sin mina';
+        $movement = match ($delivery->estado) {
+            EppEntrega::ESTADO_CAMBIADO => 'Cambio',
+            EppEntrega::ESTADO_DEVUELTO => 'Devolucion',
+            default => $delivery->motivo_cambio ? 'Renovacion' : 'Entrega',
+        };
+
         return [
             'trabajador' => $delivery->personal?->nombre_completo ?: 'Sin trabajador',
             'documento' => $delivery->personal?->dni ?: $delivery->personal?->numero_documento ?: '-',
+            'mina' => $mine,
             'puesto' => $delivery->personal?->puesto ?: 'Por definir',
             'epp' => $delivery->epp?->nombre ?: 'Sin EPP',
+            'talla' => $this->deliverySize($delivery),
             'cantidad' => (int) ($delivery->cantidad ?? 1),
             'fecha_entrega' => $delivery->fecha_entrega?->format('d/m/Y') ?: '-',
             'fecha_vencimiento' => $delivery->fecha_vencimiento_calendario?->format('d/m/Y') ?: '-',
             'estado' => $delivery->estado,
+            'tipo_movimiento' => $movement,
+            'responsable' => $delivery->registradoPor?->email ?: 'Sistema',
             'observacion' => $delivery->observacion ?: $delivery->motivo_cambio ?: '-',
         ];
+    }
+
+    private function deliverySize(EppEntrega $delivery): string
+    {
+        if (! $delivery->personal || ! $delivery->epp) {
+            return '-';
+        }
+
+        $type = $this->eppSizeType($delivery->epp->nombre);
+        if ($type === '') {
+            return 'No aplica';
+        }
+
+        return $this->workerSizes($delivery->personal)[$type] ?? '-';
     }
 
     private function toolsRows(): Collection
@@ -671,9 +1309,62 @@ class LogisticaDashboardService
         ])->values();
     }
 
+    private function filterChips(array $filters, array $options): Collection
+    {
+        $chips = collect();
+
+        if ($filters['q'] !== '') {
+            $chips->push(['label' => 'Buscar', 'value' => $filters['q']]);
+        }
+
+        $mineLabels = collect($options['minas'] ?? [])
+            ->whereIn('id', $filters['minas'])
+            ->pluck('nombre')
+            ->values();
+        if ($mineLabels->isNotEmpty()) {
+            $chips->push(['label' => 'Mina', 'value' => $mineLabels->implode(', ')]);
+        }
+
+        if ($filters['parada_id'] !== '') {
+            $label = collect($options['paradas'] ?? [])->firstWhere('id', $filters['parada_id'])['label'] ?? 'Parada seleccionada';
+            $chips->push(['label' => 'Parada / RQ', 'value' => $label]);
+        }
+
+        $eppLabels = collect($options['epps'] ?? [])
+            ->whereIn('id', $filters['epps'])
+            ->pluck('nombre')
+            ->values();
+        if ($eppLabels->isNotEmpty()) {
+            $chips->push(['label' => 'EPP', 'value' => $eppLabels->implode(', ')]);
+        }
+
+        $stateLabels = collect($options['estados'] ?? [])->only($filters['epp_estado'])->values();
+        if ($stateLabels->isNotEmpty()) {
+            $chips->push(['label' => 'Estado', 'value' => $stateLabels->implode(', ')]);
+        }
+
+        if ($filters['ficha'] !== '') {
+            $chips->push(['label' => 'Ficha', 'value' => $filters['ficha'] === 'completa' ? 'Completa' : 'Incompleta']);
+        }
+
+        if ($filters['talla_estado'] !== '') {
+            $chips->push(['label' => 'Talla', 'value' => $filters['talla_estado'] === 'con_talla' ? 'Con talla' : 'Sin talla']);
+        }
+
+        if ($filters['fecha_desde'] !== '') {
+            $chips->push(['label' => 'Desde', 'value' => $filters['fecha_desde']]);
+        }
+
+        if ($filters['fecha_hasta'] !== '') {
+            $chips->push(['label' => 'Hasta', 'value' => $filters['fecha_hasta']]);
+        }
+
+        return $chips;
+    }
+
     private function normalizeText(mixed $value): string
     {
-        return Str::upper(trim((string) $value));
+        return Str::upper(trim(Str::ascii((string) $value)));
     }
 
     private function hasTable(string $table): bool

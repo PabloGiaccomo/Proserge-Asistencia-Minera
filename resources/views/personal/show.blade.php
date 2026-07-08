@@ -4,7 +4,12 @@
 
 @section('content')
 @php
-    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['editar', 'actualizar', 'administrar']);
+    $personalPermissions = session('user.permissions', []);
+    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar');
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'cesar_trabajador');
+    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ficha');
+    $canViewSensitiveFichaData = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_datos_sensibles');
+    $canExportSensitiveFichaPdf = $canViewSensitiveFichaData && \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'exportar');
     $estadoActual = strtoupper((string) ($trabajador['estado'] ?? ''));
 @endphp
 <div class="module-page ficha-workspace">
@@ -16,7 +21,9 @@
             </div>
             <div class="page-actions">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
-                <a href="{{ route('personal.edit', $id) }}" class="btn btn-primary">Editar</a>
+                @if($canEditPersonal)
+                    <a href="{{ route('personal.edit', $id) }}" class="btn btn-primary">Editar</a>
+                @endif
                 @if($estadoActual === 'CESADO')
                     <button type="button" class="btn btn-outline" onclick="showCeaseReason()">Ver motivo de cese</button>
                 @elseif($canCeasePersonal)
@@ -73,8 +80,12 @@
                     <p class="ficha-card-subtitle">Estado: {{ \App\Modules\Personal\Support\PersonalFichaCatalog::stateLabel($ficha->estado) }}</p>
                 </div>
                 <div class="page-actions">
-                    <a href="{{ route('personal.fichas.review', $ficha->id) }}" class="btn btn-outline">Revisar</a>
-                    <a href="{{ route('personal.fichas.pdf', $ficha->id) }}" class="btn btn-primary">PDF</a>
+                    @if($canViewFicha)
+                        <a href="{{ route('personal.fichas.review', $ficha->id) }}" class="btn btn-outline">Revisar</a>
+                    @endif
+                    @if($canExportSensitiveFichaPdf)
+                        <a href="{{ route('personal.fichas.pdf', $ficha->id) }}" class="btn btn-primary">PDF</a>
+                    @endif
                 </div>
             </div>
             <div class="ficha-card-body">

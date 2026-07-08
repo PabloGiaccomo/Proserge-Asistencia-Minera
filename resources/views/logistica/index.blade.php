@@ -16,6 +16,8 @@
 
     $activeTab = request()->query('tab', 'dashboard');
     $activeTab = in_array($activeTab, $validTabs, true) ? $activeTab : 'dashboard';
+    $activeTabIndex = array_search($activeTab, $validTabs, true);
+    $activeTabIndex = $activeTabIndex === false ? 0 : $activeTabIndex;
 
     $tabs = [
         'dashboard' => 'Dashboard',
@@ -89,303 +91,32 @@
     $pendingEstimatedEpp = (int) $requirementRows->sum(fn ($row) => (int) data_get($row, 'pendiente_entrega', 0));
 @endphp
 
-<style>
-    .lgt2-dashboard {
-        display: grid !important;
-        gap: 22px !important;
-        width: 100% !important;
-    }
-
-    .lgt2-filters {
-        display: grid !important;
-        grid-template-columns: 1.4fr repeat(3, minmax(160px, 1fr)) auto auto !important;
-        gap: 14px !important;
-        align-items: end !important;
-        padding: 20px !important;
-        background: #ffffff !important;
-        border: 1px solid #d9e4f2 !important;
-        border-radius: 20px !important;
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06) !important;
-    }
-
-    .lgt2-filters label {
-        display: grid !important;
-        gap: 7px !important;
-        margin: 0 !important;
-    }
-
-    .lgt2-filters span {
-        color: #475569 !important;
-        font-size: 12px !important;
-        font-weight: 800 !important;
-        text-transform: uppercase !important;
-        letter-spacing: .04em !important;
-    }
-
-    .lgt2-filters input,
-    .lgt2-filters select {
-        width: 100% !important;
-        min-height: 46px !important;
-        padding: 0 14px !important;
-        border: 1px solid #cbd8e8 !important;
-        border-radius: 14px !important;
-        background: #f8fafc !important;
-        color: #0f172a !important;
-        font-size: 14px !important;
-    }
-
-    .lgt2-filters button,
-    .lgt2-filters a {
-        min-height: 46px !important;
-        padding: 0 18px !important;
-        border-radius: 14px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        font-weight: 800 !important;
-        text-decoration: none !important;
-        white-space: nowrap !important;
-    }
-
-    .lgt2-filters button {
-        border: 0 !important;
-        background: #14b8a6 !important;
-        color: #ffffff !important;
-        box-shadow: 0 12px 22px rgba(20, 184, 166, 0.18) !important;
-    }
-
-    .lgt2-filters a {
-        border: 1px solid #cbd8e8 !important;
-        color: #334155 !important;
-        background: #ffffff !important;
-    }
-
-    .lgt2-kpis {
-        display: grid !important;
-        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-        gap: 16px !important;
-    }
-
-    .lgt2-kpis > article {
-        padding: 20px !important;
-        background: #ffffff !important;
-        border: 1px solid #d9e4f2 !important;
-        border-radius: 20px !important;
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06) !important;
-    }
-
-    .lgt2-kpis > article span {
-        display: block !important;
-        color: #64748b !important;
-        font-size: 13px !important;
-        font-weight: 800 !important;
-    }
-
-    .lgt2-kpis > article strong {
-        display: block !important;
-        margin-top: 8px !important;
-        color: #0f766e !important;
-        font-size: 30px !important;
-        font-weight: 900 !important;
-        line-height: 1.1 !important;
-    }
-
-    .lgt2-kpis > article small {
-        display: block !important;
-        margin-top: 8px !important;
-        color: #64748b !important;
-        line-height: 1.45 !important;
-    }
-
-    .lgt2-grid {
-        display: grid !important;
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        gap: 18px !important;
-    }
-
-    .lgt2-card {
-        background: #ffffff !important;
-        border: 1px solid #d9e4f2 !important;
-        border-radius: 20px !important;
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06) !important;
-        overflow: hidden !important;
-    }
-
-    .lgt2-card header {
-        padding: 20px 22px !important;
-        border-bottom: 1px solid #e5edf7 !important;
-    }
-
-    .lgt2-card h2 {
-        margin: 0 !important;
-        color: #0f172a !important;
-        font-size: 18px !important;
-        font-weight: 800 !important;
-    }
-
-    .lgt2-card p {
-        margin: 6px 0 0 !important;
-        color: #64748b !important;
-        font-size: 14px !important;
-    }
-
-    .lgt2-bars,
-    .lgt2-size-list,
-    .lgt2-requirements,
-    .lgt2-list {
-        display: grid !important;
-        gap: 12px !important;
-        padding: 20px 22px !important;
-    }
-
-    .lgt2-bar-row,
-    .lgt2-req-row,
-    .lgt2-list-row {
-        display: grid !important;
-        grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 2fr) auto !important;
-        gap: 14px !important;
-        align-items: center !important;
-        padding: 14px !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 16px !important;
-        background: #f8fafc !important;
-    }
-
-    .lgt2-list-row {
-        grid-template-columns: minmax(180px, 1fr) auto !important;
-    }
-
-    .lgt2-bar-row strong,
-    .lgt2-req-row strong,
-    .lgt2-list-row strong {
-        color: #0f172a !important;
-        font-weight: 800 !important;
-    }
-
-    .lgt2-bar-row small,
-    .lgt2-req-row small,
-    .lgt2-list-row small {
-        display: block !important;
-        margin-top: 4px !important;
-        color: #64748b !important;
-        font-size: 13px !important;
-    }
-
-    .lgt2-bar {
-        height: 10px !important;
-        overflow: hidden !important;
-        border-radius: 999px !important;
-        background: #e2e8f0 !important;
-    }
-
-    .lgt2-bar i {
-        display: block !important;
-        height: 100% !important;
-        min-width: 5px !important;
-        border-radius: inherit !important;
-        background: linear-gradient(90deg, #14b8a6, #2563eb) !important;
-    }
-
-    .lgt2-size-block {
-        padding: 14px !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 16px !important;
-        background: #f8fafc !important;
-    }
-
-    .lgt2-size-block h3 {
-        margin: 0 0 12px !important;
-        color: #0f172a !important;
-        font-size: 15px !important;
-        font-weight: 800 !important;
-    }
-
-    .lgt2-size-row {
-        display: grid !important;
-        grid-template-columns: 80px minmax(120px, 1fr) auto !important;
-        gap: 10px !important;
-        align-items: center !important;
-        margin-top: 8px !important;
-    }
-
-    .lgt2-pill {
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        border-radius: 999px !important;
-        padding: 6px 10px !important;
-        background: #e2e8f0 !important;
-        color: #334155 !important;
-        font-size: 12px !important;
-        font-weight: 900 !important;
-    }
-
-    .lgt2-pill.ok {
-        background: #dcfce7 !important;
-        color: #166534 !important;
-    }
-
-    .lgt2-pill.warning {
-        background: #fef3c7 !important;
-        color: #92400e !important;
-    }
-
-    .lgt2-pill.danger {
-        background: #fee2e2 !important;
-        color: #991b1b !important;
-    }
-
-    .lgt2-empty {
-        padding: 20px !important;
-        border: 1px dashed #cbd5e1 !important;
-        border-radius: 16px !important;
-        color: #64748b !important;
-        background: #f8fafc !important;
-        text-align: center !important;
-    }
-
-    @media (max-width: 1200px) {
-        .lgt2-filters,
-        .lgt2-kpis,
-        .lgt2-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        }
-    }
-
-    @media (max-width: 720px) {
-        .lgt2-filters,
-        .lgt2-kpis,
-        .lgt2-grid {
-            grid-template-columns: 1fr !important;
-        }
-
-        .lgt2-bar-row,
-        .lgt2-req-row,
-        .lgt2-list-row,
-        .lgt2-size-row {
-            grid-template-columns: 1fr !important;
-        }
-    }
-</style>
-
 <div class="lgt-page">
     <header class="lgt-header">
         <h1 class="lgt-title">Logística</h1>
         <p class="lgt-subtitle">Control de EPP, herramientas, servicios y costos</p>
     </header>
 
-    <nav class="lgt-tabs" aria-label="Secciones de logística">
+    <nav class="lgt-tabs" aria-label="Secciones de logística" data-logistics-tabs>
         @foreach($tabs as $key => $label)
-            <a href="{{ $tabUrl($key) }}" class="lgt-tab {{ $activeTab === $key ? 'active' : '' }}">
+            <a
+                href="{{ $tabUrl($key) }}"
+                class="lgt-tab {{ $activeTab === $key ? 'active' : '' }}"
+                data-logistics-tab-link="{{ $key }}"
+                aria-selected="{{ $activeTab === $key ? 'true' : 'false' }}"
+            >
                 {{ $label }}
             </a>
         @endforeach
     </nav>
 
-    <section class="lgt-content">
-        @if($activeTab === 'dashboard')
+    <section class="lgt-content" data-logistics-tab-viewport>
+        <div class="lgt-tab-track lgt-tab-track--{{ $activeTabIndex }}" data-logistics-tab-track data-logistics-active-index="{{ $activeTabIndex }}">
+            <section class="lgt-tab-panel {{ $activeTab === 'dashboard' ? 'is-active' : '' }}" data-logistics-tab-panel="dashboard" aria-hidden="{{ $activeTab === 'dashboard' ? 'false' : 'true' }}">
     <section class="lgt2-dashboard">
-        <form class="lgt2-filters" method="GET" action="{{ url('/logistica') }}">
+        @include('logistica.partials.dashboard')
+        <div class="lgt2-legacy-dashboard" hidden>
+        <form class="lgt2-filters" method="GET" action="{{ url('/logistica') }}" data-logistics-dashboard-filters>
             <input type="hidden" name="tab" value="dashboard">
 
             <label>
@@ -429,7 +160,6 @@
                 </select>
             </label>
 
-            <button type="submit">Actualizar</button>
             <a href="{{ url('/logistica') }}">Limpiar</a>
         </form>
 
@@ -606,26 +336,16 @@
                 </div>
             </section>
         </div>
+        </div>
     </section>
 
-        @elseif($activeTab === 'entregas')
-            <div class="lgt-card">
-                <div class="lgt-card-header">
-                    <h2>Entregas y cambios de EPP</h2>
-                    <p>Historial de entregas, cambios y devoluciones.</p>
-                </div>
+            </section>
 
-                <div class="lgt-card-body">
-                    <div class="lgt-table-wrap">
-                        @includeIf('logistica.partials.delivery-table', [
-                            'rows' => $recentDeliveryRows,
-                            'showDays' => false,
-                        ])
-                    </div>
-                </div>
-            </div>
+            <section class="lgt-tab-panel {{ $activeTab === 'entregas' ? 'is-active' : '' }}" data-logistics-tab-panel="entregas" aria-hidden="{{ $activeTab === 'entregas' ? 'false' : 'true' }}">
+                @include('epps.partials.workspace', array_merge($eppModule ?? [], ['embedded' => true]))
+            </section>
 
-        @elseif($activeTab === 'vencimientos')
+            <section class="lgt-tab-panel {{ $activeTab === 'vencimientos' ? 'is-active' : '' }}" data-logistics-tab-panel="vencimientos" aria-hidden="{{ $activeTab === 'vencimientos' ? 'false' : 'true' }}">
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Próximos vencimientos de EPP</h2>
@@ -642,7 +362,9 @@
                 </div>
             </div>
 
-        @elseif($activeTab === 'herramientas')
+            </section>
+
+            <section class="lgt-tab-panel {{ $activeTab === 'herramientas' ? 'is-active' : '' }}" data-logistics-tab-panel="herramientas" aria-hidden="{{ $activeTab === 'herramientas' ? 'false' : 'true' }}">
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Herramientas</h2>
@@ -665,7 +387,9 @@
                 </div>
             </div>
 
-        @elseif($activeTab === 'servicios')
+            </section>
+
+            <section class="lgt-tab-panel {{ $activeTab === 'servicios' ? 'is-active' : '' }}" data-logistics-tab-panel="servicios" aria-hidden="{{ $activeTab === 'servicios' ? 'false' : 'true' }}">
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Servicios y alquileres</h2>
@@ -688,7 +412,9 @@
                 </div>
             </div>
 
-        @elseif($activeTab === 'identificacion')
+            </section>
+
+            <section class="lgt-tab-panel {{ $activeTab === 'identificacion' ? 'is-active' : '' }}" data-logistics-tab-panel="identificacion" aria-hidden="{{ $activeTab === 'identificacion' ? 'false' : 'true' }}">
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Identificación de ítems</h2>
@@ -711,7 +437,9 @@
                 </div>
             </div>
 
-        @elseif($activeTab === 'costos')
+            </section>
+
+            <section class="lgt-tab-panel {{ $activeTab === 'costos' ? 'is-active' : '' }}" data-logistics-tab-panel="costos" aria-hidden="{{ $activeTab === 'costos' ? 'false' : 'true' }}">
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Costos y facturación</h2>
@@ -733,7 +461,8 @@
                     @endif
                 </div>
             </div>
-        @endif
+            </section>
+        </div>
     </section>
 </div>
 @endsection

@@ -68,6 +68,64 @@
                 ? ['Cambios detectados en la importacion: ' . implode(', ', $summaryPartsFallback) . '.']
                 : ['No hay cambios en la BD para esta importacion.'];
         }
+
+        $importType = $hasImportResult ? ($importResult['tipoImportacion'] ?? 'master') : null;
+        $formatName = $hasImportResult ? ($importResult['formatoDetectado'] ?? match ($importType) {
+            'datos_personal' => 'Excel de datos del personal',
+            'contactos' => 'Excel de contactos',
+            default => 'Master General',
+        }) : null;
+
+        $guideMetrics = $hasImportResult ? [
+            ['value' => $importResult['filasLeidas'] ?? null, 'label' => 'Filas leidas'],
+            ['value' => $importResult['nuevos'] ?? 0, 'label' => 'Trabajadores nuevos'],
+            ['value' => $importResult['actualizados'] ?? 0, 'label' => 'Trabajadores actualizados'],
+            ['value' => $importResult['omitidos'] ?? 0, 'label' => 'Filas omitidas'],
+        ] : [];
+        $guideMetrics = array_values(array_filter($guideMetrics, fn ($item) => $item['value'] !== null));
+
+        if ($importType === 'datos_personal') {
+            $guideActions = [
+                'Identifico trabajadores por tipo y numero de documento.',
+                'Creo trabajadores que no existian y actualizo los existentes.',
+                'Actualizo ficha aprobada con datos personales, contacto, domicilio, banco, estudios, tallas y contacto de emergencia.',
+                'Sincronizo cargo/puesto, tipo de contrato, fecha de ingreso, fecha de contrato, periodo de prueba y fecha fin.',
+                'Preparo datos de contrato cuando correspondia, sin activar a quien no tenga contrato firmado vigente.',
+            ];
+            $guideFields = ['Documento', 'Nombres y apellidos', 'Cargo/Puesto', 'Contrato', 'Fechas laborales', 'Contacto', 'Domicilio', 'Banco', 'Estudios', 'Tallas', 'Emergencia'];
+            $guideReview = [
+                'Revisar documentos pendientes o vencidos de cada trabajador.',
+                'Subir o aprobar contrato firmado para habilitar estado ACTIVO cuando corresponda.',
+                'Validar filas omitidas, duplicadas o correos invalidos si aparecen abajo.',
+            ];
+        } elseif ($importType === 'contactos') {
+            $guideActions = [
+                'Busco trabajadores existentes por DNI.',
+                'Actualizo telefono y correo cuando el dato del Excel era valido.',
+                'No creo trabajadores nuevos ni cambio estado laboral.',
+            ];
+            $guideFields = ['DNI', 'Nombres', 'Cargo', 'Celular', 'Correo'];
+            $guideReview = [
+                'Revisar DNI no encontrados si aparecen abajo.',
+                'Corregir correos invalidos antes de volver a importar.',
+            ];
+        } else {
+            $guideActions = [
+                'Proceso el master de personal y comparo contra trabajadores existentes por DNI.',
+                'Actualizo cargo, contrato, fecha de ingreso, telefono, correo y relaciones con minas cuando aplica.',
+                'Creo trabajadores nuevos solo desde el flujo permitido y controla activaciones por contrato firmado.',
+            ];
+            $guideFields = ['DNI', 'Apellidos y nombres', 'Cargo/Puesto', 'Contrato', 'Fecha ingreso', 'Telefono', 'Correo', 'Minas'];
+            $guideReview = [
+                'Revisar relaciones de mina creadas, actualizadas o eliminadas.',
+                'Revisar activaciones bloqueadas por contrato firmado pendiente.',
+                'Revisar omitidos y duplicados.',
+            ];
+        }
+
+        if (($importResult['activacionesBloqueadas'] ?? 0) > 0) {
+            array_unshift($guideReview, ($importResult['activacionesBloqueadas'] ?? 0) . ' trabajador(es) quedaron pendientes porque falta contrato firmado vigente.');
+        }
     @endphp
 
     @if (session('success'))
@@ -104,6 +162,58 @@
     @endif
 
     @if($hasImportResult)
+        <section class="personal-import-guide" aria-label="Guia de importacion realizada">
+            <div class="personal-import-guide__header">
+                <div>
+                    <h2>Guia de importacion realizada</h2>
+                    <p>Este resumen explica que leyo el sistema y que acciones quedaron aplicadas o pendientes.</p>
+                </div>
+                <span class="personal-import-guide__badge">{{ $formatName }}</span>
+            </div>
+
+            <div class="personal-import-guide__body">
+                <div class="personal-import-guide__metrics">
+                    @foreach($guideMetrics as $metric)
+                        <div class="personal-import-guide__metric">
+                            <strong>{{ number_format((float) $metric['value'], 0) }}</strong>
+                            <span>{{ $metric['label'] }}</span>
+                        </div>
+                    @endforeach
+                </div>
+
+                <div class="personal-import-guide__grid">
+                    <div class="personal-import-guide__panel">
+                        <h3>Que importo</h3>
+                        <ul class="personal-import-guide__list">
+                            @foreach($guideActions as $action)
+                                <li>{{ $action }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+
+                    <div class="personal-import-guide__panel">
+                        <h3>Datos usados del Excel</h3>
+                        <div class="personal-import-guide__chips">
+                            @foreach($guideFields as $field)
+                                <span class="personal-import-guide__chip">{{ $field }}</span>
+                            @endforeach
+                        </div>
+                    </div>
+
+                    <div class="personal-import-guide__panel personal-import-guide__warning">
+                        <h3>Que revisar despues</h3>
+                        <ul class="personal-import-guide__list">
+                            @foreach($guideReview as $item)
+                                <li>{{ $item }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+    @endif
+
+    @if($hasImportResult)
         <div class="card" style="margin-bottom:16px;">
             <div class="card-header">
                 <span class="card-title">Resultado de Importación</span>
@@ -113,6 +223,11 @@
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['nuevos'] ?? 0 }}</strong><div class="text-muted">Nuevos</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['actualizados'] ?? 0 }}</strong><div class="text-muted">Actualizados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['camposActualizados'] ?? 0 }}</strong><div class="text-muted">Campos modificados</div></div></div>
+                    @if(($importResult['tipoImportacion'] ?? null) === 'datos_personal')
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['fichasActualizadas'] ?? 0 }}</strong><div class="text-muted">Fichas actualizadas</div></div></div>
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['contratoDatosActualizados'] ?? 0 }}</strong><div class="text-muted">Datos de contrato</div></div></div>
+                        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['contratosPreparados'] ?? 0 }}</strong><div class="text-muted">Contratos en preparacion</div></div></div>
+                    @endif
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['reactivados'] ?? 0 }}</strong><div class="text-muted">Reactivados</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['activacionesBloqueadas'] ?? 0 }}</strong><div class="text-muted">Activaciones bloqueadas</div></div></div>
                     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;"><div class="card-body"><strong>{{ $importResult['inactivados'] ?? 0 }}</strong><div class="text-muted">Inactivados</div></div></div>
@@ -398,7 +513,7 @@
 
                 <div class="card-body">
                     <p class="text-muted mb-6">
-                        Selecciona o arrastra el archivo que deseas importar.
+                        Selecciona o arrastra el Excel de datos del personal. El sistema actualizara trabajadores existentes por tipo y numero de documento, y creara los que no existan.
                     </p>
 
                     <div id="dropzone"

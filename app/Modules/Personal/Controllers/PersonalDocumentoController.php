@@ -69,7 +69,7 @@ class PersonalDocumentoController extends WebPageController
             'documentTypeOptions' => $this->downloadService->documentTypeOptions(),
             'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
             'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
-            'canDownloadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['ver', 'administrar']),
+            'canDownloadDocuments' => PermissionMatrix::allows($permissions, 'personal', 'descargar_documentos'),
             'contratoDatos' => $trabajador->contratoDatos,
             'isMujer' => $this->isFemale($trabajador),
             'gestacionBloqueos' => $trabajador->bloqueos,
