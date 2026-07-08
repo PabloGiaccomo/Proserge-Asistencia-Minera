@@ -428,15 +428,29 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
-        $deleted = $this->service->delete($usuario, $rqMina);
+        try {
+            $deleted = $this->service->delete($usuario, $rqMina);
+        } catch (\Throwable $exception) {
+            Log::error('rqmina.delete_failed', [
+                'rq_mina_id' => (string) $rqMina->id,
+                'actor_usuario_id' => (string) $usuario->id,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('rq-mina.index')
+                ->with('error', 'No se pudo eliminar el RQ Mina porque existen registros relacionados que no pudieron limpiarse.');
+        }
 
         if (!$deleted) {
             return redirect()
                 ->route('rq-mina.index')
-                ->with('error', 'Solo se puede eliminar un RQ si la parada aun no termino y tienes permiso para eliminar.');
+                ->with('error', 'No tienes permiso para eliminar este RQ Mina.');
         }
 
-        return redirect()->route('rq-mina.index')->with('success', 'RQ eliminado correctamente.');
+        return redirect()
+            ->route('rq-mina.index')
+            ->with('success', 'RQ Mina eliminado junto con sus registros operativos relacionados.');
     }
 
     public function enviar(Request $request, string $id): RedirectResponse
@@ -910,8 +924,19 @@ class RQMinaPageController extends WebPageController
                     'actividad_key' => (string) ($transporte->actividad_id ?? ''),
                     'alcance' => (string) ($transporte->alcance ?? ''),
                     'unidad_carga' => (string) ($transporte->unidad_carga ?? ''),
+                    'origen' => (string) ($transporte->origen ?? ''),
                     'unidades_transporte' => (string) ($transporte->unidades_transporte ?? ''),
+                    'placas_asignadas' => (string) ($transporte->placas_asignadas ?? ''),
+                    'fecha_inicio' => $transporte->fecha_inicio?->toDateString() ?? '',
+                    'fecha_fin' => $transporte->fecha_fin?->toDateString() ?? '',
+                    'dias_uso' => (string) ($transporte->dias_uso ?? ''),
+                    'estado_logistico' => (string) ($transporte->estado_logistico ?? ''),
                     'indicaciones' => (string) ($transporte->indicaciones ?? ''),
+                    'comentario_cambio' => (string) ($transporte->comentario_cambio ?? ''),
+                    'incidencia_operativa' => (string) ($transporte->incidencia_operativa ?? ''),
+                    'recepcion_fecha' => $transporte->recepcion_fecha?->toDateString() ?? '',
+                    'recepcion_estado' => (string) ($transporte->recepcion_estado ?? ''),
+                    'recepcion_observacion' => (string) ($transporte->recepcion_observacion ?? ''),
                 ])->values()->all(),
             ])
             ->values()
@@ -1037,11 +1062,27 @@ class RQMinaPageController extends WebPageController
                 'actividad_key' => trim((string) ($transporte['actividad_key'] ?? '')),
                 'alcance' => trim((string) ($transporte['alcance'] ?? '')),
                 'unidad_carga' => trim((string) ($transporte['unidad_carga'] ?? '')),
+                'origen' => trim((string) ($transporte['origen'] ?? '')),
                 'unidades_transporte' => trim((string) ($transporte['unidades_transporte'] ?? '')),
+                'placas_asignadas' => trim((string) ($transporte['placas_asignadas'] ?? '')),
+                'fecha_inicio' => trim((string) ($transporte['fecha_inicio'] ?? '')),
+                'fecha_fin' => trim((string) ($transporte['fecha_fin'] ?? '')),
+                'dias_uso' => trim((string) ($transporte['dias_uso'] ?? '')),
+                'estado_logistico' => trim((string) ($transporte['estado_logistico'] ?? '')),
                 'indicaciones' => trim((string) ($transporte['indicaciones'] ?? '')),
+                'comentario_cambio' => trim((string) ($transporte['comentario_cambio'] ?? '')),
+                'incidencia_operativa' => trim((string) ($transporte['incidencia_operativa'] ?? '')),
+                'recepcion_fecha' => trim((string) ($transporte['recepcion_fecha'] ?? '')),
+                'recepcion_estado' => trim((string) ($transporte['recepcion_estado'] ?? '')),
+                'recepcion_observacion' => trim((string) ($transporte['recepcion_observacion'] ?? '')),
             ];
 
-            if ($row['alcance'] === '' && $row['unidad_carga'] === '' && $row['unidades_transporte'] === '' && $row['indicaciones'] === '') {
+            $hasData = collect($row)
+                ->except(['actividad_key', 'estado_logistico', 'recepcion_estado'])
+                ->filter(fn ($value): bool => trim((string) $value) !== '')
+                ->isNotEmpty();
+
+            if (!$hasData) {
                 continue;
             }
 

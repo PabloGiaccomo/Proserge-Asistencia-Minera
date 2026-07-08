@@ -1,26 +1,34 @@
 @extends('layouts.app')
 
-@section('title', 'Confirmar pedido')
+@section('title', 'Pedido de herramientas')
 
 @php
     $puedeActualizarPedido = (bool) ($item['puede_actualizar_pedido'] ?? false);
+    $puedeCompletarRequerimiento = (bool) ($item['puede_completar_requerimiento'] ?? ($item['puede_editar'] ?? false));
     $modo = in_array(($modo ?? 'entrega'), ['entrega', 'recepcion'], true) ? $modo : 'entrega';
     $esRecepcion = $modo === 'recepcion';
-    $tituloPedido = $esRecepcion ? 'Recepcion final' : 'Entregas del pedido';
+    $tituloPedido = $esRecepcion ? 'Recepcion final' : 'Entregas durante la parada';
     $textoPedido = $esRecepcion
-        ? 'Registra las cantidades recibidas al finalizar la parada.'
-        : 'Revisa y actualiza las cantidades entregadas durante la parada.';
+        ? 'Registra que materiales regresaron, cuales quedaron incompletos y cuales no llegaron.'
+        : 'Registra cantidades entregadas y anota cambios, devoluciones, roturas o ajustes durante la parada.';
     $fechaInicioParada = !empty($item['fecha_inicio'] ?? null) ? \Illuminate\Support\Carbon::parse($item['fecha_inicio'])->startOfDay() : null;
     $fechaFinParada = !empty($item['fecha_fin'] ?? null) ? \Illuminate\Support\Carbon::parse($item['fecha_fin'])->startOfDay() : null;
     $hoyPedido = now()->startOfDay();
-    $paradaIniciada = $fechaInicioParada ? $hoyPedido->gte($fechaInicioParada) : false;
-    $paradaFinalizada = $fechaFinParada ? $hoyPedido->gte($fechaFinParada) : false;
+    $paradaIniciada = (bool) ($item['parada_iniciada'] ?? ($fechaInicioParada ? $hoyPedido->gte($fechaInicioParada) : false));
+    $paradaFinalizada = (bool) ($item['parada_finalizada'] ?? ($fechaFinParada ? $hoyPedido->gte($fechaFinParada) : false));
     $bloquearEdicionPorFase = (!$esRecepcion && !$paradaIniciada) || ($esRecepcion && !$paradaFinalizada);
+    $fechaRecepcion = old('fecha_recepcion', $item['fecha_recepcion_default'] ?? now()->toDateString());
     $buckets = [
         'base' => 'Herramientas',
         'adicional' => 'Herramientas adicionales',
         'consumibles_base' => 'Consumibles',
         'consumibles_adicional' => 'Consumibles adicionales',
+    ];
+    $recepcionEstados = [
+        'PENDIENTE' => 'Pendiente',
+        'COMPLETO' => 'Completo',
+        'INCOMPLETO' => 'Incompleto',
+        'NO_LLEGO' => 'No llego',
     ];
     $totalSolicitado = 0;
     $totalEntregado = 0;
@@ -31,10 +39,11 @@
             foreach (($grupo[$bucket] ?? []) as $row) {
                 $solicitado = (int) ($row['cantidad_solicitada'] ?? 0);
                 $entregado = (int) ($row['cantidad_entregada'] ?? 0);
+                $recibido = (int) ($row['cantidad_recibida'] ?? 0);
                 $totalSolicitado += $solicitado;
                 $totalEntregado += $entregado;
-                $totalRecibido += (int) ($row['cantidad_recibida'] ?? 0);
-                $totalFaltante += max(0, $solicitado - $entregado);
+                $totalRecibido += $recibido;
+                $totalFaltante += $esRecepcion ? max(0, $entregado - $recibido) : max(0, $solicitado - $entregado);
             }
         }
     }
@@ -49,9 +58,13 @@
         </div>
         <div class="page-actions">
             <a href="{{ route('herramientas-parada.index') }}" class="btn btn-outline">Volver</a>
-            <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn btn-outline">Completar requerimiento</a>
+            @if($puedeCompletarRequerimiento)
+                <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn btn-outline">Completar requerimiento</a>
+            @else
+                <span class="btn btn-outline is-disabled" aria-disabled="true" title="El limite de envio vencio o la lista ya fue enviada.">Requerimiento cerrado</span>
+            @endif
             <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => $esRecepcion ? 'entrega' : 'recepcion']) }}" class="btn btn-outline">
-                {{ $esRecepcion ? 'Ver entregas' : 'Recepcion final' }}
+                {{ $esRecepcion ? 'Ver entregas' : 'Registrar recepcion' }}
             </a>
         </div>
     </div>
@@ -90,13 +103,24 @@
             <strong id="pedidoTotalRecibido">{{ $totalRecibido }}</strong>
         </div>
         <div class="summary-item">
-            <span>Faltante</span>
+            <span>{{ $esRecepcion ? 'Falta regresar' : 'Falta entregar' }}</span>
             <strong id="pedidoTotalFaltante">{{ $totalFaltante }}</strong>
         </div>
     </div>
 
+    <div class="pedido-phase-note">
+        <strong>{{ $esRecepcion ? 'Cierre de parada' : 'Seguimiento durante parada' }}</strong>
+        <span>
+            @if($esRecepcion)
+                Usa la fecha de recepcion y marca cada item como completo, incompleto o no llego. La descripcion es opcional.
+            @else
+                Puedes registrar entregas y dejar una incidencia opcional si algo se rompio, se devolvio o cambio durante la parada.
+            @endif
+        </span>
+    </div>
+
     @unless($puedeActualizarPedido)
-        <div class="alert alert-error">Puedes revisar el pedido, pero no tienes permiso para registrar cantidades entregadas o recibidas.</div>
+        <div class="alert alert-error">Puedes revisar el pedido, pero no tienes permiso para registrar entregas o recepciones.</div>
     @endunless
     @if($bloquearEdicionPorFase)
         <div class="alert alert-error">
@@ -108,9 +132,26 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ route('herramientas-parada.pedido', $item['rq_mina_id']) }}" id="pedidoConfirmForm">
+    <form method="POST" action="{{ route('herramientas-parada.pedido', $item['rq_mina_id']) }}" id="pedidoConfirmForm" data-mode="{{ $modo }}">
         @csrf
         <input type="hidden" name="modo" value="{{ $modo }}">
+
+        @if($esRecepcion)
+            <div class="tools-card pedido-reception-date">
+                <div>
+                    <label class="form-label" for="fechaRecepcion">Fecha de recepcion</label>
+                    <p>Se coloca la fecha de hoy por defecto, pero puedes cambiarla si el retorno fue otro dia.</p>
+                </div>
+                <input
+                    id="fechaRecepcion"
+                    type="date"
+                    name="fecha_recepcion"
+                    class="form-control"
+                    value="{{ $fechaRecepcion }}"
+                    @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                >
+            </div>
+        @endif
 
         @foreach(($item['grupos'] ?? []) as $groupIndex => $group)
             <section class="tools-card pedido-card">
@@ -127,15 +168,22 @@
                         <div class="pedido-section">
                             <h3>{{ $label }}</h3>
                             <div class="pedido-table-wrap">
-                                <table class="pedido-table">
+                                <table class="pedido-table {{ $esRecepcion ? 'is-reception' : 'is-delivery' }}">
                                     <thead>
                                         <tr>
                                             <th>Descripcion</th>
                                             <th>Solicitado</th>
                                             <th>Entregado</th>
-                                            <th>Recibido</th>
-                                            <th>Faltante</th>
-                                            <th>Observacion</th>
+                                            @if($esRecepcion)
+                                                <th>Estado recepcion</th>
+                                                <th>Recibido</th>
+                                                <th>Faltante</th>
+                                                <th>Descripcion recepcion</th>
+                                            @else
+                                                <th>Faltante</th>
+                                                <th>Incidencia durante parada</th>
+                                                <th>Observacion base</th>
+                                            @endif
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -144,6 +192,7 @@
                                                 $solicitado = (int) ($row['cantidad_solicitada'] ?? 0);
                                                 $entregado = (int) ($row['cantidad_entregada'] ?? 0);
                                                 $recibido = (int) ($row['cantidad_recibida'] ?? 0);
+                                                $estadoRecepcion = $row['recepcion_estado'] ?? 'PENDIENTE';
                                             @endphp
                                             <tr class="pedido-row">
                                                 <td>
@@ -157,27 +206,74 @@
                                                 </td>
                                                 <td class="pedido-requested" data-requested="{{ $solicitado }}">{{ $solicitado }}</td>
                                                 <td>
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_entregada]"
-                                                        class="form-control pedido-delivered"
-                                                        value="{{ $entregado }}"
-                                                        @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase || $esRecepcion)
-                                                    >
+                                                    @if($esRecepcion)
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_entregada]" value="{{ $entregado }}">
+                                                        <span class="pedido-static-number pedido-delivered-static" data-delivered="{{ $entregado }}">{{ $entregado }}</span>
+                                                    @else
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_entregada]"
+                                                            class="form-control pedido-delivered"
+                                                            value="{{ $entregado }}"
+                                                            @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                        >
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_recibida]" value="{{ $recibido }}">
+                                                    @endif
                                                 </td>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_recibida]"
-                                                        class="form-control pedido-received"
-                                                        value="{{ $recibido }}"
-                                                        @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase || !$esRecepcion)
-                                                    >
-                                                </td>
-                                                <td><span class="pedido-missing">{{ max(0, $solicitado - $entregado) }}</span></td>
-                                                <td>{{ $row['observaciones'] ?? '-' }}</td>
+                                                @if($esRecepcion)
+                                                    <td>
+                                                        <select
+                                                            name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_estado]"
+                                                            class="form-control pedido-state-select"
+                                                            @disabled(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                        >
+                                                            @foreach($recepcionEstados as $estado => $label)
+                                                                <option value="{{ $estado }}" @selected($estadoRecepcion === $estado)>{{ $label }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                        @if(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                            <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_estado]" value="{{ $estadoRecepcion }}">
+                                                        @endif
+                                                    </td>
+                                                    <td>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][cantidad_recibida]"
+                                                            class="form-control pedido-received"
+                                                            value="{{ $recibido }}"
+                                                            @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                        >
+                                                    </td>
+                                                    <td><span class="pedido-missing">{{ max(0, $entregado - $recibido) }}</span></td>
+                                                    <td>
+                                                        <textarea
+                                                            name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_observacion]"
+                                                            class="form-control pedido-reception-note"
+                                                            rows="2"
+                                                            placeholder="Descripcion opcional"
+                                                            @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                        >{{ $row['recepcion_observacion'] ?? '' }}</textarea>
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_fecha]" value="{{ $row['recepcion_fecha'] ?? '' }}">
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][incidencia_durante_parada]" value="{{ $row['incidencia_durante_parada'] ?? '' }}">
+                                                    </td>
+                                                @else
+                                                    <td><span class="pedido-missing">{{ max(0, $solicitado - $entregado) }}</span></td>
+                                                    <td>
+                                                        <textarea
+                                                            name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][incidencia_durante_parada]"
+                                                            class="form-control pedido-incidence"
+                                                            rows="2"
+                                                            placeholder="Roto, devuelto, cambio de cantidad..."
+                                                            @readonly(!$puedeActualizarPedido || $bloquearEdicionPorFase)
+                                                        >{{ $row['incidencia_durante_parada'] ?? '' }}</textarea>
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_estado]" value="{{ $estadoRecepcion }}">
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_fecha]" value="{{ $row['recepcion_fecha'] ?? '' }}">
+                                                        <input type="hidden" name="grupos[{{ $groupIndex }}][{{ $bucket }}][{{ $rowIndex }}][recepcion_observacion]" value="{{ $row['recepcion_observacion'] ?? '' }}">
+                                                    </td>
+                                                    <td>{{ $row['observaciones'] ?? '-' }}</td>
+                                                @endif
                                             </tr>
                                         @endforeach
                                     </tbody>
@@ -203,7 +299,16 @@ function parsePedidoNumber(value) {
     return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
+function rowDelivered(row) {
+    const deliveredInput = row.querySelector('.pedido-delivered');
+    const deliveredStatic = row.querySelector('.pedido-delivered-static');
+
+    return parsePedidoNumber(deliveredInput?.value || deliveredStatic?.dataset.delivered || '0');
+}
+
 function recalculatePedido() {
+    const form = document.getElementById('pedidoConfirmForm');
+    const isReception = form?.dataset.mode === 'recepcion';
     let totalSolicitado = 0;
     let totalEntregado = 0;
     let totalRecibido = 0;
@@ -211,21 +316,21 @@ function recalculatePedido() {
 
     document.querySelectorAll('.pedido-row').forEach(row => {
         const requestedCell = row.querySelector('.pedido-requested');
-        const deliveredInput = row.querySelector('.pedido-delivered');
         const receivedInput = row.querySelector('.pedido-received');
         const missing = row.querySelector('.pedido-missing');
 
         const requested = parsePedidoNumber(requestedCell?.dataset.requested || '0');
-        const delivered = parsePedidoNumber(deliveredInput?.value || '0');
+        const delivered = rowDelivered(row);
         const received = parsePedidoNumber(receivedInput?.value || '0');
+        const missingAmount = isReception ? Math.max(0, delivered - received) : Math.max(0, requested - delivered);
 
         totalSolicitado += requested;
         totalEntregado += delivered;
         totalRecibido += received;
-        totalFaltante += Math.max(0, requested - delivered);
+        totalFaltante += missingAmount;
 
         if (missing) {
-            missing.textContent = Math.max(0, requested - delivered);
+            missing.textContent = missingAmount;
         }
     });
 
@@ -236,6 +341,26 @@ function recalculatePedido() {
 
 document.querySelectorAll('.pedido-delivered, .pedido-received').forEach(input => {
     input.addEventListener('input', recalculatePedido);
+});
+
+document.querySelectorAll('.pedido-state-select').forEach(select => {
+    select.addEventListener('change', function () {
+        const row = this.closest('.pedido-row');
+        const receivedInput = row?.querySelector('.pedido-received');
+        if (!(receivedInput instanceof HTMLInputElement)) {
+            return;
+        }
+
+        if (this.value === 'COMPLETO') {
+            receivedInput.value = rowDelivered(row);
+        }
+
+        if (this.value === 'NO_LLEGO') {
+            receivedInput.value = 0;
+        }
+
+        recalculatePedido();
+    });
 });
 </script>
 @endsection

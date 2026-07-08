@@ -67,6 +67,41 @@
         value="{{ $row['cantidad_recibida'] ?? 0 }}"
     >
     <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][incidencia_durante_parada]"
+        value="{{ $row['incidencia_durante_parada'] ?? '' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_estado]"
+        value="{{ $row['recepcion_estado'] ?? 'PENDIENTE' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_fecha]"
+        value="{{ $row['recepcion_fecha'] ?? '' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_observacion]"
+        value="{{ $row['recepcion_observacion'] ?? '' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_registrada_at]"
+        value="{{ $row['recepcion_registrada_at'] ?? '' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_registrada_por_usuario_id]"
+        value="{{ $row['recepcion_registrada_por_usuario_id'] ?? '' }}"
+    >
+    <input
+        type="hidden"
+        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][comentario_cambio_previo]"
+        value="{{ $row['comentario_cambio_previo'] ?? '' }}"
+    >
+    <input
         type="date"
         name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][pedido_llego_at]"
         class="form-control"

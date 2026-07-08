@@ -10,6 +10,14 @@
     $downloadRoute = fn ($archivo) => isset($ingreso) && $archivo
         ? route('personal.ingresos.archivos.download', [$ingreso->id, $archivo->id])
         : '#';
+    $ubigeoFields = [
+        'departamento_nacimiento',
+        'provincia_nacimiento',
+        'distrito_nacimiento',
+        'domicilio_departamento',
+        'domicilio_provincia',
+        'domicilio_distrito',
+    ];
 @endphp
 
 @once
@@ -97,14 +105,49 @@
                         if ($key === 'puesto') {
                             $options = [];
                         }
+                        $paisNacimientoActual = $fieldValue('pais_nacimiento') ?: 'Peru';
+                        $domicilioPaisActual = $fieldValue('domicilio_tipo') ?: 'Peru';
+                        $bancoActual = $fieldValue('banco');
+                        $sistemaPensionarioActual = $fieldValue('sistema_pensionario');
+                        $quintaEmpleadorActual = $fieldValue('quinta_empleador_principal');
+                        $isConditionallyRequired = match ($key) {
+                            'estado_civil_otro' => $fieldValue('estado_civil') === 'Otro',
+                            'nacionalidad_otra' => $fieldValue('nacionalidad') === 'Otra',
+                            'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual === 'Otro',
+                            'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual !== 'Otro',
+                            'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual === 'Extranjero',
+                            'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual !== 'Extranjero',
+                            'numero_cuenta' => in_array($bancoActual, ['BCP', 'Interbank'], true),
+                            'banco_otro' => $bancoActual === 'Otro',
+                            'cci' => $bancoActual === 'Otro',
+                            'tipo_comision', 'tipo_afp', 'cuspp' => $sistemaPensionarioActual === 'Sistema Privado de Pensiones',
+                            'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual === 'Otra empresa',
+                            default => false,
+                        };
+                        $conditionalHidden = match ($key) {
+                            'estado_civil_otro' => $fieldValue('estado_civil') !== 'Otro',
+                            'nacionalidad_otra' => $fieldValue('nacionalidad') !== 'Otra',
+                            'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual !== 'Otro',
+                            'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual === 'Otro',
+                            'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual !== 'Extranjero',
+                            'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual === 'Extranjero',
+                            'numero_cuenta' => !in_array($bancoActual, ['BCP', 'Interbank'], true),
+                            'banco_otro' => $bancoActual !== 'Otro',
+                            'cci' => $bancoActual === '',
+                            'tipo_comision', 'tipo_afp', 'cuspp' => $sistemaPensionarioActual !== 'Sistema Privado de Pensiones',
+                            'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual !== 'Otra empresa',
+                            default => false,
+                        };
+                        $isRequired = $isRequired || $isConditionallyRequired;
+                        $fieldDisabled = $conditionalHidden;
                     @endphp
 
                     @if($type === 'hidden')
-                        <input type="hidden" name="fields[{{ $key }}]" value="{{ $value }}">
+                        <input type="hidden" id="field_{{ $key }}" name="fields[{{ $key }}]" value="{{ $value }}" data-ficha-key="{{ $key }}">
                         @continue
                     @endif
 
-                    <div class="ficha-field {{ $isWide ? 'ficha-field-wide' : '' }}">
+                    <div class="ficha-field {{ $isWide ? 'ficha-field-wide' : '' }}" data-ficha-field="{{ $key }}" style="{{ $conditionalHidden ? 'display:none;' : '' }}">
                         <label class="ficha-label" for="field_{{ $key }}">
                             {{ $field['label'] }}
                             @if($isRequired)
@@ -123,18 +166,29 @@
                                 value="{{ $value }}"
                                 list="puesto-options"
                                 autocomplete="off"
+                                data-ficha-key="{{ $key }}"
                                 data-uppercase="1"
-                                {{ $isRequired ? 'required' : '' }}>
+                                {{ $fieldDisabled ? 'disabled' : '' }}
+                                {{ (!$fieldDisabled && $isRequired) ? 'required' : '' }}>
                         @elseif($type === 'textarea')
                             <textarea
                                 id="field_{{ $key }}"
                                 class="ficha-input"
                                 name="fields[{{ $key }}]"
                                 rows="3"
+                                data-ficha-key="{{ $key }}"
                                 data-uppercase="{{ $uppercase ? '1' : '0' }}"
-                                {{ $isRequired ? 'required' : '' }}>{{ $value }}</textarea>
-                        @elseif($type === 'select' && count($options) > 0)
-                            <select id="field_{{ $key }}" class="ficha-input" name="fields[{{ $key }}]" {{ $isRequired ? 'required' : '' }}>
+                                {{ $fieldDisabled ? 'disabled' : '' }}
+                                {{ (!$fieldDisabled && $isRequired) ? 'required' : '' }}>{{ $value }}</textarea>
+                        @elseif($type === 'select' || in_array($key, $ubigeoFields, true))
+                            <select
+                                id="field_{{ $key }}"
+                                class="ficha-input"
+                                name="fields[{{ $key }}]"
+                                data-ficha-key="{{ $key }}"
+                                data-current-value="{{ $value }}"
+                                {{ $fieldDisabled ? 'disabled' : '' }}
+                                {{ (!$fieldDisabled && $isRequired) ? 'required' : '' }}>
                                 <option value="">Seleccionar</option>
                                 @foreach($options as $optionValue => $optionLabel)
                                     @php
@@ -150,8 +204,10 @@
                                 type="{{ $type === 'tel' ? 'text' : $type }}"
                                 name="fields[{{ $key }}]"
                                 value="{{ $value }}"
+                                data-ficha-key="{{ $key }}"
                                 data-uppercase="{{ $uppercase ? '1' : '0' }}"
-                                {{ $isRequired ? 'required' : '' }}>
+                                {{ $fieldDisabled ? 'disabled' : '' }}
+                                {{ (!$fieldDisabled && $isRequired) ? 'required' : '' }}>
                         @endif
 
                         @error('fields.' . $key)
@@ -386,6 +442,7 @@
 
 @once
     @push('scripts')
+        @include('personal.fichas.partials.conditional-fields-script')
         <script>
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('[data-uppercase="1"]').forEach(function (input) {

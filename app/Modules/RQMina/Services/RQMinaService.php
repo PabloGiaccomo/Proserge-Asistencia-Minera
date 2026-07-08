@@ -8,6 +8,8 @@ use App\Models\Personal;
 use App\Models\RQMina;
 use App\Models\RQMinaActividad;
 use App\Models\RQMinaActividadGrupo;
+use App\Models\RQMinaActividadTransporte;
+use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\RQMinaDetalle;
 use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaFieldOption;
@@ -17,9 +19,11 @@ use App\Models\Usuario;
 use App\Modules\RQProserge\Services\RQProsergeService;
 use App\Modules\RQMina\Policies\RQMinaPolicy;
 use App\Support\Rbac\PermissionMatrix;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class RQMinaService
@@ -213,7 +217,7 @@ class RQMinaService
                 $rqMina->transportes()->insert($transportRows);
             }
 
-            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? []);
+            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario);
             $this->rememberFieldOptions($usuario, $payload);
 
             Log::info('rqmina.detail_persisted', [
@@ -303,7 +307,7 @@ class RQMinaService
                 $rqMina->transportes()->insert($transportRows);
             }
 
-            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? []);
+            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario);
             $this->rememberFieldOptions($usuario, $payload);
 
             Log::info('rqmina.detail_persisted', [
@@ -430,7 +434,7 @@ class RQMinaService
                 $this->replaceDetalle($rqMina, $detallePayload, $usuario);
             }
 
-            $this->replacePlanOperativo($rqMina, $planOperativo);
+            $this->replacePlanOperativo($rqMina, $planOperativo, $usuario);
             $this->rememberFieldOptions($usuario, [
                 'detalle' => $detallePayload ?? [],
                 'plan_operativo' => $planOperativo,
@@ -490,6 +494,7 @@ class RQMinaService
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.transporte_alcance', $transport['alcance'] ?? null);
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.unidad_carga', $transport['unidad_carga'] ?? null);
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.unidades_transporte', $transport['unidades_transporte'] ?? null);
+                $this->rememberFieldOption($usuario, 'rq_mina.plan.placas_transporte', $transport['placas_asignadas'] ?? null);
                 $this->rememberFieldOption($usuario, 'rq_mina.plan.transporte_indicaciones', $transport['indicaciones'] ?? null);
             }
         }
@@ -550,41 +555,193 @@ class RQMinaService
 
         return (bool) DB::transaction(function () use ($rqMina): bool {
             $rqId = (string) $rqMina->id;
-            $rqProsergeIds = $rqMina->rqProserge()
-                ->pluck('id')
-                ->map(fn ($id): string => (string) $id)
-                ->values()
-                ->all();
+            $deleted = [];
 
-            if (!empty($rqProsergeIds)) {
-                DB::table('grupo_trabajo')
-                    ->whereIn('rq_proserge_id', $rqProsergeIds)
-                    ->update([
-                        'rq_proserge_id' => null,
-                        'updated_at' => now(),
-                    ]);
+            $rqDetalleIds = $this->collectIdsByColumn('rq_mina_detalle', 'rq_mina_id', $rqId);
+            $rqProsergeIds = $this->collectIdsByColumn('rq_proserge', 'rq_mina_id', $rqId);
+            $grupoTrabajoIds = $this->uniqueIds(
+                $this->collectIdsByColumn('grupo_trabajo', 'rq_mina_id', $rqId),
+                $this->collectIdsWhereIn('grupo_trabajo', 'rq_proserge_id', $rqProsergeIds),
+            );
 
-                RQProsergeDetalle::query()
-                    ->whereIn('rq_proserge_id', $rqProsergeIds)
-                    ->delete();
+            $asistenciaEncabezadoIds = $this->collectIdsWhereIn('asistencia_encabezado', 'grupo_trabajo_id', $grupoTrabajoIds);
+            $asistenciaDetalleIds = $this->uniqueIds(
+                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_id', $asistenciaEncabezadoIds),
+                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_encabezado_id', $asistenciaEncabezadoIds),
+            );
+
+            $actividadGrupoIds = $this->collectIdsByColumn('rq_mina_actividad_grupos', 'rq_mina_id', $rqId);
+            $actividadIds = $this->uniqueIds(
+                $this->collectIdsByColumn('rq_mina_actividades', 'rq_mina_id', $rqId),
+                $this->collectIdsWhereIn('rq_mina_actividades', 'grupo_id', $actividadGrupoIds),
+                $this->collectIdsWhereIn('rq_mina_actividades', 'rq_mina_actividad_grupo_id', $actividadGrupoIds),
+            );
+            $actividadTransporteIds = $this->uniqueIds(
+                $this->collectIdsByColumn('rq_mina_actividad_transportes', 'rq_mina_id', $rqId),
+                $this->collectIdsWhereIn('rq_mina_actividad_transportes', 'grupo_id', $actividadGrupoIds),
+                $this->collectIdsWhereIn('rq_mina_actividad_transportes', 'rq_mina_actividad_grupo_id', $actividadGrupoIds),
+                $this->collectIdsWhereIn('rq_mina_actividad_transportes', 'actividad_id', $actividadIds),
+                $this->collectIdsWhereIn('rq_mina_actividad_transportes', 'rq_mina_actividad_id', $actividadIds),
+            );
+
+            $herramientaListaIds = $this->collectIdsByColumn('parada_herramienta_listas', 'rq_mina_id', $rqId);
+            $herramientaGrupoIds = $this->uniqueIds(
+                $this->collectIdsWhereIn('parada_herramienta_grupos', 'lista_id', $herramientaListaIds),
+                $this->collectIdsWhereIn('parada_herramienta_grupos', 'parada_herramienta_lista_id', $herramientaListaIds),
+                $this->collectIdsWhereIn('parada_herramienta_grupos', 'grupo_trabajo_id', $grupoTrabajoIds),
+            );
+
+            foreach ([
+                'faltas',
+                'evaluacion_desempeno',
+                'evaluacion_supervisor',
+                'evaluacion_residente',
+                'promedio_desempeno',
+            ] as $table) {
+                $this->deleteWhereIn($table, 'asistencia_detalle_id', $asistenciaDetalleIds, $deleted);
+                $this->deleteWhereIn($table, 'asistencia_id', $asistenciaEncabezadoIds, $deleted);
+                $this->deleteWhereIn($table, 'asistencia_encabezado_id', $asistenciaEncabezadoIds, $deleted);
+                $this->deleteWhereIn($table, 'grupo_trabajo_id', $grupoTrabajoIds, $deleted);
+                $this->deleteByColumn($table, 'rq_mina_id', $rqId, $deleted);
             }
 
-            DB::table('grupo_trabajo')
-                ->where('rq_mina_id', $rqId)
-                ->update([
-                    'rq_mina_id' => null,
-                    'updated_at' => now(),
-                ]);
+            $this->deleteWhereIn('asistencia_detalle', 'id', $asistenciaDetalleIds, $deleted);
+            $this->deleteWhereIn('asistencia_detalle', 'asistencia_id', $asistenciaEncabezadoIds, $deleted);
+            $this->deleteWhereIn('asistencia_detalle', 'asistencia_encabezado_id', $asistenciaEncabezadoIds, $deleted);
+            $this->deleteWhereIn('asistencia_encabezado', 'id', $asistenciaEncabezadoIds, $deleted);
 
-            $rqMina->delete();
+            $this->deleteWhereIn('parada_herramienta_items', 'grupo_id', $herramientaGrupoIds, $deleted);
+            $this->deleteWhereIn('parada_herramienta_items', 'parada_herramienta_grupo_id', $herramientaGrupoIds, $deleted);
+            $this->deleteWhereIn('parada_herramienta_grupos', 'id', $herramientaGrupoIds, $deleted);
+            $this->deleteWhereIn('parada_herramienta_listas', 'id', $herramientaListaIds, $deleted);
 
-            Log::info('rqmina.deleted', [
+            $this->deleteWhereIn('rq_mina_actividad_transporte_eventos', 'transporte_id', $actividadTransporteIds, $deleted);
+            $this->deleteWhereIn('rq_mina_actividad_transporte_eventos', 'rq_mina_actividad_transporte_id', $actividadTransporteIds, $deleted);
+            $this->deleteByColumn('rq_mina_actividad_transporte_eventos', 'rq_mina_id', $rqId, $deleted);
+            $this->deleteWhereIn('rq_mina_actividad_transportes', 'id', $actividadTransporteIds, $deleted);
+            $this->deleteWhereIn('rq_mina_actividad_turnos', 'actividad_id', $actividadIds, $deleted);
+            $this->deleteWhereIn('rq_mina_actividad_turnos', 'rq_mina_actividad_id', $actividadIds, $deleted);
+            $this->deleteWhereIn('rq_mina_actividades', 'id', $actividadIds, $deleted);
+            $this->deleteWhereIn('rq_mina_actividad_grupos', 'id', $actividadGrupoIds, $deleted);
+
+            foreach ([
+                'rq_mina_transporte_detalle',
+                'rq_mina_transportes',
+                'rq_mina_transporte_detalles',
+                'rq_mina_supervisores',
+                'rq_mina_registro_supervisores',
+                'rq_mina_supervisor_registros',
+                'rq_mina_historial',
+                'rq_mina_comentarios',
+            ] as $table) {
+                $this->deleteByColumn($table, 'rq_mina_id', $rqId, $deleted);
+            }
+
+            $this->deleteWhereIn('rq_mina_detalle_cambios', 'rq_mina_detalle_id', $rqDetalleIds, $deleted);
+            $this->deleteWhereIn('rq_mina_detalle_cambios', 'rq_proserge_id', $rqProsergeIds, $deleted);
+            $this->deleteByColumn('rq_mina_detalle_cambios', 'rq_mina_id', $rqId, $deleted);
+
+            $this->deleteWhereIn('rq_proserge_detalle', 'rq_proserge_id', $rqProsergeIds, $deleted);
+            $this->deleteWhereIn('rq_proserge_detalle', 'rq_mina_detalle_id', $rqDetalleIds, $deleted);
+
+            $this->deleteWhereIn('grupo_trabajo_detalle', 'grupo_trabajo_id', $grupoTrabajoIds, $deleted);
+            $this->deleteWhereIn('grupo_trabajo_detalles', 'grupo_trabajo_id', $grupoTrabajoIds, $deleted);
+            $this->deleteWhereIn('grupo_trabajo', 'id', $grupoTrabajoIds, $deleted);
+
+            $this->deleteWhereIn('rq_proserge', 'id', $rqProsergeIds, $deleted);
+            $this->deleteWhereIn('rq_mina_detalle', 'id', $rqDetalleIds, $deleted);
+
+            $rqDeleted = RQMina::query()->whereKey($rqId)->delete();
+            $this->addDeletedCount($deleted, 'rq_mina', $rqDeleted);
+
+            Log::info('rqmina.deleted_with_dependencies', [
                 'rq_mina_id' => $rqId,
                 'rq_proserge_ids' => $rqProsergeIds,
+                'grupo_trabajo_ids' => $grupoTrabajoIds,
+                'deleted' => $deleted,
             ]);
 
-            return true;
-        });
+            return $rqDeleted > 0;
+        }, 3);
+    }
+
+    private function collectIdsByColumn(string $table, string $column, string $value): array
+    {
+        if (!$this->tableHasColumn($table, $column) || !Schema::hasColumn($table, 'id')) {
+            return [];
+        }
+
+        return DB::table($table)
+            ->where($column, $value)
+            ->pluck('id')
+            ->map(fn ($id): string => (string) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function collectIdsWhereIn(string $table, string $column, array $values): array
+    {
+        $values = $this->uniqueIds($values);
+
+        if (empty($values) || !$this->tableHasColumn($table, $column) || !Schema::hasColumn($table, 'id')) {
+            return [];
+        }
+
+        return DB::table($table)
+            ->whereIn($column, $values)
+            ->pluck('id')
+            ->map(fn ($id): string => (string) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function deleteByColumn(string $table, string $column, string $value, array &$deleted): void
+    {
+        if (!$this->tableHasColumn($table, $column)) {
+            return;
+        }
+
+        $this->addDeletedCount($deleted, $table, DB::table($table)->where($column, $value)->delete());
+    }
+
+    private function deleteWhereIn(string $table, string $column, array $values, array &$deleted): void
+    {
+        $values = $this->uniqueIds($values);
+
+        if (empty($values) || !$this->tableHasColumn($table, $column)) {
+            return;
+        }
+
+        $this->addDeletedCount($deleted, $table, DB::table($table)->whereIn($column, $values)->delete());
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, $column);
+    }
+
+    private function addDeletedCount(array &$deleted, string $table, int $count): void
+    {
+        if ($count <= 0) {
+            return;
+        }
+
+        $deleted[$table] = ($deleted[$table] ?? 0) + $count;
+    }
+
+    private function uniqueIds(array ...$groups): array
+    {
+        return collect($groups)
+            ->flatten()
+            ->map(fn ($id): string => (string) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function canUpdate(Usuario $usuario, RQMina $rqMina): bool
@@ -1077,9 +1234,12 @@ class RQMinaService
         ];
     }
 
-    private function replacePlanOperativo(RQMina $rqMina, mixed $groups): void
+    private function replacePlanOperativo(RQMina $rqMina, mixed $groups, ?Usuario $usuario = null): void
     {
+        $previousTransportes = $this->snapshotActividadTransportes($rqMina);
         $normalized = $this->normalizePlanOperativo($groups);
+
+        $this->recordTransportPlanChanges($rqMina, $previousTransportes, $normalized, $usuario);
 
         $rqMina->actividadGrupos()->delete();
 
@@ -1150,8 +1310,19 @@ class RQMinaService
                     'actividad_id' => $actividadId,
                     'alcance' => $transporte['alcance'],
                     'unidad_carga' => $transporte['unidad_carga'],
+                    'origen' => $transporte['origen'],
                     'unidades_transporte' => $transporte['unidades_transporte'],
+                    'placas_asignadas' => $transporte['placas_asignadas'],
+                    'fecha_inicio' => $transporte['fecha_inicio'],
+                    'fecha_fin' => $transporte['fecha_fin'],
+                    'dias_uso' => $transporte['dias_uso'],
+                    'estado_logistico' => $transporte['estado_logistico'],
                     'indicaciones' => $transporte['indicaciones'],
+                    'comentario_cambio' => $transporte['comentario_cambio'],
+                    'incidencia_operativa' => $transporte['incidencia_operativa'],
+                    'recepcion_fecha' => $transporte['recepcion_fecha'],
+                    'recepcion_estado' => $transporte['recepcion_estado'],
+                    'recepcion_observacion' => $transporte['recepcion_observacion'],
                     'orden' => $transportIndex + 1,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -1294,19 +1465,61 @@ class RQMinaService
                 continue;
             }
 
+            $fechaInicio = $this->normalizeDateValue($item['fecha_inicio'] ?? null);
+            $fechaFin = $this->normalizeDateValue($item['fecha_fin'] ?? null);
+            $recepcionFecha = $this->normalizeDateValue($item['recepcion_fecha'] ?? null);
+
             $row = [
                 'actividad_key' => trim((string) ($item['actividad_key'] ?? '')),
                 'alcance' => trim((string) ($item['alcance'] ?? '')),
                 'unidad_carga' => trim((string) ($item['unidad_carga'] ?? '')),
+                'origen' => $this->normalizeTransportEnum(
+                    $item['origen'] ?? null,
+                    RQMinaActividadTransporte::origenes(),
+                    RQMinaActividadTransporte::ORIGEN_EMPRESA,
+                    true
+                ),
                 'unidades_transporte' => trim((string) ($item['unidades_transporte'] ?? '')),
+                'placas_asignadas' => trim((string) ($item['placas_asignadas'] ?? '')),
+                'fecha_inicio' => $fechaInicio,
+                'fecha_fin' => $fechaFin,
+                'dias_uso' => $this->calculateDiasUso($fechaInicio, $fechaFin, $item['dias_uso'] ?? null),
+                'estado_logistico' => $this->normalizeTransportEnum(
+                    $item['estado_logistico'] ?? null,
+                    RQMinaActividadTransporte::estadosLogisticos(),
+                    RQMinaActividadTransporte::ESTADO_REQUERIDO
+                ),
                 'indicaciones' => trim((string) ($item['indicaciones'] ?? '')),
+                'comentario_cambio' => trim((string) ($item['comentario_cambio'] ?? '')),
+                'incidencia_operativa' => trim((string) ($item['incidencia_operativa'] ?? '')),
+                'recepcion_fecha' => $recepcionFecha,
+                'recepcion_estado' => $this->normalizeTransportEnum(
+                    $item['recepcion_estado'] ?? null,
+                    RQMinaActividadTransporte::estadosRecepcion(),
+                    RQMinaActividadTransporte::RECEPCION_PENDIENTE
+                ),
+                'recepcion_observacion' => trim((string) ($item['recepcion_observacion'] ?? '')),
             ];
 
-            if ($row['alcance'] === '' && $row['unidad_carga'] === '' && $row['unidades_transporte'] === '' && $row['indicaciones'] === '') {
+            $hasData = collect($row)
+                ->except(['actividad_key', 'origen', 'estado_logistico', 'recepcion_estado'])
+                ->filter(fn ($value): bool => trim((string) $value) !== '')
+                ->isNotEmpty();
+
+            if (!$hasData) {
                 continue;
             }
 
-            foreach (['alcance', 'unidad_carga', 'unidades_transporte', 'indicaciones'] as $field) {
+            foreach ([
+                'alcance',
+                'unidad_carga',
+                'unidades_transporte',
+                'placas_asignadas',
+                'indicaciones',
+                'comentario_cambio',
+                'incidencia_operativa',
+                'recepcion_observacion',
+            ] as $field) {
                 $row[$field] = $row[$field] !== '' ? $row[$field] : null;
             }
 
@@ -1314,6 +1527,226 @@ class RQMinaService
         }
 
         return $normalized;
+    }
+
+    private function normalizeTransportEnum(mixed $value, array $allowed, string $default, bool $nullable = false): ?string
+    {
+        $text = strtoupper(trim((string) $value));
+
+        if ($text === '') {
+            return $nullable ? null : $default;
+        }
+
+        return in_array($text, $allowed, true) ? $text : $default;
+    }
+
+    private function normalizeDateValue(mixed $value): ?string
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($text)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function calculateDiasUso(?string $fechaInicio, ?string $fechaFin, mixed $provided = null): ?int
+    {
+        if ($fechaInicio && $fechaFin) {
+            try {
+                $inicio = Carbon::parse($fechaInicio)->startOfDay();
+                $fin = Carbon::parse($fechaFin)->startOfDay();
+
+                if ($fin->lt($inicio)) {
+                    return null;
+                }
+
+                return $inicio->diffInDays($fin) + 1;
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        if (is_numeric($provided)) {
+            return max(0, (int) $provided);
+        }
+
+        return null;
+    }
+
+    private function snapshotActividadTransportes(RQMina $rqMina): array
+    {
+        $rqMina->loadMissing('actividadGrupos.transportes');
+        $snapshots = [];
+
+        foreach ($rqMina->actividadGrupos as $groupIndex => $group) {
+            foreach ($group->transportes as $transportIndex => $transport) {
+                $snapshot = [
+                    'key' => $this->transportPlanKey([
+                        'alcance' => (string) ($transport->alcance ?? ''),
+                        'unidad_carga' => (string) ($transport->unidad_carga ?? ''),
+                        'unidades_transporte' => (string) ($transport->unidades_transporte ?? ''),
+                        'placas_asignadas' => (string) ($transport->placas_asignadas ?? ''),
+                    ], (string) ($group->nombre ?? ''), (int) $groupIndex, (int) $transportIndex),
+                    'grupo' => (string) ($group->nombre ?? ''),
+                    'alcance' => (string) ($transport->alcance ?? ''),
+                    'unidad_carga' => (string) ($transport->unidad_carga ?? ''),
+                    'origen' => (string) ($transport->origen ?? ''),
+                    'unidades_transporte' => (string) ($transport->unidades_transporte ?? ''),
+                    'placas_asignadas' => (string) ($transport->placas_asignadas ?? ''),
+                    'fecha_inicio' => $transport->fecha_inicio?->toDateString(),
+                    'fecha_fin' => $transport->fecha_fin?->toDateString(),
+                    'dias_uso' => $transport->dias_uso,
+                    'estado_logistico' => (string) ($transport->estado_logistico ?? ''),
+                    'indicaciones' => (string) ($transport->indicaciones ?? ''),
+                    'comentario_cambio' => (string) ($transport->comentario_cambio ?? ''),
+                    'incidencia_operativa' => (string) ($transport->incidencia_operativa ?? ''),
+                    'recepcion_fecha' => $transport->recepcion_fecha?->toDateString(),
+                    'recepcion_estado' => (string) ($transport->recepcion_estado ?? ''),
+                    'recepcion_observacion' => (string) ($transport->recepcion_observacion ?? ''),
+                ];
+
+                $snapshots[$snapshot['key']] = $snapshot;
+            }
+        }
+
+        return $snapshots;
+    }
+
+    private function normalizedTransportSnapshots(array $groups): array
+    {
+        $snapshots = [];
+
+        foreach ($groups as $groupIndex => $group) {
+            foreach (($group['transportes'] ?? []) as $transportIndex => $transport) {
+                $snapshot = $this->transportSnapshotFromRow($transport, (string) ($group['nombre'] ?? ''), (int) $groupIndex, (int) $transportIndex);
+                $snapshots[$snapshot['key']] = $snapshot;
+            }
+        }
+
+        return $snapshots;
+    }
+
+    private function transportSnapshotFromRow(array $row, string $groupName, int $groupIndex, int $transportIndex): array
+    {
+        return [
+            'key' => $this->transportPlanKey($row, $groupName, $groupIndex, $transportIndex),
+            'grupo' => $groupName,
+            'alcance' => $row['alcance'] ?? null,
+            'unidad_carga' => $row['unidad_carga'] ?? null,
+            'origen' => $row['origen'] ?? null,
+            'unidades_transporte' => $row['unidades_transporte'] ?? null,
+            'placas_asignadas' => $row['placas_asignadas'] ?? null,
+            'fecha_inicio' => $row['fecha_inicio'] ?? null,
+            'fecha_fin' => $row['fecha_fin'] ?? null,
+            'dias_uso' => $row['dias_uso'] ?? null,
+            'estado_logistico' => $row['estado_logistico'] ?? null,
+            'indicaciones' => $row['indicaciones'] ?? null,
+            'comentario_cambio' => $row['comentario_cambio'] ?? null,
+            'incidencia_operativa' => $row['incidencia_operativa'] ?? null,
+            'recepcion_fecha' => $row['recepcion_fecha'] ?? null,
+            'recepcion_estado' => $row['recepcion_estado'] ?? null,
+            'recepcion_observacion' => $row['recepcion_observacion'] ?? null,
+        ];
+    }
+
+    private function transportPlanKey(array $row, string $groupName, int $groupIndex, int $transportIndex): string
+    {
+        $parts = [
+            mb_strtolower(trim($groupName)),
+            mb_strtolower(trim((string) ($row['alcance'] ?? ''))),
+            mb_strtolower(trim((string) ($row['unidad_carga'] ?? ''))),
+            mb_strtolower(trim((string) ($row['unidades_transporte'] ?? ''))),
+            mb_strtolower(trim((string) ($row['placas_asignadas'] ?? ''))),
+            (string) $groupIndex,
+            (string) $transportIndex,
+        ];
+
+        return md5(implode('|', $parts));
+    }
+
+    private function comparableTransportSnapshot(array $snapshot): array
+    {
+        unset($snapshot['key']);
+
+        ksort($snapshot);
+
+        return $snapshot;
+    }
+
+    private function recordTransportPlanChanges(RQMina $rqMina, array $previous, array $groups, ?Usuario $usuario): void
+    {
+        $current = $this->normalizedTransportSnapshots($groups);
+
+        foreach ($current as $key => $snapshot) {
+            if (!isset($previous[$key])) {
+                $this->recordTransportEvent(
+                    $rqMina,
+                    RQMinaActividadTransporteEvento::TIPO_REGISTRO,
+                    null,
+                    $snapshot['estado_logistico'] ?? null,
+                    'Registro de transporte en plan operativo.',
+                    $snapshot,
+                    $usuario
+                );
+                continue;
+            }
+
+            if ($this->comparableTransportSnapshot($previous[$key]) !== $this->comparableTransportSnapshot($snapshot)) {
+                $this->recordTransportEvent(
+                    $rqMina,
+                    RQMinaActividadTransporteEvento::TIPO_CAMBIO,
+                    $previous[$key]['estado_logistico'] ?? null,
+                    $snapshot['estado_logistico'] ?? null,
+                    $snapshot['comentario_cambio'] ?: 'Cambio en datos de transporte.',
+                    ['anterior' => $previous[$key], 'nuevo' => $snapshot],
+                    $usuario
+                );
+            }
+        }
+
+        foreach ($previous as $key => $snapshot) {
+            if (isset($current[$key])) {
+                continue;
+            }
+
+            $this->recordTransportEvent(
+                $rqMina,
+                RQMinaActividadTransporteEvento::TIPO_RETIRO,
+                $snapshot['estado_logistico'] ?? null,
+                RQMinaActividadTransporte::ESTADO_RETIRADO,
+                'Transporte retirado del plan operativo.',
+                $snapshot,
+                $usuario
+            );
+        }
+    }
+
+    private function recordTransportEvent(
+        RQMina $rqMina,
+        string $tipo,
+        ?string $estadoAnterior,
+        ?string $estadoNuevo,
+        ?string $descripcion,
+        array $snapshot,
+        ?Usuario $usuario
+    ): void {
+        RQMinaActividadTransporteEvento::query()->create([
+            'id' => (string) Str::uuid(),
+            'rq_mina_id' => (string) $rqMina->id,
+            'transporte_id' => null,
+            'tipo' => $tipo,
+            'estado_anterior' => $estadoAnterior,
+            'estado_nuevo' => $estadoNuevo,
+            'descripcion' => $descripcion,
+            'transporte_snapshot' => $snapshot,
+            'fecha_evento' => now(),
+            'usuario_id' => $usuario?->id,
+        ]);
     }
 
     private function resolveSupervisorId(mixed $supervisorId): ?string

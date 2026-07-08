@@ -119,11 +119,19 @@ class RQProsergeController extends Controller
             );
         }
 
+        if ($blocked = $this->service->modificationBlockedByFinishedParada($rq)) {
+            return ApiResponse::error(
+                message: (string) $blocked['message'],
+                code: (string) $blocked['code'],
+                status: 422,
+            );
+        }
+
         $rq->fill($request->validated());
         $rq->save();
 
         return ApiResponse::success(
-            data: RQProsergeResource::make($rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']))->resolve(),
+            data: RQProsergeResource::make($rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']))->resolve(),
             message: 'RQ Proserge actualizado',
             code: 'RQ_PROSERGE_UPDATE_OK',
         );
@@ -134,7 +142,7 @@ class RQProsergeController extends Controller
         /** @var Usuario $usuario */
         $usuario = $request->user();
 
-        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle'])->find($id);
+        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])->find($id);
 
         if (!$rq) {
             return ApiResponse::error(
@@ -177,7 +185,7 @@ class RQProsergeController extends Controller
         /** @var Usuario $usuario */
         $usuario = $request->user();
 
-        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle'])->find($id);
+        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])->find($id);
 
         if (!$rq) {
             return ApiResponse::error(

@@ -90,6 +90,12 @@
     font-size: 12px;
     font-weight: 700;
 }
+.expiry-filter-toggle {
+    display: none;
+}
+.expiry-filter-summary {
+    display: none;
+}
 .expiry-page.is-filtering .expiry-table-wrap,
 .expiry-page.is-filtering .card:nth-of-type(2) {
     opacity: 0.62;
@@ -493,6 +499,218 @@ textarea.expiry-field {
     }
 }
 @media (max-width: 720px) {
+    .expiry-page {
+        gap: 12px;
+    }
+    .expiry-page .page-header {
+        margin-bottom: 4px;
+    }
+    .expiry-page .page-header-top {
+        align-items: stretch !important;
+        flex-direction: column;
+    }
+    .expiry-page .page-title {
+        font-size: 28px;
+        line-height: 1.08;
+    }
+    .expiry-page .page-subtitle {
+        font-size: 15px;
+        line-height: 1.45;
+    }
+    .expiry-page .page-actions,
+    .expiry-page .page-actions .btn {
+        width: 100%;
+    }
+    .expiry-page .page-actions .btn {
+        justify-content: center;
+    }
+    .expiry-filter-card .card-header {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .expiry-filter-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 8px 11px;
+        background: #fff;
+        color: #0f172a;
+        font-weight: 900;
+    }
+    .expiry-filter-toggle::after {
+        content: "Mostrar";
+    }
+    .expiry-filter-card.is-open .expiry-filter-toggle::after {
+        content: "Ocultar";
+    }
+    .expiry-filter-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 14px 0;
+    }
+    .expiry-filter-summary span {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 5px 9px;
+        background: #f1f5f9;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 800;
+    }
+    .expiry-filter-card:not(.is-open) .card-body {
+        display: none;
+    }
+    .expiry-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .expiry-filters label:nth-child(3),
+    .expiry-filters label:nth-child(4),
+    .expiry-filter-actions {
+        grid-column: 1 / -1;
+    }
+    .expiry-filters label {
+        font-size: 11px;
+    }
+    .expiry-filters input,
+    .expiry-filters select,
+    .expiry-field {
+        min-height: 42px;
+        padding: 8px 10px;
+        font-size: 14px;
+    }
+    .expiry-filter-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .expiry-filter-note {
+        margin-top: 8px;
+        line-height: 1.4;
+    }
+    .expiry-card-header {
+        align-items: stretch;
+    }
+    .expiry-actions-menu,
+    .expiry-actions-toggle {
+        width: 100%;
+    }
+    .expiry-actions-toggle {
+        justify-content: center;
+    }
+    .expiry-actions-list {
+        left: 0;
+        right: 0;
+        min-width: 0;
+    }
+    .expiry-table-wrap {
+        overflow: visible;
+    }
+    .expiry-table {
+        display: block;
+        min-width: 0;
+        width: 100%;
+    }
+    .expiry-table thead {
+        display: none;
+    }
+    .expiry-table tbody {
+        display: grid;
+        gap: 12px;
+    }
+    .expiry-table tr {
+        position: relative;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 14px;
+        background: #ffffff;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
+    }
+    .expiry-table tr.blacklisted-worker {
+        background: #f8fafc;
+    }
+    .expiry-table tr.is-selected {
+        border-color: #5eead4;
+        background: #ecfeff;
+    }
+    .expiry-table th,
+    .expiry-table td {
+        display: grid;
+        grid-column: 1 / -1;
+        grid-template-columns: minmax(104px, 38%) minmax(0, 1fr);
+        align-items: start;
+        gap: 10px;
+        border-bottom: 1px solid #f1f5f9;
+        padding: 0 0 10px;
+        text-align: left;
+        width: auto !important;
+        min-width: 0 !important;
+        white-space: normal;
+    }
+    .expiry-table td::before {
+        content: attr(data-label);
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1.25;
+        text-transform: uppercase;
+    }
+    .expiry-table td:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+    }
+    .expiry-table td:first-child.expiry-select-cell {
+        grid-column: 1;
+        grid-row: 1;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start !important;
+        border-bottom: 0;
+        padding: 0;
+    }
+    .expiry-table td:first-child.expiry-select-cell::before {
+        display: none;
+    }
+    .expiry-table td:first-child.expiry-select-cell + td {
+        grid-column: 2;
+        grid-row: 1;
+        display: block;
+        border-bottom: 0;
+        padding: 0;
+    }
+    .expiry-table td:first-child.expiry-select-cell + td::before {
+        display: none;
+    }
+    .expiry-select-check {
+        width: 20px;
+        height: 20px;
+    }
+    .expiry-worker-name-wrap {
+        align-items: flex-start;
+    }
+    .expiry-worker-name {
+        font-size: 15px;
+        line-height: 1.25;
+    }
+    .expiry-action-icons {
+        flex-wrap: wrap;
+    }
+    .expiry-icon-action {
+        width: 40px;
+        height: 40px;
+    }
+    .expiry-badge,
+    .expiry-blacklist-pill {
+        width: fit-content;
+    }
     .expiry-form-grid {
         grid-template-columns: 1fr;
     }
@@ -528,9 +746,29 @@ textarea.expiry-field {
         <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
 
-    <div class="card">
-        <div class="card-header"><span class="card-title">Filtros</span></div>
-        <div class="card-body">
+    <div class="card expiry-filter-card" id="expiryFilterCard">
+        <div class="card-header">
+            <span class="card-title">Filtros</span>
+            <button type="button" class="expiry-filter-toggle" id="expiryFilterToggle" aria-controls="expiryFilterBody" aria-expanded="false"></button>
+        </div>
+        <div class="expiry-filter-summary" aria-label="Resumen de filtros activos">
+            @if($isWorkerFilterMode)
+                <span>Trabajador: {{ $workerFilter }}</span>
+            @else
+                <span>{{ str_pad((string) $month, 2, '0', STR_PAD_LEFT) }} - {{ $monthNames[$month] ?? $month }}</span>
+                <span>{{ $year }}</span>
+            @endif
+            @if(filled($filters['cargo'] ?? ''))
+                <span>Cargo: {{ $filters['cargo'] }}</span>
+            @endif
+            @if(filled($filters['estado_laboral'] ?? ''))
+                <span>Estado: {{ str_replace('_', ' ', $filters['estado_laboral']) }}</span>
+            @endif
+            @if(filled($filters['tipo_contrato'] ?? ''))
+                <span>Contrato: {{ $contractTypeOptions[$filters['tipo_contrato']] ?? $filters['tipo_contrato'] }}</span>
+            @endif
+        </div>
+        <div class="card-body" id="expiryFilterBody">
             <form method="GET" action="{{ route('personal.contratos.expiring') }}" class="expiry-filters" id="expiryFiltersForm" autocomplete="off">
                 <label>
                     Mes
@@ -692,7 +930,7 @@ textarea.expiry-field {
                                     data-worker-document="{{ $workerDocument ?: '' }}"
                                     data-worker-position="{{ $contrato->puesto ?: $personal?->puesto ?: '' }}">
                                     @if($canSelectRows)
-                                        <td class="expiry-select-cell" onclick="event.stopPropagation()">
+                                        <td class="expiry-select-cell" data-label="Seleccion" onclick="event.stopPropagation()">
                                             <input
                                                 type="checkbox"
                                                 class="expiry-select-check js-expiry-contract-worker-check"
@@ -707,7 +945,7 @@ textarea.expiry-field {
                                                 @disabled(!$personal?->id)>
                                         </td>
                                     @endif
-                                    <td>
+                                    <td data-label="Trabajador">
                                         @if($previousContractsPayload->isNotEmpty())
                                             <span class="expiry-worker-name-wrap">
                                                 <strong
@@ -729,12 +967,12 @@ textarea.expiry-field {
                                         @endif
                                         <div class="expiry-muted">{{ $contratoService->contractDisplayLabel($contrato) }}</div>
                                     </td>
-                                    <td>{{ $personal?->tipo_documento ?: 'DNI' }} {{ $workerDocument }}</td>
-                                    <td>
+                                    <td data-label="Documento">{{ $personal?->tipo_documento ?: 'DNI' }} {{ $workerDocument }}</td>
+                                    <td data-label="Cargo">
                                         <strong>{{ $contrato->puesto ?: $personal?->puesto ?: '-' }}</strong>
                                     </td>
-                                    <td>{{ $formatDate($contrato->fecha_inicio) }} al {{ $formatDate($contrato->fecha_fin) }}</td>
-                                    <td>
+                                    <td data-label="Periodo">{{ $formatDate($contrato->fecha_inicio) }} al {{ $formatDate($contrato->fecha_fin) }}</td>
+                                    <td data-label="Dias">
                                         @if($days === null)
                                             <span class="expiry-badge">Sin fecha</span>
                                         @elseif($days < 0)
@@ -747,8 +985,8 @@ textarea.expiry-field {
                                             <span class="expiry-badge ok">{{ $days }} dias</span>
                                         @endif
                                     </td>
-                                    <td>{{ $contractTypeLabel }}</td>
-                                    <td>
+                                    <td data-label="Tipo de contrato">{{ $contractTypeLabel }}</td>
+                                    <td data-label="Estado">
                                         <div><span class="expiry-badge {{ $visualContractState === 'RENOVADO' ? 'ok' : '' }}">{{ ucfirst(strtolower($visualContractState)) }}</span></div>
                                         @if($hasLaterContract)
                                             <div class="expiry-muted" style="margin-top:5px;">Tiene contrato posterior.</div>
@@ -761,7 +999,7 @@ textarea.expiry-field {
                                             <div class="expiry-muted" style="margin-top:5px;">Falta contrato firmado vigente</div>
                                         @endif
                                     </td>
-                                    <td>
+                                    <td data-label="Decision">
                                         <strong class="js-expiry-decision-label">{{ $decisionLabel($decision) }}</strong>
                                         @if($isInferredDecision)
                                             <div class="expiry-muted js-expiry-decision-note">Inferido por contrato posterior.</div>
@@ -774,11 +1012,11 @@ textarea.expiry-field {
                                             <div class="expiry-muted">Motivo: {{ $reasonLabel($contrato->motivo_no_renovacion) }}</div>
                                         @endif
                                     </td>
-                                    <td class="js-expiry-registry-cell">
+                                    <td class="js-expiry-registry-cell" data-label="Registro">
                                         {{ $contrato->decisionUsuario?->personal?->nombre_completo ?: $contrato->decisionUsuario?->email ?: ($isInferredDecision ? 'Sistema' : '-') }}
                                         <div class="expiry-muted">{{ $contrato->fecha_decision ? $contrato->fecha_decision->format('d/m/Y H:i') : ($isInferredDecision ? 'Inferido' : 'Sin registro') }}</div>
                                     </td>
-                                    <td onclick="event.stopPropagation()">
+                                    <td data-label="Acciones" onclick="event.stopPropagation()">
                                         <div class="expiry-action-icons">
                                             @if($canManage)
                                                 <button
@@ -927,6 +1165,35 @@ textarea.expiry-field {
 ])
 
 <script>
+(function () {
+    const card = document.getElementById('expiryFilterCard');
+    const toggle = document.getElementById('expiryFilterToggle');
+    if (!card || !toggle) return;
+
+    const mobileQuery = window.matchMedia('(max-width: 720px)');
+
+    function setOpen(open) {
+        card.classList.toggle('is-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function syncInitialState() {
+        setOpen(!mobileQuery.matches);
+    }
+
+    toggle.addEventListener('click', function () {
+        setOpen(!card.classList.contains('is-open'));
+    });
+
+    if (typeof mobileQuery.addEventListener === 'function') {
+        mobileQuery.addEventListener('change', syncInitialState);
+    } else if (typeof mobileQuery.addListener === 'function') {
+        mobileQuery.addListener(syncInitialState);
+    }
+
+    syncInitialState();
+})();
+
 (function () {
     const form = document.getElementById('expiryFiltersForm');
     if (!form) return;

@@ -39,6 +39,29 @@ $calcTransporteTotal = static function (array $transporte): int {
         </a>
     </div>
 
+    <section class="rq-mina-mobile-lock" aria-labelledby="rqMinaMobileTitle">
+        <div class="rq-mina-mobile-lock__icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="12" rx="2"></rect>
+                <path d="M8 20h8"></path>
+                <path d="M12 16v4"></path>
+            </svg>
+        </div>
+        <div class="rq-mina-mobile-lock__content">
+            <span class="rq-mina-mobile-lock__eyebrow">Pantalla operativa</span>
+            <h2 id="rqMinaMobileTitle">RQ Mina requiere una pantalla grande</h2>
+            <p>
+                Esta vista contiene plan operativo, pedidos de personal, transporte, acciones y tablas amplias.
+                Para evitar errores de carga o envio, usala desde una laptop, PC o tablet en horizontal.
+            </p>
+            <div class="rq-mina-mobile-lock__tips">
+                <span>En celular no se habilitan acciones de creacion, edicion, envio ni eliminacion.</span>
+                <span>Si necesitas revisar una parada, abre esta misma direccion desde un dispositivo amplio.</span>
+            </div>
+        </div>
+    </section>
+
+    <div class="rq-mina-desktop-workspace">
     @if(session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
     @endif
@@ -204,9 +227,6 @@ $calcTransporteTotal = static function (array $transporte): int {
                                 $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
                                 $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
                                 $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
-                                $paradaTerminada = $fechaFinRaw !== ''
-                                    ? \Carbon\Carbon::parse($fechaFinRaw)->lt(\Carbon\Carbon::today())
-                                    : false;
                                 $fechaInicioFmt = $fechaInicioRaw !== ''
                                     ? \Carbon\Carbon::parse($fechaInicioRaw)->locale('es')->translatedFormat('d M Y')
                                     : '-';
@@ -287,12 +307,10 @@ $calcTransporteTotal = static function (array $transporte): int {
                                             </form>
                                         @endif
 
-                                        @if(!$paradaTerminada)
-                                            <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar este RQ? Si fue enviado, tambien se retirara de la gestion relacionada. Esta accion no se puede deshacer.');">
-                                                @csrf
-                                                <button type="submit" class="btn-row btn-danger">Eliminar</button>
-                                            </form>
-                                        @endif
+                                        <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar definitivamente este RQ Mina? Se borraran su RQ Proserge, Man Power, herramientas, asistencia, supervisores y registros operativos relacionados. No se borraran trabajadores, minas ni catalogos maestros. Esta accion no se puede deshacer.');">
+                                            @csrf
+                                            <button type="submit" class="btn-row btn-danger">Eliminar</button>
+                                        </form>
                                     </div>
                                 </td>
                             </tr>
@@ -356,9 +374,11 @@ $calcTransporteTotal = static function (array $transporte): int {
             </div>
         @endif
     </div>
+    </div>
 </div>
 
 <!-- Modal Nuevo RQ Mina -->
+<div class="rq-mina-desktop-workspace">
 <div class="modalrq-overlay" id="modalRQ" style="display: none;">
     <div class="modalrq-container">
         <div class="modalrq-header">
@@ -466,6 +486,7 @@ $calcTransporteTotal = static function (array $transporte): int {
             <button type="submit" form="formRQ" class="btn-crear" id="modalRQSubmit">Crear BORRADOR</button>
         </div>
     </div>
+</div>
 </div>
 
 <script>

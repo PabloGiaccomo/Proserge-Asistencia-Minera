@@ -115,11 +115,17 @@ class PermissionMatrix
     {
         $matrix = self::normalize($rawPermissions);
 
-        if (!isset($matrix[$module][$action])) {
-            return false;
+        if (self::matrixAllows($matrix, $module, $action)) {
+            return true;
         }
 
-        return $matrix[$module][$action] === true || ($action !== 'administrar' && ($matrix[$module]['administrar'] ?? false) === true);
+        foreach (self::fallbackPermissionChecks($module, $action) as [$fallbackModule, $fallbackAction]) {
+            if (self::matrixAllows($matrix, $fallbackModule, $fallbackAction)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static function allowsAny(mixed $rawPermissions, string $module, array $actions): bool
@@ -149,6 +155,92 @@ class PermissionMatrix
         }
 
         return self::allowsAny(self::effectivePermissions($usuario), $module, $actions);
+    }
+
+    private static function matrixAllows(array $matrix, string $module, string $action): bool
+    {
+        if (!isset($matrix[$module][$action])) {
+            return false;
+        }
+
+        return $matrix[$module][$action] === true
+            || ($action !== 'administrar' && ($matrix[$module]['administrar'] ?? false) === true);
+    }
+
+    private static function fallbackPermissionChecks(string $module, string $action): array
+    {
+        $checks = [];
+
+        foreach (self::fallbackActionsFor($action) as $fallbackAction) {
+            if ($fallbackAction !== $action) {
+                $checks[] = [$module, $fallbackAction];
+            }
+        }
+
+        $parentModule = self::parentModuleFor($module);
+        if ($parentModule !== null) {
+            $checks[] = [$parentModule, $action];
+
+            foreach (self::fallbackActionsFor($action) as $fallbackAction) {
+                $checks[] = [$parentModule, $fallbackAction];
+            }
+        }
+
+        return collect($checks)
+            ->unique(fn (array $check) => $check[0] . '.' . $check[1])
+            ->values()
+            ->all();
+    }
+
+    private static function parentModuleFor(string $module): ?string
+    {
+        return match ($module) {
+            'personal_ingresos',
+            'personal_documentos',
+            'personal_contratos',
+            'personal_vencimientos',
+            'personal_puestos',
+            'personal_lista_negra',
+            'habilitacion_minera' => 'personal',
+            'transportes' => 'rq_mina',
+            default => null,
+        };
+    }
+
+    private static function fallbackActionsFor(string $action): array
+    {
+        return match ($action) {
+            'ver', 'dashboards', 'descargar', 'ver_motivo' => ['ver'],
+            'crear',
+            'editar',
+            'actualizar',
+            'registrar',
+            'programar',
+            'completar',
+            'entregar',
+            'recepcionar',
+            'devolver',
+            'sincronizar',
+            'comunicar',
+            'desasignar',
+            'convalidar',
+            'subir',
+            'enviar',
+            'duplicar',
+            'corregir',
+            'reabrir',
+            'scope' => [$action, 'actualizar', 'editar'],
+            'renovar',
+            'regularizar',
+            'reingresar',
+            'anular',
+            'cerrar',
+            'marcar_no_aplica',
+            'observar',
+            'aprobar' => [$action, 'actualizar', 'aprobar'],
+            'administrar' => ['administrar'],
+            default => [$action, 'actualizar'],
+        };
     }
 
     private static function mergeMatrices(array $matrices): array

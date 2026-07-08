@@ -48,6 +48,27 @@
         })
         ->filter()
         ->values();
+    $transportOriginLabels = [
+        'EMPRESA' => 'Empresa',
+        'ALQUILADO' => 'Alquilado',
+        'OTRO' => 'Otro',
+    ];
+    $transportStateLabels = [
+        'REQUERIDO' => 'Requerido',
+        'ASIGNADO' => 'Asignado',
+        'EN_USO' => 'En uso',
+        'RETIRADO' => 'Retirado',
+        'REEMPLAZADO' => 'Reemplazado',
+        'DEVUELTO' => 'Devuelto',
+        'INCIDENCIA' => 'Incidencia',
+    ];
+    $transportReceptionLabels = [
+        'PENDIENTE' => 'Pendiente',
+        'RECIBIDO' => 'Recibido',
+        'INCOMPLETO' => 'Incompleto',
+        'NO_LLEGO' => 'No llego',
+        'CON_OBSERVACION' => 'Con observacion',
+    ];
 @endphp
 
 <style>
@@ -89,6 +110,10 @@
 .rqm-plan-turnos span { border-radius:6px; background:#f8fafc; padding:3px 5px; color:#475569; }
 .rqm-plan-transport { margin:12px; padding:10px; border:1px solid #e2e8f0; border-radius:10px; background:#fcfdff; }
 .rqm-plan-transport h4 { margin:0 0 8px; font-size:13px; color:#0f172a; }
+.rqm-plan-note { display:block; margin-top:4px; color:#64748b; font-size:11px; line-height:1.35; }
+.rqm-plan-badge { display:inline-flex; align-items:center; width:max-content; border-radius:999px; padding:4px 8px; background:#eef2ff; color:#3730a3; font-size:11px; font-weight:700; }
+.rqm-plan-badge.warning { background:#fef3c7; color:#92400e; }
+.rqm-plan-badge.success { background:#dcfce7; color:#166534; }
 </style>
 
 <div class="page-header">
@@ -329,18 +354,66 @@
                                     <thead>
                                         <tr>
                                             <th>Alcance</th>
-                                            <th>Unidad de carga</th>
-                                            <th>Unidades de transporte</th>
-                                            <th>Indicaciones</th>
+                                            <th>Unidad / origen</th>
+                                            <th>Transporte y placas</th>
+                                            <th>Uso</th>
+                                            <th>Estado</th>
+                                            <th>Retorno</th>
+                                            <th>Notas</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @foreach($grupo['transportes'] as $row)
+                                            @php
+                                                $estadoLogistico = (string) ($row['estado_logistico'] ?? 'REQUERIDO');
+                                                $estadoRecepcion = (string) ($row['recepcion_estado'] ?? 'PENDIENTE');
+                                                $estadoClass = in_array($estadoLogistico, ['DEVUELTO'], true) ? 'success' : (in_array($estadoLogistico, ['RETIRADO', 'REEMPLAZADO', 'INCIDENCIA'], true) ? 'warning' : '');
+                                                $recepcionClass = in_array($estadoRecepcion, ['RECIBIDO'], true) ? 'success' : ($estadoRecepcion !== 'PENDIENTE' ? 'warning' : '');
+                                            @endphp
                                             <tr>
                                                 <td>{{ $row['alcance'] ?? '-' }}</td>
-                                                <td>{{ $row['unidad_carga'] ?? '-' }}</td>
-                                                <td>{{ $row['unidades_transporte'] ?? '-' }}</td>
-                                                <td>{{ $row['indicaciones'] ?? '-' }}</td>
+                                                <td>
+                                                    <strong>{{ $row['unidad_carga'] ?? '-' }}</strong>
+                                                    <span class="rqm-plan-note">{{ $transportOriginLabels[$row['origen'] ?? ''] ?? 'Origen no indicado' }}</span>
+                                                </td>
+                                                <td>
+                                                    {{ $row['unidades_transporte'] ?? '-' }}
+                                                    @if(!empty($row['placas_asignadas']))
+                                                        <span class="rqm-plan-note">Placas: {{ $row['placas_asignadas'] }}</span>
+                                                    @endif
+                                                </td>
+                                                <td>
+                                                    {{ $row['fecha_inicio'] ?? '-' }} al {{ $row['fecha_fin'] ?? '-' }}
+                                                    @if(!empty($row['dias_uso']))
+                                                        <span class="rqm-plan-note">{{ $row['dias_uso'] }} dia(s) de uso</span>
+                                                    @endif
+                                                </td>
+                                                <td>
+                                                    <span class="rqm-plan-badge {{ $estadoClass }}">{{ $transportStateLabels[$estadoLogistico] ?? $estadoLogistico }}</span>
+                                                </td>
+                                                <td>
+                                                    <span class="rqm-plan-badge {{ $recepcionClass }}">{{ $transportReceptionLabels[$estadoRecepcion] ?? $estadoRecepcion }}</span>
+                                                    @if(!empty($row['recepcion_fecha']))
+                                                        <span class="rqm-plan-note">Fecha: {{ $row['recepcion_fecha'] }}</span>
+                                                    @endif
+                                                    @if(!empty($row['recepcion_observacion']))
+                                                        <span class="rqm-plan-note">{{ $row['recepcion_observacion'] }}</span>
+                                                    @endif
+                                                </td>
+                                                <td>
+                                                    @if(!empty($row['indicaciones']))
+                                                        <span class="rqm-plan-note"><strong>Inicio:</strong> {{ $row['indicaciones'] }}</span>
+                                                    @endif
+                                                    @if(!empty($row['comentario_cambio']))
+                                                        <span class="rqm-plan-note"><strong>Cambio:</strong> {{ $row['comentario_cambio'] }}</span>
+                                                    @endif
+                                                    @if(!empty($row['incidencia_operativa']))
+                                                        <span class="rqm-plan-note"><strong>Incidencia:</strong> {{ $row['incidencia_operativa'] }}</span>
+                                                    @endif
+                                                    @if(empty($row['indicaciones']) && empty($row['comentario_cambio']) && empty($row['incidencia_operativa']))
+                                                        -
+                                                    @endif
+                                                </td>
                                             </tr>
                                         @endforeach
                                     </tbody>

@@ -7,7 +7,7 @@ use App\Models\RQProsergeDetalle;
 use App\Models\RQMina;
 use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaDetalle;
-use App\Models\PersonalMina;
+use App\Models\PersonalContrato;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\RQProserge\Policies\RQProsergePolicy;
@@ -22,6 +22,10 @@ use RuntimeException;
 
 class RQProsergeService
 {
+    private const PARADA_FINALIZADA_CODE = 'RQ_PROSERGE_PARADA_FINALIZADA';
+
+    private const PARADA_FINALIZADA_MESSAGE = 'La parada ya finalizo. No se pueden modificar asignaciones ni seguimiento.';
+
     public function __construct(
         private readonly RQProsergePolicy $policy,
         private readonly DisponibilidadPersonalService $disponibilidadService,
@@ -31,7 +35,7 @@ class RQProsergeService
 
     public function listForUser(Usuario $usuario, array $filters): Collection
     {
-        $query = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado']);
+        $query = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin']);
 
         if (!empty($filters['mina_id'])) {
             $query->where('mina_id', $filters['mina_id']);
@@ -60,7 +64,7 @@ class RQProsergeService
     public function findForUser(Usuario $usuario, string $id): ?RQProserge
     {
         $rq = RQProserge::query()
-            ->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle'])
+            ->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])
             ->find($id);
 
         if (!$rq) {
@@ -94,7 +98,7 @@ class RQProsergeService
             'comentario_rrhh' => $payload['comentario_rrhh'] ?? null,
         ]);
 
-        return $rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']);
+        return $rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']);
     }
 
     public function syncFromRqMina(Usuario $usuario, RQMina $rqMina): ?RQProserge
@@ -157,7 +161,7 @@ class RQProsergeService
             );
         }
 
-        return $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']);
+        return $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']);
     }
 
     public function recalculateEstadoForRqMina(string $rqMinaId): void
@@ -215,6 +219,10 @@ class RQProsergeService
             return $this->businessError('RQ_PROSERGE_ASSIGN_FORBIDDEN', 'No autorizado para asignar en este RQ Proserge');
         }
 
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return $blocked;
+        }
+
         $rqMinaDetalle = RQMinaDetalle::query()
             ->where('id', $payload['rq_mina_detalle_id'])
             ->where('rq_mina_id', $rq->rq_mina_id)
@@ -222,6 +230,13 @@ class RQProsergeService
 
         if (!$rqMinaDetalle) {
             return $this->businessError('RQ_MINA_DETALLE_INVALID', 'El detalle de RQ Mina no pertenece al RQ Proserge');
+        }
+
+        if (!$this->assignmentFitsRqMinaDates($rq, $payload['fecha_inicio'], $payload['fecha_fin'])) {
+            return $this->businessError(
+                'RQ_PROSERGE_ASSIGNMENT_DATE_OUT_OF_RANGE',
+                'Las fechas de asignacion deben estar dentro de las fechas de la parada'
+            );
         }
 
         $disponibilidad = $this->disponibilidadService->evaluar(
@@ -274,7 +289,7 @@ class RQProsergeService
 
         return [
             'ok' => true,
-            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']),
+            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
         ];
     }
 
@@ -282,6 +297,10 @@ class RQProsergeService
     {
         if (!$this->policy->unassign($usuario, $rq)) {
             return $this->businessError('RQ_PROSERGE_UNASSIGN_FORBIDDEN', 'No autorizado para desasignar en este RQ Proserge');
+        }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return $blocked;
         }
 
         $detalle = RQProsergeDetalle::query()
@@ -303,25 +322,29 @@ class RQProsergeService
 
         return [
             'ok' => true,
-            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado', 'detalle']),
+            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
         ];
     }
 
     public function disponibles(RQProserge $rq, string $fechaInicio, string $fechaFin, int $limit = 25): array
     {
         $candidatos = DB::table('personal as p')
-            ->join('personal_mina as pm', 'pm.personal_id', '=', 'p.id')
-            ->where('pm.mina_id', $rq->mina_id)
             ->where(function ($query): void {
-                $states = $this->validOperationalMineStates();
-                $query->whereIn('pm.estado', $states)
-                    ->orWhereIn('pm.estado_habilitacion', $states);
+                $query->whereNull('p.estado')
+                    ->orWhere('p.estado', '!=', 'CESADO');
             })
-            ->where(function ($query): void {
-                $query->where('pm.activo', true)
-                    ->orWhereNull('pm.activo');
+            ->whereExists(function ($query) use ($fechaInicio, $fechaFin): void {
+                $query->selectRaw('1')
+                    ->from('personal_contratos as pc')
+                    ->whereColumn('pc.personal_id', 'p.id')
+                    ->whereIn('pc.estado', [PersonalContrato::ESTADO_ACTIVO, PersonalContrato::ESTADO_PREPARACION])
+                    ->whereNotNull('pc.fecha_inicio')
+                    ->whereDate('pc.fecha_inicio', '<=', $fechaFin)
+                    ->where(function ($subQuery) use ($fechaInicio): void {
+                        $subQuery->whereNull('pc.fecha_fin')
+                            ->orWhereDate('pc.fecha_fin', '>=', $fechaInicio);
+                    });
             })
-            ->where('p.estado', 'ACTIVO')
             ->select(['p.id', 'p.dni', 'p.numero_documento', 'p.nombre_completo', 'p.puesto'])
             ->orderBy('p.nombre_completo')
             ->limit($limit)
@@ -343,6 +366,7 @@ class RQProsergeService
                 'disponible' => $evaluacion['available'] ?? false,
                 'motivo_codigo' => $evaluacion['reason_code'],
                 'motivo' => $evaluacion['reason_message'],
+                'lineas' => $evaluacion['lineas'] ?? [],
                 'error_tecnico' => $evaluacion['technical_error'] ?? false,
             ];
         })->values()->all();
@@ -361,18 +385,6 @@ class RQProsergeService
         }
 
         $candidatos = DB::table('personal as p')
-            ->join('personal_mina as pm', 'pm.personal_id', '=', 'p.id')
-            ->where('pm.mina_id', $rq->mina_id)
-            ->where(function ($query): void {
-                $states = $this->validOperationalMineStates();
-                $query->whereIn('pm.estado', $states)
-                    ->orWhereIn('pm.estado_habilitacion', $states);
-            })
-            ->where(function ($query): void {
-                $query->where('pm.activo', true)
-                    ->orWhereNull('pm.activo');
-            })
-            ->where('p.estado', 'ACTIVO')
             ->where(function ($query) use ($tokens): void {
                 foreach ($tokens as $token) {
                     $like = '%' . $token . '%';
@@ -407,6 +419,7 @@ class RQProsergeService
                 'disponible' => (bool) ($evaluacion['available'] ?? false),
                 'motivo_codigo' => $evaluacion['reason_code'] ?? null,
                 'motivo' => $evaluacion['reason_message'] ?? null,
+                'lineas' => $evaluacion['lineas'] ?? [],
                 'error_tecnico' => (bool) ($evaluacion['technical_error'] ?? false),
             ];
         })->values()->all();
@@ -422,6 +435,11 @@ class RQProsergeService
         return $this->policy->assign($usuario, $rq);
     }
 
+    public function modificationBlockedByFinishedParada(RQProserge $rq): ?array
+    {
+        return $this->finishedParadaModificationError($rq);
+    }
+
     private function recalculateCantidadAtendida(string $rqMinaDetalleId): void
     {
         $count = RQProsergeDetalle::query()->where('rq_mina_detalle_id', $rqMinaDetalleId)->count();
@@ -432,14 +450,58 @@ class RQProsergeService
         ]);
     }
 
-    private function validOperationalMineStates(): array
+    private function assignmentFitsRqMinaDates(RQProserge $rq, string $fechaInicio, string $fechaFin): bool
     {
-        return [
-            'ACTIVO',
-            'ASIGNADO',
-            PersonalMina::ESTADO_EN_PROCESO,
-            PersonalMina::ESTADO_HABILITADO,
-        ];
+        $rqMina = $rq->relationLoaded('rqMina') ? $rq->rqMina : null;
+
+        if (!$rqMina || !$rqMina->fecha_inicio || !$rqMina->fecha_fin) {
+            $rqMina = RQMina::query()
+                ->select(['id', 'fecha_inicio', 'fecha_fin'])
+                ->find($rq->rq_mina_id);
+        }
+
+        if (!$rqMina || !$rqMina->fecha_inicio || !$rqMina->fecha_fin) {
+            return true;
+        }
+
+        $assignmentStart = CarbonImmutable::parse($fechaInicio)->startOfDay();
+        $assignmentEnd = CarbonImmutable::parse($fechaFin)->startOfDay();
+        $rqStart = $this->immutableDate($rqMina->fecha_inicio);
+        $rqEnd = $this->immutableDate($rqMina->fecha_fin);
+
+        if (!$rqStart || !$rqEnd) {
+            return true;
+        }
+
+        return $assignmentStart->gte($rqStart) && $assignmentEnd->lte($rqEnd);
+    }
+
+    private function finishedParadaModificationError(RQProserge $rq): ?array
+    {
+        if (!$this->rqMinaHasFinished($rq)) {
+            return null;
+        }
+
+        return $this->businessError(self::PARADA_FINALIZADA_CODE, self::PARADA_FINALIZADA_MESSAGE);
+    }
+
+    private function rqMinaHasFinished(RQProserge $rq): bool
+    {
+        $rqMina = $rq->relationLoaded('rqMina') ? $rq->rqMina : null;
+
+        if (!$rqMina || !$rqMina->fecha_fin) {
+            $rqMina = RQMina::query()
+                ->select(['id', 'fecha_fin'])
+                ->find($rq->rq_mina_id);
+        }
+
+        if (!$rqMina || !$rqMina->fecha_fin) {
+            return false;
+        }
+
+        $end = $this->immutableDate($rqMina->fecha_fin);
+
+        return $end !== null && $end->endOfDay()->lt(CarbonImmutable::now());
     }
 
     private function compareOperationalPriority(RQProserge $left, RQProserge $right, CarbonImmutable $today): int
@@ -622,6 +684,10 @@ class RQProsergeService
         if (!$rq) {
             return ['success' => false, 'message' => 'Solicitud no encontrada'];
         }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return ['success' => false, 'message' => $blocked['message'], 'code' => $blocked['code']];
+        }
         
         $updated = $this->update($usuario, $rq, $payload);
         
@@ -639,6 +705,10 @@ class RQProsergeService
         if (!$rq) {
             return ['success' => false, 'message' => 'Solicitud no encontrada'];
         }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return ['success' => false, 'message' => $blocked['message'], 'code' => $blocked['code']];
+        }
         
         $result = $this->assign($usuario, $rq, $asignadoId);
         
@@ -653,6 +723,10 @@ class RQProsergeService
         
         if (!$rq) {
             return ['success' => false, 'message' => 'Solicitud no encontrada'];
+        }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return ['success' => false, 'message' => $blocked['message'], 'code' => $blocked['code']];
         }
         
         $rq->fill([

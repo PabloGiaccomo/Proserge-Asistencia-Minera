@@ -166,6 +166,64 @@
         padding: 22px;
     }
 
+    .ingreso-contract-dialog {
+        width: min(620px, calc(100vw - 28px));
+        border: 0;
+        border-radius: 16px;
+        padding: 0;
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35);
+    }
+
+    .ingreso-contract-dialog::backdrop {
+        background: rgba(15, 23, 42, 0.55);
+    }
+
+    .ingreso-contract-body {
+        padding: 24px;
+    }
+
+    .ingreso-contract-worker {
+        margin: 16px 0;
+        padding: 12px 14px;
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #f8fafc;
+        color: #0f172a;
+        font-weight: 800;
+    }
+
+    .ingreso-contract-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .ingreso-contract-file {
+        display: block;
+        margin-top: 12px;
+        color: #0f172a;
+        font-weight: 700;
+    }
+
+    .ingreso-contract-file small {
+        display: block;
+        margin-top: 6px;
+        color: #64748b;
+        font-weight: 500;
+        line-height: 1.45;
+    }
+
+    .ingreso-contract-help {
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px solid #fde68a;
+        border-radius: 10px;
+        background: #fffbeb;
+        color: #92400e;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
     @media (max-width: 860px) {
         .ingresos-header,
         .ingresos-card-header {
@@ -173,7 +231,8 @@
         }
 
         .ingresos-link-grid,
-        .ingresos-filters {
+        .ingresos-filters,
+        .ingreso-contract-grid {
             grid-template-columns: 1fr;
         }
     }
@@ -291,10 +350,14 @@
                                     <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.show', $ingreso->id) }}">Ver ficha</a>
                                     @if(!$locked)
                                         <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.edit', $ingreso->id) }}">Editar</a>
-                                        <form method="POST" action="{{ route('personal.ingresos.accept', $ingreso->id) }}">
-                                            @csrf
-                                            <button class="btn btn-primary btn-sm" type="submit">Agregar a Personal</button>
-                                        </form>
+                                        <button
+                                            class="btn btn-primary btn-sm"
+                                            type="button"
+                                            data-open-contract-ingreso
+                                            data-action="{{ route('personal.ingresos.accept', $ingreso->id) }}"
+                                            data-worker="{{ $name !== '' ? $name : 'Sin nombre' }}"
+                                            data-document="{{ trim(($ingreso->tipo_documento ?: 'DNI') . ' ' . $ingreso->numero_documento) }}"
+                                        >Agregar a Personal</button>
                                         <form method="POST" action="{{ route('personal.ingresos.contract-not-signed', $ingreso->id) }}">
                                             @csrf
                                             <button class="btn btn-outline btn-sm" type="submit">No firmo contrato</button>
@@ -333,6 +396,42 @@
         </div>
     </div>
 </dialog>
+
+<dialog class="ingreso-contract-dialog" id="contractIngresoDialog">
+    <form method="POST" id="contractIngresoForm" class="ingreso-contract-body" enctype="multipart/form-data">
+        @csrf
+        <h2 style="margin:0 0 8px;color:#0f172a;font-size:22px;">Registrar fechas de contrato</h2>
+        <p style="margin:0;color:#475569;line-height:1.55;">
+            Antes de agregar a Personal, indica el periodo del contrato actual o del proximo contrato. Si ya tienes el contrato firmado, puedes adjuntarlo ahora en PDF.
+        </p>
+        <div class="ingreso-contract-worker">
+            <span id="contractIngresoWorker">Trabajador</span><br>
+            <small id="contractIngresoDocument" style="color:#64748b;font-weight:700;"></small>
+        </div>
+        <div class="ingreso-contract-grid">
+            <label>
+                Fecha inicio contrato *
+                <input class="form-control" type="date" name="fecha_inicio_contrato" id="contractIngresoStart" required>
+            </label>
+            <label>
+                Fecha fin
+                <input class="form-control" type="date" name="fecha_fin_contrato" id="contractIngresoEnd">
+            </label>
+        </div>
+        <label class="ingreso-contract-file">
+            Contrato firmado PDF (opcional)
+            <input class="form-control" type="file" name="contrato_pdf" id="contractIngresoPdf" accept="application/pdf,.pdf">
+            <small>Si adjuntas el PDF ahora, se asociara al contrato creado y se quitara la marca de pendiente.</small>
+        </label>
+        <div class="ingreso-contract-help">
+            Si aun no hay fecha de fin, puedes dejarla vacia. Si no adjuntas el PDF, el trabajador quedara pendiente de contrato firmado.
+        </div>
+        <div class="ficha-actions-bar" style="margin-top:18px;">
+            <button type="button" class="btn btn-outline" data-close-contract-dialog>Cancelar</button>
+            <button type="submit" class="btn btn-primary">Agregar a Personal</button>
+        </div>
+    </form>
+</dialog>
 @endsection
 
 @push('scripts')
@@ -350,9 +449,47 @@ document.addEventListener('click', function (event) {
 
 document.addEventListener('DOMContentLoaded', function () {
     const dialog = document.getElementById('deleteIngresoDialog');
+    const contractDialog = document.getElementById('contractIngresoDialog');
+    const contractForm = document.getElementById('contractIngresoForm');
+    const contractWorker = document.getElementById('contractIngresoWorker');
+    const contractDocument = document.getElementById('contractIngresoDocument');
+    const contractStart = document.getElementById('contractIngresoStart');
+    const contractEnd = document.getElementById('contractIngresoEnd');
+    const contractPdf = document.getElementById('contractIngresoPdf');
     let pendingForm = null;
+    const localDateValue = function () {
+        const today = new Date();
+        today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+        return today.toISOString().slice(0, 10);
+    };
 
     document.addEventListener('click', function (event) {
+        const contractButton = event.target.closest('[data-open-contract-ingreso]');
+        if (contractButton) {
+            if (contractForm) {
+                contractForm.action = contractButton.dataset.action || '';
+            }
+            if (contractWorker) {
+                contractWorker.textContent = contractButton.dataset.worker || 'Trabajador';
+            }
+            if (contractDocument) {
+                contractDocument.textContent = contractButton.dataset.document || '';
+            }
+            if (contractStart) {
+                contractStart.value = localDateValue();
+            }
+            if (contractEnd) {
+                contractEnd.value = '';
+            }
+            if (contractPdf) {
+                contractPdf.value = '';
+            }
+            if (contractDialog?.showModal) {
+                contractDialog.showModal();
+            }
+            return;
+        }
+
         const openButton = event.target.closest('[data-open-delete-ingreso]');
         if (openButton) {
             pendingForm = openButton.closest('form');
@@ -367,15 +504,35 @@ document.addEventListener('DOMContentLoaded', function () {
             pendingForm = null;
         }
 
+        if (event.target.closest('[data-close-contract-dialog]')) {
+            contractDialog?.close();
+        }
+
         if (event.target.closest('[data-confirm-delete-ingreso]') && pendingForm) {
             pendingForm.submit();
         }
+    });
+
+    contractForm?.addEventListener('submit', function (event) {
+        if (contractStart?.value && contractEnd?.value && contractEnd.value < contractStart.value) {
+            event.preventDefault();
+            contractEnd.setCustomValidity('La fecha de fin no puede ser menor a la fecha de inicio.');
+            contractEnd.reportValidity();
+            return;
+        }
+        contractEnd?.setCustomValidity('');
     });
 
     dialog?.addEventListener('click', function (event) {
         if (event.target === dialog) {
             dialog.close();
             pendingForm = null;
+        }
+    });
+
+    contractDialog?.addEventListener('click', function (event) {
+        if (event.target === contractDialog) {
+            contractDialog.close();
         }
     });
 });

@@ -495,7 +495,12 @@ class ParadaHerramientaServiceTest extends TestCase
             ->where('descripcion', 'Detector de tension')
             ->value('id');
 
-        $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
+        DB::table('rq_mina')->where('id', $rq->id)->update([
+            'fecha_inicio' => now()->subDays(3)->toDateString(),
+            'fecha_fin' => now()->subDay()->toDateString(),
+        ]);
+
+        $deliveryResult = $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
             'modo' => 'entrega',
             'grupos' => [
                 [
@@ -510,14 +515,16 @@ class ParadaHerramientaServiceTest extends TestCase
             ],
         ]);
 
+        $this->assertTrue($deliveryResult['ok']);
         $this->assertDatabaseHas('parada_herramienta_items', [
             'id' => $itemId,
             'cantidad_entregada' => 4,
             'cantidad_recibida' => 0,
         ]);
 
-        $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
+        $receptionResult = $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
             'modo' => 'recepcion',
+            'fecha_recepcion' => now()->toDateString(),
             'grupos' => [
                 [
                     'base' => [
@@ -525,17 +532,215 @@ class ParadaHerramientaServiceTest extends TestCase
                             'id' => $itemId,
                             'cantidad_entregada' => 1,
                             'cantidad_recibida' => 3,
+                            'recepcion_estado' => 'INCOMPLETO',
+                            'recepcion_observacion' => 'Retorno parcial',
                         ],
                     ],
                 ],
             ],
         ]);
 
+        $this->assertTrue($receptionResult['ok']);
         $this->assertDatabaseHas('parada_herramienta_items', [
             'id' => $itemId,
             'cantidad_entregada' => 4,
             'cantidad_recibida' => 3,
+            'recepcion_estado' => 'INCOMPLETO',
+            'recepcion_observacion' => 'Retorno parcial',
         ]);
+    }
+
+    public function test_entrega_solo_se_registra_cuando_la_parada_inicio_y_guarda_incidencia(): void
+    {
+        [$usuario, $rq] = $this->createToolsContext('LOGISTICA ENTREGA', [
+            'herramientas' => [
+                'ver' => true,
+                'actualizar' => true,
+                'administrar' => false,
+            ],
+        ]);
+
+        $service = app(ParadaHerramientaService::class);
+        $saveResult = $service->saveLista($usuario, $rq, [
+            'grupos' => [
+                [
+                    'nombre' => 'Grupo mecanico',
+                    'base' => [
+                        ['descripcion' => 'Eslinga', 'cantidad_solicitada' => 5],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($saveResult['ok']);
+
+        $itemId = DB::table('parada_herramienta_items')
+            ->where('descripcion', 'Eslinga')
+            ->value('id');
+
+        $blockedResult = $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
+            'modo' => 'entrega',
+            'grupos' => [
+                [
+                    'base' => [
+                        [
+                            'id' => $itemId,
+                            'cantidad_entregada' => 2,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($blockedResult['ok']);
+
+        DB::table('rq_mina')->where('id', $rq->id)->update([
+            'fecha_inicio' => now()->subDay()->toDateString(),
+            'fecha_fin' => now()->addDays(3)->toDateString(),
+        ]);
+
+        $deliveryResult = $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
+            'modo' => 'entrega',
+            'grupos' => [
+                [
+                    'base' => [
+                        [
+                            'id' => $itemId,
+                            'cantidad_entregada' => 4,
+                            'incidencia_durante_parada' => 'Una eslinga se devolvio por desgaste.',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($deliveryResult['ok']);
+        $this->assertDatabaseHas('parada_herramienta_items', [
+            'id' => $itemId,
+            'cantidad_entregada' => 4,
+            'incidencia_durante_parada' => 'Una eslinga se devolvio por desgaste.',
+        ]);
+    }
+
+    public function test_recepcion_final_guarda_fecha_estado_y_observacion(): void
+    {
+        [$usuario, $rq] = $this->createToolsContext('LOGISTICA RECEPCION', [
+            'herramientas' => [
+                'ver' => true,
+                'actualizar' => true,
+                'administrar' => false,
+            ],
+        ]);
+
+        $service = app(ParadaHerramientaService::class);
+        $saveResult = $service->saveLista($usuario, $rq, [
+            'grupos' => [
+                [
+                    'nombre' => 'Grupo mecanico',
+                    'base' => [
+                        ['descripcion' => 'Torquimetro', 'cantidad_solicitada' => 2],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($saveResult['ok']);
+
+        $itemId = DB::table('parada_herramienta_items')
+            ->where('descripcion', 'Torquimetro')
+            ->value('id');
+
+        DB::table('parada_herramienta_items')->where('id', $itemId)->update([
+            'cantidad_entregada' => 2,
+        ]);
+        DB::table('rq_mina')->where('id', $rq->id)->update([
+            'fecha_inicio' => now()->subDays(4)->toDateString(),
+            'fecha_fin' => now()->subDay()->toDateString(),
+        ]);
+
+        $result = $service->updatePedido($usuario, $rq->fresh(['mina:id,nombre', 'gruposTrabajo', 'listaHerramientas.grupos.items']), [
+            'modo' => 'recepcion',
+            'fecha_recepcion' => now()->subDay()->toDateString(),
+            'grupos' => [
+                [
+                    'base' => [
+                        [
+                            'id' => $itemId,
+                            'cantidad_recibida' => 1,
+                            'recepcion_estado' => 'INCOMPLETO',
+                            'recepcion_observacion' => 'Regreso con accesorio faltante.',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($result['ok']);
+        $this->assertDatabaseHas('parada_herramienta_items', [
+            'id' => $itemId,
+            'cantidad_entregada' => 2,
+            'cantidad_recibida' => 1,
+            'recepcion_estado' => 'INCOMPLETO',
+            'recepcion_fecha' => now()->subDay()->toDateString(),
+            'recepcion_observacion' => 'Regreso con accesorio faltante.',
+            'recepcion_registrada_por_usuario_id' => $usuario->id,
+        ]);
+    }
+
+    public function test_limite_vencido_bloquea_completar_requerimiento(): void
+    {
+        [$usuario, $rq] = $this->createToolsContext('LOGISTICA LIMITE VENCIDO', [
+            'herramientas' => [
+                'ver' => true,
+                'actualizar' => true,
+                'administrar' => false,
+            ],
+        ]);
+
+        DB::table('rq_mina')->where('id', $rq->id)->update([
+            'fecha_inicio' => now()->addDays(3)->toDateString(),
+            'fecha_fin' => now()->addDays(9)->toDateString(),
+        ]);
+        $rq = $rq->fresh(['mina:id,nombre', 'gruposTrabajo']);
+
+        $service = app(ParadaHerramientaService::class);
+
+        $blockedResult = $service->saveLista($usuario, $rq, [
+            'grupos' => [
+                [
+                    'nombre' => 'Grupo mecanico',
+                    'base' => [
+                        ['descripcion' => 'Llave corona', 'cantidad_solicitada' => 1],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($blockedResult['ok']);
+        $this->assertStringContainsString('vencio', $blockedResult['message']);
+
+        $resultWithComment = $service->saveLista($usuario, $rq, [
+            'comentario_cambio_previo' => 'Se agrego por solicitud del supervisor antes del arranque.',
+            'grupos' => [
+                [
+                    'nombre' => 'Grupo mecanico',
+                    'base' => [
+                        ['descripcion' => 'Llave corona', 'cantidad_solicitada' => 1],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($resultWithComment['ok']);
+        $this->assertDatabaseMissing('parada_herramienta_items', [
+            'descripcion' => 'Llave corona',
+        ]);
+
+        $view = $service->toDetailView($rq->fresh(['mina:id,nombre', 'gruposTrabajo']), $usuario);
+
+        $this->assertFalse($view['puede_editar']);
+        $this->assertFalse($view['puede_completar_requerimiento']);
+        $this->assertTrue($view['limite_envio_vencido']);
     }
 
     public function test_supervisor_asignado_limita_la_visibilidad_de_herramientas(): void

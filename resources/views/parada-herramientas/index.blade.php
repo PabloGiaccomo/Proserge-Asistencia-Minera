@@ -120,6 +120,7 @@
                                 $deadlineClass = $dias < 0 ? 'expired' : ($dias <= 2 ? 'urgent' : 'ok');
                                 $paradaIniciada = (bool) ($item['parada_iniciada'] ?? false);
                                 $paradaFinalizada = (bool) ($item['parada_finalizada'] ?? false);
+                                $puedeCompletarRequerimiento = (bool) ($item['puede_completar_requerimiento'] ?? false);
                             @endphp
                             <tr>
                                 <td>
@@ -151,13 +152,23 @@
                                 <td><span class="tools-status {{ $estadoClass($item['estado_lista'] ?? 'PENDIENTE') }}">{{ ucfirst(strtolower($item['estado_lista'] ?? 'Pendiente')) }}</span></td>
                                 <td>
                                     <div class="tools-row-actions">
-                                        <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row btn-row-outline tools-action-link">
-                                            <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                                                <path d="M12 5v14"></path>
-                                                <path d="M5 12h14"></path>
-                                            </svg>
-                                            <span>Completar requerimiento</span>
-                                        </a>
+                                        @if($puedeCompletarRequerimiento)
+                                            <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row btn-row-outline tools-action-link">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M12 5v14"></path>
+                                                    <path d="M5 12h14"></path>
+                                                </svg>
+                                                <span>Completar requerimiento</span>
+                                            </a>
+                                        @else
+                                            <span class="btn-row btn-row-outline tools-action-link is-disabled" title="{{ $dias < 0 ? 'El limite de envio vencio; el requerimiento quedo cerrado.' : 'El requerimiento ya fue enviado.' }}" aria-disabled="true">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M7 11V8a5 5 0 0 1 10 0v3"></path>
+                                                    <path d="M6 11h12v9H6z"></path>
+                                                </svg>
+                                                <span>{{ $dias < 0 ? 'Limite vencido' : 'Requerimiento cerrado' }}</span>
+                                            </span>
+                                        @endif
                                         @if($paradaIniciada)
                                             <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => 'entrega']) }}" class="btn-row tools-action-link">
                                                 <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">

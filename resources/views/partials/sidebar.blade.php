@@ -40,6 +40,7 @@
             $canRQProserge = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'rq_proserge', 'ver');
             $canManPower = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'man_power', 'ver');
             $canHerramientas = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'herramientas', 'ver');
+            $canEpps = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'epps', 'ver');
             $canMiAsistencia = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'mi_asistencia', 'ver');
             $canEvaluaciones = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'evaluaciones', 'ver');
             $canAsistencias = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'asistencias', 'ver');
@@ -88,7 +89,7 @@
             </div>
             @endif
 
-            @if($canRQMina || $canRQProserge || $canManPower || $canHerramientas || $canMiAsistencia)
+            @if($canRQMina || $canRQProserge || $canManPower || $canHerramientas || $canEpps || $canMiAsistencia)
             <div class="nav-group">
                 <div class="nav-group-title">Operación</div>
                 <div class="nav-subgroup">
@@ -110,10 +111,22 @@
                         <span class="nav-label">Man Power</span>
                     </a>
                     @endif
+                    @if($canEpps)
+                    <a href="{{ route('logistica.index') }}" class="nav-item {{ request()->is('logistica*') ? 'active' : '' }}">
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="10" width="3" height="6" rx="1"/><rect x="12" y="7" width="3" height="9" rx="1"/><rect x="17" y="12" width="3" height="4" rx="1"/><path d="M7 5h10"/></svg></span>
+                        <span class="nav-label">Logistica</span>
+                    </a>
+                    @endif
                     @if($canHerramientas)
                     <a href="{{ route('herramientas-parada.index') }}" class="nav-item {{ request()->is('herramientas-parada*') ? 'active' : '' }}">
                         <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a4 4 0 0 1-5.1 5.1l-8.4 8.4a2 2 0 0 1-2.8-2.8l8.4-8.4a4 4 0 0 1 5.1-5.1l-3.3 3z"/><path d="M5 11l3 3"/></svg></span>
                         <span class="nav-label">Herramientas</span>
+                    </a>
+                    @endif
+                    @if($canEpps)
+                    <a href="{{ route('epps.index') }}" class="nav-item {{ request()->is('epps*') ? 'active' : '' }}">
+                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M8 2h8l2 7v4a6 6 0 0 1-12 0V9z"/><path d="M6 9h12"/></svg></span>
+                        <span class="nav-label">EPP</span>
                     </a>
                     @endif
                     @if($canMiAsistencia)

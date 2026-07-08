@@ -314,11 +314,13 @@
             const isActive = item.id === selectedId;
             let cierreLabel = 'Asignación abierta';
             let cierreClass = 'abierto';
-            if (item.estado_cierre === 'advertencia') {
+            if (item.finalizada) {
+                cierreLabel = 'Parada finalizada';
+                cierreClass = 'cerrado';
+            } else if (item.estado_cierre === 'advertencia') {
                 cierreLabel = 'A 1 semana de cerrar';
                 cierreClass = 'advertencia';
-            }
-            if (item.estado_cierre === 'cerrado') {
+            } else if (item.estado_cierre === 'cerrado') {
                 cierreLabel = 'Asignación cerrada';
                 cierreClass = 'cerrado';
             }
@@ -350,16 +352,84 @@
     }
 
     function availabilityBox(disponibilidad) {
-        const disponible = disponibilidad?.tipo === 'disponible';
+        const tipo = disponibilidad?.tipo || 'pendiente';
+        const disponible = tipo === 'disponible';
+        const pendiente = tipo === 'pendiente';
         const lines = Array.isArray(disponibilidad?.lineas) ? disponibilidad.lineas : [];
+        const title = pendiente ? 'Pendiente de validar' : (disponible ? 'Disponible' : 'No disponible');
+        const className = pendiente ? 'is-neutral' : (disponible ? 'is-ok' : 'is-bad');
+
         return `
-            <div class="availability-box ${disponible ? 'is-ok' : 'is-bad'}">
-                <div class="availability-title">${disponible ? 'Disponible' : 'No disponible'}</div>
+            <div class="availability-box ${className}">
+                <div class="availability-title">${title}</div>
                 <div class="availability-lines">
-                    ${lines.map((line) => `<p>${line}</p>`).join('')}
+                    ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
                 </div>
             </div>
         `;
+    }
+
+    function pendingAvailability(message = 'Busca y selecciona un trabajador para validar su disponibilidad en esta mina y rango de fechas.') {
+        return {
+            tipo: 'pendiente',
+            lineas: [message],
+        };
+    }
+
+    function resultAvailability(item) {
+        const available = Boolean(item.disponible);
+        const lines = Array.isArray(item.lineas) && item.lineas.length
+            ? item.lineas
+            : [item.motivo || (available ? 'Disponible para asignar en este rango.' : 'No disponible para este rango.')];
+
+        return {
+            tipo: available ? 'disponible' : 'no_disponible',
+            lineas: lines,
+            motivo: item.motivo || '',
+            codigo: item.motivo_codigo || null,
+        };
+    }
+
+    function encodeAvailability(item) {
+        return encodeURIComponent(JSON.stringify(resultAvailability(item)));
+    }
+
+    function parseAvailability(value) {
+        try {
+            return JSON.parse(decodeURIComponent(value || ''));
+        } catch (error) {
+            return pendingAvailability('Selecciona nuevamente al trabajador para validar disponibilidad.');
+        }
+    }
+
+    function setAssignAvailability(card, available) {
+        const assignButton = card?.querySelector('.js-rq-assign');
+        if (!assignButton) {
+            return;
+        }
+
+        assignButton.disabled = !available;
+        assignButton.classList.toggle('disabled', !available);
+        card.dataset.workerAvailable = available ? '1' : '0';
+    }
+
+    function updateAvailabilityBox(card, disponibilidad) {
+        const box = card?.querySelector('.availability-box');
+        if (box) {
+            box.outerHTML = availabilityBox(disponibilidad);
+        }
+
+        const hidden = card?.querySelector('.js-rq-worker-id');
+        setAssignAvailability(card, disponibilidad?.tipo === 'disponible' && Boolean(hidden?.value));
+    }
+
+    function resetWorkerSelection(card, message) {
+        const hidden = card?.querySelector('.js-rq-worker-id');
+        if (hidden) {
+            hidden.value = '';
+        }
+
+        updateAvailabilityBox(card, pendingAvailability(message));
     }
 
     function matchesSearchInPuesto(puesto, personnelQuery) {
@@ -555,7 +625,7 @@
         }
 
         return `
-            <div class="puesto-card" data-puesto-id="${escapeHtml(puesto.id || '')}">
+            <div class="puesto-card" data-puesto-id="${escapeHtml(puesto.id || '')}" data-worker-available="${disableAssign ? '0' : '1'}">
                 <div class="puesto-head">
                     <h4>${escapeHtml(puesto.nombre)}</h4>
                     <span class="puesto-counter">${escapeHtml(puesto.asignados || 0)}/${escapeHtml(puesto.requeridos || 0)}</span>
@@ -633,7 +703,10 @@
             cierreBanner = '<div class="cierre-banner advertencia">A 1 semana de cerrar: en 2 semanas no se podrá asignar ni desasignar personal.</div>';
         }
         if (isClosed) {
-            cierreBanner = '<div class="cierre-banner cerrado">RQ cerrado: no se permiten modificaciones. Solo visualización del personal de parada.</div>';
+            const closedMessage = item.finalizada
+                ? (item.bloqueo_edicion_mensaje || 'La parada ya finalizo. Las asignaciones y el seguimiento quedaron bloqueados.')
+                : 'RQ cerrado: no se permiten modificaciones. Solo visualización del personal de parada.';
+            cierreBanner = `<div class="cierre-banner cerrado">${escapeHtml(closedMessage)}</div>`;
         }
 
         const cambios = Array.isArray(item.cambios) ? item.cambios : [];
@@ -687,26 +760,36 @@
         }
 
         if (!Array.isArray(items) || items.length === 0) {
-            results.innerHTML = '<div class="worker-search-empty">Sin coincidencias para la mina y fechas seleccionadas.</div>';
+            results.innerHTML = '<div class="worker-search-empty">No se encontro personal con ese texto.</div>';
             return;
         }
 
         results.innerHTML = items.map((item) => {
-            const label = `${item.nombre_completo || '-'}${item.documento ? ' - ' + item.documento : ''}`;
-            const subline = [item.puesto, item.motivo].filter(Boolean).join(' - ');
-            const disabled = item.disponible ? '' : 'disabled';
+            const name = item.nombre_completo || '-';
+            const document = item.documento || '';
+            const label = `${name}${document ? ' - ' + document : ''}`;
+            const puesto = item.puesto || 'Puesto no registrado';
+            const disponibilidad = resultAvailability(item);
+            const motivo = disponibilidad.lineas[0] || item.motivo || 'Disponible para asignar en este rango.';
+            const statusText = item.disponible ? 'Disponible' : 'No disponible';
 
             return `
                 <button
                     type="button"
-                    class="worker-result ${item.disponible ? '' : 'is-disabled'}"
+                    class="worker-result ${item.disponible ? '' : 'is-unavailable'}"
                     data-worker-result
                     data-personal-id="${escapeHtml(item.personal_id)}"
                     data-label="${escapeHtml(label)}"
-                    ${disabled}
+                    data-available="${item.disponible ? '1' : '0'}"
+                    data-availability="${encodeAvailability(item)}"
                 >
-                    <strong>${escapeHtml(label)}</strong>
-                    ${subline ? `<span>${escapeHtml(subline)}</span>` : ''}
+                    <span class="worker-result-main">
+                        <strong>${escapeHtml(name)}</strong>
+                        ${document ? `<small>DNI ${escapeHtml(document)}</small>` : ''}
+                    </span>
+                    <span class="worker-result-detail">${escapeHtml(puesto)}</span>
+                    <span class="worker-result-status ${item.disponible ? 'is-ok' : 'is-bad'}">${escapeHtml(statusText)}</span>
+                    <span class="worker-result-reason">${escapeHtml(motivo)}</span>
                 </button>
             `;
         }).join('');
@@ -715,18 +798,15 @@
     async function searchWorkers(input) {
         const card = input.closest('.puesto-card');
         const results = card?.querySelector('[data-worker-results]');
-        const hidden = card?.querySelector('.js-rq-worker-id');
         const queryValue = input.value.trim();
         const fechaInicio = card?.querySelector('.js-rq-date-start')?.value || '';
         const fechaFin = card?.querySelector('.js-rq-date-end')?.value || '';
 
-        if (hidden) {
-            hidden.value = '';
-        }
-
         if (!results) {
             return;
         }
+
+        resetWorkerSelection(card, 'Selecciona un trabajador de la lista para validar disponibilidad.');
 
         if (queryValue.length < 2) {
             results.innerHTML = '';
@@ -734,6 +814,7 @@
         }
 
         if (!fechaInicio || !fechaFin) {
+            resetWorkerSelection(card, 'Primero indica fecha inicio y fecha fin.');
             results.innerHTML = '<div class="worker-search-empty">Primero indica fecha inicio y fecha fin.</div>';
             return;
         }
@@ -809,11 +890,10 @@
 
         const card = dateInput.closest('.puesto-card');
         const workerInput = card?.querySelector('.js-rq-worker-search');
-        const workerHidden = card?.querySelector('.js-rq-worker-id');
         const results = card?.querySelector('[data-worker-results]');
-        if (workerHidden) {
-            workerHidden.value = '';
-        }
+
+        resetWorkerSelection(card, 'Las fechas cambiaron. Vuelve a seleccionar al trabajador para validar disponibilidad.');
+
         if (results) {
             results.innerHTML = '';
         }
@@ -829,7 +909,13 @@
             card.querySelector('.js-rq-worker-id').value = workerOption.dataset.personalId || '';
             card.querySelector('.js-rq-worker-search').value = workerOption.dataset.label || '';
             card.querySelector('[data-worker-results]').innerHTML = '';
-            setCardMessage(card, '', 'ok');
+            const disponibilidad = parseAvailability(workerOption.dataset.availability);
+            updateAvailabilityBox(card, disponibilidad);
+            setCardMessage(
+                card,
+                disponibilidad.tipo === 'disponible' ? '' : 'No se puede asignar hasta resolver la disponibilidad indicada.',
+                disponibilidad.tipo === 'disponible' ? 'ok' : 'error'
+            );
             return;
         }
 
@@ -843,6 +929,11 @@
 
             if (!personalId) {
                 setCardMessage(card, 'Selecciona un trabajador de la lista antes de asignar.', 'error');
+                return;
+            }
+
+            if (card.dataset.workerAvailable !== '1') {
+                setCardMessage(card, 'El trabajador seleccionado no esta disponible para esta mina o rango de fechas.', 'error');
                 return;
             }
 

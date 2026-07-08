@@ -1649,6 +1649,7 @@ class PersonalFichaService
 
     public function normalizeFichaData(array $fields): array
     {
+        $fields = $this->normalizeFichaFieldAliases($fields);
         $data = PersonalFichaCatalog::emptyData();
 
         foreach ($data as $key => $value) {
@@ -1715,7 +1716,6 @@ class PersonalFichaService
 
         if (in_array($data['banco'] ?? '', ['BCP', 'Interbank'], true)) {
             $data['banco_otro'] = '';
-            $data['cci'] = '';
         } elseif (($data['banco'] ?? '') === 'Otro') {
             $data['numero_cuenta'] = '';
         }
@@ -1736,6 +1736,36 @@ class PersonalFichaService
         }
 
         return $data;
+    }
+
+    private function normalizeFichaFieldAliases(array $fields): array
+    {
+        $aliases = [
+            'grado_instruccion' => ['grado_de_instruccion', 'grado', 'nivel_estudios', 'nivel_educativo'],
+            'profesion_oficio' => ['profesion_u_oficio', 'profesionoficio'],
+            'especialidad' => ['especialidad_academica'],
+            'anio_experiencia' => ['anos_experiencia', 'anios_experiencia', 'anos_de_experiencia', 'anios_de_experiencia', 'experiencia', 'experiencia_laboral'],
+            'anio_egreso' => ['ano_egreso', 'anio_de_egreso', 'ano_de_egreso', 'egreso'],
+            'carrera' => ['carrera_profesional'],
+            'institucion' => ['institucion_educativa', 'centro_estudios', 'centro_de_estudios'],
+        ];
+
+        foreach ($aliases as $canonical => $candidateKeys) {
+            if (PersonalNormalizer::text($fields[$canonical] ?? '') !== '') {
+                continue;
+            }
+
+            foreach ($candidateKeys as $candidateKey) {
+                if (PersonalNormalizer::text($fields[$candidateKey] ?? '') === '') {
+                    continue;
+                }
+
+                $fields[$canonical] = $fields[$candidateKey];
+                break;
+            }
+        }
+
+        return $fields;
     }
 
     public function normalizeFamiliares(array $familiares): array

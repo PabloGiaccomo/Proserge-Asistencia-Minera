@@ -1,0 +1,874 @@
+.logistics-screen {
+    display: grid;
+    gap: 1.2rem;
+    padding: clamp(1rem, 2.5vw, 2rem);
+}
+
+.logistics-hero,
+.logistics-panel,
+.logistics-tabs,
+.logistics-kpi {
+    background: #fff;
+    border: 1px solid #d9e4f2;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.logistics-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 160px;
+    padding: clamp(1.2rem, 3vw, 2rem);
+    border-radius: 18px;
+    overflow: hidden;
+    position: relative;
+}
+
+.logistics-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 4px;
+    background: linear-gradient(90deg, #14b8a6, #38bdf8, #f59e0b);
+    pointer-events: none;
+}
+
+.logistics-eyebrow {
+    margin: 0 0 .35rem;
+    color: #0f766e;
+    font-size: .74rem;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.logistics-hero h1,
+.logistics-panel h2,
+.logistics-kpi strong {
+    color: #0f172a;
+}
+
+.logistics-hero h1 {
+    margin: 0;
+    font-size: 3rem;
+    line-height: 1;
+}
+
+.logistics-hero p:not(.logistics-eyebrow),
+.logistics-panel p,
+.logistics-kpi span,
+.logistics-empty,
+.logistics-table td small {
+    color: #64748b;
+}
+
+.logistics-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .7rem;
+    z-index: 1;
+}
+
+.logistics-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: .7rem 1rem;
+    border-radius: 10px;
+    border: 1px solid #d9e4f2;
+    font-weight: 800;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.logistics-btn:hover {
+    transform: translateY(-1px);
+}
+
+.logistics-btn-primary {
+    background: #14b8a6;
+    border-color: #14b8a6;
+    color: #fff;
+    box-shadow: 0 12px 24px rgba(20, 184, 166, 0.2);
+}
+
+.logistics-btn-light {
+    background: #fff;
+    color: #0f172a;
+}
+
+.logistics-tabs {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    width: max-content;
+    max-width: 100%;
+    padding: .4rem;
+    border-radius: 14px;
+    overflow-x: auto;
+}
+
+.logistics-tab {
+    flex: 0 0 auto;
+    padding: .7rem 1rem;
+    border-radius: 10px;
+    color: #334155;
+    font-weight: 800;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.logistics-tab.is-active {
+    color: #0f766e;
+    background: #ecfeff;
+    outline: 1px solid #5eead4;
+}
+
+.tab-debug-visible {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    margin: 24px 0;
+    padding: 18px 22px;
+    border-radius: 14px;
+    background: #dc2626;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 800;
+    position: relative;
+    z-index: 9999;
+}
+
+.logistics-tab-content,
+.logistics-dashboard-content,
+.logistics-panel,
+.logistics-section,
+.logistics-content {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    height: auto !important;
+    min-height: 120px;
+    overflow: visible !important;
+    position: relative;
+}
+
+.logistics-tab-content {
+    width: 100%;
+    margin-top: 1rem;
+    clear: both;
+}
+
+.logistics-panel {
+    border-radius: 16px;
+}
+
+.logistics-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid #e5edf7;
+}
+
+.logistics-panel-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.logistics-panel-header p {
+    margin: .25rem 0 0;
+}
+
+.logistics-filters {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .9rem;
+    padding: 1.25rem;
+}
+
+.logistics-field {
+    display: grid;
+    gap: .35rem;
+}
+
+.logistics-field-wide {
+    grid-column: span 2;
+}
+
+.logistics-field span {
+    color: #334155;
+    font-size: .8rem;
+    font-weight: 800;
+}
+
+.logistics-field input,
+.logistics-field select {
+    width: 100%;
+    min-height: 44px;
+    padding: .65rem .75rem;
+    border: 1px solid #cbd8e8;
+    border-radius: 10px;
+    background: #fff;
+    color: #0f172a;
+}
+
+.logistics-field select[multiple] {
+    min-height: 116px;
+}
+
+.logistics-filter-actions {
+    display: flex;
+    align-items: end;
+}
+
+.logistics-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .9rem;
+}
+
+.logistics-kpi {
+    display: grid;
+    gap: .35rem;
+    padding: 1rem;
+    border-radius: 14px;
+}
+
+.logistics-kpi strong {
+    font-size: 2rem;
+}
+
+.logistics-kpi-warning {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.logistics-kpi-danger {
+    border-color: #fecaca;
+    background: #fef2f2;
+}
+
+.logistics-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.logistics-panel-wide {
+    grid-column: 1 / -1;
+}
+
+.logistics-chart-list,
+.logistics-size-grid,
+.logistics-missing-list {
+    display: grid;
+    gap: .75rem;
+    padding: 1.25rem;
+}
+
+.logistics-chart-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) auto;
+    gap: .8rem;
+    align-items: center;
+}
+
+.logistics-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.logistics-bar i {
+    display: block;
+    height: 100%;
+    width: var(--bar, 0%);
+    min-width: 4px;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #14b8a6, #2563eb);
+    transition: width .45s ease;
+}
+
+.logistics-bar-blue i {
+    background: linear-gradient(90deg, #38bdf8, #2563eb);
+}
+
+.logistics-size-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.logistics-size-card,
+.logistics-missing-card {
+    border: 1px solid #d9e4f2;
+    border-radius: 12px;
+    padding: .9rem;
+    background: #f8fafc;
+}
+
+.logistics-size-card h3,
+.logistics-missing-card strong {
+    margin: 0 0 .65rem;
+    color: #0f172a;
+}
+
+.logistics-size-row {
+    display: grid;
+    grid-template-columns: 90px minmax(80px, 1fr) auto;
+    gap: .55rem;
+    align-items: center;
+    margin-top: .45rem;
+}
+
+.logistics-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.logistics-table {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+}
+
+.logistics-table th,
+.logistics-table td {
+    padding: .85rem .75rem;
+    border-bottom: 1px solid #e5edf7;
+    text-align: left;
+    vertical-align: top;
+}
+
+.logistics-table th {
+    color: #475569;
+    background: #f8fafc;
+    font-size: .76rem;
+    text-transform: uppercase;
+}
+
+.logistics-table td {
+    color: #0f172a;
+}
+
+.logistics-table td small {
+    display: block;
+    margin-top: .25rem;
+}
+
+.logistics-pill,
+.logistics-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: .35rem .6rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: .78rem;
+    font-weight: 800;
+}
+
+.logistics-pill.is-ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.logistics-pill.is-ready {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.logistics-pill.is-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.logistics-pill.is-danger {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.logistics-count {
+    background: #ecfeff;
+    color: #0f766e;
+}
+
+.logistics-missing-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.logistics-empty {
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.logistics-kpi,
+.logistics-panel,
+.logistics-chart-row,
+.logistics-size-card,
+.logistics-missing-card {
+    opacity: 1;
+    transform: none;
+}
+
+.logistics-screen.is-ready .logistics-kpi,
+.logistics-screen.is-ready .logistics-panel,
+.logistics-screen.is-ready .logistics-chart-row,
+.logistics-screen.is-ready .logistics-size-card,
+.logistics-screen.is-ready .logistics-missing-card {
+    animation: logisticsFadeUp .36s ease forwards;
+}
+
+.logistics-screen.is-ready .logistics-kpi:nth-child(2),
+.logistics-screen.is-ready .logistics-chart-row:nth-child(2),
+.logistics-screen.is-ready .logistics-size-card:nth-child(2) {
+    animation-delay: .04s;
+}
+
+.logistics-screen.is-ready .logistics-kpi:nth-child(3),
+.logistics-screen.is-ready .logistics-chart-row:nth-child(3),
+.logistics-screen.is-ready .logistics-size-card:nth-child(3) {
+    animation-delay: .08s;
+}
+
+.logistics-screen.is-ready .logistics-kpi:nth-child(4),
+.logistics-screen.is-ready .logistics-chart-row:nth-child(4),
+.logistics-screen.is-ready .logistics-size-card:nth-child(4) {
+    animation-delay: .12s;
+}
+
+@keyframes logisticsFadeUp {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .logistics-kpi,
+    .logistics-panel,
+    .logistics-chart-row,
+    .logistics-size-card,
+    .logistics-missing-card {
+        opacity: 1;
+        transform: none;
+        animation: none !important;
+    }
+
+    .logistics-btn,
+    .logistics-bar i {
+        transition: none;
+    }
+}
+
+@media (max-width: 1100px) {
+    .logistics-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .logistics-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .logistics-missing-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .logistics-screen {
+        padding: 1rem;
+        padding-bottom: 6rem;
+    }
+
+    .logistics-hero h1 {
+        font-size: 2.1rem;
+    }
+
+    .logistics-kpi strong {
+        font-size: 1.65rem;
+    }
+
+    .logistics-hero,
+    .logistics-panel-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .logistics-hero-actions,
+    .logistics-filter-actions {
+        width: 100%;
+    }
+
+    .logistics-btn,
+    .logistics-filter-actions .logistics-btn {
+        width: 100%;
+    }
+
+    .logistics-tabs {
+        width: 100%;
+    }
+
+    .logistics-filters,
+    .logistics-kpis,
+    .logistics-dashboard-grid,
+    .logistics-size-grid,
+    .logistics-missing-list {
+        grid-template-columns: 1fr;
+    }
+
+    .logistics-field-wide {
+        grid-column: span 1;
+    }
+
+    .logistics-chart-row,
+    .logistics-size-row {
+        grid-template-columns: 1fr;
+    }
+
+    .logistics-table {
+        min-width: 760px;
+    }
+}
+.logistics-header-compact {
+    margin-bottom: 1rem;
+}
+
+.logistics-header-compact h1 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.logistics-header-compact p {
+    margin: .25rem 0 0;
+    color: #64748b;
+    font-size: .95rem;
+}
+
+.logistics-tab-content {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    margin-top: 1.5rem;
+    min-height: 240px;
+    overflow: visible !important;
+    position: relative;
+    z-index: 1;
+}
+
+.logistics-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.logistics-list {
+    display: grid;
+    gap: .7rem;
+    padding: 1.25rem;
+}
+
+.logistics-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .85rem 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.logistics-list-item strong {
+    color: #0f172a;
+}
+
+.logistics-list-item span {
+    color: #64748b;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .logistics-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.lgt2-dashboard {
+    display: grid;
+    gap: 20px;
+}
+
+.lgt2-filters {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(4, minmax(160px, 1fr)) auto auto;
+    gap: 12px;
+    align-items: end;
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #d9e4f2;
+    border-radius: 18px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.lgt2-filters label {
+    display: grid;
+    gap: 6px;
+}
+
+.lgt2-filters span {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.lgt2-filters input,
+.lgt2-filters select {
+    min-height: 44px;
+    border: 1px solid #cbd8e8;
+    border-radius: 12px;
+    padding: 0 12px;
+    background: #f8fafc;
+    color: #0f172a;
+}
+
+.lgt2-filters button,
+.lgt2-filters a {
+    min-height: 44px;
+    border-radius: 12px;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.lgt2-filters button {
+    border: 0;
+    background: #14b8a6;
+    color: white;
+}
+
+.lgt2-filters a {
+    border: 1px solid #cbd8e8;
+    color: #334155;
+    background: white;
+}
+
+.lgt2-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.lgt2-kpi-card,
+.lgt2-card {
+    background: #ffffff;
+    border: 1px solid #d9e4f2;
+    border-radius: 18px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.lgt2-kpi-card {
+    padding: 20px;
+}
+
+.lgt2-kpi-card span {
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.lgt2-kpi-card strong {
+    display: block;
+    margin-top: 8px;
+    color: #0f766e;
+    font-size: 30px;
+    line-height: 1.1;
+}
+
+.lgt2-kpi-card small {
+    display: block;
+    margin-top: 8px;
+    color: #64748b;
+}
+
+.lgt2-kpi-card.warning strong {
+    color: #d97706;
+}
+
+.lgt2-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.lgt2-card {
+    overflow: hidden;
+}
+
+.lgt2-wide {
+    grid-column: span 1;
+}
+
+.lgt2-card header {
+    padding: 18px 20px;
+    border-bottom: 1px solid #e5edf7;
+}
+
+.lgt2-card h2 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 17px;
+}
+
+.lgt2-card p {
+    margin: 6px 0 0;
+    color: #64748b;
+}
+
+.lgt2-bars,
+.lgt2-size-list,
+.lgt2-requirements,
+.lgt2-list {
+    display: grid;
+    gap: 12px;
+    padding: 18px 20px;
+}
+
+.lgt2-bar-row,
+.lgt2-req-row,
+.lgt2-list-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 2fr) auto;
+    gap: 14px;
+    align-items: center;
+    padding: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.lgt2-list-row {
+    grid-template-columns: minmax(180px, 1fr) auto;
+}
+
+.lgt2-bar-row strong,
+.lgt2-req-row strong,
+.lgt2-list-row strong {
+    color: #0f172a;
+}
+
+.lgt2-bar-row small,
+.lgt2-req-row small,
+.lgt2-list-row small {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+}
+
+.lgt2-bar {
+    height: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+}
+
+.lgt2-bar i {
+    display: block;
+    height: 100%;
+    min-width: 5px;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #14b8a6, #2563eb);
+}
+
+.lgt2-size-block {
+    padding: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.lgt2-size-block h3 {
+    margin: 0 0 12px;
+    color: #0f172a;
+}
+
+.lgt2-size-row {
+    display: grid;
+    grid-template-columns: 80px minmax(120px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.lgt2-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.lgt2-pill.ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.lgt2-pill.warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.lgt2-pill.danger {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.lgt2-empty {
+    padding: 20px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 14px;
+    color: #64748b;
+    background: #f8fafc;
+    text-align: center;
+}
+
+@media (max-width: 1200px) {
+    .lgt2-filters,
+    .lgt2-kpis,
+    .lgt2-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .lgt2-filters,
+    .lgt2-kpis,
+    .lgt2-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .lgt2-bar-row,
+    .lgt2-req-row,
+    .lgt2-list-row,
+    .lgt2-size-row {
+        grid-template-columns: 1fr;
+    }
+}

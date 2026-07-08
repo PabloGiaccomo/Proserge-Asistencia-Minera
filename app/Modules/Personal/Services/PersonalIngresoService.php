@@ -19,10 +19,12 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PersonalIngresoService
 {
@@ -31,6 +33,7 @@ class PersonalIngresoService
     public function __construct(
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalService $personalService,
+        private readonly PersonalContratoService $contratoService,
     ) {
     }
 
@@ -84,9 +87,24 @@ class PersonalIngresoService
     {
         $estado = strtoupper(trim((string) ($filters['estado'] ?? '')));
         $search = PersonalNormalizer::normalizeKey((string) ($filters['search'] ?? ''));
+        $todayStart = Carbon::today()->startOfDay();
+        $todayEnd = Carbon::today()->endOfDay();
 
         return PersonalIngreso::query()
             ->with(['archivos', 'personalExistente', 'personalCreado', 'revisadoPor.personal'])
+            ->where(function ($query) use ($todayStart, $todayEnd): void {
+                $query->where('estado', '!=', PersonalIngreso::ESTADO_ACEPTADA)
+                    ->orWhere(function ($acceptedQuery) use ($todayStart, $todayEnd): void {
+                        $acceptedQuery->where('estado', PersonalIngreso::ESTADO_ACEPTADA)
+                            ->where(function ($dateQuery) use ($todayStart, $todayEnd): void {
+                                $dateQuery->whereBetween('reviewed_at', [$todayStart, $todayEnd])
+                                    ->orWhere(function ($fallbackQuery) use ($todayStart, $todayEnd): void {
+                                        $fallbackQuery->whereNull('reviewed_at')
+                                            ->whereBetween('updated_at', [$todayStart, $todayEnd]);
+                                    });
+                            });
+                    });
+            })
             ->when($estado !== '', fn ($query) => $query->where('estado', $estado))
             ->orderByDesc('submitted_at')
             ->orderByDesc('created_at')
@@ -120,43 +138,16 @@ class PersonalIngresoService
         return $this->refreshExistingPersonalRelation($ingreso);
     }
 
-    public function storeSubmission(array $fields, array $familiares, string $firmaBase64, UploadedFile $huella, array $documentos = []): PersonalIngreso
+    public function storeSubmission(array $fields, array $familiares, string $firmaBase64, UploadedFile $huella, array $documentos = [], ?string $submissionUuid = null): PersonalIngreso
     {
         $data = $this->fichaService->normalizeFichaData($fields);
         $this->assertDocumentIsValid($data);
         $personalExistente = $this->findPersonalByDocument($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
-        $ingresoId = (string) Str::uuid();
+        $submissionUuid = $this->normalizeSubmissionUuid($submissionUuid);
+        $supportsSubmissionUuid = $this->supportsSubmissionUuid();
 
-        $huellaPath = $huella->storeAs(
-            'personal_ingresos/' . $ingresoId,
-            'huella_' . now()->format('Ymd_His') . '.' . strtolower($huella->getClientOriginalExtension() ?: 'jpg'),
-            'local',
-        );
-
-        $storedDocuments = [];
-        foreach ($documentos as $tipo => $file) {
-            if (!$file instanceof UploadedFile) {
-                continue;
-            }
-
-            $safeTipo = $this->safeFileType((string) $tipo);
-            $storedDocuments[] = [
-                'id' => (string) Str::uuid(),
-                'tipo' => $safeTipo,
-                'nombre_original' => $file->getClientOriginalName(),
-                'path' => $file->storeAs(
-                    'personal_ingresos/' . $ingresoId . '/documentos',
-                    $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($file->getClientOriginalExtension() ?: 'bin'),
-                    'local',
-                ),
-                'mime' => $file->getMimeType(),
-                'size' => $file->getSize(),
-            ];
-        }
-
-        return DB::transaction(function () use ($ingresoId, $data, $familiares, $firmaBase64, $huella, $huellaPath, $storedDocuments, $personalExistente): PersonalIngreso {
-            $ingreso = PersonalIngreso::query()->create([
-                'id' => $ingresoId,
+        $ingreso = DB::transaction(function () use ($data, $familiares, $firmaBase64, $personalExistente, $submissionUuid, $supportsSubmissionUuid): PersonalIngreso {
+            $payload = [
                 'estado' => PersonalIngreso::ESTADO_RECIBIDA,
                 'tipo_documento' => $data['tipo_documento'] ?? 'DNI',
                 'numero_documento' => $data['numero_documento'] ?? '',
@@ -164,29 +155,87 @@ class PersonalIngresoService
                 'datos_json' => $data,
                 'familiares_json' => $this->fichaService->normalizeFamiliares($familiares),
                 'firma_base64' => $firmaBase64,
-                'huella_path' => $huellaPath,
                 'submitted_at' => now(),
-            ]);
+            ];
 
-            PersonalIngresoArchivo::query()->create([
-                'id' => (string) Str::uuid(),
-                'personal_ingreso_id' => $ingreso->id,
-                'tipo' => 'huella',
-                'nombre_original' => $huella->getClientOriginalName(),
-                'path' => $huellaPath,
-                'mime' => $huella->getMimeType(),
-                'size' => $huella->getSize(),
-            ]);
-
-            foreach ($storedDocuments as $document) {
-                PersonalIngresoArchivo::query()->create([
-                    ...$document,
-                    'personal_ingreso_id' => $ingreso->id,
-                ]);
+            if ($supportsSubmissionUuid && $submissionUuid !== null) {
+                $payload['submission_uuid'] = $submissionUuid;
             }
 
-            return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
+            $ingreso = null;
+            if ($supportsSubmissionUuid && $submissionUuid !== null) {
+                $ingreso = PersonalIngreso::query()
+                    ->where('submission_uuid', $submissionUuid)
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if ($ingreso instanceof PersonalIngreso) {
+                if (in_array($ingreso->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
+                    return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
+                }
+
+                $ingreso->forceFill($payload)->save();
+
+                return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
+            }
+
+            return PersonalIngreso::query()->create([
+                'id' => (string) Str::uuid(),
+                ...$payload,
+            ])->fresh(['archivos', 'personalExistente', 'personalCreado']);
         });
+
+        try {
+            $huellaPath = $this->replaceIngresoArchivo($ingreso, 'huella', $huella, false);
+            $ingreso->forceFill(['huella_path' => $huellaPath])->save();
+        } catch (Throwable $exception) {
+            Log::error('No se pudo guardar la huella de ingreso publico.', [
+                'personal_ingreso_id' => $ingreso->id,
+                'submission_uuid' => $submissionUuid,
+                'documento' => $data['numero_documento'] ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $this->appendIngresoObservation(
+                $ingreso,
+                'La ficha llego al sistema, pero la foto de huella no se guardo correctamente. El trabajador debe reenviar la ficha sin cerrar la pagina.',
+            );
+
+            throw ValidationException::withMessages([
+                'huella' => 'La ficha se registro, pero no se pudo guardar la foto de huella. Vuelve a enviarla sin cerrar la pagina.',
+            ]);
+        }
+
+        $documentWarnings = [];
+        foreach ($documentos as $tipo => $file) {
+            if (!$file instanceof UploadedFile) {
+                continue;
+            }
+
+            $safeTipo = $this->safeFileType((string) $tipo);
+            try {
+                $this->replaceIngresoArchivo($ingreso, $safeTipo, $file, true);
+            } catch (Throwable $exception) {
+                $documentWarnings[] = $safeTipo;
+                Log::warning('No se pudo guardar documento opcional de ingreso publico.', [
+                    'personal_ingreso_id' => $ingreso->id,
+                    'submission_uuid' => $submissionUuid,
+                    'tipo' => $safeTipo,
+                    'documento' => $data['numero_documento'] ?? null,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        if ($documentWarnings !== []) {
+            $this->appendIngresoObservation(
+                $ingreso,
+                'Algunos documentos opcionales no se guardaron correctamente: ' . implode(', ', array_unique($documentWarnings)) . '.',
+            );
+        }
+
+        return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
     }
 
     public function updateIngreso(PersonalIngreso $ingreso, array $fields, array $familiares, ?string $firmaBase64, ?UploadedFile $huella, array $documentos, Usuario $user): PersonalIngreso
@@ -229,9 +278,9 @@ class PersonalIngresoService
         });
     }
 
-    public function accept(PersonalIngreso $ingreso, Usuario $user): Personal
+    public function accept(PersonalIngreso $ingreso, Usuario $user, array $contractPayload): Personal
     {
-        return $this->persistIntoPersonal($ingreso, $user, false);
+        return $this->persistIntoPersonal($ingreso, $user, false, $contractPayload);
     }
 
     public function markContractNotSigned(PersonalIngreso $ingreso, Usuario $user): Personal
@@ -273,6 +322,7 @@ class PersonalIngresoService
         $data = $ingreso && is_array($ingreso->datos_json)
             ? $ingreso->datos_json
             : PersonalFichaCatalog::emptyData();
+        $data = $this->fichaService->normalizeFichaData($data);
 
         $data['tipo_documento'] = $data['tipo_documento'] ?? $ingreso?->tipo_documento ?? 'DNI';
         $data['numero_documento'] = $data['numero_documento'] ?? $ingreso?->numero_documento ?? '';
@@ -324,12 +374,12 @@ class PersonalIngresoService
         };
     }
 
-    private function persistIntoPersonal(PersonalIngreso $ingreso, Usuario $user, bool $contractNotSigned): Personal
+    private function persistIntoPersonal(PersonalIngreso $ingreso, Usuario $user, bool $contractNotSigned, array $contractPayload = []): Personal
     {
         $this->assertIngresoEditable($ingreso);
 
         $ingreso = $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
-        $data = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
+        $data = $this->fichaService->normalizeFichaData(is_array($ingreso->datos_json) ? $ingreso->datos_json : []);
         $this->assertDocumentIsValid($data);
         $existing = $this->findPersonalByDocument($data['tipo_documento'] ?? $ingreso->tipo_documento, $data['numero_documento'] ?? $ingreso->numero_documento);
         $estado = $contractNotSigned
@@ -340,12 +390,16 @@ class PersonalIngresoService
             $estado = PersonalFicha::ESTADO_APROBADO;
         }
 
-        return DB::transaction(function () use ($ingreso, $data, $existing, $estado, $contractNotSigned, $user): Personal {
+        return DB::transaction(function () use ($ingreso, $data, $existing, $estado, $contractNotSigned, $contractPayload, $user): Personal {
             $payload = [
                 ...$this->personalPayloadFromData($data, $estado),
                 'origen_registro' => 'NUEVO',
                 'pendiente_contrato_firmado' => !$contractNotSigned,
             ];
+
+            if (!$contractNotSigned && !empty($contractPayload['fecha_inicio_contrato'])) {
+                $payload['fecha_ingreso'] = PersonalNormalizer::isoDate($contractPayload['fecha_inicio_contrato']);
+            }
 
             $personal = $existing
                 ? $this->personalService->update($existing, [...$payload, 'origen_registro' => $existing->origen_registro ?: 'NUEVO'])
@@ -353,6 +407,33 @@ class PersonalIngresoService
 
             $fichaEstado = $contractNotSigned ? PersonalFicha::ESTADO_ENVIADA : PersonalFicha::ESTADO_APROBADO;
             $this->syncFichaFromIngreso($personal, $ingreso, $fichaEstado, $user);
+
+            if (!$contractNotSigned) {
+                $signedContractFile = $contractPayload['contrato_pdf'] ?? null;
+                $contract = $this->contratoService->prepareIngressContract(
+                    $personal->fresh(['fichaColaborador', 'minas', 'contratoDatos']) ?: $personal,
+                    [
+                        ...$contractPayload,
+                        'tipo_contrato' => $data['contrato'] ?? $personal->contrato,
+                        'puesto' => $data['puesto'] ?? $personal->puesto,
+                        'area' => $data['puesto'] ?? $personal->puesto,
+                    ],
+                    $user,
+                );
+
+                if ($signedContractFile instanceof UploadedFile && !$contract->hasSignedFile()) {
+                    $contract = $this->contratoService->uploadSignedFileForContract(
+                        $personal->fresh(['fichaColaborador', 'minas', 'contratoDatos']) ?: $personal,
+                        $contract,
+                        $signedContractFile,
+                        $user,
+                    );
+                }
+
+                if (Schema::hasColumn('personal', 'pendiente_contrato_firmado')) {
+                    $personal->forceFill(['pendiente_contrato_firmado' => !$contract->hasSignedFile()])->save();
+                }
+            }
 
             $ingreso->forceFill([
                 'estado' => $contractNotSigned ? PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO : PersonalIngreso::ESTADO_ACEPTADA,
@@ -611,6 +692,35 @@ class PersonalIngresoService
         $tipo = Str::slug($tipo, '_');
 
         return $tipo !== '' ? mb_substr($tipo, 0, 80) : 'documento';
+    }
+
+    private function normalizeSubmissionUuid(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $value = preg_replace('/[^A-Za-z0-9._-]/', '', $value) ?: '';
+        $value = mb_substr($value, 0, 64);
+
+        return $value !== '' ? $value : null;
+    }
+
+    private function supportsSubmissionUuid(): bool
+    {
+        return Schema::hasTable('personal_ingresos') && Schema::hasColumn('personal_ingresos', 'submission_uuid');
+    }
+
+    private function appendIngresoObservation(PersonalIngreso $ingreso, string $message): void
+    {
+        $current = trim((string) $ingreso->observaciones_revision);
+        $line = '[' . now()->format('d/m/Y H:i') . '] ' . $message;
+
+        $ingreso->forceFill([
+            'observaciones_revision' => $current !== '' ? $current . PHP_EOL . $line : $line,
+        ])->save();
     }
 
     private function assertIngresoEditable(PersonalIngreso $ingreso): void

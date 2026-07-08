@@ -8,9 +8,12 @@ use App\Modules\Personal\Services\PersonalIngresoService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Throwable;
 
 class PublicPersonalIngresoController extends Controller
 {
@@ -70,13 +73,30 @@ class PublicPersonalIngresoController extends Controller
         $fields = $validated['fields'];
         $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
 
-        $this->ingresos->storeSubmission(
-            $fields,
-            $validated['familiares'] ?? [],
-            $validated['firma_base64'],
-            $request->file('huella'),
-            $request->file('documentos', []),
-        );
+        try {
+            $this->ingresos->storeSubmission(
+                $fields,
+                $validated['familiares'] ?? [],
+                $validated['firma_base64'],
+                $request->file('huella'),
+                $request->file('documentos', []),
+                $validated['submission_uuid'] ?? null,
+            );
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('No se pudo guardar ficha publica de ingreso.', [
+                'submission_uuid' => $validated['submission_uuid'] ?? null,
+                'documento' => $fields['numero_documento'] ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return back()
+                ->withInput()
+                ->withErrors([
+                    'form' => 'No pudimos guardar tu ficha por un problema temporal. Revisa tu conexion e intenta enviarla nuevamente.',
+                ]);
+        }
 
         $request->session()->forget('personal_ingreso_public_key_date');
 
@@ -94,6 +114,7 @@ class PublicPersonalIngresoController extends Controller
     {
         $rules = [
             'fields' => ['required', 'array'],
+            'submission_uuid' => ['nullable', 'string', 'max:64'],
             'familiares' => ['nullable', 'array'],
             'familiares.*.nombres_apellidos' => ['nullable', 'string', 'max:191'],
             'familiares.*.parentesco' => ['nullable', 'string', 'max:80'],

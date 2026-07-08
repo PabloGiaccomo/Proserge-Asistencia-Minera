@@ -19,6 +19,8 @@ use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
 use App\Modules\ManPower\Controllers\ManPowerPageController;
 use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
+use App\Modules\Epps\Controllers\EppPageController;
+use App\Modules\Logistica\Controllers\LogisticaPageController;
 use App\Modules\RQMina\Controllers\RQMinaPageController;
 use App\Modules\RQProserge\Controllers\RQProsergePageController;
 use App\Modules\Asistencia\Controllers\AsistenciaPageController;
@@ -224,6 +226,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/man-power/grupos/{id}', [ManPowerPageController::class, 'grupoDetalle'])->middleware('web.permission:man_power,ver')->name('man-power.grupo-detalle');
 
     // Herramientas por parada
+    Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('logistica.index');
+
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
     Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.catalogo.importar');
     Route::get('/herramientas-parada/catalogo/sugerencias', [ParadaHerramientaPageController::class, 'sugerenciasCatalogo'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.catalogo.sugerencias');
@@ -235,6 +239,15 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.enviar');
     Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/importar-formato', [ParadaHerramientaPageController::class, 'importarFormato'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.importar-formato');
     Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/recordatorio-supervisor', [ParadaHerramientaPageController::class, 'recordarSupervisor'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.recordar-supervisor');
+
+    // EPP logistica
+    Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
+    Route::get('/epps/personal/buscar', [EppPageController::class, 'buscarPersonal'])->middleware('web.permission:epps,ver')->name('epps.personal.buscar');
+    Route::get('/epps/entregas/ultima', [EppPageController::class, 'ultimaEntrega'])->middleware('web.permission:epps,ver')->name('epps.entregas.ultima');
+    Route::post('/epps/catalogo', [EppPageController::class, 'storeCatalog'])->middleware('web.permission:epps,actualizar')->name('epps.catalogo.store');
+    Route::put('/epps/catalogo/{id}', [EppPageController::class, 'updateCatalog'])->middleware('web.permission:epps,actualizar')->name('epps.catalogo.update');
+    Route::post('/epps/entregas', [EppPageController::class, 'storeEntrega'])->middleware('web.permission:epps,actualizar')->name('epps.entregas.store');
+    Route::post('/epps/entregas/{id}/cerrar', [EppPageController::class, 'closeEntrega'])->middleware('web.permission:epps,actualizar')->name('epps.entregas.close');
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');

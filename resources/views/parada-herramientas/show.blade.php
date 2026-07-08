@@ -5,7 +5,9 @@
 @php
     $puedeEditar = (bool) ($item['puede_editar'] ?? false);
     $puedeActualizarPedido = (bool) ($item['puede_actualizar_pedido'] ?? false);
+    $requiereComentarioCambio = (bool) ($item['requiere_comentario_cambio_previo'] ?? false);
     $dias = (int) ($item['dias_para_limite'] ?? 0);
+    $limiteEnvioVencido = (bool) ($item['limite_envio_vencido'] ?? ($dias < 0));
     $deadlineClass = $dias < 0 ? 'expired' : ($dias <= 2 ? 'urgent' : 'ok');
     $formAction = $puedeEditar
         ? route('herramientas-parada.save', $item['rq_mina_id'])
@@ -95,8 +97,14 @@
         </div>
     </div>
 
-    @unless($puedeEditar || $puedeActualizarPedido)
-        <div class="alert alert-error">Esta lista no esta editable porque fue enviada o ya vencio el plazo.</div>
+    @unless($puedeEditar)
+        <div class="alert alert-error">
+            @if($limiteEnvioVencido)
+                El limite de envio vencio. El requerimiento quedo cerrado y no se puede modificar.
+            @else
+                Esta lista no esta editable porque ya fue enviada.
+            @endif
+        </div>
     @endunless
 
     <form method="POST" action="{{ $formAction }}" id="toolsForm">
@@ -258,6 +266,16 @@
         </div>
 
         <div class="tools-card notes-card">
+            @if($puedeEditar && $requiereComentarioCambio)
+                <div class="phase-note is-warning">
+                    <strong>Cambio dentro de la semana previa a la parada.</strong>
+                    <span>Registra el motivo del cambio para que RR.HH., logistica y operaciones tengan trazabilidad.</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Motivo del cambio</label>
+                    <textarea name="comentario_cambio_previo" class="form-control" rows="3" required>{{ old('comentario_cambio_previo') }}</textarea>
+                </div>
+            @endif
             <div class="form-group">
                 <label class="form-label">Observaciones generales</label>
                 <textarea name="observaciones" class="form-control" rows="3" @readonly(!$puedeEditar)>{{ old('observaciones', $item['observaciones'] ?? '') }}</textarea>
@@ -366,6 +384,13 @@ function toolRowTemplate(groupIndex, type, rowIndex, row = {}, category = 'herra
             <input type="date" name="${prefix}[pedido_llego_at]" class="form-control" value="${escapeHtml(row.pedido_llego_at || '')}" ${pedidoReadonlyAttr}>
             <input type="hidden" name="${prefix}[cantidad_entregada]" value="${escapeHtml(row.cantidad_entregada || 0)}">
             <input type="hidden" name="${prefix}[cantidad_recibida]" value="${escapeHtml(row.cantidad_recibida || 0)}">
+            <input type="hidden" name="${prefix}[incidencia_durante_parada]" value="${escapeHtml(row.incidencia_durante_parada || '')}">
+            <input type="hidden" name="${prefix}[recepcion_estado]" value="${escapeHtml(row.recepcion_estado || 'PENDIENTE')}">
+            <input type="hidden" name="${prefix}[recepcion_fecha]" value="${escapeHtml(row.recepcion_fecha || '')}">
+            <input type="hidden" name="${prefix}[recepcion_observacion]" value="${escapeHtml(row.recepcion_observacion || '')}">
+            <input type="hidden" name="${prefix}[recepcion_registrada_at]" value="${escapeHtml(row.recepcion_registrada_at || '')}">
+            <input type="hidden" name="${prefix}[recepcion_registrada_por_usuario_id]" value="${escapeHtml(row.recepcion_registrada_por_usuario_id || '')}">
+            <input type="hidden" name="${prefix}[comentario_cambio_previo]" value="${escapeHtml(row.comentario_cambio_previo || '')}">
             <span class="tools-status pending">Pedido pendiente</span>
             <button type="button" class="btn-remove-tool" onclick="this.closest('.tool-row').remove()" aria-label="Quitar fila" title="Quitar fila">X</button>
         </div>

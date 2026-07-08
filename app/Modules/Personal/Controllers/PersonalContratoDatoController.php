@@ -92,7 +92,7 @@ class PersonalContratoDatoController extends WebPageController
 
         return redirect()
             ->route('personal.index')
-            ->with('success', 'Contrato firmado subido correctamente. El trabajador quedo activo.');
+            ->with('success', 'Contrato firmado subido correctamente.');
     }
 
     private function rules(): array

@@ -85,30 +85,7 @@ class PersonalContratoDatoService
     {
         return DB::transaction(function () use ($personal, $file, $user): PersonalContratoDato {
             app(PersonalContratoService::class)->assertContractEditable($personal, $user);
-            $record = $this->ensureForPersonal($personal, [], $user);
-
-            if (
-                $record->signed_contract_path
-                && Storage::disk('local')->exists($record->signed_contract_path)
-                && !$this->isSignedPathReferencedByContract($record->signed_contract_path)
-            ) {
-                Storage::disk('local')->delete($record->signed_contract_path);
-            }
-
-            $path = $file->storeAs(
-                'personal_contratos/' . $personal->id,
-                'contrato_firmado_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.pdf',
-                'local',
-            );
-
-            $record->forceFill([
-                'signed_at' => now(),
-                'signed_contract_path' => $path,
-                'signed_contract_original_name' => $file->getClientOriginalName(),
-                'signed_contract_mime' => $file->getMimeType(),
-                'signed_contract_size' => $file->getSize(),
-                'updated_by_usuario_id' => $user->id,
-            ])->save();
+            $record = $this->storeSignedContractFile($personal, $file, $user, now());
 
             $record = $record->fresh();
             app(PersonalContratoService::class)->markEditableContractSigned($personal, $record, $user);
@@ -117,6 +94,15 @@ class PersonalContratoDatoService
             }
 
             return $record;
+        });
+    }
+
+    public function uploadSignedContractReference(Personal $personal, UploadedFile $file, Usuario $user): PersonalContratoDato
+    {
+        return DB::transaction(function () use ($personal, $file, $user): PersonalContratoDato {
+            $this->ensureForPersonal($personal, [], $user);
+
+            return $this->storeSignedContractFile($personal, $file, $user, null);
         });
     }
 
@@ -161,6 +147,36 @@ class PersonalContratoDatoService
             ->where('nombre', $nombre)
             ->where('activo', true)
             ->first();
+    }
+
+    private function storeSignedContractFile(Personal $personal, UploadedFile $file, Usuario $user, mixed $signedAt): PersonalContratoDato
+    {
+        $record = $this->ensureForPersonal($personal, [], $user);
+
+        if (
+            $record->signed_contract_path
+            && Storage::disk('local')->exists($record->signed_contract_path)
+            && !$this->isSignedPathReferencedByContract($record->signed_contract_path)
+        ) {
+            Storage::disk('local')->delete($record->signed_contract_path);
+        }
+
+        $path = $file->storeAs(
+            'personal_contratos/' . $personal->id,
+            'contrato_firmado_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.pdf',
+            'local',
+        );
+
+        $record->forceFill([
+            'signed_at' => $signedAt,
+            'signed_contract_path' => $path,
+            'signed_contract_original_name' => $file->getClientOriginalName(),
+            'signed_contract_mime' => $file->getMimeType(),
+            'signed_contract_size' => $file->getSize(),
+            'updated_by_usuario_id' => $user->id,
+        ])->save();
+
+        return $record->fresh();
     }
 
     private function isSignedPathReferencedByContract(string $path): bool

@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "./modules/man-power.css";
 @import "./modules/parada-herramientas.css";
+@import "./modules/epps.css";
+@import "./modules/logistica.css";
 @import "./modules/rq-mina.css";
 @import "./modules/rq-proserge.css";
 @import "./modules/asistencia-alertas.css";
@@ -41,6 +43,7 @@
     --sidebar-min-width: 220px;
     --sidebar-max-width: 380px;
     --header-height: 64px;
+    --mobile-bottom-nav-height: calc(64px + env(safe-area-inset-bottom, 8px));
 }
 
 * {
@@ -1989,33 +1992,48 @@ body.notif-panel-open {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 24px;
     background: linear-gradient(135deg, #07142A 0%, #0A223D 100%);
     border-radius: 20px;
     padding: 32px 36px;
     margin-bottom: 28px;
+    overflow: hidden;
 }
 
 .welcome-content {
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .welcome-title {
-    font-size: 28px;
+    font-size: clamp(24px, 3vw, 34px);
     font-weight: 700;
     color: white;
     margin-bottom: 4px;
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+}
+
+.welcome-title span {
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .welcome-subtitle {
     font-size: 14px;
     color: rgba(255, 255, 255, 0.6);
+    max-width: 560px;
 }
 
 .welcome-date {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    flex: 0 0 auto;
+    min-width: 132px;
+    text-align: right;
 }
 
 .date-label {
@@ -2029,7 +2047,86 @@ body.notif-panel-open {
     font-size: 16px;
     font-weight: 600;
     color: var(--color-primary);
-    text-transform: capitalize;
+}
+
+.home-dashboard-panel {
+    margin-bottom: 16px;
+}
+
+.home-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+}
+
+.home-dashboard-card {
+    display: grid;
+    grid-template-columns: 6px minmax(0, 1fr);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #ffffff;
+    min-height: 146px;
+}
+
+.home-dashboard-accent {
+    width: 6px;
+}
+
+.home-dashboard-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.home-dashboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.home-dashboard-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.home-dashboard-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.home-dashboard-text {
+    margin: 0;
+    color: #475569;
+    line-height: 1.5;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.home-dashboard-foot {
+    margin-top: auto;
+}
+
+.home-dashboard-note {
+    font-size: 12px;
+    color: #64748b;
 }
 
 .quick-access-grid {
@@ -2169,6 +2266,97 @@ body.notif-panel-open {
 .role-desc {
     font-size: 13px;
     color: var(--color-text-secondary);
+}
+
+@media (max-width: 1023px) {
+    .home-page {
+        padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .welcome-section {
+        align-items: flex-start;
+        padding: 28px 30px;
+        border-radius: 24px;
+    }
+
+    .home-dashboard-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 767px) {
+    .welcome-section {
+        flex-direction: column;
+        gap: 18px;
+        padding: 26px 24px;
+        margin-bottom: 20px;
+    }
+
+    .welcome-title {
+        font-size: clamp(24px, 7.4vw, 34px);
+        line-height: 1.22;
+    }
+
+    .welcome-subtitle {
+        font-size: 14px;
+        line-height: 1.55;
+    }
+
+    .welcome-date {
+        width: 100%;
+        min-width: 0;
+        align-items: flex-start;
+        text-align: left;
+        padding-top: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .date-value {
+        font-size: 15px;
+        line-height: 1.3;
+    }
+
+    .home-dashboard-grid,
+    .home-info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .home-dashboard-card {
+        min-height: 0;
+    }
+
+    .home-dashboard-header {
+        align-items: flex-start;
+    }
+
+    .home-dashboard-body,
+    .info-card-body {
+        padding: 16px;
+    }
+
+    .info-card-header {
+        padding: 16px;
+    }
+}
+
+@media (max-width: 430px) {
+    .welcome-section {
+        padding: 24px 20px;
+        border-radius: 22px;
+    }
+
+    .welcome-title {
+        font-size: clamp(22px, 7vw, 28px);
+    }
+
+    .home-dashboard-header {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .home-dashboard-tag {
+        align-self: flex-start;
+    }
 }
 
 /* ============================================
@@ -3836,6 +4024,7 @@ body.notif-panel-open {
     z-index: 200;
     padding: 0;
     padding-bottom: env(safe-area-inset-bottom, 8px);
+    transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 .mobile-bottom-nav-inner {
@@ -3891,6 +4080,39 @@ body.notif-panel-open {
 @media (max-width: 1023px) {
     .mobile-bottom-nav {
         display: block;
+    }
+
+    body.sidebar-mobile-open {
+        overflow: hidden;
+    }
+
+    .sidebar {
+        bottom: var(--mobile-bottom-nav-height);
+        height: auto;
+        max-height: calc(100dvh - var(--mobile-bottom-nav-height));
+        z-index: 190;
+        border-bottom-right-radius: 24px;
+        overscroll-behavior: contain;
+    }
+
+    .sidebar-overlay {
+        inset: 0 0 var(--mobile-bottom-nav-height) 0;
+        z-index: 180;
+    }
+
+    body.sidebar-mobile-open .sidebar {
+        bottom: 0;
+        max-height: 100dvh;
+    }
+
+    body.sidebar-mobile-open .sidebar-overlay {
+        inset: 0;
+    }
+
+    body.sidebar-mobile-open .mobile-bottom-nav {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(100%);
     }
     
     .app-content {

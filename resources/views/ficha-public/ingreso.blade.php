@@ -3,6 +3,9 @@
 @section('title', 'Ingreso de colaborador - Proserge')
 
 @section('content')
+@php
+    $fichaSentSuccessfully = str_contains((string) session('success'), 'Ficha enviada correctamente');
+@endphp
 <style>
     .ingreso-public-container {
         width: min(1120px, calc(100vw - 28px));
@@ -130,6 +133,51 @@
         gap: 10px;
     }
 
+    .ingreso-submit-status {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        padding: 14px 16px;
+        margin-top: 14px;
+        border: 1px solid #99f6e4;
+        border-radius: 10px;
+        background: #ecfeff;
+        color: #0f766e;
+    }
+
+    .ingreso-submit-status[hidden] {
+        display: none;
+    }
+
+    .ingreso-submit-status strong {
+        display: block;
+        color: #0f766e;
+        font-size: 14px;
+    }
+
+    .ingreso-submit-status p {
+        margin: 3px 0 0;
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
+    .ingreso-submit-spinner {
+        width: 30px;
+        height: 30px;
+        border: 3px solid #ccfbf1;
+        border-top-color: #0f766e;
+        border-radius: 999px;
+        animation: ingreso-spin 0.8s linear infinite;
+    }
+
+    @keyframes ingreso-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
     @media (max-width: 760px) {
         .ingreso-public-hero,
         .ingreso-key-form {
@@ -145,7 +193,7 @@
     }
 </style>
 
-<div class="ingreso-public-container ficha-workspace">
+<div class="ingreso-public-container ficha-workspace" data-ingreso-page data-ingreso-submitted="{{ $fichaSentSuccessfully ? '1' : '0' }}">
     <div class="ingreso-public-hero">
         <div>
             <h1>Ficha del colaborador</h1>
@@ -251,12 +299,21 @@
 
         <form method="POST" action="{{ route('personal.ingresos.public.submit') }}" enctype="multipart/form-data" data-ingreso-submit>
             @csrf
+            @php($submissionUuid = old('submission_uuid') ?: (string) \Illuminate\Support\Str::uuid())
+            <input type="hidden" name="submission_uuid" value="{{ $submissionUuid }}" data-ingreso-submission-uuid>
             @include('personal.fichas.partials.ingreso-form-fields', [
                 'readonly' => false,
                 'formMode' => 'public',
                 'archivos' => collect(),
                 'firmaBase64' => old('firma_base64', ''),
             ])
+            <div class="ingreso-submit-status" data-ingreso-submit-status hidden>
+                <span class="ingreso-submit-spinner" aria-hidden="true"></span>
+                <div>
+                    <strong>Enviando ficha...</strong>
+                    <p>Primero se guardan tus datos y luego los archivos. No cierres esta ventana hasta ver la confirmacion.</p>
+                </div>
+            </div>
             <div class="ficha-actions-bar">
                 <button type="submit" class="btn btn-primary" data-loading-text="Enviando ficha...">Enviar ficha</button>
             </div>
@@ -264,3 +321,155 @@
     @endif
 </div>
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        const page = document.querySelector('[data-ingreso-page]');
+        if (!page) {
+            return;
+        }
+
+        const storagePrefix = 'proserge:personal-ingreso-draft:';
+        const activeSubmissionKey = storagePrefix + 'active';
+
+        if (page.dataset.ingresoSubmitted === '1') {
+            try {
+                Object.keys(window.localStorage || {})
+                    .filter(function (key) {
+                        return key.indexOf(storagePrefix) === 0;
+                    })
+                    .forEach(function (key) {
+                        window.localStorage.removeItem(key);
+                    });
+            } catch (error) {
+                // El borrador local es una ayuda; si el navegador lo bloquea, la ficha sigue funcionando.
+            }
+
+            return;
+        }
+
+        const form = document.querySelector('form[data-ingreso-submit]');
+        if (!form) {
+            return;
+        }
+
+        const uuidInput = form.querySelector('[data-ingreso-submission-uuid]');
+        if (!uuidInput) {
+            return;
+        }
+
+        let activeSubmissionUuid = null;
+        try {
+            activeSubmissionUuid = window.localStorage.getItem(activeSubmissionKey);
+        } catch (error) {
+            activeSubmissionUuid = null;
+        }
+
+        if (activeSubmissionUuid && /^[A-Za-z0-9._-]{1,64}$/.test(activeSubmissionUuid)) {
+            uuidInput.value = activeSubmissionUuid;
+        }
+
+        if (!uuidInput.value) {
+            uuidInput.value = window.crypto && typeof window.crypto.randomUUID === 'function'
+                ? window.crypto.randomUUID()
+                : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        }
+
+        try {
+            window.localStorage.setItem(activeSubmissionKey, uuidInput.value);
+        } catch (error) {
+            // La ficha puede enviarse aunque el navegador no permita almacenamiento local.
+        }
+
+        const storageKey = storagePrefix + uuidInput.value;
+        const fieldsForDraft = function () {
+            return Array.from(form.elements).filter(function (field) {
+                if (!field.name || field.name === '_token' || field.name === 'submission_uuid' || field.type === 'file') {
+                    return false;
+                }
+
+                return ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(field.tagName) !== -1;
+            });
+        };
+
+        const fieldSelector = function (name) {
+            return '[name="' + String(name).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+        };
+
+        const readDraft = function () {
+            try {
+                return JSON.parse(window.localStorage.getItem(storageKey) || '{}') || {};
+            } catch (error) {
+                return {};
+            }
+        };
+
+        const writeDraft = function () {
+            const draft = {};
+            fieldsForDraft().forEach(function (field) {
+                if (field.type === 'checkbox' || field.type === 'radio') {
+                    draft[field.name] = field.checked;
+                    return;
+                }
+
+                draft[field.name] = field.value;
+            });
+
+            try {
+                window.localStorage.setItem(storageKey, JSON.stringify(draft));
+            } catch (error) {
+                // No bloqueamos el envio si el almacenamiento local no esta disponible.
+            }
+        };
+
+        const restoreDraft = function () {
+            const draft = readDraft();
+            Object.keys(draft).forEach(function (name) {
+                form.querySelectorAll(fieldSelector(name)).forEach(function (field) {
+                    if (field.type === 'checkbox' || field.type === 'radio') {
+                        field.checked = Boolean(draft[name]);
+                        return;
+                    }
+
+                    if (!field.value) {
+                        field.value = draft[name];
+                    }
+                });
+            });
+        };
+
+        restoreDraft();
+
+        let saveTimer = null;
+        const scheduleSave = function () {
+            window.clearTimeout(saveTimer);
+            saveTimer = window.setTimeout(writeDraft, 250);
+        };
+
+        form.addEventListener('input', scheduleSave, true);
+        form.addEventListener('change', scheduleSave, true);
+        form.addEventListener('submit', function (event) {
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+
+            writeDraft();
+            form.dataset.submitting = '1';
+
+            const status = form.querySelector('[data-ingreso-submit-status]');
+            if (status) {
+                status.hidden = false;
+                status.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            const button = form.querySelector('button[type="submit"]');
+            if (button) {
+                button.disabled = true;
+                button.textContent = button.dataset.loadingText || 'Enviando ficha...';
+            }
+        }, true);
+    })();
+</script>
+@endpush

@@ -2798,6 +2798,239 @@
             -webkit-overflow-scrolling: touch;
         }
     }
+
+    @media (max-width: 900px) {
+        .mine-page,
+        .mine-page .page-header,
+        .mine-page .card,
+        .mine-mines-card,
+        .mine-worker-card,
+        .mine-assignments-card,
+        .mine-expiring-card,
+        .mine-scheduled-card {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+        }
+
+        .mine-page {
+            overflow-x: hidden;
+        }
+
+        .mine-toolbar {
+            align-items: stretch;
+            gap: 14px;
+        }
+
+        .mine-toolbar > div:first-child {
+            min-width: 0;
+        }
+
+        .mine-toolbar .page-actions {
+            width: 100%;
+            min-width: 0;
+            justify-content: flex-start;
+        }
+
+        .mine-toolbar .page-actions > .btn,
+        .mine-toolbar .mine-actions-menu,
+        .mine-toolbar .mine-actions-btn {
+            min-width: 0;
+        }
+
+        .mine-view-switch {
+            width: 100%;
+            max-width: 100%;
+            justify-content: flex-start;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+
+        .mine-view-tab {
+            min-width: max-content;
+        }
+
+        .mine-card-header,
+        .mine-worker-header,
+        .mine-list-header {
+            align-items: stretch;
+        }
+
+        .mine-card-header > *,
+        .mine-worker-header > *,
+        .mine-list-header > * {
+            min-width: 0;
+        }
+
+        .mine-header-copy {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+        }
+
+        .mine-board {
+            grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+        }
+
+        .mine-tile {
+            min-width: 0;
+        }
+
+        .mine-view-toolbar,
+        .mine-pagination-controls {
+            width: 100%;
+        }
+
+        .mine-matrix-wrap,
+        .mining-matrix-wrapper,
+        .mine-table-wrap,
+        .worker-table-wrap {
+            max-width: 100%;
+            min-width: 0;
+            overscroll-behavior-x: contain;
+        }
+
+        .mine-calendar-filter {
+            min-width: min(210px, 100%);
+        }
+
+        .mine-calendar-popover {
+            width: min(300px, calc(100vw - 28px));
+            max-width: calc(100vw - 28px);
+        }
+
+        dialog.mine-dialog {
+            width: min(96vw, 980px);
+            max-width: 96vw;
+            max-height: calc(100dvh - 24px);
+            margin: auto;
+        }
+
+        .mine-dialog-body {
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .mine-page {
+            gap: 12px;
+            padding-bottom: 88px;
+        }
+
+        .mine-page .page-title {
+            font-size: clamp(26px, 9vw, 34px);
+            line-height: 1.05;
+            overflow-wrap: anywhere;
+        }
+
+        .mine-page .page-subtitle {
+            font-size: 15px;
+            line-height: 1.35;
+        }
+
+        .mine-toolbar .page-actions {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+            gap: 10px !important;
+        }
+
+        .mine-toolbar .page-actions > .btn,
+        .mine-toolbar .mine-actions-menu,
+        .mine-toolbar .mine-actions-btn {
+            width: 100%;
+        }
+
+        .mine-actions-panel {
+            left: 0;
+            right: auto;
+            width: min(320px, calc(100vw - 32px));
+            min-width: 0;
+        }
+
+        .mine-view-switch {
+            border-radius: 14px;
+            padding: 5px;
+        }
+
+        .mine-view-tab {
+            padding: 11px 13px;
+            font-size: 13px;
+        }
+
+        .mine-mines-card .card-body,
+        .mine-worker-card .card-body,
+        .mine-assignments-card .card-body,
+        .mine-expiring-card .card-body,
+        .mine-scheduled-card .card-body {
+            padding-left: 14px;
+            padding-right: 14px;
+        }
+
+        .mine-card-header,
+        .mine-worker-header,
+        .mine-list-header {
+            gap: 8px;
+        }
+
+        .mine-filter-row,
+        .mine-view-toolbar,
+        .mine-view-size {
+            display: grid;
+            grid-template-columns: 1fr;
+        }
+
+        .mine-view-select,
+        .mine-filter-control,
+        .mine-filter-clear-link {
+            width: 100%;
+        }
+
+        .mine-view-summary,
+        .mine-pagination-summary {
+            text-align: left;
+        }
+
+        .worker-table tr {
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+        }
+
+        .worker-table td[data-label]::before {
+            display: block;
+            margin-bottom: 3px;
+        }
+
+        .mine-table-wrap {
+            border-radius: 12px;
+        }
+
+        .mine-table {
+            min-width: 760px;
+        }
+
+        .mine-expiring-table {
+            min-width: 840px;
+        }
+
+        .mine-matrix-wrap,
+        .mining-matrix-wrapper {
+            max-height: 68dvh;
+        }
+
+        dialog.mine-dialog {
+            width: calc(100vw - 16px);
+            max-width: calc(100vw - 16px);
+            max-height: calc(100dvh - 16px);
+            border-radius: 18px;
+        }
+
+        .mine-dialog-header,
+        .mine-dialog-body {
+            padding-left: 14px;
+            padding-right: 14px;
+        }
+    }
 </style>
 
 <div class="module-page mine-page">
@@ -4582,7 +4815,7 @@
                             <label class="mine-checkline"><input type="hidden" name="desaprueba_finaliza_proceso" value="0"><input type="checkbox" name="desaprueba_finaliza_proceso" value="1" @checked($exam->desaprueba_finaliza_proceso)><span>Desaprobar finaliza proceso</span></label>
                             <label class="mine-checkline"><input type="hidden" name="permite_convalidacion" value="0"><input type="checkbox" name="permite_convalidacion" value="1" @checked($exam->permite_convalidacion)><span>Permite convalidación</span></label>
                             <label class="mine-checkline"><input type="hidden" name="activo" value="0"><input type="checkbox" name="activo" value="1" @checked($exam->activo)><span>Activo</span></label>
-                            <label>Orden<input type="number" min="0" name="orden" value="{{ $exam->orden }}"></label>
+                            <input type="hidden" name="orden" value="{{ $exam->orden ?? 0 }}">
                             <label class="is-wide">Observación<textarea name="observacion">{{ $exam->observacion }}</textarea></label>
                             <label>Observación de precio<input type="text" name="observacion_precio" placeholder="Opcional si cambia precio"></label>
 
@@ -4625,7 +4858,7 @@
 
                     <label>Mina<select name="mina_id" required>@foreach($mines as $mine)<option value="{{ $mine->id }}">{{ $mine->nombre }}</option>@endforeach</select></label>
                     <label class="is-wide">Examen<select name="examen_id" required>@foreach($exams as $exam)<option value="{{ $exam->id }}">{{ $exam->nombre }}</option>@endforeach</select></label>
-                    <label>Prioridad visual<input type="number" min="0" name="orden" value="0" placeholder="0, 1, 2..."></label>
+                    <input type="hidden" name="orden" value="0">
                     <label class="mine-checkline"><input type="hidden" name="obligatorio" value="0"><input type="checkbox" name="obligatorio" value="1" checked><span>Obligatorio</span></label>
                     <label class="mine-checkline"><input type="hidden" name="permite_no_aplica" value="0"><input type="checkbox" name="permite_no_aplica" value="1" checked><span>Puede marcarse como no aplica por área</span></label>
                     <label class="mine-checkline"><input type="hidden" name="permite_convalidacion_mina" value="0"><input type="checkbox" name="permite_convalidacion_mina" value="1"><span>Puede convalidarse desde otra mina compatible</span></label>
@@ -4669,8 +4902,7 @@
                                         </div>
                                         <span class="mine-muted">
                                             {{ $requirement->examen?->tiene_vigencia ? 'Con vencimiento' : 'Sin vencimiento' }} ·
-                                            Intentos {{ $requirement->examen?->max_intentos ?: '-' }} ·
-                                            Prioridad {{ $requirement->orden ?? 0 }}
+                                            Intentos {{ $requirement->examen?->max_intentos ?: '-' }}
                                         </span>
                                         @if($requirement->vigencia_dias_override)
                                             <span class="mine-muted">Vigencia para esta mina: {{ $requirement->vigencia_dias_override }} días</span>

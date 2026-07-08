@@ -126,11 +126,27 @@ class PersonalContratoFormatoServiceTest extends TestCase
 
         $session = $this->updateSession();
         $personalId = $this->createWorker('FALTA_CONTRATO');
+        $fechaInicio = now()->toDateString();
+        $fechaFin = now()->addMonths(6)->toDateString();
 
         DB::table('personal_contrato_datos')->insert([
             'id' => (string) Str::uuid(),
             'personal_id' => $personalId,
+            'fecha_inicio_contrato' => $fechaInicio,
+            'fecha_fin_contrato' => $fechaFin,
             'downloaded_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalId,
+            'contrato_numero' => 1,
+            'estado' => 'PREPARACION',
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
+            'archivo_pendiente_regularizacion' => true,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

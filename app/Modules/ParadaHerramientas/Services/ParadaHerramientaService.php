@@ -142,6 +142,14 @@ class ParadaHerramientaService
             ];
         }
 
+        $lateChangeComment = trim((string) ($payload['comentario_cambio_previo'] ?? ''));
+        if ($this->requiresLateChangeComment($rq, $lista) && $lateChangeComment === '') {
+            return [
+                'ok' => false,
+                'message' => 'Para modificar el requerimiento dentro de la semana previa a la parada debes registrar el motivo del cambio.',
+            ];
+        }
+
         $groups = $this->normalizeGroups($payload['grupos'] ?? []);
         if (empty($groups)) {
             return [
@@ -150,7 +158,7 @@ class ParadaHerramientaService
             ];
         }
 
-        DB::transaction(function () use ($lista, $usuario, $payload, $groups): void {
+        DB::transaction(function () use ($lista, $usuario, $payload, $groups, $lateChangeComment): void {
             $lista->fill([
                 'observaciones' => trim((string) ($payload['observaciones'] ?? '')) ?: null,
                 'updated_by_usuario_id' => $usuario->id,
@@ -183,8 +191,15 @@ class ParadaHerramientaService
                         'cantidad_recibida' => $item['cantidad_recibida'],
                         'unidad' => $item['unidad'],
                         'observaciones' => $item['observaciones'] ?: null,
+                        'incidencia_durante_parada' => $item['incidencia_durante_parada'] ?: null,
                         'pedido_solicitado_at' => $item['pedido_solicitado_at'] ?? null,
                         'pedido_llego_at' => $item['pedido_llego_at'] ?? null,
+                        'recepcion_estado' => $item['recepcion_estado'],
+                        'recepcion_fecha' => $item['recepcion_fecha'] ?? null,
+                        'recepcion_observacion' => $item['recepcion_observacion'] ?: null,
+                        'recepcion_registrada_at' => $item['recepcion_registrada_at'] ?? null,
+                        'recepcion_registrada_por_usuario_id' => $item['recepcion_registrada_por_usuario_id'] ?: null,
+                        'comentario_cambio_previo' => $lateChangeComment !== '' ? $lateChangeComment : ($item['comentario_cambio_previo'] ?: null),
                         'orden' => $order++,
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -347,6 +362,12 @@ class ParadaHerramientaService
         $lista = $this->ensureLista($rq, $usuario);
         $fechaInicio = Carbon::parse($rq->fecha_inicio);
         $fechaFin = $rq->fecha_fin ? Carbon::parse($rq->fecha_fin) : null;
+        $deadline = Carbon::parse($lista->fecha_limite_envio)->startOfDay();
+        $diasParaLimite = now()->startOfDay()->diffInDays($deadline, false);
+        $puedeEditar = $this->canEditLista($usuario, $rq, $lista);
+        $today = now()->startOfDay();
+        $paradaIniciada = $today->gte($fechaInicio->copy()->startOfDay());
+        $paradaFinalizada = $fechaFin ? $today->gte($fechaFin->copy()->startOfDay()) : false;
 
         return [
             'rq_mina_id' => (string) $rq->id,
@@ -355,10 +376,14 @@ class ParadaHerramientaService
             'area' => $rq->area,
             'fecha_inicio' => $fechaInicio->toDateString(),
             'fecha_fin' => $fechaFin?->toDateString(),
+            'parada_iniciada' => $paradaIniciada,
+            'parada_finalizada' => $paradaFinalizada,
+            'fase_parada' => $paradaFinalizada ? 'FINALIZADA' : ($paradaIniciada ? 'DURANTE' : 'PREVIA'),
             'semana' => (int) $fechaInicio->isoWeek(),
             'anio_semana' => (int) $fechaInicio->isoWeekYear(),
-            'fecha_limite_envio' => Carbon::parse($lista->fecha_limite_envio)->toDateString(),
-            'dias_para_limite' => now()->startOfDay()->diffInDays(Carbon::parse($lista->fecha_limite_envio)->startOfDay(), false),
+            'fecha_limite_envio' => $deadline->toDateString(),
+            'dias_para_limite' => $diasParaLimite,
+            'limite_envio_vencido' => $diasParaLimite < 0,
             'estado_lista' => $lista->estado,
             'enviado_at' => $lista->enviado_at?->format('Y-m-d H:i:s'),
             'observaciones' => $lista->observaciones,
@@ -366,8 +391,11 @@ class ParadaHerramientaService
                 'nombre' => $rq->supervisor?->nombre_completo,
                 'correo' => $rq->supervisor?->correo ?: $rq->supervisor?->usuario?->email,
             ],
-            'puede_editar' => $this->canEditLista($usuario, $rq, $lista),
+            'puede_editar' => $puedeEditar,
+            'puede_completar_requerimiento' => $puedeEditar,
             'puede_actualizar_pedido' => $this->canUpdatePedido($usuario),
+            'requiere_comentario_cambio_previo' => $this->requiresLateChangeComment($rq, $lista),
+            'fecha_recepcion_default' => now()->toDateString(),
             'grupos' => $lista->grupos->map(fn (ParadaHerramientaGrupo $grupo): array => [
                 'id' => (string) $grupo->id,
                 'grupo_trabajo_id' => (string) ($grupo->grupo_trabajo_id ?? ''),
@@ -389,6 +417,9 @@ class ParadaHerramientaService
         $deadline = $lista?->fecha_limite_envio ? Carbon::parse($lista->fecha_limite_envio) : $this->deadlineFor($rq);
         $dias = now()->startOfDay()->diffInDays($deadline->copy()->startOfDay(), false);
         $today = now()->startOfDay();
+        $estadoLista = $lista?->estado ?? 'PENDIENTE';
+        $limiteEnvioVencido = $dias < 0;
+        $puedeCompletarRequerimiento = !$limiteEnvioVencido && strtoupper((string) $estadoLista) !== 'ENVIADO';
 
         return [
             'rq_mina_id' => (string) $rq->id,
@@ -403,9 +434,11 @@ class ParadaHerramientaService
             'anio_semana' => (int) $fechaInicio->isoWeekYear(),
             'fecha_limite_envio' => $deadline->toDateString(),
             'dias_para_limite' => $dias,
-            'estado_lista' => $lista?->estado ?? 'PENDIENTE',
+            'limite_envio_vencido' => $limiteEnvioVencido,
+            'estado_lista' => $estadoLista,
             'enviado_at' => $lista?->enviado_at?->format('Y-m-d H:i:s'),
             'grupos_count' => $lista?->grupos?->count() ?? $rq->gruposTrabajo->count(),
+            'puede_completar_requerimiento' => $puedeCompletarRequerimiento,
         ];
     }
 
@@ -432,8 +465,15 @@ class ParadaHerramientaService
                     'cantidad_faltante' => max(0, $solicitada - $entregada),
                     'unidad' => $item->unidad,
                     'observaciones' => $item->observaciones,
+                    'incidencia_durante_parada' => $item->incidencia_durante_parada,
                     'pedido_solicitado_at' => $item->pedido_solicitado_at?->toDateString(),
                     'pedido_llego_at' => $item->pedido_llego_at?->toDateString(),
+                    'recepcion_estado' => $item->recepcion_estado ?: ParadaHerramientaItem::RECEPCION_PENDIENTE,
+                    'recepcion_fecha' => $item->recepcion_fecha?->toDateString(),
+                    'recepcion_observacion' => $item->recepcion_observacion,
+                    'recepcion_registrada_at' => $item->recepcion_registrada_at?->format('Y-m-d H:i:s'),
+                    'recepcion_registrada_por_usuario_id' => $item->recepcion_registrada_por_usuario_id,
+                    'comentario_cambio_previo' => $item->comentario_cambio_previo,
                 ];
             })
             ->all();
@@ -525,6 +565,13 @@ class ParadaHerramientaService
             $observaciones = trim((string) ($item['observaciones'] ?? ''));
             $pedidoSolicitado = $this->sanitizeDate($item['pedido_solicitado_at'] ?? null);
             $pedidoLlego = $this->sanitizeDate($item['pedido_llego_at'] ?? null);
+            $incidenciaDuranteParada = trim((string) ($item['incidencia_durante_parada'] ?? ''));
+            $recepcionEstado = $this->normalizeRecepcionEstado($item['recepcion_estado'] ?? ParadaHerramientaItem::RECEPCION_PENDIENTE);
+            $recepcionFecha = $this->sanitizeDate($item['recepcion_fecha'] ?? null);
+            $recepcionObservacion = trim((string) ($item['recepcion_observacion'] ?? ''));
+            $recepcionRegistradaAt = trim((string) ($item['recepcion_registrada_at'] ?? ''));
+            $recepcionRegistradaPor = trim((string) ($item['recepcion_registrada_por_usuario_id'] ?? ''));
+            $comentarioCambioPrevio = trim((string) ($item['comentario_cambio_previo'] ?? ''));
 
             if ($descripcion === '' && $cantidad <= 0 && $observaciones === '') {
                 continue;
@@ -540,8 +587,15 @@ class ParadaHerramientaService
                     'cantidad_recibida' => $cantidadRecibida,
                     'unidad' => $unidad !== '' ? $unidad : null,
                     'observaciones' => $observaciones,
+                    'incidencia_durante_parada' => $incidenciaDuranteParada,
                     'pedido_solicitado_at' => $pedidoSolicitado,
                     'pedido_llego_at' => $pedidoLlego,
+                    'recepcion_estado' => $recepcionEstado,
+                    'recepcion_fecha' => $recepcionFecha,
+                    'recepcion_observacion' => $recepcionObservacion,
+                    'recepcion_registrada_at' => $recepcionRegistradaAt !== '' ? $recepcionRegistradaAt : null,
+                    'recepcion_registrada_por_usuario_id' => $recepcionRegistradaPor,
+                    'comentario_cambio_previo' => $comentarioCambioPrevio,
                 ];
             }
         }
@@ -551,15 +605,14 @@ class ParadaHerramientaService
 
     private function canEditLista(Usuario $usuario, RQMina $rq, ParadaHerramientaLista $lista): bool
     {
-        if (strtoupper((string) $lista->estado) === 'ENVIADO') {
+        $today = now()->startOfDay();
+        $deadline = Carbon::parse($lista->fecha_limite_envio)->startOfDay();
+
+        if ($today->gt($deadline)) {
             return false;
         }
 
-        if (PermissionMatrix::userCan($usuario, 'herramientas', 'administrar')) {
-            return true;
-        }
-
-        return now()->startOfDay()->lte(Carbon::parse($lista->fecha_limite_envio)->startOfDay());
+        return strtoupper((string) $lista->estado) !== 'ENVIADO';
     }
 
     public function updatePedido(Usuario $usuario, RQMina $rq, array $payload): array
@@ -576,6 +629,21 @@ class ParadaHerramientaService
         $mode = in_array(($payload['modo'] ?? ''), ['entrega', 'recepcion'], true)
             ? (string) $payload['modo']
             : 'todo';
+
+        if ($mode === 'entrega' && !$this->hasParadaStarted($rq)) {
+            return [
+                'ok' => false,
+                'message' => 'Las entregas se habilitan cuando inicia la parada.',
+            ];
+        }
+
+        if ($mode === 'recepcion' && !$this->hasParadaEnded($rq)) {
+            return [
+                'ok' => false,
+                'message' => 'La recepcion final se habilita cuando termina la parada.',
+            ];
+        }
+
         $updates = $this->normalizePedidoUpdates($payload['grupos'] ?? []);
         if (empty($updates)) {
             return [
@@ -583,13 +651,14 @@ class ParadaHerramientaService
                 'message' => 'No hay pedidos para actualizar.',
             ];
         }
+        $fechaRecepcion = $this->sanitizeDate($payload['fecha_recepcion'] ?? null) ?: now()->toDateString();
 
         $allowedIds = $lista->grupos
             ->flatMap(fn (ParadaHerramientaGrupo $grupo) => $grupo->items->pluck('id'))
             ->map(fn ($id) => (string) $id)
             ->flip();
 
-        DB::transaction(function () use ($updates, $allowedIds, $mode): void {
+        DB::transaction(function () use ($updates, $allowedIds, $mode, $fechaRecepcion, $usuario): void {
             foreach ($updates as $itemId => $fields) {
                 if (!$allowedIds->has($itemId)) {
                     continue;
@@ -603,10 +672,16 @@ class ParadaHerramientaService
 
                 if ($mode === 'todo' || $mode === 'entrega') {
                     $data['cantidad_entregada'] = $fields['cantidad_entregada'];
+                    $data['incidencia_durante_parada'] = $fields['incidencia_durante_parada'] ?: null;
                 }
 
                 if ($mode === 'todo' || $mode === 'recepcion') {
                     $data['cantidad_recibida'] = $fields['cantidad_recibida'];
+                    $data['recepcion_estado'] = $fields['recepcion_estado'];
+                    $data['recepcion_fecha'] = $fields['recepcion_fecha'] ?: $fechaRecepcion;
+                    $data['recepcion_observacion'] = $fields['recepcion_observacion'] ?: null;
+                    $data['recepcion_registrada_at'] = now();
+                    $data['recepcion_registrada_por_usuario_id'] = $usuario->id;
                 }
 
                 ParadaHerramientaItem::query()
@@ -1542,6 +1617,34 @@ class ParadaHerramientaService
         return $raw !== '' ? $raw : null;
     }
 
+    private function normalizeRecepcionEstado(mixed $value): string
+    {
+        $estado = strtoupper(trim((string) ($value ?? '')));
+
+        return in_array($estado, ParadaHerramientaItem::recepcionEstados(), true)
+            ? $estado
+            : ParadaHerramientaItem::RECEPCION_PENDIENTE;
+    }
+
+    private function hasParadaStarted(RQMina $rq): bool
+    {
+        return now()->startOfDay()->gte(Carbon::parse($rq->fecha_inicio)->startOfDay());
+    }
+
+    private function hasParadaEnded(RQMina $rq): bool
+    {
+        if (!$rq->fecha_fin) {
+            return false;
+        }
+
+        return now()->startOfDay()->gte(Carbon::parse($rq->fecha_fin)->startOfDay());
+    }
+
+    private function requiresLateChangeComment(RQMina $rq, ParadaHerramientaLista $lista): bool
+    {
+        return false;
+    }
+
     private function normalizePedidoUpdates(mixed $groups): array
     {
         if (!is_array($groups)) {
@@ -1571,6 +1674,10 @@ class ParadaHerramientaService
                         'pedido_llego_at' => $this->sanitizeDate($item['pedido_llego_at'] ?? null),
                         'cantidad_entregada' => max(0, (int) ($item['cantidad_entregada'] ?? 0)),
                         'cantidad_recibida' => max(0, (int) ($item['cantidad_recibida'] ?? 0)),
+                        'incidencia_durante_parada' => trim((string) ($item['incidencia_durante_parada'] ?? '')),
+                        'recepcion_estado' => $this->normalizeRecepcionEstado($item['recepcion_estado'] ?? ParadaHerramientaItem::RECEPCION_PENDIENTE),
+                        'recepcion_fecha' => $this->sanitizeDate($item['recepcion_fecha'] ?? null),
+                        'recepcion_observacion' => trim((string) ($item['recepcion_observacion'] ?? '')),
                     ];
                 }
             }

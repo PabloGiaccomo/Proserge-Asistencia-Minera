@@ -369,7 +369,8 @@
                                             'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual === 'Extranjero',
                                             'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual !== 'Extranjero',
                                             'numero_cuenta' => in_array($bancoActual, ['BCP', 'Interbank'], true),
-                                            'banco_otro', 'cci' => $bancoActual === 'Otro',
+                                            'banco_otro' => $bancoActual === 'Otro',
+                                            'cci' => $bancoActual === 'Otro',
                                             'tipo_comision', 'tipo_afp', 'cuspp' => $sistemaPensionarioActual === 'Sistema Privado de Pensiones',
                                             'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual === 'Otra empresa',
                                             default => false,
@@ -383,7 +384,8 @@
                                             'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual !== 'Extranjero',
                                             'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual === 'Extranjero',
                                             'numero_cuenta' => !in_array($bancoActual, ['BCP', 'Interbank'], true),
-                                            'banco_otro', 'cci' => $bancoActual !== 'Otro',
+                                            'banco_otro' => $bancoActual !== 'Otro',
+                                            'cci' => $bancoActual === '',
                                             'tipo_comision', 'tipo_afp', 'cuspp' => $currentFieldValue('sistema_pensionario') !== 'Sistema Privado de Pensiones',
                                             'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $currentFieldValue('quinta_empleador_principal') !== 'Otra empresa',
                                             default => false,
@@ -1270,10 +1272,18 @@ document.addEventListener('DOMContentLoaded', function () {
         const bancoConCuenta = banco === 'BCP' || banco === 'Interbank';
         setVisible('numero_cuenta', bancoConCuenta);
         setVisible('banco_otro', banco === 'Otro');
-        setVisible('cci', banco === 'Otro');
+        setVisible('cci', banco !== '');
         setEnabled('numero_cuenta', bancoConCuenta);
         setEnabled('banco_otro', banco === 'Otro');
-        setEnabled('cci', banco === 'Otro');
+        setEnabled('cci', banco !== '');
+        if (!isReadonly && banco !== 'Otro') {
+            const otroBanco = byKey('banco_otro');
+            if (otroBanco) otroBanco.value = '';
+        }
+        if (!isReadonly && !bancoConCuenta) {
+            const numeroCuenta = byKey('numero_cuenta');
+            if (numeroCuenta) numeroCuenta.value = '';
+        }
 
         const empleadorOtro = byKey('quinta_empleador_principal')?.value === 'Otra empresa';
         setVisible('quinta_otra_empresa', empleadorOtro);

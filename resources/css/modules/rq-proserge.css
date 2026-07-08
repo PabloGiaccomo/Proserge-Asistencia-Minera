@@ -375,7 +375,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 230px;
+    max-height: 320px;
     overflow: auto;
     background: #ffffff;
     border: 1px solid #dbe5f2;
@@ -394,10 +394,11 @@
     background: #f9fbff;
     color: #223249;
     cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 9px 10px;
+    display: grid;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) auto;
+    gap: 7px 12px;
+    align-items: center;
+    padding: 10px 12px;
     text-align: left;
     transition: border-color .15s ease, background .15s ease;
 }
@@ -408,21 +409,69 @@
 }
 
 .worker-result strong {
+    display: block;
     font-size: 12px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 }
 
-.worker-result span,
+.worker-result-main small,
+.worker-result-detail,
+.worker-result-reason,
 .worker-search-empty {
     color: #687892;
     font-size: 11px;
     line-height: 1.35;
 }
 
-.worker-result.is-disabled,
+.worker-result-main small {
+    display: block;
+    margin-top: 2px;
+}
+
+.worker-result-detail {
+    overflow-wrap: anywhere;
+}
+
+.worker-result-status {
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 4px 9px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.worker-result-status.is-ok {
+    background: #dcfce7;
+    color: #047857;
+}
+
+.worker-result-status.is-bad {
+    background: #fee2e2;
+    color: #b42318;
+}
+
+.worker-result-reason {
+    grid-column: 1 / -1;
+    border-top: 1px dashed #dbe5f2;
+    padding-top: 6px;
+}
+
+.worker-result.is-unavailable,
 .worker-result:disabled {
     background: #fff3f3;
     border-color: #ffd2d2;
     color: #9f1239;
+}
+
+.worker-result.is-unavailable:hover {
+    background: #fff7ed;
+    border-color: #fb923c;
+    color: #7c2d12;
+}
+
+.worker-result:disabled {
     cursor: not-allowed;
 }
 
@@ -432,6 +481,16 @@
 
 .worker-search-empty.is-error {
     color: #b42318;
+}
+
+@media (max-width: 900px) {
+    .worker-result {
+        grid-template-columns: 1fr;
+    }
+
+    .worker-result-status {
+        justify-self: start;
+    }
 }
 
 .puesto-grid {
@@ -457,6 +516,11 @@
     border-color: #f6c1c1;
 }
 
+.availability-box.is-neutral {
+    background: #f8fafc;
+    border-color: #dbe5f2;
+}
+
 .availability-title {
     font-size: 12px;
     font-weight: 800;
@@ -469,6 +533,10 @@
 
 .availability-box.is-bad .availability-title {
     color: #b42318;
+}
+
+.availability-box.is-neutral .availability-title {
+    color: #475569;
 }
 
 .availability-lines p {

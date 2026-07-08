@@ -27,6 +27,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (verify) verify.disabled = !enabled;
     };
 
+    const clearField = function (key) {
+        const input = byKey(key);
+        if (input) input.value = '';
+    };
+
     const fillSelect = function (select, values) {
         if (!select) return;
         const selected = select.dataset.currentValue || select.value;
@@ -94,10 +99,14 @@ document.addEventListener('DOMContentLoaded', function () {
         const bancoConCuenta = banco === 'BCP' || banco === 'Interbank';
         setVisible('numero_cuenta', bancoConCuenta);
         setEnabled('numero_cuenta', bancoConCuenta);
-        ['banco_otro', 'cci'].forEach(key => {
-            setVisible(key, banco === 'Otro');
-            setEnabled(key, banco === 'Otro');
-        });
+        setVisible('banco_otro', banco === 'Otro');
+        setEnabled('banco_otro', banco === 'Otro');
+        setVisible('cci', banco !== '');
+        setEnabled('cci', banco !== '');
+        if (!bancoConCuenta) clearField('numero_cuenta');
+        if (banco !== 'Otro') {
+            clearField('banco_otro');
+        }
 
         const spp = byKey('sistema_pensionario')?.value === 'Sistema Privado de Pensiones';
         ['tipo_comision', 'tipo_afp', 'cuspp'].forEach(key => {

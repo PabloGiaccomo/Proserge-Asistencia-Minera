@@ -21,6 +21,7 @@ class PersonalIngreso extends Model
 
     protected $fillable = [
         'id',
+        'submission_uuid',
         'estado',
         'tipo_documento',
         'numero_documento',

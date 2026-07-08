@@ -415,6 +415,54 @@ class PersonalContratoRenewalTest extends TestCase
         ]);
     }
 
+    public function test_subir_pdf_de_contrato_en_preparacion_activa_aunque_el_trabajador_siga_cesado(): void
+    {
+        Storage::fake('local');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createPersonal('CESADO', [
+            'fecha_cese' => '2026-05-31',
+            'motivo_cese' => 'Termino de contrato anterior',
+        ]);
+        $base = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-05-31', true);
+
+        $newContract = app(PersonalContratoService::class)->prepareReentry($personal, [
+            'fecha_inicio' => '2026-08-01',
+            'fecha_fin' => '2026-12-31',
+            'observacion_renovacion' => 'Retorno por nueva parada',
+        ], $actor);
+
+        Personal::query()->whereKey($personal->id)->update([
+            'estado' => 'CESADO',
+            'fecha_cese' => '2026-05-31',
+            'motivo_cese' => 'Termino de contrato anterior',
+        ]);
+
+        app(PersonalContratoDatoService::class)->uploadSignedContract(
+            $personal->fresh(),
+            UploadedFile::fake()->create('contrato-reingreso.pdf', 32, 'application/pdf'),
+            $actor,
+        );
+
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $newContract->id,
+            'estado' => PersonalContrato::ESTADO_ACTIVO,
+            'signed_contract_original_name' => 'contrato-reingreso.pdf',
+            'archivo_pendiente_regularizacion' => false,
+        ]);
+        $this->assertDatabaseHas('personal_contratos', [
+            'id' => $base->id,
+            'estado' => PersonalContrato::ESTADO_CERRADO,
+        ]);
+        $this->assertDatabaseHas('personal', [
+            'id' => $personal->id,
+            'estado' => 'ACTIVO',
+            'fecha_cese' => null,
+            'motivo_cese' => null,
+            'pendiente_contrato_firmado' => false,
+        ]);
+    }
+
     public function test_reingreso_permite_actualizar_datos_laborales_bancarios_y_pensionarios(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));

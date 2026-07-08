@@ -89,6 +89,7 @@ class PersonalIndexResource extends JsonResource
         $fechaCese = PersonalNormalizer::isoDate($fichaData['fecha_cese'] ?? $this->fecha_cese ?? null);
         $missingRequiredFichaFields = $this->missingRequiredFichaFields($fichaData, $ficha !== null);
         $hasCurrentSignedContract = $this->hasCurrentSignedContract($contratoDatos, $contratoActual, $contratoVigenteFirmado);
+        $hasOperationalContractDates = $this->hasOperationalContractDates($contratoActual, $contratoActivo, $todayString);
 
         if (!$telefono1 && !empty($this->telefono)) {
             $phoneData = PersonalNormalizer::normalizePhonePayload($this->telefono);
@@ -134,7 +135,8 @@ class PersonalIndexResource extends JsonResource
         $faltaContrato = $estadoPersonal === 'FALTA_CONTRATO';
         $noFirmoContrato = $estadoPersonal === 'NO_FIRMO_CONTRATO';
         $pendienteContratoFirmado = (bool) ($this->pendiente_contrato_firmado ?? false);
-        $pendienteContratoSinFirmar = $pendienteContratoFirmado && !$hasCurrentSignedContract;
+        $faltaContratoSoloPorAdjunto = $faltaContrato && $hasOperationalContractDates;
+        $faltaContratoOperativo = $faltaContrato && !$faltaContratoSoloPorAdjunto;
         $terminarFicha = !$hasCurrentSignedContract && (
             in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
             || $ficha === null
@@ -146,7 +148,7 @@ class PersonalIndexResource extends JsonResource
 
         $estadoVisible = match (true) {
             $estadoPersonal === 'CESADO' || $ultimoContratoFinalizadoSinVigente || $contratoVencido || $ceseVigente => 'CESADO',
-            $noFirmoContrato || $pendienteContratoSinFirmar => 'INACTIVO',
+            $noFirmoContrato => 'INACTIVO',
             $faltaContrato, $terminarFicha => 'INACTIVO',
             $bienestarInactivo || ($primaryBloqueo && (string) $primaryBloqueo->tipo === 'gestacion') => 'INACTIVO',
             $contrato === 'INTER' && !$intermitenteActivo => 'INACTIVO',
@@ -156,15 +158,14 @@ class PersonalIndexResource extends JsonResource
         $estadoDisplay = match (true) {
             $estadoVisible === 'CESADO' => 'CESADO',
             $noFirmoContrato => 'NO_FIRMO_CONTRATO',
-            $estadoPersonal === 'FALTA_CONTRATO' && $estadoVisible !== 'CESADO' => 'FALTA_CONTRATO',
+            $faltaContratoOperativo && $estadoVisible !== 'CESADO' => 'FALTA_CONTRATO',
             default => $estadoVisible,
         };
 
         $situacionKey = match (true) {
             $estadoVisible === 'CESADO' => 'no_habilitado',
             $noFirmoContrato => 'no_firmo_contrato',
-            $pendienteContratoSinFirmar => 'contrato_pendiente_archivo',
-            $faltaContrato => 'falta_contrato',
+            $faltaContratoOperativo => 'falta_contrato',
             $revisarFicha => 'revisar_ficha',
             $terminarFicha => 'terminar_ficha',
             $primaryBloqueo && (string) $primaryBloqueo->tipo === 'vacaciones' => 'vacaciones',
@@ -182,7 +183,6 @@ class PersonalIndexResource extends JsonResource
         $situacionLabel = match ($situacionKey) {
             'revisar_ficha' => 'Revisar ficha',
             'falta_contrato' => 'Falta contrato firmado',
-            'contrato_pendiente_archivo' => 'Adjuntar contrato firmado',
             'no_firmo_contrato' => 'No firmo contrato',
             'terminar_ficha' => 'Terminar ficha',
             'vacaciones' => 'Vacaciones',
@@ -357,6 +357,25 @@ class PersonalIndexResource extends JsonResource
         }
 
         return $contratoDatos->signed_at->greaterThanOrEqualTo($contratoActual->activado_at);
+    }
+
+    private function hasOperationalContractDates($contratoActual, $contratoActivo, string $todayString): bool
+    {
+        $contract = $contratoActivo ?: $contratoActual;
+
+        if (!$contract) {
+            return false;
+        }
+
+        $estado = strtoupper((string) ($contract->estado ?? ''));
+        if (!in_array($estado, [PersonalContrato::ESTADO_ACTIVO, PersonalContrato::ESTADO_PREPARACION], true)) {
+            return false;
+        }
+
+        $inicio = optional($contract->fecha_inicio)->toDateString();
+        $fin = optional($contract->fecha_fin)->toDateString();
+
+        return $inicio !== null && (!$fin || $fin >= $todayString);
     }
 
     private function formatContract($contract, bool $includeClosedData = false): ?array

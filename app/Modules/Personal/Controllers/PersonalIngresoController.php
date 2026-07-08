@@ -87,14 +87,31 @@ class PersonalIngresoController extends WebPageController
             ->with('success', 'Ficha guardada para revision.');
     }
 
-    public function accept(string $id): RedirectResponse
+    public function accept(Request $request, string $id): RedirectResponse
     {
+        $validated = $request->validate([
+            'fecha_inicio_contrato' => ['required', 'date'],
+            'fecha_fin_contrato' => ['nullable', 'date', 'after_or_equal:fecha_inicio_contrato'],
+            'contrato_pdf' => ['nullable', 'file', 'mimes:pdf', 'max:20480'],
+        ], [
+            'fecha_inicio_contrato.required' => 'Indica la fecha de inicio del contrato.',
+            'fecha_inicio_contrato.date' => 'La fecha de inicio del contrato no es valida.',
+            'fecha_fin_contrato.date' => 'La fecha de fin del contrato no es valida.',
+            'fecha_fin_contrato.after_or_equal' => 'La fecha de fin no puede ser menor a la fecha de inicio.',
+            'contrato_pdf.mimes' => 'El contrato firmado debe ser PDF.',
+            'contrato_pdf.max' => 'El PDF no debe superar 20 MB.',
+        ]);
+
+        $validated['contrato_pdf'] = $request->file('contrato_pdf');
+
         $ingreso = $this->ingresos->findOrFail($id);
-        $personal = $this->ingresos->accept($ingreso, $this->requireAuthenticatedUser());
+        $personal = $this->ingresos->accept($ingreso, $this->requireAuthenticatedUser(), $validated);
 
         return redirect()
             ->route('personal.edit', $personal->id)
-            ->with('success', 'Ficha agregada a Personal. Queda marcada con pendiente de adjuntar contrato firmado.');
+            ->with('success', $personal->pendiente_contrato_firmado
+                ? 'Ficha agregada a Personal. Queda marcada con pendiente de adjuntar contrato firmado.'
+                : 'Ficha agregada a Personal con contrato firmado adjuntado.');
     }
 
     public function contractNotSigned(string $id): RedirectResponse

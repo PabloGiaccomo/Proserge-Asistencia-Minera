@@ -5,6 +5,7 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
 use App\Models\Oficina;
+use App\Models\PersonalFicha;
 use App\Models\PersonalPuesto;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalIndexResource;
@@ -140,7 +141,13 @@ class PersonalPageController extends WebPageController
         )->resolve();
 
         if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
-            $trabajadores = array_values(array_filter($trabajadores, fn (array $trabajador): bool => strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter));
+            $trabajadores = array_values(array_filter($trabajadores, function (array $trabajador) use ($visibleStateFilter): bool {
+                if (!empty($trabajador['en_lista_negra'])) {
+                    return true;
+                }
+
+                return strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter;
+            }));
         }
 
         $catalogs = $this->getLocationCatalogs();
@@ -413,6 +420,7 @@ class PersonalPageController extends WebPageController
         $catalogs['catalogTalleres'] = array_values(array_unique($catalogs['catalogTalleres']));
 
         $regularizationSummary = $this->fichaService->regularizationSummary($ficha);
+        $missingRequiredDocuments = $this->fichaService->missingRequiredDocumentKeys($ficha);
 
         return view('personal.edit', array_merge($catalogs, [
             'trabajador' => $trabajador,
@@ -420,11 +428,27 @@ class PersonalPageController extends WebPageController
             'sections' => PersonalFichaCatalog::sections(),
             'initialFields' => $this->initialFichaFieldsForEdit($trabajador, $ficha),
             'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha?->huella_path),
-            'missingRequiredDocuments' => $this->fichaService->missingRequiredDocumentKeys($ficha),
+            'missingRequiredDocuments' => $missingRequiredDocuments,
             'missingRequiredFichaFields' => $regularizationSummary['missing_fields'],
             'regularizationSummary' => $regularizationSummary,
+            'showIngresoRegularizationNotice' => $this->shouldShowIngresoRegularizationNotice($trabajador, $ficha, $regularizationSummary, $missingRequiredDocuments),
             'puestoOptions' => $this->puestoOptions(),
         ]));
+    }
+
+    private function shouldShowIngresoRegularizationNotice(array $trabajador, ?PersonalFicha $ficha, array $regularizationSummary, array $missingRequiredDocuments): bool
+    {
+        if (!$ficha) {
+            return false;
+        }
+
+        $estadoInterno = strtoupper((string) ($trabajador['estado_interno'] ?? $trabajador['estado'] ?? ''));
+        if ($estadoInterno === 'NO_FIRMO_CONTRATO') {
+            return false;
+        }
+
+        return (bool) ($regularizationSummary['can_regularize'] ?? false)
+            || count($missingRequiredDocuments) > 0;
     }
 
     private function getLocationCatalogs(): array

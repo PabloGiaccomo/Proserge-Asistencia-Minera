@@ -1776,7 +1776,7 @@
     }
 
     .personal-page .data-table.personal-grid-compact {
-        min-width: 900px;
+        min-width: 0;
     }
 
     .personal-page .personal-grid-shell.is-expanded {
@@ -1885,6 +1885,232 @@
 
     .contract-preview-wrap {
         min-height: 0;
+    }
+
+    .personal-page .personal-grid-shell {
+        overflow: visible;
+    }
+
+    .personal-page .personal-grid-scroll-top {
+        display: none;
+    }
+
+    .personal-page .personal-grid-wrap {
+        overflow: visible;
+        border: 0;
+        background: transparent;
+    }
+
+    .personal-page .data-table.personal-grid-compact,
+    .personal-page .personal-grid-shell:not(.is-ocup-grouped) .data-table.personal-grid-compact {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        table-layout: auto;
+    }
+
+    .personal-page .data-table.personal-grid-compact thead {
+        display: none;
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody {
+        display: grid;
+        gap: 12px;
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody tr {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 8px 12px;
+        width: 100%;
+        padding: 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody tr.contract-missing {
+        border-color: #fed7aa;
+        box-shadow: inset 4px 0 0 rgba(251, 146, 60, 0.55), 0 10px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody tr.contract-file-pending {
+        border-color: #fde68a;
+        box-shadow: inset 4px 0 0 rgba(245, 158, 11, 0.55), 0 10px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody tr.blacklisted-worker {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+    }
+
+    .personal-page .data-table.personal-grid-compact th,
+    .personal-page .data-table.personal-grid-compact td,
+    .personal-page .data-table.personal-grid-compact th[data-column],
+    .personal-page .data-table.personal-grid-compact td[data-column] {
+        position: static;
+        left: auto;
+        z-index: auto;
+        width: auto;
+        min-width: 0;
+        max-width: 100%;
+        background: transparent;
+        white-space: normal;
+        overflow: visible;
+        box-sizing: border-box;
+    }
+
+    .personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact td,
+    .personal-page .personal-grid-shell.is-expanded .data-table.personal-grid-compact th {
+        white-space: normal;
+    }
+
+    .personal-page .personal-grid-shell.is-expanded .personal-action-buttons {
+        flex-wrap: wrap;
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody td {
+        display: grid;
+        grid-template-columns: minmax(82px, 34%) minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        grid-column: 1 / -1;
+        padding: 7px 0;
+        border-bottom: 1px solid #edf2f7;
+        color: #0f172a;
+        font-size: 12px;
+        text-align: left;
+    }
+
+    .personal-page .data-table.personal-grid-compact tbody td::before {
+        content: attr(data-label);
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="seleccion"] {
+        display: flex;
+        grid-column: 1;
+        grid-row: 1;
+        align-items: center;
+        justify-content: center;
+        padding: 2px 0 0;
+        border-bottom: 0;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="seleccion"]::before,
+    .personal-page .data-table.personal-grid-compact td[data-column="trabajador"]::before,
+    .personal-page .data-table.personal-grid-compact td[data-column="acciones"]::before {
+        display: none;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="trabajador"] {
+        display: block;
+        grid-column: 2;
+        grid-row: 1;
+        padding: 0;
+        border-bottom: 0;
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1.25;
+    }
+
+    @supports selector(:has(*)) {
+        .personal-page .data-table.personal-grid-compact tbody tr:not(:has(td[data-column="seleccion"])) td[data-column="trabajador"] {
+            grid-column: 1 / -1;
+        }
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="acciones"] {
+        display: block;
+        grid-column: 1 / -1;
+        grid-row: 2;
+        padding: 10px 0;
+        border-top: 1px solid #edf2f7;
+        border-bottom: 1px solid #edf2f7;
+    }
+
+    .personal-page .personal-action-buttons {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(36px, 1fr));
+        gap: 8px;
+        align-items: center;
+    }
+
+    .personal-page .personal-action-buttons form {
+        display: contents;
+    }
+
+    .personal-page .personal-icon-btn {
+        width: 100%;
+        min-width: 0;
+        height: 38px;
+        min-height: 38px;
+        border-radius: 10px;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="contrato"] .dg-pill,
+    .personal-page .data-table.personal-grid-compact td[data-column="estado"] .dg-pill,
+    .personal-page .data-table.personal-grid-compact td[data-column="situacion"] .dg-pill {
+        width: auto;
+        min-width: 104px;
+        justify-self: start;
+    }
+
+    .personal-page .personal-contract-warning {
+        margin-top: 6px;
+        width: 100%;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="ocupacion"] {
+        display: block;
+        padding-bottom: 0;
+        border-bottom: 0;
+    }
+
+    .personal-page .data-table.personal-grid-compact td[data-column="ocupacion"]::before {
+        display: block;
+        margin-bottom: 8px;
+    }
+
+    .personal-page .dg-ocup-board {
+        gap: 8px;
+    }
+
+    .personal-page .dg-ocup-row {
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .personal-page .dg-ocup-values {
+        flex-wrap: wrap;
+        overflow: visible;
+        padding-bottom: 0;
+    }
+
+    .personal-page .dg-ocup-cell {
+        min-width: 92px;
+        max-width: 100%;
+    }
+
+    .personal-page .dg-ocup-flat {
+        flex-wrap: wrap;
+        min-width: 0;
+        white-space: normal;
+    }
+
+    .personal-page .personal-pagination-controls.is-top,
+    .personal-page .personal-pagination-controls {
+        align-items: flex-start;
+        border-radius: 14px;
+    }
+
+    .personal-page .personal-pagination-info {
+        width: 100%;
     }
 }
 </style>
@@ -2500,7 +2726,7 @@
                                         'oficina', 'taller', 'habilitado' => 'dg-pill-situacion-activo',
                                         'no_habilitado' => 'dg-pill-situacion-bloqueo',
                                         'vacaciones' => 'dg-pill-situacion-vacaciones',
-                                        'revisar_ficha', 'ficha_observada', 'falta_contrato', 'contrato_pendiente_archivo', 'no_firmo_contrato' => 'dg-pill-situacion-revision',
+                                        'revisar_ficha', 'ficha_observada', 'falta_contrato', 'no_firmo_contrato' => 'dg-pill-situacion-revision',
                                         'descanso_medico' => 'dg-pill-situacion-descanso',
                                         'gestacion' => 'dg-pill-situacion-gestacion',
                                         'terminar_ficha' => 'dg-pill-situacion-inactivo',
@@ -2539,13 +2765,14 @@
                                     data-minas="{{ implode(' ', $trabajador['minas'] ?? []) }}"
                                     data-estado="{{ $trabajador['estado_actual'] ?? mb_strtolower($estadoText) }}"
                                     data-bienestar="{{ $situacionKey }}"
+                                    data-lista-negra="{{ $enListaNegra ? '1' : '0' }}"
                                     data-ocup-minas="{{ implode(' ', $ocupMinas) }}"
                                     data-ocup-minas-list="{{ implode('||', $ocupMinas) }}"
                                     data-ocup-oficina="{{ implode(' ', $ocupOficinas) }}"
                                     data-ocup-taller="{{ implode(' ', $ocupTalleres) }}"
                                     onclick="showWorkerDetail(this)">
                                     @if($canDownloadDocuments)
-                                        <td data-column="seleccion" onclick="event.stopPropagation()">
+                                        <td data-column="seleccion" data-label="Seleccion" onclick="event.stopPropagation()">
                                             <input
                                                 type="checkbox"
                                                 class="personal-select-check js-personal-document-check"
@@ -2554,7 +2781,7 @@
                                                 aria-label="Seleccionar {{ $trabajador['nombre'] ?? 'trabajador' }} para descarga documental">
                                         </td>
                                     @endif
-                                    <td data-column="acciones" onclick="event.stopPropagation()">
+                                    <td data-column="acciones" data-label="Acciones" onclick="event.stopPropagation()">
                                         <div class="personal-action-buttons">
                                             <a
                                                 href="{{ route('personal.edit', $trabajador['id'] ?? '') }}"
@@ -2715,15 +2942,15 @@
                                             </button>
                                         </div>
                                     </td>
-                                    <td data-column="trabajador">
+                                    <td data-column="trabajador" data-label="Trabajador">
                                         <span class="personal-worker-name">{{ $trabajador['nombre'] ?? 'Sin nombre' }}</span>
                                     </td>
-                                    <td data-column="documento">{{ $documentDisplay !== '' ? $documentDisplay : '-' }}</td>
-                                    <td data-column="celular">{{ $trabajador['telefono'] ?? ($trabajador['telefono_1'] ?? '-') }}</td>
-                                    <td data-column="correo">{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '-') }}</td>
-                                    <td data-column="puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
-                                    <td data-column="contrato" class="{{ $contratoAttentionCellClass }}"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
-                                    <td data-column="estado">
+                                    <td data-column="documento" data-label="Documento">{{ $documentDisplay !== '' ? $documentDisplay : '-' }}</td>
+                                    <td data-column="celular" data-label="Celular">{{ $trabajador['telefono'] ?? ($trabajador['telefono_1'] ?? '-') }}</td>
+                                    <td data-column="correo" data-label="Correo">{{ $trabajador['correo'] ?? ($trabajador['email'] ?? '-') }}</td>
+                                    <td data-column="puesto" data-label="Puesto">{{ $trabajador['puesto'] ?? '-' }}</td>
+                                    <td data-column="contrato" data-label="Contrato" class="{{ $contratoAttentionCellClass }}"><span class="dg-pill {{ $contratoClass }}">{{ $contratoText !== '' ? $contratoText : '-' }}</span></td>
+                                    <td data-column="estado" data-label="Estado">
                                         @if($canEditContractData && ($estadoRaw === 'FALTA_CONTRATO' || $pendienteContratoFirmado))
                                             <a
                                                 href="{{ route('personal.contrato-datos.edit', $trabajador['id'] ?? '') }}"
@@ -2742,14 +2969,23 @@
                                         @else
                                             <span class="dg-pill {{ $estadoClass }}">{{ $estadoText }}</span>
                                         @endif
-                                        @if($pendienteContratoFirmado)
+                                        @if($pendienteContratoFirmado && $canUpdatePersonal)
+                                            <button
+                                                type="button"
+                                                class="personal-contract-warning dg-pill-button"
+                                                title="Subir contrato firmado"
+                                                aria-label="Subir contrato firmado"
+                                                onclick="event.stopPropagation(); openSignedContractModal(this.closest('tr'))">
+                                                Adjuntar contrato firmado
+                                            </button>
+                                        @elseif($pendienteContratoFirmado)
                                             <span class="personal-contract-warning">Adjuntar contrato firmado</span>
                                         @endif
                                     </td>
-                                    <td data-column="situacion">
+                                    <td data-column="situacion" data-label="Situacion">
                                         <span class="dg-pill {{ $situacionClass }}">{{ $situacionLabel }}</span>
                                     </td>
-                                    <td data-column="ocupacion">
+                                    <td data-column="ocupacion" data-label="Minas / habilitacion">
                                         @if(count($ocupAll) > 0)
                                             <div class="dg-ocup-flat">
                                                 @foreach(($catalogMinas ?? []) as $ocup)
@@ -5238,8 +5474,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (searchTokens.length && !searchTokens.every(t => searchable.includes(t))) return false;
             if (puestos.length && !puestos.some(function (puesto) { return normalizeText(row.dataset.puesto).indexOf(puesto) !== -1; })) return false;
             if (contratos.length && !contratos.some(function (contrato) { return normalizeText(row.dataset.contrato).indexOf(contrato) !== -1; })) return false;
-            if (estados.length && estados.indexOf(normalizeText(row.dataset.estado)) === -1) return false;
-            if (bienestares.length && bienestares.indexOf(normalizeText(row.dataset.bienestar)) === -1) return false;
+            const isBlacklisted = row.dataset.listaNegra === '1' || row.classList.contains('blacklisted-worker');
+            if (!isBlacklisted && estados.length && estados.indexOf(normalizeText(row.dataset.estado)) === -1) return false;
+            if (!isBlacklisted && bienestares.length && bienestares.indexOf(normalizeText(row.dataset.bienestar)) === -1) return false;
             if (!rowMatchesOccupationFilter(row)) return false;
             return true;
         });

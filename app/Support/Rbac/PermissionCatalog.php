@@ -11,11 +11,19 @@ class PermissionCatalog
         'inicio' => 'Inicio',
         'perfil' => 'Perfil',
         'personal' => 'Personal',
+        'personal_ingresos' => 'Ingresos de Personal',
+        'personal_documentos' => 'Documentos de Personal',
+        'personal_contratos' => 'Contratos laborales',
+        'personal_vencimientos' => 'Vencimientos de contratos',
+        'personal_puestos' => 'Puestos y funciones',
+        'personal_lista_negra' => 'Lista negra',
+        'habilitacion_minera' => 'Habilitacion minera',
         'rq_mina' => 'RQ Mina',
         'rq_proserge' => 'RQ Proserge',
         'notificaciones' => 'Notificaciones',
         'man_power' => 'Man Power',
         'herramientas' => 'Herramientas',
+        'transportes' => 'Transportes',
         'mi_asistencia' => 'Mi Asistencia',
         'bienestar' => 'Bienestar',
         'evaluaciones' => 'Evaluaciones',
@@ -45,6 +53,64 @@ class PermissionCatalog
         'asignar',
         'cerrar',
         'administrar',
+        'descargar',
+        'subir',
+        'observar',
+        'marcar_no_aplica',
+        'regularizar',
+        'renovar',
+        'reingresar',
+        'anular',
+        'configurar',
+        'registrar',
+        'programar',
+        'convalidar',
+        'desasignar',
+        'completar',
+        'entregar',
+        'recepcionar',
+        'devolver',
+        'sincronizar',
+        'comunicar',
+        'enviar',
+        'duplicar',
+        'corregir',
+        'reabrir',
+        'ver_motivo',
+        'scope',
+    ];
+
+    /** @var array<string, array<int, string>> */
+    private const MODULE_ACTIONS = [
+        'inicio' => ['ver', 'dashboards'],
+        'perfil' => ['ver', 'actualizar'],
+        'notificaciones' => ['ver', 'actualizar'],
+        'personal' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'exportar', 'importar', 'aprobar'],
+        'personal_ingresos' => ['ver', 'editar', 'actualizar', 'eliminar', 'aprobar', 'comunicar'],
+        'personal_documentos' => ['ver', 'subir', 'descargar', 'aprobar', 'observar', 'marcar_no_aplica'],
+        'personal_contratos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'subir', 'descargar', 'regularizar', 'renovar', 'reingresar', 'anular', 'cerrar'],
+        'personal_vencimientos' => ['ver', 'actualizar', 'renovar', 'cerrar', 'exportar'],
+        'personal_puestos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
+        'personal_lista_negra' => ['ver', 'registrar', 'eliminar', 'ver_motivo'],
+        'habilitacion_minera' => ['ver', 'crear', 'editar', 'actualizar', 'asignar', 'desasignar', 'configurar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
+        'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'enviar', 'duplicar', 'administrar'],
+        'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
+        'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
+        'herramientas' => ['ver', 'actualizar', 'importar', 'completar', 'enviar', 'entregar', 'recepcionar', 'administrar'],
+        'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'entregar', 'recepcionar', 'administrar'],
+        'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'devolver', 'administrar'],
+        'mi_asistencia' => ['ver', 'dashboards'],
+        'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar'],
+        'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'aprobar'],
+        'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'cerrar', 'reabrir'],
+        'faltas' => ['ver', 'dashboards', 'editar', 'actualizar', 'eliminar', 'corregir', 'anular'],
+        'catalogos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'importar'],
+        'remoto' => ['ver', 'actualizar'],
+        'minas' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar'],
+        'talleres' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
+        'oficinas' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
+        'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar', 'scope'],
+        'roles' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar'],
     ];
 
     public static function modules(): array
@@ -98,6 +164,16 @@ class PermissionCatalog
     {
         $available = [];
 
+        foreach (self::MODULE_ACTIONS as $module => $actions) {
+            if (in_array($module, $exclude, true)) {
+                continue;
+            }
+
+            foreach ($actions as $action) {
+                $available[$module][$action] = true;
+            }
+        }
+
         foreach (Route::getRoutes() as $route) {
             foreach ($route->middleware() as $middleware) {
                 if (!is_string($middleware) || !str_starts_with($middleware, 'web.permission:')) {
@@ -136,6 +212,31 @@ class PermissionCatalog
             'asignar' => 'Asignar',
             'cerrar' => 'Cerrar',
             'administrar' => 'Administrar',
+            'descargar' => 'Descargar',
+            'subir' => 'Subir',
+            'observar' => 'Observar',
+            'marcar_no_aplica' => 'Marcar no aplica',
+            'regularizar' => 'Regularizar',
+            'renovar' => 'Renovar',
+            'reingresar' => 'Reingresar',
+            'anular' => 'Anular',
+            'configurar' => 'Configurar',
+            'registrar' => 'Registrar',
+            'programar' => 'Programar',
+            'convalidar' => 'Convalidar',
+            'desasignar' => 'Desasignar',
+            'completar' => 'Completar',
+            'entregar' => 'Entregar',
+            'recepcionar' => 'Recepcionar',
+            'devolver' => 'Devolver',
+            'sincronizar' => 'Sincronizar',
+            'comunicar' => 'Comunicar',
+            'enviar' => 'Enviar',
+            'duplicar' => 'Duplicar',
+            'corregir' => 'Corregir',
+            'reabrir' => 'Reabrir',
+            'ver_motivo' => 'Ver motivo',
+            'scope' => 'Alcance',
             default => ucfirst($action),
         };
     }
@@ -170,8 +271,14 @@ class PermissionCatalog
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
                     'personal' => ['ver', 'dashboards', 'editar', 'actualizar', 'exportar'],
-                    'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
+                    'personal_documentos' => ['ver', 'descargar'],
+                    'personal_contratos' => ['ver', 'descargar'],
+                    'personal_vencimientos' => ['ver'],
+                    'habilitacion_minera' => ['ver', 'actualizar', 'asignar', 'desasignar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
+                    'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'enviar', 'duplicar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
+                    'herramientas' => ['ver', 'actualizar', 'completar', 'enviar', 'entregar', 'recepcionar'],
+                    'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'entregar', 'recepcionar'],
                 ]),
             ],
             [
@@ -182,9 +289,18 @@ class PermissionCatalog
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
                     'personal' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'exportar', 'importar'],
+                    'personal_ingresos' => ['ver', 'editar', 'actualizar', 'eliminar', 'aprobar', 'comunicar'],
+                    'personal_documentos' => ['ver', 'subir', 'descargar', 'aprobar', 'observar', 'marcar_no_aplica'],
+                    'personal_contratos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'subir', 'descargar', 'regularizar', 'renovar', 'reingresar', 'anular', 'cerrar'],
+                    'personal_vencimientos' => ['ver', 'actualizar', 'renovar', 'cerrar', 'exportar'],
+                    'personal_puestos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
+                    'personal_lista_negra' => ['ver', 'registrar', 'eliminar', 'ver_motivo'],
+                    'habilitacion_minera' => ['ver', 'actualizar', 'asignar', 'desasignar', 'configurar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
                     'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'administrar'],
                     'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
+                    'herramientas' => ['ver', 'actualizar', 'importar', 'completar', 'enviar', 'entregar', 'recepcionar'],
+                    'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'devolver'],
                     'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
                     'asistencias' => ['ver', 'dashboards', 'editar', 'actualizar', 'cerrar'],
                 ]),
@@ -200,6 +316,10 @@ class PermissionCatalog
                     'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'cerrar'],
                     'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
                     'personal' => ['ver', 'dashboards'],
+                    'rq_mina' => ['ver', 'dashboards'],
+                    'herramientas' => ['ver', 'actualizar', 'completar', 'entregar', 'recepcionar'],
+                    'epps' => ['ver', 'registrar', 'devolver'],
+                    'bienestar' => ['ver', 'dashboards'],
                 ]),
             ],
             [
@@ -250,8 +370,8 @@ class PermissionCatalog
     {
         $matrix = self::emptyMatrix();
 
-        foreach (array_keys(self::MODULES) as $module) {
-            foreach (self::ACTIONS as $action) {
+        foreach ($matrix as $module => $actions) {
+            foreach (array_keys($actions) as $action) {
                 $matrix[$module][$action] = true;
             }
         }

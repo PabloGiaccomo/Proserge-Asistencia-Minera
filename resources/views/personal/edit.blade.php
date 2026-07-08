@@ -78,7 +78,7 @@
                 </div>
             </div>
         @endif
-        @if(!empty($ficha) && (($regularizationSummary['can_regularize'] ?? false) || count($missingRequiredDocuments ?? []) > 0))
+        @if($showIngresoRegularizationNotice ?? false)
             <div class="page-header-top" style="margin-top:10px;">
                 <div class="ficha-alert ficha-alert-warning" style="width:100%; margin:0;">
                     Esta ficha todavia tiene informacion pendiente por regularizar. Usa la vista de Ingresos para copiar el link publico y pedir al trabajador que envie una ficha con su DNI.
@@ -138,7 +138,8 @@
                                         'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual !== 'Extranjero',
                                         'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual === 'Extranjero',
                                         'numero_cuenta' => !in_array($bancoActual, ['BCP', 'Interbank'], true),
-                                        'banco_otro', 'cci' => $bancoActual !== 'Otro',
+                                        'banco_otro' => $bancoActual !== 'Otro',
+                                        'cci' => $bancoActual === '',
                                         'tipo_comision', 'tipo_afp', 'cuspp' => $currentFieldValue('sistema_pensionario') !== 'Sistema Privado de Pensiones',
                                         'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $currentFieldValue('quinta_empleador_principal') !== 'Otra empresa',
                                         'fecha_fin_contrato' => !in_array($currentFieldValue('contrato'), ['FIJO', 'INTER', 'REG'], true),
@@ -358,7 +359,7 @@
                             <span data-toggle-arrow="configuracion-interna">▼</span>
                         </button>
                     </div>
-                    <p class="ficha-card-subtitle">Controla el perfil y las ubicaciones del trabajador.</p>
+                    <p class="ficha-card-subtitle">Controla el perfil interno, oficinas y talleres del trabajador. Las minas se gestionan desde Habilitacion minera.</p>
                 </div>
             </div>
             <div class="ficha-card-body" id="configuracion-interna-panel-body">
@@ -392,35 +393,12 @@
                     </div>
                 </section>
 
-                <section class="ficha-section">
-                    <div class="ficha-section-header">
-                        <h3 class="ficha-section-title">Minas</h3>
-                    </div>
-                    <div class="mines-grid">
-                        @foreach($catalogMinas as $mina)
-                            @php
-                                $isSelected = in_array($mina, $selectedLocations, true);
-                                $estado = (string) ($stateByLocation[$mina] ?? 'habilitado');
-                            @endphp
-                            <div class="mine-selection-item">
-                                <div class="mine-checkbox">
-                                    <input type="checkbox" name="minas[]" value="{{ $mina }}" id="mina_{{ md5($mina) }}" {{ $isSelected ? 'checked' : '' }}>
-                                    <label for="mina_{{ md5($mina) }}" class="mine-checkbox-label">
-                                        <span class="checkbox-custom"></span>
-                                        <span class="checkbox-text">{{ $mina }}</span>
-                                    </label>
-                                </div>
-                                <div class="mine-status-select">
-                                    <select name="mina_estado[{{ $mina }}]" class="form-control form-control-sm">
-                                        <option value="habilitado" {{ $estado === 'habilitado' ? 'selected' : '' }}>Habilitado</option>
-                                        <option value="proceso" {{ $estado === 'proceso' ? 'selected' : '' }}>En proceso</option>
-                                        <option value="no_habilitado" {{ $estado === 'no_habilitado' ? 'selected' : '' }}>No habilitado</option>
-                                    </select>
-                                </div>
-                            </div>
-                        @endforeach
-                    </div>
-                </section>
+                @foreach($catalogMinas as $mina)
+                    @if(in_array($mina, $selectedLocations, true))
+                        <input type="hidden" name="minas[]" value="{{ $mina }}">
+                        <input type="hidden" name="mina_estado[{{ $mina }}]" value="{{ $stateByLocation[$mina] ?? 'habilitado' }}">
+                    @endif
+                @endforeach
 
                 <section class="ficha-section">
                     <div class="ficha-section-header">

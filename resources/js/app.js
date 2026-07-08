@@ -149,7 +149,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const storeSidebarState = function(isOpen) {
         try {
-            window.localStorage.setItem(sidebarStateKey, (isMobileViewport() ? 'mobile:' : 'desktop:') + (isOpen ? 'open' : 'closed'));
+            if (isMobileViewport()) {
+                if (!isOpen) {
+                    window.localStorage.setItem(sidebarStateKey, 'mobile:closed');
+                }
+
+                return;
+            }
+
+            window.localStorage.setItem(sidebarStateKey, 'desktop:' + (isOpen ? 'open' : 'closed'));
         } catch (error) {
             // Keep the sidebar usable even when storage is unavailable.
         }
@@ -183,6 +191,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const setSidebarState = function(isOpen, persist) {
         const mobile = isMobileViewport();
         sidebar.classList.toggle('open', mobile && isOpen);
+        document.body.classList.toggle('sidebar-mobile-open', mobile && isOpen);
 
         if (appLayout) {
             appLayout.classList.toggle('sidebar-hidden', !isOpen);
@@ -219,10 +228,79 @@ document.addEventListener('DOMContentLoaded', function() {
         setSidebarState(!isOpen, true);
     };
 
+    let lastMobileScrollTouchAt = 0;
+
+    window.addEventListener('touchmove', function() {
+        if (isMobileViewport()) {
+            lastMobileScrollTouchAt = Date.now();
+        }
+    }, { passive: true });
+
+    const registerSidebarToggle = function(button) {
+        if (!button) {
+            return;
+        }
+
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchMoved = false;
+        let ignoreNextClick = false;
+
+        button.addEventListener('touchstart', function(event) {
+            if (!isMobileViewport() || !event.touches || event.touches.length !== 1) {
+                return;
+            }
+
+            touchMoved = false;
+            touchStartX = event.touches[0].clientX;
+            touchStartY = event.touches[0].clientY;
+        }, { passive: true });
+
+        button.addEventListener('touchmove', function(event) {
+            if (!isMobileViewport() || !event.touches || event.touches.length !== 1) {
+                return;
+            }
+
+            const deltaX = Math.abs(event.touches[0].clientX - touchStartX);
+            const deltaY = Math.abs(event.touches[0].clientY - touchStartY);
+
+            if (deltaY > 8 || deltaX > 12) {
+                touchMoved = true;
+            }
+        }, { passive: true });
+
+        button.addEventListener('touchend', function() {
+            if (!isMobileViewport() || !touchMoved) {
+                return;
+            }
+
+            ignoreNextClick = true;
+            window.setTimeout(function() {
+                ignoreNextClick = false;
+            }, 420);
+        }, { passive: true });
+
+        button.addEventListener('click', function(event) {
+            if (ignoreNextClick || (isMobileViewport() && Date.now() - lastMobileScrollTouchAt < 450)) {
+                event.preventDefault();
+                event.stopPropagation();
+                ignoreNextClick = false;
+                return;
+            }
+
+            toggleSidebar();
+        });
+    };
+
     const applyResponsiveSidebarDefault = function() {
+        if (isMobileViewport()) {
+            setSidebarState(sidebar.classList.contains('open'), false);
+            return;
+        }
+
         const stored = storedSidebarState();
-        const defaultOpen = isMobileViewport() ? false : true;
-        const statePrefix = isMobileViewport() ? 'mobile:' : 'desktop:';
+        const defaultOpen = true;
+        const statePrefix = 'desktop:';
         const scopedStored = stored && stored.startsWith(statePrefix) ? stored.replace(statePrefix, '') : null;
         const nextOpen = scopedStored === 'open' ? true : (scopedStored === 'closed' ? false : defaultOpen);
         setSidebarState(nextOpen, false);
@@ -231,13 +309,8 @@ document.addEventListener('DOMContentLoaded', function() {
     restoreSidebarWidth();
     applyResponsiveSidebarDefault();
 
-    if (menuToggle) {
-        menuToggle.addEventListener('click', toggleSidebar);
-    }
-
-    if (mobileMenuToggle) {
-        mobileMenuToggle.addEventListener('click', toggleSidebar);
-    }
+    registerSidebarToggle(menuToggle);
+    registerSidebarToggle(mobileMenuToggle);
 
     if (sidebarCollapseToggle) {
         sidebarCollapseToggle.addEventListener('click', function() {

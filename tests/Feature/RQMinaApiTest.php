@@ -221,8 +221,18 @@ class RQMinaApiTest extends TestCase
                         [
                             'alcance' => 'SAIT-100',
                             'unidad_carga' => 'Grua 80T',
+                            'origen' => 'ALQUILADO',
                             'unidades_transporte' => 'Van 15 y minibus 35 asientos',
+                            'placas_asignadas' => 'ABC-123',
+                            'fecha_inicio' => '2026-04-13',
+                            'fecha_fin' => '2026-04-19',
+                            'estado_logistico' => 'ASIGNADO',
                             'indicaciones' => 'Desde miercoles turno A',
+                            'comentario_cambio' => 'Cambio aprobado antes del inicio',
+                            'incidencia_operativa' => 'Unidad de respaldo disponible',
+                            'recepcion_fecha' => '2026-04-20',
+                            'recepcion_estado' => 'RECIBIDO',
+                            'recepcion_observacion' => 'Retorno sin observaciones',
                         ],
                     ],
                 ],
@@ -257,6 +267,18 @@ class RQMinaApiTest extends TestCase
         ]);
         $this->assertDatabaseHas('rq_mina_actividad_transportes', [
             'unidad_carga' => 'Grua 80T',
+            'origen' => 'ALQUILADO',
+            'placas_asignadas' => 'ABC-123',
+            'fecha_inicio' => '2026-04-13',
+            'fecha_fin' => '2026-04-19',
+            'dias_uso' => 7,
+            'estado_logistico' => 'ASIGNADO',
+            'recepcion_fecha' => '2026-04-20',
+            'recepcion_estado' => 'RECIBIDO',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividad_transporte_eventos', [
+            'tipo' => 'REGISTRO_REQUERIMIENTO',
+            'estado_nuevo' => 'ASIGNADO',
         ]);
     }
 
@@ -447,7 +469,7 @@ class RQMinaApiTest extends TestCase
         ]);
     }
 
-    public function test_web_permite_eliminar_rq_enviado_si_la_parada_no_termino(): void
+    public function test_web_permite_eliminar_rq_enviado_con_dependencias_operativas(): void
     {
         Carbon::setTestNow('2026-06-17 09:00:00');
 
@@ -506,19 +528,15 @@ class RQMinaApiTest extends TestCase
         ])->post(route('rq-mina.destroy', $rqId));
 
         $response->assertRedirect(route('rq-mina.index'));
-        $response->assertSessionHas('success', 'RQ eliminado correctamente.');
+        $response->assertSessionHas('success', 'RQ Mina eliminado junto con sus registros operativos relacionados.');
 
         $this->assertDatabaseMissing('rq_mina', ['id' => $rqId]);
         $this->assertDatabaseMissing('rq_proserge', ['id' => $rqProsergeId]);
         $this->assertDatabaseMissing('rq_proserge_detalle', ['rq_proserge_id' => $rqProsergeId]);
-        $this->assertDatabaseHas('grupo_trabajo', [
-            'id' => $grupoTrabajoId,
-            'rq_mina_id' => null,
-            'rq_proserge_id' => null,
-        ]);
+        $this->assertDatabaseMissing('grupo_trabajo', ['id' => $grupoTrabajoId]);
     }
 
-    public function test_web_bloquea_eliminar_rq_si_la_parada_ya_termino(): void
+    public function test_web_permite_eliminar_rq_aunque_la_parada_ya_termino(): void
     {
         Carbon::setTestNow('2026-06-17 09:00:00');
 
@@ -533,15 +551,12 @@ class RQMinaApiTest extends TestCase
         ])->post(route('rq-mina.destroy', $rqId));
 
         $response->assertRedirect(route('rq-mina.index'));
-        $response->assertSessionHas('error', 'Solo se puede eliminar un RQ si la parada aun no termino y tienes permiso para eliminar.');
+        $response->assertSessionHas('success', 'RQ Mina eliminado junto con sus registros operativos relacionados.');
 
-        $this->assertDatabaseHas('rq_mina', [
-            'id' => $rqId,
-            'estado' => 'ENVIADO',
-        ]);
+        $this->assertDatabaseMissing('rq_mina', ['id' => $rqId]);
     }
 
-    public function test_listado_muestra_eliminar_para_enviado_no_terminado_y_lo_oculta_si_termino(): void
+    public function test_listado_muestra_eliminar_para_rq_enviado_aunque_haya_terminado(): void
     {
         Carbon::setTestNow('2026-06-17 09:00:00');
 
@@ -558,7 +573,7 @@ class RQMinaApiTest extends TestCase
 
         $response->assertOk();
         $response->assertSee(route('rq-mina.destroy', $vigenteId), false);
-        $response->assertDontSee(route('rq-mina.destroy', $terminadoId), false);
+        $response->assertSee(route('rq-mina.destroy', $terminadoId), false);
     }
 
     public function test_reducir_pedido_retira_ultimas_asignaciones_y_registra_cambio(): void

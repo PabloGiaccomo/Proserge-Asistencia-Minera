@@ -90,7 +90,7 @@
             <div class="ficha-card-header">
                 <div>
                     <h2 class="ficha-card-title">Configuracion interna</h2>
-                    <p class="ficha-card-subtitle">Define el estado del trabajador, su perfil y las ubicaciones donde puede operar.</p>
+                    <p class="ficha-card-subtitle">Define el estado inicial, perfil interno, oficinas y talleres. Las minas se gestionan desde Habilitacion minera.</p>
                 </div>
             </div>
             <div class="ficha-card-body">
@@ -113,32 +113,6 @@
                                 <span class="ficha-error">{{ $message }}</span>
                             @enderror
                         </div>
-                    </div>
-                </section>
-
-                <section class="ficha-section">
-                    <div class="ficha-section-header">
-                        <h3 class="ficha-section-title">Minas</h3>
-                    </div>
-                    <div class="mines-grid">
-                        @foreach($catalogMinas as $mina)
-                            <div class="mine-selection-item">
-                                <div class="mine-checkbox">
-                                    <input type="checkbox" name="minas[]" value="{{ $mina }}" id="mina_{{ str_replace(' ', '_', $mina) }}" @checked(in_array($mina, old('minas', []), true))>
-                                    <label for="mina_{{ str_replace(' ', '_', $mina) }}" class="mine-checkbox-label">
-                                        <span class="checkbox-custom"></span>
-                                        <span class="checkbox-text">{{ $mina }}</span>
-                                    </label>
-                                </div>
-                                <div class="mine-status-select">
-                                    <select name="mina_estado[{{ $mina }}]" class="form-control form-control-sm">
-                                        <option value="habilitado" @selected(old('mina_estado.' . $mina, 'habilitado') === 'habilitado')>Habilitado</option>
-                                        <option value="proceso" @selected(old('mina_estado.' . $mina) === 'proceso')>En proceso</option>
-                                        <option value="no_habilitado" @selected(old('mina_estado.' . $mina) === 'no_habilitado')>No habilitado</option>
-                                    </select>
-                                </div>
-                            </div>
-                        @endforeach
                     </div>
                 </section>
 

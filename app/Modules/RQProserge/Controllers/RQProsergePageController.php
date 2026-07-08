@@ -7,6 +7,7 @@ use App\Models\RQProserge;
 use App\Models\RQMinaDetalleCambio;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\RQProserge\Services\RQProsergeService;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -64,6 +65,16 @@ class RQProsergePageController extends WebPageController
     public function update(Request $request, string $id)
     {
         $estado = strtoupper((string) $request->input('estado', ''));
+        $usuario = $this->requireAuthenticatedUser();
+        $rq = $this->service->findForUser($usuario, $id);
+
+        if (!$rq) {
+            return redirect()->route('rq-proserge.index')->with('error', 'RQ Proserge no encontrado o sin acceso.');
+        }
+
+        if ($blocked = $this->service->modificationBlockedByFinishedParada($rq)) {
+            return redirect()->route('rq-proserge.show', $id)->with('error', (string) $blocked['message']);
+        }
 
         if ($estado === 'PARCIAL') {
             $this->notificationService->emit('rq_proserge_parcial', [
@@ -232,8 +243,8 @@ class RQProsergePageController extends WebPageController
                 'trabajador' => '',
                 'comentario' => '',
                 'disponibilidad' => [
-                    'tipo' => 'disponible',
-                    'lineas' => ['Disponible para revisar asignacion segun habilitacion y disponibilidad operativa.'],
+                    'tipo' => 'pendiente',
+                    'lineas' => ['Busca y selecciona un trabajador para validar su disponibilidad en esta mina y rango de fechas.'],
                 ],
                 'fecha_inicio' => $this->formatDate($detalle->rqMina?->fecha_inicio),
                 'fecha_fin' => $this->formatDate($detalle->rqMina?->fecha_fin),
@@ -250,6 +261,7 @@ class RQProsergePageController extends WebPageController
 
         $solicitado = $puestos->sum(fn (array $puesto): int => (int) ($puesto['requeridos'] ?? 0));
         $atendido = $puestos->sum(fn (array $puesto): int => (int) ($puesto['asignados'] ?? 0));
+        $paradaFinalizada = $this->rqMinaFinalizada($rqMina?->fecha_fin);
 
         return [
             'id' => $rq->id,
@@ -263,7 +275,11 @@ class RQProsergePageController extends WebPageController
             'fecha_inicio_iso' => $this->formatIsoDate($rqMina?->fecha_inicio),
             'fecha_fin_iso' => $this->formatIsoDate($rqMina?->fecha_fin),
             'estado' => $rq->estado,
-            'estado_cierre' => in_array($rq->estado, ['CERRADO', 'CANCELADO'], true) ? 'cerrado' : 'abierto',
+            'estado_cierre' => $paradaFinalizada || in_array($rq->estado, ['CERRADO', 'CANCELADO'], true) ? 'cerrado' : 'abierto',
+            'finalizada' => $paradaFinalizada,
+            'bloqueo_edicion_mensaje' => $paradaFinalizada
+                ? 'La parada ya finalizo. Las asignaciones y el seguimiento quedaron bloqueados.'
+                : null,
             'solicitado' => $solicitado,
             'atendido' => $atendido,
             'personal_solicitado' => $solicitado,
@@ -300,5 +316,29 @@ class RQProsergePageController extends WebPageController
         }
 
         return $date ? (string) $date : '';
+    }
+
+    private function rqMinaFinalizada(mixed $date): bool
+    {
+        $fin = $this->immutableDate($date);
+
+        return $fin !== null && $fin->endOfDay()->lt(CarbonImmutable::now());
+    }
+
+    private function immutableDate(mixed $date): ?CarbonImmutable
+    {
+        if (!$date) {
+            return null;
+        }
+
+        if ($date instanceof CarbonImmutable) {
+            return $date->startOfDay();
+        }
+
+        if ($date instanceof CarbonInterface) {
+            return CarbonImmutable::instance($date)->startOfDay();
+        }
+
+        return CarbonImmutable::parse((string) $date)->startOfDay();
     }
 }

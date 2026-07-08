@@ -7,17 +7,17 @@
     <div class="welcome-section">
         <div class="welcome-content">
             <h1 class="welcome-title">
-                Bienvenido, {{ explode(' ', session('user.name') ?? session('user.email') ?? 'Usuario')[0] }}
+                Bienvenido, <span>{{ explode(' ', session('user.name') ?? session('user.email') ?? 'Usuario')[0] }}</span>
             </h1>
             <p class="welcome-subtitle">Inicio operativo con dashboards visibles segun tu rol.</p>
         </div>
         <div class="welcome-date">
             <span class="date-label">Hoy es</span>
-            <span class="date-value">{{ now()->format('d \d\e F \d\e Y') }}</span>
+            <span class="date-value">{{ now()->locale('es')->translatedFormat('d \d\e F \d\e Y') }}</span>
         </div>
     </div>
 
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card home-dashboard-panel">
         <div class="card-header">
             <span class="card-title">Dashboards disponibles</span>
         </div>
@@ -71,76 +71,4 @@
         </div>
     </div>
 </div>
-
-<style>
-.home-dashboard-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 14px;
-}
-
-.home-dashboard-card {
-    display: grid;
-    grid-template-columns: 6px minmax(0, 1fr);
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    overflow: hidden;
-    background: #ffffff;
-    min-height: 146px;
-}
-
-.home-dashboard-accent {
-    width: 6px;
-}
-
-.home-dashboard-body {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.home-dashboard-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.home-dashboard-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #0f172a;
-}
-
-.home-dashboard-tag {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid #dbeafe;
-    background: #eff6ff;
-    color: #1d4ed8;
-    font-size: 11px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.home-dashboard-text {
-    margin: 0;
-    color: #475569;
-    line-height: 1.5;
-    font-size: 14px;
-}
-
-.home-dashboard-foot {
-    margin-top: auto;
-}
-
-.home-dashboard-note {
-    font-size: 12px;
-    color: #64748b;
-}
-</style>
 @endsection

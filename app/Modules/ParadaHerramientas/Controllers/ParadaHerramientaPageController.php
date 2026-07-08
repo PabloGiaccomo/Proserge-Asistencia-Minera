@@ -84,6 +84,7 @@ class ParadaHerramientaPageController extends WebPageController
 
         $result = $this->service->saveLista($usuario, $rq, [
             'observaciones' => $request->input('observaciones'),
+            'comentario_cambio_previo' => $request->input('comentario_cambio_previo'),
             'grupos' => $request->input('grupos', []),
         ]);
 
@@ -202,6 +203,7 @@ class ParadaHerramientaPageController extends WebPageController
 
         $result = $this->service->updatePedido($usuario, $rq, [
             'modo' => $request->input('modo'),
+            'fecha_recepcion' => $request->input('fecha_recepcion'),
             'grupos' => $request->input('grupos', []),
         ]);
 

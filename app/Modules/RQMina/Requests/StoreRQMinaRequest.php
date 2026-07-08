@@ -56,8 +56,19 @@ class StoreRQMinaRequest extends FormRequest
             'plan_operativo.*.transportes' => ['nullable', 'array'],
             'plan_operativo.*.transportes.*.alcance' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.transportes.*.unidad_carga' => ['nullable', 'string', 'max:191'],
+            'plan_operativo.*.transportes.*.origen' => ['nullable', 'string', 'in:EMPRESA,ALQUILADO,OTRO'],
             'plan_operativo.*.transportes.*.unidades_transporte' => ['nullable', 'string'],
+            'plan_operativo.*.transportes.*.placas_asignadas' => ['nullable', 'string'],
+            'plan_operativo.*.transportes.*.fecha_inicio' => ['nullable', 'date'],
+            'plan_operativo.*.transportes.*.fecha_fin' => ['nullable', 'date'],
+            'plan_operativo.*.transportes.*.dias_uso' => ['nullable', 'integer', 'min:0'],
+            'plan_operativo.*.transportes.*.estado_logistico' => ['nullable', 'string', 'in:REQUERIDO,ASIGNADO,EN_USO,RETIRADO,REEMPLAZADO,DEVUELTO,INCIDENCIA'],
             'plan_operativo.*.transportes.*.indicaciones' => ['nullable', 'string'],
+            'plan_operativo.*.transportes.*.comentario_cambio' => ['nullable', 'string'],
+            'plan_operativo.*.transportes.*.incidencia_operativa' => ['nullable', 'string'],
+            'plan_operativo.*.transportes.*.recepcion_fecha' => ['nullable', 'date'],
+            'plan_operativo.*.transportes.*.recepcion_estado' => ['nullable', 'string', 'in:PENDIENTE,RECIBIDO,INCOMPLETO,NO_LLEGO,CON_OBSERVACION'],
+            'plan_operativo.*.transportes.*.recepcion_observacion' => ['nullable', 'string'],
         ];
     }
 }

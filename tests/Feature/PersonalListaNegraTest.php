@@ -135,6 +135,55 @@ class PersonalListaNegraTest extends TestCase
         ]);
     }
 
+    public function test_listado_mantiene_visible_lista_negra_aunque_filtre_estado(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+
+        app(PersonalService::class)->create([
+            'dni' => '75990005',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '75990005',
+            'nombre_completo' => 'Trabajador Activo Filtro',
+            'puesto' => 'Operario',
+            'contrato' => 'FIJO',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $blacklisted = app(PersonalService::class)->create([
+            'dni' => '75990006',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '75990006',
+            'nombre_completo' => 'Trabajador Cesado Lista Negra Visible',
+            'puesto' => 'Operario',
+            'contrato' => 'FIJO',
+            'estado' => 'CESADO',
+        ]);
+
+        app(PersonalService::class)->create([
+            'dni' => '75990007',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '75990007',
+            'nombre_completo' => 'Trabajador Cesado Sin Lista Negra',
+            'puesto' => 'Operario',
+            'contrato' => 'FIJO',
+            'estado' => 'CESADO',
+        ]);
+
+        DB::table('personal')->where('id', $blacklisted->id)->update([
+            'en_lista_negra' => true,
+            'lista_negra_motivo' => 'Debe revisarse antes de una futura activacion.',
+            'lista_negra_at' => now(),
+            'lista_negra_by_usuario_id' => $userId,
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.index', ['estado' => 'ACTIVO']))
+            ->assertOk()
+            ->assertSee('TRABAJADOR CESADO LISTA NEGRA VISIBLE')
+            ->assertSee('data-lista-negra="1"', false)
+            ->assertDontSee('TRABAJADOR CESADO SIN LISTA NEGRA');
+    }
+
     private function createUser(array $permissions): string
     {
         $roleId = (string) Str::uuid();
