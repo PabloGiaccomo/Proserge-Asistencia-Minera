@@ -169,7 +169,7 @@ class FaltasService
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
     }
 
-    public function anular(Usuario $usuario, string $id): array
+    public function anularPorId(Usuario $usuario, string $id): array
     {
         $falta = $this->findForUser($usuario, $id);
         

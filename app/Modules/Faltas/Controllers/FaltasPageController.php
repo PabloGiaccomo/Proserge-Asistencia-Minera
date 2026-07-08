@@ -52,7 +52,7 @@ class FaltasPageController extends WebPageController
     public function anular(string $id)
     {
         $user = $this->getUser();
-        $result = $this->service->anular($user, $id);
+        $result = $this->service->anularPorId($user, $id);
         
         if ($result['success']) {
             return redirect()->route('faltas.index')->with('success', $result['message']);
