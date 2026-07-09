@@ -9,10 +9,14 @@ use App\Models\ParadaHerramientaLista;
 use App\Models\Personal;
 use App\Models\PersonalMina;
 use App\Models\RQMina;
+use App\Models\RQMinaActividadTransporte;
+use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\RQProsergeDetalle;
+use App\Models\Usuario;
 use App\Modules\Epps\Services\EppService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -1263,25 +1267,200 @@ class LogisticaDashboardService
 
     private function serviceRows(): Collection
     {
-        if (! $this->hasTable('rq_mina')) {
+        if (! $this->hasTable('rq_mina_actividad_transportes')) {
             return collect();
         }
 
-        return RQMina::query()
-            ->with(['mina:id,nombre', 'transportes'])
-            ->latest('fecha_inicio')
-            ->limit(30)
+        return RQMinaActividadTransporte::query()
+            ->with(['grupo.rqMina.mina:id,nombre'])
+            ->whereHas('grupo.rqMina')
+            ->latest('updated_at')
+            ->limit(120)
             ->get()
-            ->map(function (RQMina $rqMina): array {
+            ->map(function (RQMinaActividadTransporte $transporte): array {
+                $grupo = $transporte->grupo;
+                $rqMina = $grupo?->rqMina;
+                $parada = trim(sprintf(
+                    '%s - %s',
+                    $rqMina?->mina?->nombre ?: 'Sin mina',
+                    $rqMina?->destino_nombre ?: $rqMina?->area ?: 'Sin area'
+                ));
+
                 return [
-                    'parada' => ($rqMina->mina?->nombre ?: 'Sin mina') . ' - ' . ($rqMina->area ?: 'Sin area'),
-                    'inicio' => $rqMina->fecha_inicio?->format('d/m/Y') ?: '-',
-                    'fin' => $rqMina->fecha_fin?->format('d/m/Y') ?: '-',
-                    'transportes' => $rqMina->transportes->count(),
-                    'detalle' => $rqMina->transportes->pluck('transporte')->filter()->take(3)->implode(', ') ?: 'Sin transporte registrado',
-                    'estado' => $rqMina->estado ?: 'BORRADOR',
+                    'id' => (string) $transporte->id,
+                    'rq_mina_id' => (string) ($rqMina?->id ?? ''),
+                    'parada' => $parada,
+                    'grupo' => $grupo?->nombre ?: $grupo?->area_operativa ?: 'Sin grupo',
+                    'alcance' => $transporte->alcance ?: '-',
+                    'unidad_carga' => $transporte->unidad_carga ?: '-',
+                    'origen' => $transporte->origen ?: '',
+                    'origen_label' => $this->transportOriginLabel($transporte->origen),
+                    'solicitado' => $transporte->unidades_transporte ?: 'Sin detalle solicitado',
+                    'placas_asignadas' => $transporte->placas_asignadas ?: '',
+                    'fecha_inicio' => $transporte->fecha_inicio?->toDateString() ?: '',
+                    'fecha_inicio_label' => $transporte->fecha_inicio?->format('d/m/Y') ?: '-',
+                    'fecha_fin' => $transporte->fecha_fin?->toDateString() ?: '',
+                    'fecha_fin_label' => $transporte->fecha_fin?->format('d/m/Y') ?: '-',
+                    'dias_uso' => $transporte->dias_uso,
+                    'estado' => $transporte->estado_logistico ?: RQMinaActividadTransporte::ESTADO_REQUERIDO,
+                    'estado_label' => $this->transportStateLabel($transporte->estado_logistico ?: RQMinaActividadTransporte::ESTADO_REQUERIDO),
+                    'indicaciones' => $transporte->indicaciones ?: '',
+                    'comentario_cambio' => $transporte->comentario_cambio ?: '',
+                    'incidencia_operativa' => $transporte->incidencia_operativa ?: '',
+                    'recepcion_fecha' => $transporte->recepcion_fecha?->toDateString() ?: '',
+                    'recepcion_fecha_label' => $transporte->recepcion_fecha?->format('d/m/Y') ?: '-',
+                    'recepcion_estado' => $transporte->recepcion_estado ?: RQMinaActividadTransporte::RECEPCION_PENDIENTE,
+                    'recepcion_estado_label' => $this->receptionStateLabel($transporte->recepcion_estado ?: RQMinaActividadTransporte::RECEPCION_PENDIENTE),
+                    'recepcion_observacion' => $transporte->recepcion_observacion ?: '',
                 ];
             });
+    }
+
+    public function updateTransportRequirement(string $id, array $payload, Usuario $usuario): RQMinaActividadTransporte
+    {
+        $transporte = RQMinaActividadTransporte::query()
+            ->with('grupo.rqMina')
+            ->findOrFail($id);
+        $previousState = (string) ($transporte->estado_logistico ?: RQMinaActividadTransporte::ESTADO_REQUERIDO);
+        $data = $this->normalizeTransportPayload($payload, $transporte);
+
+        return DB::transaction(function () use ($transporte, $data, $previousState, $usuario): RQMinaActividadTransporte {
+            $transporte->forceFill($data)->save();
+            $transporte->refresh();
+
+            $rqMinaId = (string) ($transporte->grupo?->rq_mina_id ?: $transporte->grupo?->rqMina?->id ?: '');
+            if ($rqMinaId !== '') {
+                RQMinaActividadTransporteEvento::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'rq_mina_id' => $rqMinaId,
+                    'transporte_id' => $transporte->id,
+                    'tipo' => RQMinaActividadTransporteEvento::TIPO_CAMBIO,
+                    'estado_anterior' => $previousState,
+                    'estado_nuevo' => (string) $transporte->estado_logistico,
+                    'descripcion' => $transporte->comentario_cambio ?: $transporte->incidencia_operativa ?: $transporte->recepcion_observacion,
+                    'transporte_snapshot' => $transporte->only([
+                        'alcance',
+                        'unidad_carga',
+                        'origen',
+                        'unidades_transporte',
+                        'placas_asignadas',
+                        'fecha_inicio',
+                        'fecha_fin',
+                        'dias_uso',
+                        'estado_logistico',
+                        'indicaciones',
+                        'comentario_cambio',
+                        'incidencia_operativa',
+                        'recepcion_fecha',
+                        'recepcion_estado',
+                        'recepcion_observacion',
+                    ]),
+                    'fecha_evento' => now(),
+                    'usuario_id' => $usuario->id,
+                ]);
+            }
+
+            return $transporte;
+        });
+    }
+
+    private function normalizeTransportPayload(array $payload, RQMinaActividadTransporte $transporte): array
+    {
+        $inicio = $this->normalizeDate($payload['fecha_inicio'] ?? null);
+        $fin = $this->normalizeDate($payload['fecha_fin'] ?? null);
+        $estado = strtoupper(trim((string) ($payload['estado_logistico'] ?? RQMinaActividadTransporte::ESTADO_REQUERIDO)));
+        $recepcion = strtoupper(trim((string) ($payload['recepcion_estado'] ?? RQMinaActividadTransporte::RECEPCION_PENDIENTE)));
+        $origen = strtoupper(trim((string) ($payload['origen'] ?? '')));
+
+        if (! in_array($estado, RQMinaActividadTransporte::estadosLogisticos(), true)) {
+            $estado = RQMinaActividadTransporte::ESTADO_REQUERIDO;
+        }
+
+        if (! in_array($recepcion, RQMinaActividadTransporte::estadosRecepcion(), true)) {
+            $recepcion = RQMinaActividadTransporte::RECEPCION_PENDIENTE;
+        }
+
+        if ($origen !== '' && ! in_array($origen, RQMinaActividadTransporte::origenes(), true)) {
+            $origen = RQMinaActividadTransporte::ORIGEN_OTRO;
+        }
+
+        return [
+            'origen' => $origen ?: null,
+            'placas_asignadas' => trim((string) ($payload['placas_asignadas'] ?? '')) ?: null,
+            'fecha_inicio' => $inicio,
+            'fecha_fin' => $fin,
+            'dias_uso' => $this->transportUsageDays($inicio, $fin) ?? $transporte->dias_uso,
+            'estado_logistico' => $estado,
+            'comentario_cambio' => trim((string) ($payload['comentario_cambio'] ?? '')) ?: null,
+            'incidencia_operativa' => trim((string) ($payload['incidencia_operativa'] ?? '')) ?: null,
+            'recepcion_fecha' => $this->normalizeDate($payload['recepcion_fecha'] ?? null),
+            'recepcion_estado' => $recepcion,
+            'recepcion_observacion' => trim((string) ($payload['recepcion_observacion'] ?? '')) ?: null,
+        ];
+    }
+
+    private function normalizeDate(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function transportUsageDays(?string $inicio, ?string $fin): ?int
+    {
+        if (! $inicio || ! $fin) {
+            return null;
+        }
+
+        $start = Carbon::parse($inicio)->startOfDay();
+        $end = Carbon::parse($fin)->startOfDay();
+
+        if ($end->lt($start)) {
+            return 0;
+        }
+
+        return (int) $start->diffInDays($end) + 1;
+    }
+
+    private function transportStateLabel(?string $state): string
+    {
+        return match ($state) {
+            RQMinaActividadTransporte::ESTADO_ASIGNADO => 'Asignado',
+            RQMinaActividadTransporte::ESTADO_EN_USO => 'En uso',
+            RQMinaActividadTransporte::ESTADO_RETIRADO => 'Retirado',
+            RQMinaActividadTransporte::ESTADO_REEMPLAZADO => 'Reemplazado',
+            RQMinaActividadTransporte::ESTADO_DEVUELTO => 'Devuelto',
+            RQMinaActividadTransporte::ESTADO_INCIDENCIA => 'Incidencia',
+            default => 'Requerido',
+        };
+    }
+
+    private function receptionStateLabel(?string $state): string
+    {
+        return match ($state) {
+            RQMinaActividadTransporte::RECEPCION_RECIBIDO => 'Recibido',
+            RQMinaActividadTransporte::RECEPCION_INCOMPLETO => 'Incompleto',
+            RQMinaActividadTransporte::RECEPCION_NO_LLEGO => 'No llego',
+            RQMinaActividadTransporte::RECEPCION_CON_OBSERVACION => 'Con observacion',
+            default => 'Pendiente',
+        };
+    }
+
+    private function transportOriginLabel(?string $origin): string
+    {
+        return match ($origin) {
+            RQMinaActividadTransporte::ORIGEN_EMPRESA => 'Empresa',
+            RQMinaActividadTransporte::ORIGEN_ALQUILADO => 'Alquilado',
+            RQMinaActividadTransporte::ORIGEN_OTRO => 'Otro',
+            default => 'Sin definir',
+        };
     }
 
     private function identityRows(Collection $catalog): Collection

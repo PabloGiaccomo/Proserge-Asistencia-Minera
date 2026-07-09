@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\EppEntrega;
 use App\Models\Personal;
 use App\Models\PersonalMina;
+use App\Models\RQMinaActividadTransporte;
+use App\Models\Usuario;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -67,6 +69,42 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame(4, $row['dias_uso_efectivo']);
         $this->assertSame(30, $row['vida_dias']);
         $this->assertSame('4 / 30 dias', $row['uso_efectivo']);
+    }
+
+    public function test_logistica_actualiza_requerimiento_de_transporte_de_rq_mina(): void
+    {
+        $mineId = $this->createMine('BOROO');
+        $usuario = $this->createLogisticsUser();
+        $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
+
+        $updated = app(LogisticaDashboardService::class)->updateTransportRequirement($transportId, [
+            'origen' => 'ALQUILADO',
+            'placas_asignadas' => 'ABC-123; chofer Juan',
+            'fecha_inicio' => '2026-07-10',
+            'fecha_fin' => '2026-07-12',
+            'estado_logistico' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
+            'comentario_cambio' => 'Asignado por proveedor local',
+            'incidencia_operativa' => '',
+            'recepcion_estado' => RQMinaActividadTransporte::RECEPCION_PENDIENTE,
+            'recepcion_observacion' => 'Pendiente de confirmacion final',
+        ], $usuario);
+
+        $this->assertSame(RQMinaActividadTransporte::ESTADO_ASIGNADO, $updated->estado_logistico);
+        $this->assertSame('ABC-123; chofer Juan', $updated->placas_asignadas);
+        $this->assertSame(3, $updated->dias_uso);
+        $this->assertDatabaseHas('rq_mina_actividad_transporte_eventos', [
+            'transporte_id' => $transportId,
+            'estado_anterior' => RQMinaActividadTransporte::ESTADO_REQUERIDO,
+            'estado_nuevo' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
+            'usuario_id' => $usuario->id,
+        ]);
+
+        $rows = app(LogisticaDashboardService::class)->pageData(['tab' => 'servicios'])['serviceRows'];
+        $row = collect($rows)->firstWhere('id', $transportId);
+
+        $this->assertNotNull($row);
+        $this->assertSame('Van 15, minibus 35', $row['solicitado']);
+        $this->assertSame('ABC-123; chofer Juan', $row['placas_asignadas']);
     }
 
     private function createPersonal(string $state, string $name): Personal
@@ -230,5 +268,89 @@ class LogisticaDashboardServiceTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    private function createLogisticsUser(): Usuario
+    {
+        $roleId = (string) Str::uuid();
+        $userId = (string) Str::uuid();
+
+        DB::table('roles')->insert([
+            'id' => $roleId,
+            'nombre' => 'LOGISTICA_TRANSPORTE_TEST',
+            'permisos' => json_encode([]),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('usuarios')->insert([
+            'id' => $userId,
+            'email' => Str::lower(Str::random(8)).'@test.local',
+            'password' => bcrypt('secret123'),
+            'rol_id' => $roleId,
+            'personal_id' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return Usuario::query()->findOrFail($userId);
+    }
+
+    private function createRqTransportRequirement(string $mineId, string $userId): string
+    {
+        $rqMinaId = (string) Str::uuid();
+        $groupId = (string) Str::uuid();
+        $transportId = (string) Str::uuid();
+
+        DB::table('rq_mina')->insert([
+            'id' => $rqMinaId,
+            'mina_id' => $mineId,
+            'area' => 'Mina Local - seguimiento',
+            'fecha_inicio' => '2026-07-10',
+            'fecha_fin' => '2026-07-12',
+            'estado' => 'ENVIADO',
+            'created_by_usuario_id' => $userId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $groupId,
+            'rq_mina_id' => $rqMinaId,
+            'area_operativa' => 'Operacion',
+            'modulo' => 'C2',
+            'nombre' => 'Parada registrada',
+            'observaciones' => null,
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_mina_actividad_transportes')->insert([
+            'id' => $transportId,
+            'grupo_id' => $groupId,
+            'actividad_id' => null,
+            'alcance' => 'Sector C2',
+            'unidad_carga' => 'Personal',
+            'origen' => null,
+            'unidades_transporte' => 'Van 15, minibus 35',
+            'placas_asignadas' => null,
+            'fecha_inicio' => '2026-07-10',
+            'fecha_fin' => '2026-07-12',
+            'dias_uso' => 3,
+            'estado_logistico' => RQMinaActividadTransporte::ESTADO_REQUERIDO,
+            'indicaciones' => 'Salida 5am desde garita',
+            'comentario_cambio' => null,
+            'incidencia_operativa' => null,
+            'recepcion_fecha' => null,
+            'recepcion_estado' => RQMinaActividadTransporte::RECEPCION_PENDIENTE,
+            'recepcion_observacion' => null,
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $transportId;
     }
 }

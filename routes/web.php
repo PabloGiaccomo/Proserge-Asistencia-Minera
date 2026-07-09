@@ -219,6 +219,7 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Herramientas por parada
     Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('logistica.index');
+    Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:epps,actualizar')->name('logistica.transportes.update');
 
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
     Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.catalogo.importar');

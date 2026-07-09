@@ -49,6 +49,8 @@
     };
 
     $metrics = $metrics ?? [];
+    $permissions = session('user.permissions', []);
+    $canUpdateTransportes = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'epps', 'actualizar');
 
     $metric = static fn (string $key, int|float $default = 0) => data_get($metrics, $key, $default) ?? $default;
 
@@ -109,6 +111,13 @@
             </a>
         @endforeach
     </nav>
+
+    @if(session('success'))
+        <div class="lgt-alert lgt-alert-success">{{ session('success') }}</div>
+    @endif
+    @if($errors->any())
+        <div class="lgt-alert lgt-alert-error">{{ $errors->first() }}</div>
+    @endif
 
     <section class="lgt-content" data-logistics-tab-viewport>
         <div class="lgt-tab-track lgt-tab-track--{{ $activeTabIndex }}" data-logistics-tab-track data-logistics-active-index="{{ $activeTabIndex }}">
@@ -393,19 +402,108 @@
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Servicios y alquileres</h2>
-                    <p>Transporte, alquileres y servicios asociados a paradas.</p>
+                    <p>Atención logística de transportes solicitados desde RQ Mina.</p>
                 </div>
 
                 <div class="lgt-card-body">
                     @if($servicePreviewRows->isEmpty())
                         <div class="lgt-empty">No hay datos disponibles</div>
                     @else
-                        <div class="lgt-list">
+                        <div class="lgt-service-grid">
                             @foreach($servicePreviewRows as $row)
-                                <div class="lgt-list-row">
-                                    <strong>{{ $resolve($row, ['servicio', 'nombre', 'parada']) }}</strong>
-                                    <span>{{ $resolve($row, ['estado', 'status'], 'Sin estado') }}</span>
-                                </div>
+                                <article class="lgt-service-card">
+                                    <header class="lgt-service-head">
+                                        <div>
+                                            <strong>{{ $resolve($row, ['parada']) }}</strong>
+                                            <span>{{ $resolve($row, ['grupo']) }} · {{ $resolve($row, ['alcance']) }}</span>
+                                        </div>
+                                        <b class="lgt-status">{{ $resolve($row, ['estado_label', 'estado']) }}</b>
+                                    </header>
+
+                                    <div class="lgt-service-request">
+                                        <div>
+                                            <span>Unidad de carga</span>
+                                            <strong>{{ $resolve($row, ['unidad_carga']) }}</strong>
+                                        </div>
+                                        <div>
+                                            <span>Transporte solicitado</span>
+                                            <strong>{{ $resolve($row, ['solicitado']) }}</strong>
+                                        </div>
+                                        <div>
+                                            <span>Fechas solicitadas</span>
+                                            <strong>{{ $resolve($row, ['fecha_inicio_label']) }} - {{ $resolve($row, ['fecha_fin_label']) }}</strong>
+                                        </div>
+                                        <div>
+                                            <span>Indicaciones de RQ Mina</span>
+                                            <strong>{{ $resolve($row, ['indicaciones'], 'Sin indicaciones') }}</strong>
+                                        </div>
+                                    </div>
+
+                                    <form method="POST" action="{{ route('logistica.transportes.update', $row['id']) }}" class="lgt-service-form">
+                                        @csrf
+                                        @method('PUT')
+                                        <label>
+                                            <span>Origen</span>
+                                            <select name="origen" @disabled(! $canUpdateTransportes)>
+                                                <option value="">Sin definir</option>
+                                                <option value="EMPRESA" @selected(data_get($row, 'origen') === 'EMPRESA')>Empresa</option>
+                                                <option value="ALQUILADO" @selected(data_get($row, 'origen') === 'ALQUILADO')>Alquilado</option>
+                                                <option value="OTRO" @selected(data_get($row, 'origen') === 'OTRO')>Otro</option>
+                                            </select>
+                                        </label>
+                                        <label class="wide">
+                                            <span>Placa o datos del transporte asignado</span>
+                                            <input type="text" name="placas_asignadas" value="{{ data_get($row, 'placas_asignadas') }}" placeholder="ABC-123; proveedor; chofer; teléfono" @readonly(! $canUpdateTransportes)>
+                                        </label>
+                                        <label>
+                                            <span>Fecha inicio</span>
+                                            <input type="date" name="fecha_inicio" value="{{ data_get($row, 'fecha_inicio') }}" @readonly(! $canUpdateTransportes)>
+                                        </label>
+                                        <label>
+                                            <span>Fecha fin</span>
+                                            <input type="date" name="fecha_fin" value="{{ data_get($row, 'fecha_fin') }}" @readonly(! $canUpdateTransportes)>
+                                        </label>
+                                        <label>
+                                            <span>Estado logístico</span>
+                                            <select name="estado_logistico" @disabled(! $canUpdateTransportes)>
+                                                @foreach(['REQUERIDO' => 'Requerido', 'ASIGNADO' => 'Asignado', 'EN_USO' => 'En uso', 'RETIRADO' => 'Retirado', 'REEMPLAZADO' => 'Reemplazado', 'DEVUELTO' => 'Devuelto', 'INCIDENCIA' => 'Incidencia'] as $value => $label)
+                                                    <option value="{{ $value }}" @selected(data_get($row, 'estado') === $value)>{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span>Recepción</span>
+                                            <select name="recepcion_estado" @disabled(! $canUpdateTransportes)>
+                                                @foreach(['PENDIENTE' => 'Pendiente', 'RECIBIDO' => 'Recibido', 'INCOMPLETO' => 'Incompleto', 'NO_LLEGO' => 'No llegó', 'CON_OBSERVACION' => 'Con observación'] as $value => $label)
+                                                    <option value="{{ $value }}" @selected(data_get($row, 'recepcion_estado') === $value)>{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span>Fecha recepción</span>
+                                            <input type="date" name="recepcion_fecha" value="{{ data_get($row, 'recepcion_fecha') }}" @readonly(! $canUpdateTransportes)>
+                                        </label>
+                                        <label class="wide">
+                                            <span>Observación logística</span>
+                                            <textarea name="comentario_cambio" rows="2" placeholder="Detalle de coordinación, proveedor, cambios o datos pendientes" @readonly(! $canUpdateTransportes)>{{ data_get($row, 'comentario_cambio') }}</textarea>
+                                        </label>
+                                        <label class="wide">
+                                            <span>Incidencia operativa</span>
+                                            <textarea name="incidencia_operativa" rows="2" placeholder="Malogro, reemplazo, retraso, retiro o devolución" @readonly(! $canUpdateTransportes)>{{ data_get($row, 'incidencia_operativa') }}</textarea>
+                                        </label>
+                                        <label class="wide">
+                                            <span>Detalle de recepción</span>
+                                            <textarea name="recepcion_observacion" rows="2" placeholder="Detalle si llegó incompleto, no llegó o tiene observación" @readonly(! $canUpdateTransportes)>{{ data_get($row, 'recepcion_observacion') }}</textarea>
+                                        </label>
+
+                                        <div class="lgt-service-actions">
+                                            <small>Días de uso: {{ data_get($row, 'dias_uso') ?? 'Auto' }}</small>
+                                            @if($canUpdateTransportes)
+                                                <button type="submit">Guardar atención</button>
+                                            @endif
+                                        </div>
+                                    </form>
+                                </article>
                             @endforeach
                         </div>
                     @endif
