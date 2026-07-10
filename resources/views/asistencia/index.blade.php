@@ -4,6 +4,7 @@
 
 @php
 $activeTab = request()->query('tab', 'resumen');
+$canExportAttendance = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'asistencias', 'exportar');
 $tabs = [
     'resumen' => 'Resumen',
     'dia' => 'Por día',
@@ -189,10 +190,12 @@ $minaDetail = [
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 Aplicar
             </button>
-            <button class="btn-filter-outline">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Exportar
-            </button>
+            @if($canExportAttendance)
+                <button class="btn-filter-outline">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Exportar
+                </button>
+            @endif
         </div>
     </div>
 

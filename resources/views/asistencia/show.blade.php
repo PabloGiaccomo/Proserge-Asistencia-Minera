@@ -3,6 +3,12 @@
 @section('title', 'Asistencia - Detalle de Grupo')
 
 @section('content')
+@php
+    $asistenciaPermissions = session('user.permissions', []);
+    $canRegisterAttendance = \App\Support\Rbac\PermissionMatrix::allowsDirect($asistenciaPermissions, 'asistencias', 'registrar');
+    $canCloseAttendance = \App\Support\Rbac\PermissionMatrix::allowsDirect($asistenciaPermissions, 'asistencias', 'cerrar');
+    $canReopenAttendance = \App\Support\Rbac\PermissionMatrix::allowsDirect($asistenciaPermissions, 'asistencias', 'reabrir');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -17,7 +23,7 @@
                 </svg>
                 Volver
             </a>
-            @if(!($grupo['cerrado'] ?? false))
+            @if(!($grupo['cerrado'] ?? false) && $canRegisterAttendance)
             <a href="{{ route('asistencia.marcar', $grupo['id']) }}" class="btn btn-primary">
                 Marcar Asistencia
             </a>
@@ -63,16 +69,18 @@
             <h3 class="card-title">Acciones</h3>
         </div>
         <div class="card-body">
-            @if($grupo['cerrado'] ?? false)
+            @if(($grupo['cerrado'] ?? false) && $canReopenAttendance)
                 <form action="{{ route('asistencia.reabrir', $grupo['id']) }}" method="POST">
                     @csrf
                     <button type="submit" class="btn btn-primary">Reabrir</button>
                 </form>
-            @else
+            @elseif(!($grupo['cerrado'] ?? false) && $canCloseAttendance)
                 <form action="{{ route('asistencia.cerrar', $grupo['id']) }}" method="POST">
                     @csrf
                     <button type="submit" class="btn btn-outline">Cerrar Asistencia</button>
                 </form>
+            @else
+                <p class="text-muted" style="margin:0;">No tienes acciones disponibles para este grupo.</p>
             @endif
         </div>
     </div>

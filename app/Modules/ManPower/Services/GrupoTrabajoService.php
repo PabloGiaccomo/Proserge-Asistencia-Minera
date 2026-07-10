@@ -10,6 +10,7 @@ use App\Models\RQMina;
 use App\Models\Taller;
 use App\Models\Usuario;
 use App\Modules\ManPower\Policies\ManPowerPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -23,7 +24,7 @@ class GrupoTrabajoService
 
     public function createGrupo(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->manageGrupos($usuario)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear') || !$this->policy->manageGrupos($usuario)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -102,7 +103,7 @@ class GrupoTrabajoService
 
     public function updateGrupo(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'man_power', ['editar', 'actualizar']) || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -162,7 +163,7 @@ class GrupoTrabajoService
 
     public function addPersonal(Usuario $usuario, GrupoTrabajo $grupo, string $personalId): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -188,7 +189,7 @@ class GrupoTrabajoService
 
     public function removePersonal(Usuario $usuario, GrupoTrabajo $grupo, string $personalId): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 

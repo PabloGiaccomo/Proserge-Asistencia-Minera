@@ -14,6 +14,7 @@ class PermissionCatalog
         'personal_ingresos' => 'Ingresos de Personal',
         'personal_documentos' => 'Documentos de Personal',
         'personal_contratos' => 'Contratos laborales',
+        'vencimientos' => 'Vencimientos',
         'personal_vencimientos' => 'Vencimientos de contratos',
         'personal_puestos' => 'Puestos y funciones',
         'personal_lista_negra' => 'Lista negra',
@@ -22,6 +23,7 @@ class PermissionCatalog
         'rq_proserge' => 'RQ Proserge',
         'notificaciones' => 'Notificaciones',
         'man_power' => 'Man Power',
+        'logistica' => 'Logistica',
         'herramientas' => 'Herramientas',
         'transportes' => 'Transportes',
         'mi_asistencia' => 'Mi Asistencia',
@@ -47,9 +49,14 @@ class PermissionCatalog
         'ver_ficha',
         'ver_documentos',
         'ver_contratos',
+        'ver_matriz',
+        'ver_vencimientos',
+        'ver_programados',
+        'ver_historial_precios',
         'dashboards',
         'crear',
         'editar',
+        'editar_ficha',
         'editar_datos_contrato',
         'actualizar',
         'eliminar',
@@ -58,15 +65,19 @@ class PermissionCatalog
         'importar',
         'importar_master_general',
         'aprobar',
+        'rechazar',
         'asignar',
         'activar_trabajador',
+        'activar',
         'cesar_trabajador',
+        'desactivar',
         'cerrar',
         'administrar',
         'descargar',
         'descargar_documentos',
         'descargar_formato_contrato',
         'subir',
+        'subir_documentos',
         'subir_contrato_firmado',
         'observar',
         'marcar_no_aplica',
@@ -96,6 +107,11 @@ class PermissionCatalog
         'scope',
     ];
 
+    /** @var array<int, string> */
+    private const HIDDEN_MODULES = [
+        'personal_vencimientos',
+    ];
+
     /** @var array<string, array<int, string>> */
     private const MODULE_ACTIONS = [
         'inicio' => ['ver', 'dashboards'],
@@ -111,6 +127,7 @@ class PermissionCatalog
             'dashboards',
             'crear',
             'editar',
+            'editar_ficha',
             'editar_datos_contrato',
             'actualizar',
             'eliminar',
@@ -118,12 +135,16 @@ class PermissionCatalog
             'exportar_excel',
             'importar',
             'importar_master_general',
+            'enviar',
             'aprobar',
             'activar_trabajador',
             'cesar_trabajador',
             'descargar_documentos',
             'descargar_formato_contrato',
+            'subir_documentos',
             'subir_contrato_firmado',
+            'renovar',
+            'reingresar',
             'ver_motivo',
             'ver_datos_sensibles',
             'gestionar_lista_negra',
@@ -132,28 +153,47 @@ class PermissionCatalog
         'personal_ingresos' => ['ver', 'editar', 'actualizar', 'eliminar', 'aprobar', 'comunicar'],
         'personal_documentos' => ['ver', 'subir', 'descargar', 'aprobar', 'observar', 'marcar_no_aplica'],
         'personal_contratos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'subir', 'descargar', 'regularizar', 'renovar', 'reingresar', 'anular', 'cerrar'],
+        'vencimientos' => ['ver', 'actualizar', 'exportar', 'registrar', 'renovar', 'cerrar'],
         'personal_vencimientos' => ['ver', 'actualizar', 'renovar', 'cerrar', 'exportar'],
         'personal_puestos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
         'personal_lista_negra' => ['ver', 'registrar', 'eliminar', 'ver_motivo'],
-        'habilitacion_minera' => ['ver', 'crear', 'editar', 'actualizar', 'asignar', 'desasignar', 'configurar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
-        'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'enviar', 'duplicar', 'administrar'],
+        'habilitacion_minera' => [
+            'ver',
+            'ver_matriz',
+            'ver_vencimientos',
+            'ver_programados',
+            'ver_historial_precios',
+            'crear',
+            'editar',
+            'actualizar',
+            'asignar',
+            'desasignar',
+            'configurar',
+            'registrar',
+            'programar',
+            'convalidar',
+            'importar',
+            'exportar',
+        ],
+        'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'exportar', 'importar', 'enviar', 'configurar', 'duplicar', 'administrar'],
         'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
         'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
-        'herramientas' => ['ver', 'actualizar', 'importar', 'completar', 'enviar', 'entregar', 'recepcionar', 'administrar'],
+        'logistica' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'exportar', 'importar', 'registrar', 'configurar', 'asignar', 'enviar', 'entregar', 'recepcionar', 'devolver', 'administrar'],
+        'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar', 'administrar'],
         'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'entregar', 'recepcionar', 'administrar'],
-        'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'devolver', 'administrar'],
+        'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver', 'administrar'],
         'mi_asistencia' => ['ver', 'dashboards'],
-        'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar'],
+        'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'anular'],
         'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'aprobar'],
-        'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'cerrar', 'reabrir'],
+        'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'registrar', 'cerrar', 'reabrir', 'exportar'],
         'faltas' => ['ver', 'dashboards', 'editar', 'actualizar', 'eliminar', 'corregir', 'anular'],
         'catalogos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'importar'],
         'remoto' => ['ver', 'actualizar'],
-        'minas' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar'],
+        'minas' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'desactivar', 'administrar'],
         'talleres' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
         'oficinas' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
-        'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar', 'scope'],
-        'roles' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'administrar'],
+        'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'activar', 'desactivar', 'asignar', 'configurar', 'scope', 'administrar'],
+        'roles' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'activar', 'desactivar', 'duplicar', 'administrar'],
     ];
 
     public static function modules(): array
@@ -170,12 +210,18 @@ class PermissionCatalog
             if (in_array($module, $exclude, true)) {
                 continue;
             }
+            if (in_array($module, self::HIDDEN_MODULES, true)) {
+                continue;
+            }
             if (isset($available[$module])) {
                 $labels[$module] = $label;
             }
         }
 
         $extraModules = array_diff_key($available, $labels);
+        foreach (self::HIDDEN_MODULES as $hiddenModule) {
+            unset($extraModules[$hiddenModule]);
+        }
         if (!empty($extraModules)) {
             ksort($extraModules);
             foreach ($extraModules as $module => $_) {
@@ -230,8 +276,12 @@ class PermissionCatalog
                     continue;
                 }
 
-                $action = $action !== '' ? $action : 'ver';
-                $available[$module][$action] = true;
+                $actions = $action !== '' ? array_map('trim', explode('|', $action)) : ['ver'];
+                foreach ($actions as $routeAction) {
+                    if ($routeAction !== '') {
+                        $available[$module][$routeAction] = true;
+                    }
+                }
             }
         }
 
@@ -249,9 +299,14 @@ class PermissionCatalog
             'ver_ficha' => 'Ver ficha',
             'ver_documentos' => 'Ver documentos',
             'ver_contratos' => 'Ver contratos',
+            'ver_matriz' => 'Ver matriz operativa',
+            'ver_vencimientos' => 'Ver proximos vencimientos',
+            'ver_programados' => 'Ver examenes programados',
+            'ver_historial_precios' => 'Ver historial de precios',
             'dashboards' => 'Dashboard',
             'crear' => 'Crear',
             'editar' => 'Editar',
+            'editar_ficha' => 'Editar ficha',
             'editar_datos_contrato' => 'Editar datos de contrato',
             'actualizar' => 'Actualizar',
             'eliminar' => 'Eliminar',
@@ -260,15 +315,19 @@ class PermissionCatalog
             'importar' => 'Importar',
             'importar_master_general' => 'Importar Master General',
             'aprobar' => 'Aprobar',
+            'rechazar' => 'Rechazar',
             'asignar' => 'Asignar',
             'activar_trabajador' => 'Activar trabajador',
+            'activar' => 'Activar',
             'cesar_trabajador' => 'Cesar trabajador',
+            'desactivar' => 'Desactivar',
             'cerrar' => 'Cerrar',
             'administrar' => 'Administrar',
             'descargar' => 'Descargar',
             'descargar_documentos' => 'Descargar documentos',
             'descargar_formato_contrato' => 'Descargar formato de contrato',
             'subir' => 'Subir',
+            'subir_documentos' => 'Subir documentos',
             'subir_contrato_firmado' => 'Subir contrato firmado',
             'observar' => 'Observar',
             'marcar_no_aplica' => 'Marcar no aplica',
@@ -337,21 +396,27 @@ class PermissionCatalog
                         'ver_contratos',
                         'dashboards',
                         'editar',
+                        'editar_ficha',
                         'editar_datos_contrato',
                         'actualizar',
                         'exportar_excel',
                         'descargar_documentos',
                         'descargar_formato_contrato',
+                        'subir_documentos',
                         'subir_contrato_firmado',
+                        'renovar',
+                        'reingresar',
                         'ver_motivo',
                     ],
                     'personal_documentos' => ['ver', 'descargar'],
                     'personal_contratos' => ['ver', 'descargar'],
+                    'vencimientos' => ['ver'],
                     'personal_vencimientos' => ['ver'],
                     'habilitacion_minera' => ['ver', 'actualizar', 'asignar', 'desasignar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
-                    'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'enviar', 'duplicar'],
+                    'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'importar', 'enviar', 'configurar', 'duplicar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'herramientas' => ['ver', 'actualizar', 'completar', 'enviar', 'entregar', 'recepcionar'],
+                    'logistica' => ['ver', 'actualizar', 'enviar', 'entregar', 'recepcionar'],
+                    'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar'],
                     'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'entregar', 'recepcionar'],
                 ]),
             ],
@@ -372,6 +437,7 @@ class PermissionCatalog
                         'dashboards',
                         'crear',
                         'editar',
+                        'editar_ficha',
                         'editar_datos_contrato',
                         'actualizar',
                         'eliminar',
@@ -379,12 +445,16 @@ class PermissionCatalog
                         'exportar_excel',
                         'importar',
                         'importar_master_general',
+                        'enviar',
                         'aprobar',
                         'activar_trabajador',
                         'cesar_trabajador',
                         'descargar_documentos',
                         'descargar_formato_contrato',
+                        'subir_documentos',
                         'subir_contrato_firmado',
+                        'renovar',
+                        'reingresar',
                         'ver_motivo',
                         'ver_datos_sensibles',
                         'gestionar_lista_negra',
@@ -393,17 +463,19 @@ class PermissionCatalog
                     'personal_ingresos' => ['ver', 'editar', 'actualizar', 'eliminar', 'aprobar', 'comunicar'],
                     'personal_documentos' => ['ver', 'subir', 'descargar', 'aprobar', 'observar', 'marcar_no_aplica'],
                     'personal_contratos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'subir', 'descargar', 'regularizar', 'renovar', 'reingresar', 'anular', 'cerrar'],
+                    'vencimientos' => ['ver', 'actualizar', 'registrar', 'renovar', 'cerrar', 'exportar'],
                     'personal_vencimientos' => ['ver', 'actualizar', 'renovar', 'cerrar', 'exportar'],
                     'personal_puestos' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar'],
                     'personal_lista_negra' => ['ver', 'registrar', 'eliminar', 'ver_motivo'],
                     'habilitacion_minera' => ['ver', 'actualizar', 'asignar', 'desasignar', 'configurar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
-                    'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'administrar'],
+                    'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'activar', 'desactivar', 'asignar', 'configurar', 'scope', 'administrar'],
                     'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'herramientas' => ['ver', 'actualizar', 'importar', 'completar', 'enviar', 'entregar', 'recepcionar'],
-                    'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'devolver'],
-                    'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
-                    'asistencias' => ['ver', 'dashboards', 'editar', 'actualizar', 'cerrar'],
+                    'logistica' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'importar', 'registrar', 'enviar', 'entregar', 'recepcionar', 'devolver'],
+                    'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar'],
+                    'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver'],
+                    'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'anular'],
+                    'asistencias' => ['ver', 'dashboards', 'editar', 'actualizar', 'registrar', 'cerrar'],
                 ]),
             ],
             [
@@ -414,11 +486,12 @@ class PermissionCatalog
                     'inicio' => ['ver'],
                     'perfil' => ['ver', 'actualizar'],
                     'mi_asistencia' => ['ver', 'dashboards'],
-                    'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'cerrar'],
+                    'asistencias' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'registrar', 'cerrar'],
                     'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
                     'personal' => ['ver', 'ver_detalle', 'ver_documentos', 'ver_contratos', 'dashboards'],
                     'rq_mina' => ['ver', 'dashboards'],
-                    'herramientas' => ['ver', 'actualizar', 'completar', 'entregar', 'recepcionar'],
+                    'logistica' => ['ver', 'registrar', 'devolver'],
+                    'herramientas' => ['ver', 'actualizar', 'registrar', 'completar', 'entregar', 'recepcionar'],
                     'epps' => ['ver', 'registrar', 'devolver'],
                     'bienestar' => ['ver', 'dashboards'],
                 ]),

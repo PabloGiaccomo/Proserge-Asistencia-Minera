@@ -10,6 +10,7 @@ use App\Models\EvaluacionSupervisor;
 use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -71,7 +72,7 @@ class EvaluacionDesempenoService
 
     public function create(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->manage($usuario)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')) {
             return $this->forbidden();
         }
 
@@ -141,7 +142,9 @@ class EvaluacionDesempenoService
 
     public function update(Usuario $usuario, EvaluacionDesempeno $item, array $payload): array
     {
-        if (!$this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)) {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])
+            || !$this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)
+        ) {
             return $this->forbidden();
         }
 
@@ -165,7 +168,9 @@ class EvaluacionDesempenoService
 
     public function createSupervisor(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
+            || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
+        ) {
             return $this->forbidden();
         }
 
@@ -179,7 +184,9 @@ class EvaluacionDesempenoService
 
     public function createResidente(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
+            || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
+        ) {
             return $this->forbidden();
         }
 
@@ -243,7 +250,7 @@ class EvaluacionDesempenoService
 
     public function updateForUser(Usuario $usuario, string $id, array $payload): array
     {
-        $item = $this->find($id);
+        $item = EvaluacionDesempeno::query()->find($id);
         
         if (!$item) {
             return ['success' => false, 'message' => 'Evaluación no encontrada'];

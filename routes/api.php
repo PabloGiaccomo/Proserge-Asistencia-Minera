@@ -33,9 +33,9 @@ Route::prefix('v1')->group(function (): void {
 
     Route::get('/catalogos/minas', [MinaController::class, 'index']);
     Route::get('/catalogos/minas/{id}', [MinaController::class, 'show']);
-    Route::post('/catalogos/minas', [MinaController::class, 'store']);
-    Route::put('/catalogos/minas/{id}', [MinaController::class, 'update']);
-    Route::post('/catalogos/minas/{id}/inactivar', [MinaController::class, 'inactivate']);
+    Route::post('/catalogos/minas', [MinaController::class, 'store'])->middleware('auth.token');
+    Route::put('/catalogos/minas/{id}', [MinaController::class, 'update'])->middleware('auth.token');
+    Route::post('/catalogos/minas/{id}/inactivar', [MinaController::class, 'inactivate'])->middleware('auth.token');
     Route::get('/catalogos/talleres', [TallerController::class, 'index']);
     Route::get('/catalogos/oficinas', [OficinaController::class, 'index']);
     Route::get('/catalogos/paraderos', [ParaderoController::class, 'index']);

@@ -3,6 +3,12 @@
 @section('title', 'Ingresos - Proserge')
 
 @section('content')
+@php
+    $ingresoPermissions = session('user.permissions', []);
+    $canEditIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'editar');
+    $canUpdateIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'actualizar');
+    $canDeleteIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'eliminar');
+@endphp
 <style>
     .ingresos-page {
         display: flex;
@@ -349,7 +355,10 @@
                                 <div class="ingresos-actions">
                                     <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.show', $ingreso->id) }}">Ver ficha</a>
                                     @if(!$locked)
-                                        <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.edit', $ingreso->id) }}">Editar</a>
+                                        @if($canEditIngresos)
+                                            <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.edit', $ingreso->id) }}">Editar</a>
+                                        @endif
+                                        @if($canUpdateIngresos)
                                         <button
                                             class="btn btn-primary btn-sm"
                                             type="button"
@@ -362,11 +371,14 @@
                                             @csrf
                                             <button class="btn btn-outline btn-sm" type="submit">No firmo contrato</button>
                                         </form>
+                                        @endif
+                                        @if($canDeleteIngresos)
                                         <form method="POST" action="{{ route('personal.ingresos.destroy', $ingreso->id) }}" class="js-delete-ingreso-form">
                                             @csrf
                                             @method('DELETE')
                                             <button class="btn btn-danger btn-sm" type="button" data-open-delete-ingreso>Ficha erronea</button>
                                         </form>
+                                        @endif
                                     @elseif($existing)
                                         <a class="btn btn-outline btn-sm" href="{{ route('personal.edit', $existing->id) }}">Ver en Personal</a>
                                     @endif

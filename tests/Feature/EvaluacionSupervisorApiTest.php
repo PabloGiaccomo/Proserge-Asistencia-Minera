@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -21,7 +22,9 @@ class EvaluacionSupervisorApiTest extends TestCase
         DB::table('roles')->insert([
             'id' => $this->rolPlannerId,
             'nombre' => 'PLANNER',
-            'permisos' => json_encode([]),
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'evaluaciones' => ['ver', 'crear', 'editar', 'actualizar'],
+            ])),
             'estado' => 'ACTIVO',
         ]);
     }

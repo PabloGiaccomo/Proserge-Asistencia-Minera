@@ -5,6 +5,9 @@
 @php
     $puedeEditar = (bool) ($item['puede_editar'] ?? false);
     $puedeActualizarPedido = (bool) ($item['puede_actualizar_pedido'] ?? false);
+    $toolPermissions = session('user.permissions', []);
+    $puedeImportarHerramientas = \App\Support\Rbac\PermissionMatrix::allowsDirect($toolPermissions, 'herramientas', 'importar');
+    $puedeEnviarHerramientas = \App\Support\Rbac\PermissionMatrix::allowsDirect($toolPermissions, 'herramientas', 'enviar');
     $requiereComentarioCambio = (bool) ($item['requiere_comentario_cambio_previo'] ?? false);
     $dias = (int) ($item['dias_para_limite'] ?? 0);
     $limiteEnvioVencido = (bool) ($item['limite_envio_vencido'] ?? ($dias < 0));
@@ -40,7 +43,7 @@
             <p class="page-subtitle">{{ $item['lugar'] ?? '-' }} | Semana {{ $item['semana'] ?? '-' }}</p>
         </div>
         <div class="page-actions">
-            <a href="{{ route('herramientas-parada.index') }}" class="btn btn-outline">Volver</a>
+            <a href="{{ route('logistica.index', ['tab' => 'herramientas']) }}" class="btn btn-outline">Volver</a>
         </div>
     </div>
 
@@ -142,16 +145,18 @@
                                     <div class="tools-action-menu-list">
                                         <button type="button" onclick="showToolCategory(this, 'herramientas')">Herramientas</button>
                                         <button type="button" onclick="showToolCategory(this, 'consumibles')">Consumibles</button>
-                                        @if($puedeEditar)
+                                        @if($puedeEditar && $puedeImportarHerramientas)
                                             <button type="button" onclick="openToolImport(this, '{{ $group['id'] }}')">Subir/actualizar formato</button>
                                         @endif
-                                        <button
-                                            type="submit"
-                                            form="toolReminderForm-{{ $group['id'] }}"
-                                            onclick="return confirm('Enviar correo al supervisor responsable para este grupo?');"
-                                        >
-                                            Correo supervisor
-                                        </button>
+                                        @if($puedeEnviarHerramientas)
+                                            <button
+                                                type="submit"
+                                                form="toolReminderForm-{{ $group['id'] }}"
+                                                onclick="return confirm('Enviar correo al supervisor responsable para este grupo?');"
+                                            >
+                                                Correo supervisor
+                                            </button>
+                                        @endif
                                     </div>
                                 </details>
                                 @if($puedeEditar)
@@ -291,7 +296,7 @@
         </div>
     </form>
 
-    @if($puedeEditar)
+    @if($puedeEditar && $puedeImportarHerramientas)
         <dialog class="tools-import-dialog" id="toolsImportDialog">
             <form method="POST" action="#" enctype="multipart/form-data" id="toolsImportForm">
                 @csrf
@@ -316,18 +321,20 @@
         </dialog>
     @endif
 
-    @if($puedeEditar)
+    @if($puedeEditar && $puedeEnviarHerramientas)
         <form method="POST" action="{{ route('herramientas-parada.enviar', $item['rq_mina_id']) }}" class="send-form" onsubmit="return confirm('Enviar esta lista de herramientas?');">
             @csrf
             <button type="submit" class="btn btn-primary">Enviar lista</button>
         </form>
     @endif
 
-    @foreach(($item['grupos'] ?? []) as $group)
-        <form id="toolReminderForm-{{ $group['id'] }}" method="POST" action="{{ route('herramientas-parada.recordar-supervisor', [$item['rq_mina_id'], $group['id']]) }}" style="display:none;">
-            @csrf
-        </form>
-    @endforeach
+    @if($puedeEnviarHerramientas)
+        @foreach(($item['grupos'] ?? []) as $group)
+            <form id="toolReminderForm-{{ $group['id'] }}" method="POST" action="{{ route('herramientas-parada.recordar-supervisor', [$item['rq_mina_id'], $group['id']]) }}" style="display:none;">
+                @csrf
+            </form>
+        @endforeach
+    @endif
 
     <datalist id="toolDescriptionSuggestions"></datalist>
     <datalist id="toolObservationSuggestions"></datalist>

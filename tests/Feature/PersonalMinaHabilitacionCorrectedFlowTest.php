@@ -54,6 +54,56 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
             ->assertDontSee('Catalogo general de examenes mineros');
     }
 
+    public function test_menu_acciones_respeta_permisos_granulares_de_habilitacion_minera(): void
+    {
+        $userId = $this->createUser([
+            'habilitacion_minera' => ['ver', 'crear', 'ver_historial_precios'],
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.habilitacion-minera.index'))
+            ->assertOk()
+            ->assertSee('Acciones')
+            ->assertSee('Agregar examen')
+            ->assertSee('Historial de precios')
+            ->assertDontSee('Editar examen')
+            ->assertDontSee("openDialog('modal-configuracion')", false)
+            ->assertDontSee('Importar Excel master')
+            ->assertDontSee('Agregar precio');
+    }
+
+    public function test_backend_distingue_permiso_programar_de_registrar_resultado(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $assignment = $this->assignmentWithExam($service, $actor, $this->createExam('Examen permisos'));
+        $workerExam = $assignment->examenes->first();
+
+        $programmerId = $this->createUser(['habilitacion_minera' => ['ver', 'programar']]);
+        $registrarId = $this->createUser(['habilitacion_minera' => ['ver', 'registrar']]);
+
+        $this->withSession($this->sessionFor($programmerId))
+            ->post(route('personal.habilitacion-minera.exam-attempts.store', $workerExam->id), [
+                'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+                'fecha_programacion' => '2026-07-20',
+            ])
+            ->assertRedirect();
+
+        $this->withSession($this->sessionFor($programmerId))
+            ->post(route('personal.habilitacion-minera.exam-attempts.store', $workerExam->id), [
+                'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
+                'fecha_realizacion' => '2026-07-20',
+            ])
+            ->assertForbidden();
+
+        $this->withSession($this->sessionFor($registrarId))
+            ->post(route('personal.habilitacion-minera.exam-attempts.store', $workerExam->id), [
+                'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+                'fecha_programacion' => '2026-07-21',
+            ])
+            ->assertForbidden();
+    }
+
     public function test_vista_no_abre_importar_excel_al_entrar_con_preview_guardada(): void
     {
         $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);

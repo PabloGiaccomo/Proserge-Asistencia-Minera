@@ -30,7 +30,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
         $mayWorker = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Control Vencimiento Mayo']);
         $juneWorker = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Control Vencimiento Junio']);
         $julyWorker = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Control Vencimiento Julio']);
@@ -56,7 +56,8 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $permissions = ['vencimientos' => ['ver'], 'personal' => ['ver_motivo']];
+        $userId = $this->createUser($permissions);
         $worker = $this->createPersonal('ACTIVO', [
             'nombre_completo' => 'Control Lista Negra Vencimiento',
             'numero_documento' => '77112233',
@@ -73,7 +74,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ]);
         $this->insertContract($worker, '2026-01-01', '2026-06-20', true);
 
-        $this->withSession($this->sessionFor($userId, ['personal' => ['ver']]))
+        $this->withSession($this->sessionFor($userId, $permissions))
             ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
             ->assertOk()
             ->assertSee('Control Lista Negra Vencimiento')
@@ -108,7 +109,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
         $target = $this->createPersonal('ACTIVO', [
             'nombre_completo' => 'Tipo Desde Trabajador',
             'contrato' => 'Personal fijo / servicio especifico',
@@ -168,7 +169,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Vista Filtros']);
         $this->insertContract($personal, '2026-01-01', '2026-06-20', true, ['tipo_contrato' => 'FIJO']);
 
@@ -192,7 +193,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Filtro Trabajador Vista']);
         $this->insertContract($personal, '2026-01-01', '2026-03-31', true, ['estado' => PersonalContrato::ESTADO_CERRADO]);
         $this->insertContract($personal, '2026-04-01', '2026-06-30', true);
@@ -213,7 +214,10 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $permissions = ['personal' => ['ver', 'exportar', 'actualizar']];
+        $permissions = [
+            'vencimientos' => ['ver', 'registrar', 'renovar'],
+            'personal' => ['descargar_formato_contrato'],
+        ];
         $userId = $this->createUser($permissions);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Formato Renovacion']);
         $this->insertContract($personal, '2026-01-01', '2026-06-20', true, ['tipo_contrato' => 'FIJO']);
@@ -237,7 +241,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
     {
         Carbon::setTestNow('2026-06-06 08:00:00');
 
-        $permissions = ['personal' => ['ver', 'actualizar']];
+        $permissions = ['vencimientos' => ['ver', 'registrar']];
         $userId = $this->createUser($permissions);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Historial Hover']);
         $this->insertContract($personal, '2026-01-01', '2026-03-31', true, [
@@ -394,7 +398,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
 
     public function test_decision_se_infiere_como_renovar_si_existe_contrato_posterior(): void
     {
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Inferencia Renovacion']);
         $base = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['estado' => PersonalContrato::ESTADO_CERRADO]);
         $this->insertContract($personal, '2026-07-01', '2026-12-31', true, [
@@ -423,7 +427,7 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         Carbon::setTestNow('2026-06-06 08:00:00');
         Storage::fake('local');
 
-        $permissions = ['personal' => ['ver', 'actualizar', 'editar']];
+        $permissions = ['vencimientos' => ['ver', 'registrar', 'renovar']];
         $userId = $this->createUser($permissions);
         $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Masivo Renovacion']);
         $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['tipo_contrato' => 'FIJO']);
@@ -457,10 +461,82 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         $this->assertSame('ACTIVO', $personal->fresh()->estado);
     }
 
+    public function test_exportar_vencimientos_requiere_permiso_exportar(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $viewer = $this->createUser(['vencimientos' => ['ver']]);
+        $exporter = $this->createUser(['vencimientos' => ['ver', 'exportar']]);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Exportar Vencimientos']);
+        $this->insertContract($personal, '2026-01-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($viewer))
+            ->get(route('personal.contratos.expiring.export', ['mes' => 6, 'anio' => 2026]))
+            ->assertForbidden();
+
+        $this->withSession($this->sessionFor($exporter))
+            ->get(route('personal.contratos.expiring.export', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }
+
+    public function test_registrar_decision_no_permite_preparar_renovacion_sin_permiso_renovar(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $userId = $this->createUser(['vencimientos' => ['ver', 'registrar']]);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Decision Sin Renovar']);
+        $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true);
+
+        $this->withSession($this->sessionFor($userId))
+            ->postJson(route('personal.contratos.bulk-decision'), [
+                'contract_ids' => [$contract->id],
+                'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVAR,
+                'fecha_inicio' => '2026-07-01',
+            ])
+            ->assertForbidden();
+
+        $this->withSession($this->sessionFor($userId))
+            ->postJson(route('personal.contratos.bulk-decision'), [
+                'contract_ids' => [$contract->id],
+                'estado_decision_renovacion' => PersonalContrato::DECISION_EN_EVALUACION,
+                'observacion_decision' => 'Pendiente de confirmacion.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('summary.procesados', 1)
+            ->assertJsonPath('summary.renovaciones', 0);
+    }
+
+    public function test_enlace_a_detalle_de_trabajador_solo_aparece_con_permiso_ver_detalle(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+
+        $viewer = $this->createUser(['vencimientos' => ['ver']]);
+        $detailViewer = $this->createUser([
+            'vencimientos' => ['ver'],
+            'personal' => ['ver_detalle'],
+        ]);
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Detalle Protegido']);
+        $this->insertContract($personal, '2026-01-01', '2026-06-30', true);
+        $detailUrl = route('personal.show', $personal->id);
+
+        $this->withSession($this->sessionFor($viewer))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertDontSee($detailUrl, false);
+
+        $this->withSession($this->sessionFor($detailViewer))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee($detailUrl, false)
+            ->assertSee('Ver detalle de Detalle Protegido');
+    }
+
     public function test_rutas_respetan_permiso_actualizar(): void
     {
-        $denied = $this->createUser(['personal' => ['ver']]);
-        $allowed = $this->createUser(['personal' => ['ver', 'actualizar', 'editar']]);
+        $denied = $this->createUser(['vencimientos' => ['ver']]);
+        $allowedRegister = $this->createUser(['vencimientos' => ['ver', 'registrar']]);
+        $allowedRenew = $this->createUser(['vencimientos' => ['ver', 'registrar', 'renovar']]);
         $personal = $this->createPersonal('ACTIVO');
         $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true);
 
@@ -474,13 +550,13 @@ class PersonalContratoExpiryDecisionTest extends TestCase
             ])
             ->assertForbidden();
 
-        $this->withSession($this->sessionFor($allowed))
+        $this->withSession($this->sessionFor($allowedRegister))
             ->post(route('personal.contratos.decision', $contract->id), [
                 'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVAR,
             ])
             ->assertRedirect();
 
-        $this->withSession($this->sessionFor($allowed))
+        $this->withSession($this->sessionFor($allowedRenew))
             ->post(route('personal.contratos.prepare-from-decision', $contract->id), [
                 'fecha_inicio' => '2026-07-01',
             ])

@@ -4,6 +4,7 @@ namespace App\Modules\Epps\Services;
 
 use App\Models\EppEntrega;
 use App\Models\EppRegistro;
+use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
@@ -19,16 +20,27 @@ class EppService
     {
         $search = trim((string) ($filters['q'] ?? ''));
         $estado = strtoupper(trim((string) ($filters['estado'] ?? '')));
-        $perPage = (int) ($filters['per_page'] ?? 20);
-        $perPage = in_array($perPage, [10, 20, 50, 100], true) ? $perPage : 20;
+        $minaId = trim((string) ($filters['mina_id'] ?? ''));
+        $eppId = trim((string) ($filters['epp_id'] ?? ''));
+        $tipoMovimiento = strtoupper(trim((string) ($filters['tipo_movimiento'] ?? '')));
+        $fechaDesde = $this->normalizeDateFilter($filters['fecha_desde'] ?? null);
+        $fechaHasta = $this->normalizeDateFilter($filters['fecha_hasta'] ?? null);
+        $perPageOptions = [10, 25, 50, 100];
+        $perPage = (int) ($filters['per_page'] ?? 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
 
         $catalogo = EppRegistro::query()
             ->orderBy('nombre')
             ->get();
+        $minas = Mina::query()
+            ->orderBy('nombre')
+            ->get(['id', 'nombre']);
 
         $entregas = EppEntrega::query()
             ->with([
                 'personal:id,nombre_completo,dni,numero_documento,puesto,estado',
+                'personal.relacionesMina:id,personal_id,mina_id,activo',
+                'personal.relacionesMina.mina:id,nombre',
                 'epp:id,codigo,nombre,categoria,vida_util_dias,estado',
                 'registradoPor:id,email,personal_id',
                 'registradoPor.personal:id,nombre_completo',
@@ -44,15 +56,29 @@ class EppService
                                 ->where('nombre_completo', 'like', "%{$search}%")
                                 ->orWhere('dni', 'like', "%{$search}%")
                                 ->orWhere('numero_documento', 'like', "%{$search}%")
-                                ->orWhere('puesto', 'like', "%{$search}%");
+                                ->orWhere('puesto', 'like', "%{$search}%")
+                                ->orWhere('id', $search);
                         })
                         ->orWhereHas('epp', function ($eppQuery) use ($search): void {
                             $eppQuery
                                 ->where('nombre', 'like', "%{$search}%")
                                 ->orWhere('codigo', 'like', "%{$search}%");
+                    });
+                });
+            })
+            ->when($minaId !== '', function ($query) use ($minaId): void {
+                $query->whereHas('personal.relacionesMina', function ($relation) use ($minaId): void {
+                    $relation
+                        ->where('mina_id', $minaId)
+                        ->where(function ($active): void {
+                            $active->where('activo', true)->orWhereNull('activo');
                         });
                 });
             })
+            ->when($eppId !== '', fn ($query) => $query->where('epp_id', $eppId))
+            ->when($tipoMovimiento !== '', fn ($query) => $this->applyMovementTypeFilter($query, $tipoMovimiento))
+            ->when($fechaDesde, fn ($query) => $query->whereDate(DB::raw('COALESCE(devuelto_at, fecha_entrega)'), '>=', $fechaDesde))
+            ->when($fechaHasta, fn ($query) => $query->whereDate(DB::raw('COALESCE(devuelto_at, fecha_entrega)'), '<=', $fechaHasta))
             ->orderByRaw("FIELD(estado, 'ENTREGADO', 'CAMBIADO', 'DEVUELTO')")
             ->latest('fecha_entrega')
             ->paginate($perPage)
@@ -66,16 +92,29 @@ class EppService
         return [
             'catalogo' => $catalogo,
             'eppsActivos' => $catalogo->where('estado', EppRegistro::ESTADO_ACTIVO)->values(),
+            'minas' => $minas,
             'entregas' => $entregas,
             'filters' => [
                 'q' => $search,
                 'estado' => $estado,
+                'mina_id' => $minaId,
+                'epp_id' => $eppId,
+                'tipo_movimiento' => $tipoMovimiento,
+                'fecha_desde' => $fechaDesde ?? '',
+                'fecha_hasta' => $fechaHasta ?? '',
                 'per_page' => $perPage,
             ],
+            'perPageOptions' => $perPageOptions,
             'estadosEntrega' => [
                 EppEntrega::ESTADO_ENTREGADO,
                 EppEntrega::ESTADO_CAMBIADO,
                 EppEntrega::ESTADO_DEVUELTO,
+            ],
+            'tiposMovimiento' => [
+                'ENTREGA' => 'Entrega',
+                'CAMBIO' => 'Cambio',
+                'DEVOLUCION' => 'Devolucion',
+                'RENOVACION' => 'Renovacion',
             ],
         ];
     }
@@ -95,7 +134,8 @@ class EppService
                     ->where('nombre_completo', 'like', "%{$query}%")
                     ->orWhere('dni', 'like', "%{$query}%")
                     ->orWhere('numero_documento', 'like', "%{$query}%")
-                    ->orWhere('puesto', 'like', "%{$query}%");
+                    ->orWhere('puesto', 'like', "%{$query}%")
+                    ->orWhere('id', $query);
             })
             ->orderBy('nombre_completo')
             ->limit(15)
@@ -114,6 +154,39 @@ class EppService
                 )),
             ])
             ->all();
+    }
+
+    private function applyMovementTypeFilter($query, string $type): void
+    {
+        match ($type) {
+            'ENTREGA' => $query
+                ->where('estado', EppEntrega::ESTADO_ENTREGADO)
+                ->where(function ($where): void {
+                    $where->whereNull('motivo_cambio')->orWhere('motivo_cambio', '');
+                }),
+            'RENOVACION' => $query
+                ->where('estado', EppEntrega::ESTADO_ENTREGADO)
+                ->whereNotNull('motivo_cambio')
+                ->where('motivo_cambio', '<>', ''),
+            'CAMBIO' => $query->where('estado', EppEntrega::ESTADO_CAMBIADO),
+            'DEVOLUCION' => $query->where('estado', EppEntrega::ESTADO_DEVUELTO),
+            default => null,
+        };
+    }
+
+    private function normalizeDateFilter(mixed $value): ?string
+    {
+        $value = trim((string) ($value ?? ''));
+
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function lastDeliverySummary(string $personalId, string $eppId): ?array

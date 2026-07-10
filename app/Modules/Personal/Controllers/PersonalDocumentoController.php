@@ -67,9 +67,11 @@ class PersonalDocumentoController extends WebPageController
             'documentStateLabels' => PersonalFichaCatalog::documentStateLabels(),
             'vidaLeyPhysicalStateLabels' => PersonalFichaCatalog::vidaLeyPhysicalStateLabels(),
             'documentTypeOptions' => $this->downloadService->documentTypeOptions(),
-            'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
-            'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
-            'canDownloadDocuments' => PermissionMatrix::allows($permissions, 'personal', 'descargar_documentos'),
+            'canUploadDocuments' => $this->allowsDocumentAction($permissions, 'subir_documentos', 'subir'),
+            'canReviewDocuments' => PermissionMatrix::allowsDirect($permissions, 'personal', 'aprobar'),
+            'canDownloadDocuments' => $this->allowsDocumentAction($permissions, 'descargar_documentos', 'descargar'),
+            'canEditWorker' => PermissionMatrix::allowsDirectAny($permissions, 'personal', ['editar', 'actualizar', 'editar_ficha']),
+            'canViewContracts' => $this->allowsContractAction($permissions, 'ver_contratos', 'ver'),
             'contratoDatos' => $trabajador->contratoDatos,
             'isMujer' => $this->isFemale($trabajador),
             'gestacionBloqueos' => $trabajador->bloqueos,
@@ -79,6 +81,12 @@ class PersonalDocumentoController extends WebPageController
 
     public function store(Request $request, string $id): RedirectResponse
     {
+        abort_unless(
+            $this->allowsDocumentAction(session('user.permissions', []), 'subir_documentos', 'subir'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $trabajador = Personal::query()->with('fichaColaborador')->findOrFail($id);
 
         $rules = [
@@ -147,6 +155,12 @@ class PersonalDocumentoController extends WebPageController
 
     public function downloadSelected(Request $request, string $id): BinaryFileResponse
     {
+        abort_unless(
+            $this->allowsDocumentAction(session('user.permissions', []), 'descargar_documentos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         Personal::query()->findOrFail($id);
 
         $validated = $request->validate([
@@ -169,6 +183,12 @@ class PersonalDocumentoController extends WebPageController
 
     public function downloadBulk(Request $request): BinaryFileResponse
     {
+        abort_unless(
+            $this->allowsDocumentAction(session('user.permissions', []), 'descargar_documentos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $validated = $request->validate([
             'personal_ids' => ['required', 'array', 'min:1'],
             'personal_ids.*' => ['string', 'exists:personal,id'],
@@ -193,6 +213,12 @@ class PersonalDocumentoController extends WebPageController
 
     public function gestacionPdf(string $id, string $bloqueoId): Response
     {
+        abort_unless(
+            $this->allowsDocumentAction(session('user.permissions', []), 'descargar_documentos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $trabajador = Personal::query()
             ->with('fichaColaborador')
             ->findOrFail($id);
@@ -239,6 +265,12 @@ class PersonalDocumentoController extends WebPageController
 
     public function contratoFirmado(string $id): Response
     {
+        abort_unless(
+            $this->allowsDocumentAction(session('user.permissions', []), 'descargar_documentos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $trabajador = Personal::query()
             ->with('contratoDatos', 'contratoLaboralActual')
             ->findOrFail($id);
@@ -268,5 +300,17 @@ class PersonalDocumentoController extends WebPageController
         $sexo = Str::lower(trim((string) ($data['sexo'] ?? '')));
 
         return $sexo !== '' && (str_starts_with($sexo, 'f') || in_array($sexo, ['mujer', 'femenino'], true));
+    }
+
+    private function allowsDocumentAction(array $permissions, string $personalAction, string $documentAction): bool
+    {
+        return PermissionMatrix::allowsDirect($permissions, 'personal', $personalAction)
+            || PermissionMatrix::allowsDirect($permissions, 'personal_documentos', $documentAction);
+    }
+
+    private function allowsContractAction(array $permissions, string $personalAction, string $contractAction): bool
+    {
+        return PermissionMatrix::allowsDirect($permissions, 'personal', $personalAction)
+            || PermissionMatrix::allowsDirect($permissions, 'personal_contratos', $contractAction);
     }
 }

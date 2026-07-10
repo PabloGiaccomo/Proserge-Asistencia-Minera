@@ -5,6 +5,7 @@
 @section('content')
 @php
     $today = date('Y-m-d');
+    $canCreateManPowerGroup = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'man_power', 'crear');
     $paradas = [
         [
             'id' => 'MP-201',
@@ -314,6 +315,10 @@
         const accent = coverageAccent(status);
         const hasGroups = Number(item.grupos_creados || 0) > 0;
 
+        const createButton = @json($canCreateManPowerGroup)
+            ? `<a href="{{ route('man-power.grupo-crear') }}?parada_id=${item.id}" class="btn-create ${!hasGroups ? 'is-priority' : ''}">Crear grupo</a>`
+            : '';
+
         return `
             <article class="mp-card ${accent}">
                 <div class="mp-card-head">
@@ -339,7 +344,7 @@
 
                 <div class="mp-actions">
                     <a href="{{ route('man-power.grupos') }}?parada_id=${item.id}" class="btn-view ${hasGroups ? 'is-priority' : ''}">Ver grupos</a>
-                    <a href="{{ route('man-power.grupo-crear') }}?parada_id=${item.id}" class="btn-create ${!hasGroups ? 'is-priority' : ''}">Crear grupo</a>
+                    ${createButton}
                 </div>
             </article>
         `;

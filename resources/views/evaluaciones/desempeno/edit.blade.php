@@ -3,6 +3,9 @@
 @section('title', 'Evaluación de Desempeño - Editar')
 
 @section('content')
+@php
+    $canUpdateEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'actualizar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -36,7 +39,9 @@
 
     <div class="form-actions">
         <a href="{{ route('evaluaciones.desempeno.index') }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @if($canUpdateEvaluation)
+            <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @endif
     </div>
 </form>
 @endsection

@@ -5,9 +5,9 @@
 @section('content')
 @php
     $permissions = session('user.permissions', []);
-    $canCreate = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'talleres', 'crear');
-    $canEdit = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'talleres', 'editar');
-    $canDelete = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'talleres', 'eliminar');
+    $canCreate = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'talleres', 'crear');
+    $canEdit = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'talleres', 'editar');
+    $canDelete = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'talleres', 'eliminar');
 @endphp
 <div class="page-header">
     <div class="page-header-content">

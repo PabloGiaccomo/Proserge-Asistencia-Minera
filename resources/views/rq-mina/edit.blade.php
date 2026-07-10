@@ -3,6 +3,9 @@
 @section('title', 'RQ Mina - Editar')
 
 @section('content')
+@php
+    $canUpdateRqMina = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'actualizar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -102,7 +105,9 @@
 
     <div class="form-actions">
         <a href="{{ route('rq-mina.index') }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @if($canUpdateRqMina)
+            <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @endif
     </div>
 </form>
 @endsection

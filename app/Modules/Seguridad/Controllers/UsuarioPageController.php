@@ -12,6 +12,7 @@ use App\Models\Rol;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
 use App\Modules\Notificaciones\Services\NotificationService;
+use App\Modules\Seguridad\Services\AdminProtectionService;
 use App\Modules\Seguridad\Services\RoleManagementService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
@@ -21,6 +22,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class UsuarioPageController extends Controller
@@ -28,6 +30,7 @@ class UsuarioPageController extends Controller
     public function __construct(
         private readonly RoleManagementService $roleService,
         private readonly NotificationService $notificationService,
+        private readonly AdminProtectionService $adminProtection,
     )
     {
     }
@@ -123,6 +126,8 @@ class UsuarioPageController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $this->assertDirectPermission('usuarios', 'crear');
+
         $validated = $request->validate([
             'personal_id' => [
                 'required',
@@ -142,6 +147,8 @@ class UsuarioPageController extends Controller
         ], [
             'personal_id.unique' => 'Este trabajador ya tiene un usuario registrado.',
         ]);
+
+        $this->assertDirectPermission('usuarios', 'asignar');
 
         $trabajador = Personal::query()->findOrFail($validated['personal_id']);
 
@@ -238,21 +245,56 @@ class UsuarioPageController extends Controller
 
         $validated = $request->validate($rules);
 
-        $usuario->email = mb_strtolower($validated['email']);
-        $usuario->rol_id = $validated['rol_id'];
+        DB::transaction(function () use ($usuario, $validated): void {
+            $lockedUsuario = Usuario::query()
+                ->lockForUpdate()
+                ->with(['rol:id,nombre,estado', 'rolesAdicionales:id,nombre,estado'])
+                ->findOrFail($usuario->id);
 
-        if ($this->hasEstadoColumn()) {
-            $usuario->estado = strtoupper((string) $validated['estado']);
-        }
+            $nextAreaRoleIds = $this->normalizeRoleSelection($validated['area_role_ids'] ?? []);
+            $nextCargoRoleIds = $this->normalizeRoleSelection($validated['cargo_role_ids'] ?? []);
+            $currentAreaRoleIds = $this->roleIdsByType($lockedUsuario, 'area');
+            $currentCargoRoleIds = $this->roleIdsByType($lockedUsuario, 'cargo');
 
-        $usuario->save();
+            $emailChanged = mb_strtolower((string) $lockedUsuario->email) !== mb_strtolower((string) $validated['email']);
+            $rolesChanged = (string) $lockedUsuario->rol_id !== (string) $validated['rol_id']
+                || !$this->sameRoleIds($currentAreaRoleIds, $nextAreaRoleIds)
+                || !$this->sameRoleIds($currentCargoRoleIds, $nextCargoRoleIds);
 
-        $this->syncAdditionalRoles(
-            $usuario,
-            $validated['rol_id'],
-            $this->normalizeRoleSelection($validated['area_role_ids'] ?? []),
-            $this->normalizeRoleSelection($validated['cargo_role_ids'] ?? []),
-        );
+            if ($emailChanged) {
+                $this->assertAnyDirectPermission('usuarios', ['editar', 'actualizar']);
+            }
+
+            if ($rolesChanged) {
+                $this->assertDirectPermission('usuarios', 'asignar');
+            }
+
+            if ($this->hasEstadoColumn()) {
+                $currentEstado = strtoupper((string) $lockedUsuario->estado);
+                $nextEstado = strtoupper((string) $validated['estado']);
+                if ($currentEstado !== $nextEstado) {
+                    $this->assertDirectPermission('usuarios', $nextEstado === 'ACTIVO' ? 'activar' : 'desactivar');
+                }
+            }
+
+            $this->adminProtection->assertUserUpdateAllowed($lockedUsuario, $validated);
+
+            $lockedUsuario->email = mb_strtolower($validated['email']);
+            $lockedUsuario->rol_id = $validated['rol_id'];
+
+            if ($this->hasEstadoColumn()) {
+                $lockedUsuario->estado = strtoupper((string) $validated['estado']);
+            }
+
+            $lockedUsuario->save();
+
+            $this->syncAdditionalRoles(
+                $lockedUsuario,
+                $validated['rol_id'],
+                $nextAreaRoleIds,
+                $nextCargoRoleIds,
+            );
+        });
 
         return redirect()->route('usuarios.show', $usuario->id)->with('success', 'Usuario actualizado correctamente.');
     }
@@ -344,8 +386,26 @@ class UsuarioPageController extends Controller
             return redirect()->route('usuarios.index')->with('error', 'La tabla de usuarios aun no tiene columna de estado. Ejecuta las migraciones pendientes.');
         }
 
-        $usuario->estado = strtoupper((string) $usuario->estado) === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
-        $usuario->save();
+        try {
+            $usuario = DB::transaction(function () use ($usuario): Usuario {
+                $lockedUsuario = Usuario::query()
+                    ->lockForUpdate()
+                    ->with(['rol:id,nombre,estado', 'rolesAdicionales:id,nombre,estado'])
+                    ->findOrFail($usuario->id);
+
+                $this->adminProtection->assertUserToggleAllowed($lockedUsuario);
+
+                $targetAction = strtoupper((string) $lockedUsuario->estado) === 'ACTIVO' ? 'desactivar' : 'activar';
+                $this->assertDirectPermission('usuarios', $targetAction);
+
+                $lockedUsuario->estado = strtoupper((string) $lockedUsuario->estado) === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+                $lockedUsuario->save();
+
+                return $lockedUsuario;
+            });
+        } catch (ValidationException $exception) {
+            return redirect()->route('usuarios.index')->with('error', $this->validationMessage($exception));
+        }
 
         if (strtoupper((string) $usuario->estado) === 'INACTIVO') {
             $this->notificationService->emit('usuario_desactivado', [
@@ -366,6 +426,8 @@ class UsuarioPageController extends Controller
 
     public function editarScope(string $usuarioId): View
     {
+        $this->assertDirectPermission('usuarios', 'scope');
+
         $usuario = $this->findUsuarioOrFail($usuarioId);
         $minas = Mina::query()->orderBy('nombre')->get(['id', 'nombre', 'estado']);
         $scopeIds = $usuario->scopesMina->pluck('mina_id')->all();
@@ -379,6 +441,8 @@ class UsuarioPageController extends Controller
 
     public function syncScope(Request $request, string $usuarioId): RedirectResponse
     {
+        $this->assertDirectPermission('usuarios', 'scope');
+
         $usuario = $this->findUsuarioOrFail($usuarioId);
 
         $validated = $request->validate([
@@ -418,8 +482,8 @@ class UsuarioPageController extends Controller
         return Usuario::query()
             ->with([
                 'personal:id,dni,nombre_completo,puesto,correo,estado',
-                'rol:id,nombre',
-                'rolesAdicionales:id,nombre',
+                'rol:id,nombre,estado',
+                'rolesAdicionales:id,nombre,estado',
                 'scopesMina.mina:id,nombre',
             ])
             ->findOrFail($id);
@@ -479,6 +543,21 @@ class UsuarioPageController extends Controller
             ->values();
     }
 
+    private function roleIdsByType(Usuario $usuario, string $type): Collection
+    {
+        return $this->normalizeRoleSelection(
+            $usuario->rolesAdicionales
+                ->filter(fn (Rol $rol): bool => ($rol->pivot->tipo ?? null) === $type)
+                ->pluck('id')
+                ->all()
+        );
+    }
+
+    private function sameRoleIds(Collection $first, Collection $second): bool
+    {
+        return $first->sort()->values()->all() === $second->sort()->values()->all();
+    }
+
     private function syncAdditionalRoles(Usuario $usuario, string $primaryRoleId, Collection $areaRoleIds, Collection $cargoRoleIds): void
     {
         if (!Schema::hasTable('usuario_roles')) {
@@ -534,10 +613,33 @@ class UsuarioPageController extends Controller
         }
 
         return $query->get()
-            ->filter(fn (Usuario $usuario) => PermissionMatrix::userCanAny($usuario, $module, $actions))
+            ->filter(fn (Usuario $usuario) => PermissionMatrix::userCanDirectAny($usuario, $module, $actions))
             ->pluck('id')
             ->map(fn ($id) => (string) $id)
             ->values()
             ->all();
+    }
+
+    private function validationMessage(ValidationException $exception): string
+    {
+        return (string) (collect($exception->errors())->flatten()->first() ?: 'No se pudo completar la accion.');
+    }
+
+    private function assertDirectPermission(string $module, string $action): void
+    {
+        abort_unless(
+            PermissionMatrix::allowsDirect(session('user.permissions', []), $module, $action),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+    }
+
+    private function assertAnyDirectPermission(string $module, array $actions): void
+    {
+        abort_unless(
+            PermissionMatrix::allowsDirectAny(session('user.permissions', []), $module, $actions),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
     }
 }

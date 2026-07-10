@@ -13,24 +13,28 @@
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
     $personalPermissions = session('user.permissions', []);
-    $canViewDetail = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_detalle');
-    $canViewIngresos = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ingresos');
-    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ficha');
-    $canViewDocuments = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_documentos');
-    $canViewContracts = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_contratos');
-    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar');
-    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar_datos_contrato');
-    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'actualizar');
-    $canExportExcel = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'exportar_excel');
-    $canImportMasterGeneral = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'importar_master_general');
-    $canActivatePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'activar_trabajador');
-    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'cesar_trabajador');
-    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'descargar_documentos');
-    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'descargar_formato_contrato');
-    $canUploadSignedContract = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'subir_contrato_firmado');
-    $canViewReason = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_motivo');
-    $canManageBlacklist = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'gestionar_lista_negra');
-    $canManagePuestos = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'gestionar_puestos');
+    $canViewDetail = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_detalle');
+    $canViewIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_ingresos');
+    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_ficha');
+    $canViewDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_documentos', 'ver');
+    $canViewContracts = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_contratos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_contratos', 'ver');
+    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($personalPermissions, 'personal', ['editar', 'actualizar', 'editar_ficha']);
+    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'editar_datos_contrato');
+    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'actualizar');
+    $canExportExcel = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($personalPermissions, 'personal', ['exportar_excel', 'exportar']);
+    $canImportMasterGeneral = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($personalPermissions, 'personal', ['importar', 'importar_master_general']);
+    $canActivatePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'activar_trabajador');
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'cesar_trabajador');
+    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'descargar_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_documentos', 'descargar');
+    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'descargar_formato_contrato');
+    $canUploadSignedContract = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'subir_contrato_firmado');
+    $canViewReason = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_motivo');
+    $canManageBlacklist = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'gestionar_lista_negra');
+    $canManagePuestos = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_puestos', 'ver')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'gestionar_puestos');
     $documentDownloadOptions = \App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements();
 @endphp
 <style>
@@ -4407,6 +4411,17 @@ function showWorkerDetail(card) {
     const canCeasePersonal = @json($canCeasePersonal);
     const canActivatePersonal = @json($canActivatePersonal);
     const csrfToken = @json(csrf_token());
+    const personalFichaReviewUrlTemplate = @json(route('personal.fichas.review', ['id' => '__ID__']));
+    const personalDocumentosUrlTemplate = @json(route('personal.documentos.index', ['id' => '__ID__']));
+    const personalContratosUrlTemplate = @json(route('personal.contratos.index', ['id' => '__ID__']));
+    const personalEditarUrlTemplate = @json(route('personal.edit', ['id' => '__ID__']));
+    const personalCesarUrlTemplate = @json(route('personal.cease', ['id' => '__ID__']));
+    const bienestarShowUrlTemplate = @json(route('bienestar.show', ['id' => '__ID__']));
+
+    function buildRouteFromTemplate(template, id) {
+        return template.replace('__ID__', encodeURIComponent(id));
+    }
+
     if (!modal || !worker.nombre) return;
 
     const telefonoAttr = card.getAttribute('data-telefono') || '';
@@ -4573,15 +4588,15 @@ function showWorkerDetail(card) {
                 ${contractHistoryHtml}
             </div>
             <div class="detail-footer">
-                ${worker.ficha_id && canViewFicha ? `<a href="/personal/fichas/${worker.ficha_id}/revisar" class="btn btn-outline">Ficha Colaborador</a>` : ''}
-                <a href="/bienestar/${worker.id}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
-                ${canViewDocuments ? `<a href="/personal/${worker.id}/documentos" class="btn btn-outline">Documentos</a>` : ''}
-                ${canViewContracts ? `<a href="/personal/${worker.id}/contratos" class="btn btn-outline">Contratos</a>` : ''}
+                ${worker.ficha_id && canViewFicha ? `<a href="${buildRouteFromTemplate(personalFichaReviewUrlTemplate, worker.ficha_id)}" class="btn btn-outline">Ficha Colaborador</a>` : ''}
+                <a href="${buildRouteFromTemplate(bienestarShowUrlTemplate, worker.id)}?solo_calendario=1" class="btn btn-outline">Cartilla Ocupación</a>
+                ${canViewDocuments ? `<a href="${buildRouteFromTemplate(personalDocumentosUrlTemplate, worker.id)}" class="btn btn-outline">Documentos</a>` : ''}
+                ${canViewContracts ? `<a href="${buildRouteFromTemplate(personalContratosUrlTemplate, worker.id)}" class="btn btn-outline">Contratos</a>` : ''}
                 ${worker.en_lista_negra && canViewReason ? `<button type="button" class="btn btn-outline" data-lista-negra-reason-btn>Ver motivo de lista negra</button>` : (!worker.en_lista_negra && canManageBlacklist ? `<button type="button" class="btn btn-outline" data-lista-negra-btn>Lista negra</button>` : '')}
-                ${canEditPersonal ? `<a href="/personal/${worker.id}/editar" class="btn btn-primary">Editar Trabajador</a>` : ''}
+                ${canEditPersonal ? `<a href="${buildRouteFromTemplate(personalEditarUrlTemplate, worker.id)}" class="btn btn-primary">Editar Trabajador</a>` : ''}
                 ${worker.estado_actual === 'cesado' && canViewReason ? `<button type="button" class="btn btn-outline" data-cease-reason-btn>Ver motivo de cese</button>` : ''}
                 ${worker.estado_actual === 'cesado' && canActivatePersonal ? `<button type="button" class="btn btn-primary" data-activate-worker-btn>Activar trabajador</button>` : ''}
-                ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="/personal/${worker.id}/cesar" data-worker-name="${escapeHtml(worker.nombre || worker.nombre_completo || 'este trabajador')}" onsubmit="return requestCeaseReason(this);"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
+                ${canCeasePersonal && worker.puede_cesar ? `<form method="POST" action="${buildRouteFromTemplate(personalCesarUrlTemplate, worker.id)}" data-worker-name="${escapeHtml(worker.nombre || worker.nombre_completo || 'este trabajador')}" onsubmit="return requestCeaseReason(this);"><input type="hidden" name="_token" value="${csrfToken}"><button type="submit" class="btn btn-outline">Cesar</button></form>` : ''}
             </div>
         </div>
     `;

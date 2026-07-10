@@ -4,7 +4,13 @@
 
 @section('content')
 @php
-    $canManage = \App\Support\Rbac\PermissionMatrix::allowsAny(session('user.permissions', []), 'personal', ['actualizar', 'administrar']);
+    $puestoPermissions = session('user.permissions', []);
+    $canCreatePuesto = \App\Support\Rbac\PermissionMatrix::allowsDirect($puestoPermissions, 'personal_puestos', 'crear')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($puestoPermissions, 'personal', 'gestionar_puestos');
+    $canEditPuesto = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($puestoPermissions, 'personal_puestos', ['editar', 'actualizar'])
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($puestoPermissions, 'personal', 'gestionar_puestos');
+    $canDeletePuesto = \App\Support\Rbac\PermissionMatrix::allowsDirect($puestoPermissions, 'personal_puestos', 'eliminar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($puestoPermissions, 'personal', 'gestionar_puestos');
 @endphp
 
 <style>
@@ -269,7 +275,7 @@
                                     </div>
                                 </div>
 
-                                @if($canManage)
+                                @if($canEditPuesto)
                                     <form method="POST" action="{{ route('personal.puestos.update', $puesto->id) }}" class="puesto-row-grid">
                                         @csrf
                                         @method('PUT')
@@ -292,13 +298,15 @@
                                             <button type="submit" class="btn btn-primary btn-sm">Actualizar</button>
                                         </div>
                                     </form>
-                                    <form method="POST" action="{{ route('personal.puestos.destroy', $puesto->id) }}" class="puesto-delete-form" onsubmit="return confirm('Eliminar este puesto? Esta accion solo procede si no tiene trabajadores asociados.');">
-                                        @csrf
-                                        @method('DELETE')
-                                        <button type="submit" class="btn btn-outline btn-sm" {{ $puesto->trabajadores_count > 0 ? 'disabled' : '' }} title="{{ $puesto->trabajadores_count > 0 ? 'No se puede eliminar porque tiene trabajadores asociados.' : 'Eliminar puesto' }}">
-                                            Eliminar
-                                        </button>
-                                    </form>
+                                    @if($canDeletePuesto)
+                                        <form method="POST" action="{{ route('personal.puestos.destroy', $puesto->id) }}" class="puesto-delete-form" onsubmit="return confirm('Eliminar este puesto? Esta accion solo procede si no tiene trabajadores asociados.');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn-outline btn-sm" {{ $puesto->trabajadores_count > 0 ? 'disabled' : '' }} title="{{ $puesto->trabajadores_count > 0 ? 'No se puede eliminar porque tiene trabajadores asociados.' : 'Eliminar puesto' }}">
+                                                Eliminar
+                                            </button>
+                                        </form>
+                                    @endif
                                 @else
                                     <p class="empty-description" style="margin:10px 0 0;">{{ $puesto->funciones ?: 'Sin funciones registradas.' }}</p>
                                 @endif
@@ -329,7 +337,7 @@
                 <span class="card-title">Nuevo puesto</span>
             </div>
             <div class="card-body">
-                @if($canManage)
+                @if($canCreatePuesto)
                     <form method="POST" action="{{ route('personal.puestos.store') }}" class="puestos-form">
                         @csrf
                         <label class="form-label">

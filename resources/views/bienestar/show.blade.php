@@ -3,6 +3,11 @@
 @section('title', 'Cartilla de Ocupación - Bienestar')
 
 @section('content')
+@php
+    $bienestarPermissions = session('user.permissions', []);
+    $canEditWellbeingBlocks = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($bienestarPermissions, 'bienestar', ['editar', 'actualizar']);
+    $canDeleteWellbeingBlocks = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($bienestarPermissions, 'bienestar', ['eliminar', 'anular']);
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -106,11 +111,15 @@
                                     <td>{{ $bloqueo->bloqueadoPor?->personal?->nombre_completo ?? $bloqueo->bloqueadoPor?->email ?? '-' }}</td>
                                     <td>
                                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                                            <a href="{{ route('bienestar.bloqueos.edit', $bloqueo->id) }}" class="btn btn-outline btn-xs">Editar</a>
+                                            @if($canEditWellbeingBlocks)
+                                                <a href="{{ route('bienestar.bloqueos.edit', $bloqueo->id) }}" class="btn btn-outline btn-xs">Editar</a>
+                                            @endif
+                                            @if($canDeleteWellbeingBlocks)
                                             <form method="POST" action="{{ route('bienestar.bloqueos.anular', $bloqueo->id) }}" onsubmit="return confirm('¿Anular este bloqueo?');" style="display:inline;">
                                                 @csrf
                                                 <button type="submit" class="btn btn-danger btn-xs">Anular</button>
                                             </form>
+                                            @endif
                                         </div>
                                     </td>
                                 </tr>

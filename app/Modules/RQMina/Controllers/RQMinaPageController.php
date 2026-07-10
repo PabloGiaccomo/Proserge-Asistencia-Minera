@@ -13,6 +13,7 @@ use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Personal\Services\PersonalService;
 use App\Modules\RQMina\Services\RQMinaService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -120,10 +121,22 @@ class RQMinaPageController extends WebPageController
         $copyData = null;
 
         if ($copyFrom !== '') {
+            abort_unless(
+                PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'duplicar'),
+                403,
+                'No tienes permiso para realizar esta accion.'
+            );
+
             $rqMina = $this->service->findForUser($usuario, $copyFrom);
             if ($rqMina) {
                 $copyData = $this->toViewItem($rqMina);
             }
+        } else {
+            abort_unless(
+                PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'crear'),
+                403,
+                'No tienes permiso para realizar esta accion.'
+            );
         }
 
         $formMode = 'create';

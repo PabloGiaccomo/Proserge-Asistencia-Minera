@@ -146,7 +146,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }) || null;
         };
 
+        const tabAliases = {
+            'entregas-epp': 'entregas',
+            'entregas_epp': 'entregas',
+            'epp-entregas': 'entregas',
+        };
+
         const normalizeTab = function(tab) {
+            tab = tabAliases[tab] || tab;
             return orderedTabs.includes(tab) ? tab : orderedTabs[0];
         };
 

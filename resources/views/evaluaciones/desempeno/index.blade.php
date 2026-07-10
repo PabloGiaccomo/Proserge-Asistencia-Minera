@@ -3,6 +3,10 @@
 @section('title', 'Evaluaciones de Desempeño')
 
 @section('content')
+@php
+    $canCreateEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'crear');
+    $canEditEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'editar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -13,6 +17,7 @@
             <a href="{{ route('evaluaciones.desempeno.promedios') }}" class="btn btn-outline">
                 Ver Promedios
             </a>
+            @if($canCreateEvaluation)
             <a href="{{ route('evaluaciones.desempeno.create') }}" class="btn btn-primary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -20,6 +25,7 @@
                 </svg>
                 Nueva Evaluación
             </a>
+            @endif
         </div>
     </div>
 </div>
@@ -65,9 +71,11 @@
                                 <a href="{{ route('evaluaciones.desempeno.show', $item['id']) }}" class="btn btn-sm btn-outline">
                                     Ver
                                 </a>
+                                @if($canEditEvaluation)
                                 <a href="{{ route('evaluaciones.desempeno.edit', $item['id']) }}" class="btn btn-sm btn-outline">
                                     Editar
                                 </a>
+                                @endif
                             </td>
                         </tr>
                         @endforeach

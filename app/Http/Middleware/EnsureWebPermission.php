@@ -27,7 +27,7 @@ class EnsureWebPermission
             }
         }
 
-        if (PermissionMatrix::allows($permissions, $module, $action)) {
+        if ($this->allowsRoute($permissions, $module, $action)) {
             return $next($request);
         }
 
@@ -43,7 +43,7 @@ class EnsureWebPermission
             }
         }
 
-        if (PermissionMatrix::allows($permissions, $module, $action)) {
+        if ($this->allowsRoute($permissions, $module, $action)) {
             return $next($request);
         }
 
@@ -68,11 +68,88 @@ class EnsureWebPermission
             return response()->json([
                 'ok' => false,
                 'error' => 'PERMISSION_DENIED',
-                'message' => 'No tienes permiso para realizar esta accion.',
+                'message' => $this->deniedMessage($action),
             ], 403);
         }
 
-        abort(403, 'No tienes permiso para realizar esta accion.');
+        abort(403, $this->deniedMessage($action));
+    }
+
+    private function allowsRoute(array $permissions, string $module, string $action): bool
+    {
+        $action = trim($action) !== '' ? trim($action) : 'ver';
+
+        foreach ($this->routeActions($action) as $routeAction) {
+            if (PermissionMatrix::allowsDirect($permissions, $module, $routeAction)) {
+                return true;
+            }
+
+            foreach ($this->routeFallbackPermissions($module, $routeAction) as [$fallbackModule, $fallbackAction]) {
+                if (PermissionMatrix::allowsDirect($permissions, $fallbackModule, $fallbackAction)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function routeFallbackPermissions(string $module, string $action): array
+    {
+        return match ($module) {
+            'personal' => match ($action) {
+                'ver_documentos' => [['personal_documentos', 'ver']],
+                'subir_documentos' => [['personal_documentos', 'subir']],
+                'descargar_documentos' => [['personal_documentos', 'descargar'], ['personal_contratos', 'descargar']],
+                'ver_contratos' => [['personal_contratos', 'ver']],
+                'renovar' => [['personal_contratos', 'renovar']],
+                'reingresar' => [['personal_contratos', 'reingresar']],
+                default => [],
+            },
+            'personal_puestos' => [['personal', 'gestionar_puestos']],
+            'vencimientos' => match ($action) {
+                'registrar' => [['personal_vencimientos', 'registrar'], ['personal_vencimientos', 'actualizar'], ['vencimientos', 'actualizar']],
+                default => [['personal_vencimientos', $action]],
+            },
+            'personal_vencimientos' => match ($action) {
+                'registrar' => [['vencimientos', 'registrar'], ['vencimientos', 'actualizar'], ['personal_vencimientos', 'actualizar']],
+                default => [['vencimientos', $action]],
+            },
+            'habilitacion_minera' => match ($action) {
+                'ver_matriz',
+                'ver_vencimientos',
+                'ver_programados',
+                'ver_historial_precios' => [['personal', 'ver']],
+                'crear',
+                'editar',
+                'actualizar',
+                'asignar',
+                'desasignar',
+                'configurar',
+                'registrar',
+                'programar',
+                'convalidar',
+                'importar',
+                'exportar' => [['personal', 'actualizar']],
+                default => [['personal', $action]],
+            },
+            default => [],
+        };
+    }
+
+    private function routeActions(string $action): array
+    {
+        $actions = array_map('trim', explode('|', $action));
+        $actions = array_filter($actions, fn (string $item): bool => $item !== '');
+
+        return !empty($actions) ? array_values(array_unique($actions)) : ['ver'];
+    }
+
+    private function deniedMessage(string $action): string
+    {
+        return trim($action) === 'ver'
+            ? 'No tienes permiso para acceder a este módulo.'
+            : 'No tienes permiso para realizar esta accion.';
     }
 
     private function notificationAccessFromUserSetting(): ?bool

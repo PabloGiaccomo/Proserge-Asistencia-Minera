@@ -7,6 +7,7 @@ use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
 use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -66,7 +67,9 @@ class EvaluacionSupervisorService
 
     public function create(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
+            || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
+        ) {
             return $this->forbidden();
         }
 
@@ -107,7 +110,9 @@ class EvaluacionSupervisorService
 
     public function update(Usuario $usuario, EvaluacionSupervisor $item, array $payload): array
     {
-        if (!$this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)) {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])
+            || !$this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)
+        ) {
             return $this->forbidden();
         }
 

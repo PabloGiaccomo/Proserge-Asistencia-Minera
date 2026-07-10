@@ -3,6 +3,9 @@
 @section('title', 'Editar Bloqueo - Bienestar')
 
 @section('content')
+@php
+    $canUpdateWellbeing = \App\Support\Rbac\PermissionMatrix::allowsDirectAny(session('user.permissions', []), 'bienestar', ['editar', 'actualizar']);
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -59,7 +62,9 @@
                     <textarea name="detalle" class="form-control" rows="3">{{ old('detalle', $bloqueo->detalle) }}</textarea>
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
+                    @if($canUpdateWellbeing)
+                        <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
+                    @endif
                     <a href="{{ route('bienestar.index') }}" class="btn btn-outline btn-sm">Cancelar</a>
                 </div>
             </form>

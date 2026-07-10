@@ -8,10 +8,12 @@ use App\Models\PersonalPuesto;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -28,29 +30,38 @@ class PersonalContratoController extends WebPageController
 
     public function expiring(Request $request): View
     {
-        $rawMonth = $request->input('mes');
-        $rawYear = $request->input('anio');
-        $month = is_numeric($rawMonth) ? max(1, min(12, (int) $rawMonth)) : now()->month;
-        $year = is_numeric($rawYear) ? max(2000, min(2100, (int) $rawYear)) : now()->year;
+        $this->assertVencimientosPermission('ver');
 
-        $filters = [
-            'mes' => $month,
-            'anio' => $year,
-            'trabajador' => $request->input('trabajador', ''),
-            'cargo' => $request->input('cargo', ''),
-            'estado_laboral' => $request->input('estado_laboral', ''),
-            'tipo_contrato' => $request->input('tipo_contrato', ''),
-        ];
+        $filters = $this->expiringFilters($request);
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $perPageOptions = [10, 25, 50, 100];
+        if (!in_array($perPage, $perPageOptions, true)) {
+            $perPage = 25;
+        }
+
+        $contratos = $this->contratoService->listExpiringContracts($filters, $perPage);
 
         return view('personal.contratos.vencimientos', [
             'filters' => $filters,
-            'contratos' => $this->contratoService->listExpiringContracts($filters),
+            'contratos' => $contratos,
+            'perPageOptions' => $perPageOptions,
+            'currentPerPage' => $perPage,
             'decisionOptions' => $this->contratoService->decisionStateOptions(),
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
             'reasonOptions' => $this->contratoService->noRenewalReasonOptions(),
             'cessationReasonOptions' => $this->contratoService->controlledCeaseReasonOptions(),
             'contratoService' => $this->contratoService,
         ]);
+    }
+
+    public function exportExpiring(Request $request): StreamedResponse
+    {
+        $this->assertVencimientosPermission('exportar');
+
+        $filters = $this->expiringFilters($request);
+        $filename = 'vencimientos_contratos_' . now()->format('Ymd_His') . '.xlsx';
+
+        return $this->contratoService->downloadExpiringContracts($filters, $filename);
     }
 
     public function index(string $id): View
@@ -89,6 +100,15 @@ class PersonalContratoController extends WebPageController
 
     public function downloadSignedContract(string $id, string $contractId): Response
     {
+        $permissions = session('user.permissions', []);
+        abort_unless(
+            PermissionMatrix::allowsDirect($permissions, 'personal', 'descargar_documentos')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'descargar')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_contratos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $personal = $this->personalService->find($id);
         abort_if(!$personal, 404);
 
@@ -213,6 +233,8 @@ class PersonalContratoController extends WebPageController
 
     public function renew(Request $request, string $id): RedirectResponse
     {
+        $this->assertContractAction('renovar', 'renovar');
+
         $personal = $this->personalService->find($id);
         abort_if(!$personal, 404);
 
@@ -241,6 +263,8 @@ class PersonalContratoController extends WebPageController
 
     public function reentry(Request $request, string $id): RedirectResponse
     {
+        $this->assertContractAction('reingresar', 'reingresar');
+
         $personal = $this->personalService->find($id);
         abort_if(!$personal, 404);
 
@@ -269,6 +293,8 @@ class PersonalContratoController extends WebPageController
 
     public function decision(Request $request, string $contractId): RedirectResponse
     {
+        $this->assertVencimientosPermission('registrar');
+
         $contract = PersonalContrato::query()->find($contractId);
         abort_if(!$contract, 404);
 
@@ -294,6 +320,8 @@ class PersonalContratoController extends WebPageController
 
     public function bulkDecision(Request $request): JsonResponse
     {
+        $this->assertVencimientosPermission('registrar');
+
         $validated = $request->validate([
             'contract_ids' => ['required', 'array', 'min:1'],
             'contract_ids.*' => ['required', 'string'],
@@ -308,6 +336,10 @@ class PersonalContratoController extends WebPageController
             'contract_ids.min' => 'Selecciona al menos un contrato.',
             'fecha_fin.after_or_equal' => 'La fecha de fin no puede ser anterior al inicio.',
         ]);
+
+        if (($validated['estado_decision_renovacion'] ?? '') === PersonalContrato::DECISION_RENOVAR) {
+            $this->assertVencimientosPermission('renovar');
+        }
 
         try {
             $summary = $this->contratoService->registerBulkRenewalDecision(
@@ -332,6 +364,8 @@ class PersonalContratoController extends WebPageController
 
     public function prepareFromDecision(Request $request, string $contractId): RedirectResponse
     {
+        $this->assertVencimientosPermission('renovar');
+
         $contract = PersonalContrato::query()->find($contractId);
         abort_if(!$contract, 404);
 
@@ -360,6 +394,8 @@ class PersonalContratoController extends WebPageController
 
     public function closeNotRenewed(Request $request, string $contractId): RedirectResponse
     {
+        $this->assertVencimientosPermission('cerrar');
+
         $contract = PersonalContrato::query()->find($contractId);
         abort_if(!$contract, 404);
 
@@ -420,5 +456,64 @@ class PersonalContratoController extends WebPageController
         return redirect()
             ->route('personal.contratos.index', $personal->id)
             ->with('success', 'Contrato anulado correctamente. El registro se conserva en el historial.');
+    }
+
+    private function assertContractAction(string $personalAction, string $contractAction): void
+    {
+        $permissions = session('user.permissions', []);
+
+        abort_unless(
+            PermissionMatrix::allowsDirectAny($permissions, 'personal', [$personalAction, 'actualizar'])
+                || PermissionMatrix::allowsDirect($permissions, 'personal_contratos', $contractAction),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+    }
+
+    private function expiringFilters(Request $request): array
+    {
+        $rawMonth = $request->input('mes');
+        $rawYear = $request->input('anio');
+        $rawPerPage = $request->input('per_page');
+
+        return [
+            'mes' => is_numeric($rawMonth) ? max(1, min(12, (int) $rawMonth)) : now()->month,
+            'anio' => is_numeric($rawYear) ? max(2000, min(2100, (int) $rawYear)) : now()->year,
+            'trabajador' => $request->input('trabajador', ''),
+            'cargo' => $request->input('cargo', ''),
+            'estado_laboral' => $request->input('estado_laboral', ''),
+            'tipo_contrato' => $request->input('tipo_contrato', ''),
+            'per_page' => is_numeric($rawPerPage) ? max(10, min(100, (int) $rawPerPage)) : 25,
+        ];
+    }
+
+    private function assertVencimientosPermission(string $action): void
+    {
+        $permissions = session('user.permissions', []);
+
+        abort_unless(
+            $this->hasVencimientosPermission($permissions, $action),
+            403,
+            $action === 'ver'
+                ? 'No tienes permiso para acceder a este modulo.'
+                : 'No tienes permiso para realizar esta accion.'
+        );
+    }
+
+    private function hasVencimientosPermission(array $permissions, string $action): bool
+    {
+        if (
+            PermissionMatrix::allowsDirect($permissions, 'vencimientos', $action)
+            || PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', $action)
+        ) {
+            return true;
+        }
+
+        if ($action === 'registrar') {
+            return PermissionMatrix::allowsDirect($permissions, 'vencimientos', 'actualizar')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', 'actualizar');
+        }
+
+        return false;
     }
 }

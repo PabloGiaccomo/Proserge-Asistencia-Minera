@@ -613,12 +613,51 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
                     }
                     $processedDni[$dni] = true;
 
+                    $wasNew = false;
                     $personal = $existing->get($dni);
                     if (!$personal) {
-                        $stats['omitidos']++;
-                        $stats['noEncontrados']++;
-                        $this->registerNotUpdatedDetail($stats, 'omitidosDetalle', $dni, $rowName, 'DNI no encontrado en personal');
-                        continue;
+                        $nombreContacto = mb_strtoupper(trim($rowName), 'UTF-8') ?: 'Sin nombre';
+                        $puestoContacto = PersonalNormalizer::text($row[$columns['puesto']] ?? '') ?: 'Sin puesto';
+                        $puestoContacto = mb_substr($puestoContacto, 0, self::MAX_PUESTO_LENGTH);
+                        $correoContacto = $hasCorreoColumn ? $this->normalizeEmail(PersonalNormalizer::text($row[$columns['correo']] ?? '')) : null;
+                        $phoneContact = PersonalNormalizer::normalizePhonePayload($row[$columns['telefono']] ?? null);
+
+                        $newData = [
+                            'id' => (string) Str::uuid(),
+                            'dni' => $dni,
+                            'nombre_completo' => $nombreContacto,
+                            'puesto' => $puestoContacto,
+                            'estado' => app(PersonalService::class)->resolveActiveIntentState(null),
+                            'qr_code' => 'QR-' . $dni . '-' . Str::upper(Str::random(8)),
+                        ];
+
+                        if ($hasTelefonoColumn) {
+                            $newData['telefono'] = PersonalNormalizer::combinePhones($phoneContact['telefono_1'], $phoneContact['telefono_2']);
+                        }
+                        if ($hasTelefono1Column) {
+                            $newData['telefono_1'] = $phoneContact['telefono_1'];
+                        }
+                        if ($hasTelefono2Column) {
+                            $newData['telefono_2'] = $phoneContact['telefono_2'];
+                        }
+                        if ($hasCorreoColumn) {
+                            $newData['correo'] = $correoContacto;
+                        }
+
+                        $personal = Personal::query()->create($newData);
+                        $wasNew = true;
+                        $existing->put($dni, $personal);
+                        $stats['nuevos']++;
+
+                        if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
+                            $stats['nuevosDetalle'][] = [
+                                'dni' => $dni,
+                                'nombre' => $nombreContacto,
+                                'puesto' => $puestoContacto,
+                                'ocupacion' => '-',
+                                'contrato' => '-',
+                            ];
+                        }
                     }
 
                     $puestoImportado = PersonalNormalizer::text($row[$columns['puesto']] ?? '');
@@ -706,7 +745,7 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
                                 'cambios' => array_values($workerChanges),
                             ];
                         }
-                    } else {
+                    } elseif (!$wasNew) {
                         $stats['sinCambios']++;
                         if (!$hasNotUpdatedDetail) {
                             $this->registerNotUpdatedDetail(
@@ -1208,7 +1247,16 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
             'contrato' => ['contrato'],
             'banco' => ['banco'],
             'numero_cuenta' => ['cuentasueldo'],
-            'cci' => ['ccisueldosueldo', 'ccisuentasueldosueldo', 'ccisuentasueldo', 'cci'],
+            'cci' => [
+                'cci',
+                'ccicuenta',
+                'ccicuentasueldo',
+                'ccisueldosueldo',
+                'ccisuentasueldosueldo',
+                'ccisuentasueldo',
+                'codigocuentainterbancaria',
+                'cuentainterbancaria',
+            ],
             'grado_instruccion' => ['gradodeinstruccion', 'gradoinstruccion'],
             'profesion_oficio' => ['profesionyocarrera', 'profesionocarrera', 'profesioncarrera'],
             'titulado' => ['titulado'],

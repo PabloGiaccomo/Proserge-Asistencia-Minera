@@ -5,11 +5,12 @@
 @section('content')
 @php
     $personalPermissions = session('user.permissions', []);
-    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'editar');
-    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'cesar_trabajador');
-    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_ficha');
-    $canViewSensitiveFichaData = \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'ver_datos_sensibles');
-    $canExportSensitiveFichaPdf = $canViewSensitiveFichaData && \App\Support\Rbac\PermissionMatrix::allows($personalPermissions, 'personal', 'exportar');
+    $canEditPersonal = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($personalPermissions, 'personal', ['editar', 'actualizar', 'editar_ficha']);
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'cesar_trabajador');
+    $canViewFicha = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_ficha');
+    $canViewReason = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_motivo');
+    $canViewSensitiveFichaData = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_datos_sensibles');
+    $canExportSensitiveFichaPdf = $canViewSensitiveFichaData && \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'exportar');
     $estadoActual = strtoupper((string) ($trabajador['estado'] ?? ''));
 @endphp
 <div class="module-page ficha-workspace">
@@ -24,7 +25,7 @@
                 @if($canEditPersonal)
                     <a href="{{ route('personal.edit', $id) }}" class="btn btn-primary">Editar</a>
                 @endif
-                @if($estadoActual === 'CESADO')
+                @if($estadoActual === 'CESADO' && $canViewReason)
                     <button type="button" class="btn btn-outline" onclick="showCeaseReason()">Ver motivo de cese</button>
                 @elseif($canCeasePersonal)
                     <form method="POST" action="{{ route('personal.cease', $id) }}" data-worker-name="{{ $trabajador['nombre'] ?? 'este trabajador' }}" onsubmit="return requestCeaseReason(this);">

@@ -5,12 +5,21 @@ namespace App\Modules\Seguridad\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Usuario;
 use App\Shared\Support\ApiResponse;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 
 class UsuarioController extends Controller
 {
     public function index(Request $request)
     {
+        if (!PermissionMatrix::userCanDirect($request->user(), 'usuarios', 'ver')) {
+            return ApiResponse::error(
+                message: 'No tienes permiso para consultar usuarios.',
+                code: 'USUARIOS_FORBIDDEN',
+                status: 403,
+            );
+        }
+
         $estado = strtoupper($request->string('estado')->toString());
 
         $query = Usuario::query()

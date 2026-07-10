@@ -134,8 +134,8 @@ class DashboardService
                 ->map(fn ($r): array => ['turno' => $r->turno, 'total' => (int) $r->total])
                 ->all(),
             'grupos_por_destino' => $this->grupoBase($usuario, $filters)
-                ->selectRaw('destino_tipo, COUNT(*) as total')
-                ->groupBy('destino_tipo')
+                ->selectRaw('gt.destino_tipo as destino_tipo, COUNT(*) as total')
+                ->groupBy('gt.destino_tipo')
                 ->get()
                 ->map(fn ($r): array => ['destino_tipo' => $r->destino_tipo, 'total' => (int) $r->total])
                 ->all(),

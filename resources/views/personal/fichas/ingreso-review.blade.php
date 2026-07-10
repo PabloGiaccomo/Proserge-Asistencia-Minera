@@ -180,6 +180,10 @@
 </style>
 
 @php
+    $ingresoPermissions = session('user.permissions', []);
+    $canEditIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'editar');
+    $canUpdateIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'actualizar');
+    $canDeleteIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'eliminar');
     $data = is_array($data ?? null) ? $data : [];
     $name = trim(collect([$data['apellido_paterno'] ?? '', $data['apellido_materno'] ?? '', $data['nombres'] ?? ''])->filter()->implode(' '));
     $statusClass = $ingresosService->statusClass((string) $ingreso->estado);
@@ -195,7 +199,7 @@
         </div>
         <div class="d-flex gap-2">
             <a class="btn btn-outline" href="{{ route('personal.fichas.temporales') }}">Volver a Ingresos</a>
-            @if(!$editing && !$locked)
+            @if(!$editing && !$locked && $canEditIngresos)
                 <a class="btn btn-primary" href="{{ route('personal.ingresos.edit', $ingreso->id) }}">Editar ficha</a>
             @endif
         </div>
@@ -258,11 +262,11 @@
     @endif
 
     <div class="ingreso-actions-footer">
-        @if($editing)
+        @if($editing && $canUpdateIngresos)
             <button class="btn btn-primary" type="submit" form="ingresoEditForm" data-loading-text="Guardando...">Guardar ficha (falta revision)</button>
         @endif
 
-        @if(!$locked)
+        @if(!$locked && $canUpdateIngresos)
             <button
                 class="btn btn-primary"
                 type="button"
@@ -276,13 +280,17 @@
                 @csrf
                 <button class="btn btn-outline" type="submit">Contrato no firmado</button>
             </form>
+        @endif
 
+        @if(!$locked && $canDeleteIngresos)
             <form method="POST" action="{{ route('personal.ingresos.destroy', $ingreso->id) }}" class="js-delete-ingreso-form">
                 @csrf
                 @method('DELETE')
                 <button class="btn btn-danger" type="button" data-open-delete-ingreso>Eliminar trabajador</button>
             </form>
-        @elseif($existing)
+        @endif
+
+        @if($locked && $existing)
             <a class="btn btn-primary" href="{{ route('personal.edit', $existing->id) }}">Ver trabajador en Personal</a>
         @endif
     </div>

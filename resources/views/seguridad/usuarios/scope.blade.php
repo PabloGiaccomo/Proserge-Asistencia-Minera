@@ -3,6 +3,9 @@
 @section('title', 'Scope Mina - Proserge')
 
 @section('content')
+@php
+    $canScopeUser = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'usuarios', 'scope');
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top">
@@ -30,6 +33,11 @@
             <span class="card-badge">{{ count($scopeIds) }} seleccionadas</span>
         </div>
         <div class="card-body">
+            @if(!$canScopeUser)
+                <div class="alert alert-error">
+                    No tienes permiso para configurar el alcance de mina de usuarios.
+                </div>
+            @else
             <form action="{{ route('usuarios.scope-update', $usuario->id) }}" method="POST">
                 @csrf
                 @method('PUT')
@@ -58,6 +66,7 @@
                     <button type="submit" class="btn btn-primary">Guardar Scope</button>
                 </div>
             </form>
+            @endif
         </div>
     </div>
 </div>

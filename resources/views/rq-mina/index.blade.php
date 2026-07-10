@@ -12,6 +12,12 @@ $activeFilters = $data['filters'] ?? [];
 $pg = $data['pagination'] ?? ['current_page' => 1, 'total_pages' => 1, 'per_page' => 10, 'total' => count($items)];
 $baseQuery = request()->except(['page', 'per_page']);
 $baseUrl = route('rq-mina.index');
+$rqPermissions = session('user.permissions', []);
+$canCreateRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'crear');
+$canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'editar');
+$canDuplicateRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'duplicar');
+$canSendRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'enviar');
+$canDeleteRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'eliminar');
 
 $calcPuestos = static function (array $detalle): int {
     return count($detalle);
@@ -33,10 +39,12 @@ $calcTransporteTotal = static function (array $transporte): int {
             <h1 class="page-title">RQ Mina</h1>
             <p class="page-subtitle">Requerimientos de personal de mina</p>
         </div>
-        <a href="{{ route('rq-mina.create') }}" class="btn-nuevoRQ">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Nueva Parada
-        </a>
+        @if($canCreateRq)
+            <a href="{{ route('rq-mina.create') }}" class="btn-nuevoRQ">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Nueva Parada
+            </a>
+        @endif
     </div>
 
     <section class="rq-mina-mobile-lock" aria-labelledby="rqMinaMobileTitle">
@@ -297,20 +305,26 @@ $calcTransporteTotal = static function (array $transporte): int {
                                     <div class="row-actions">
                                         <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
                                         <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-row-outline">Plan</a>
-                                        <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
-                                        <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="btn-row btn-copy">Copiar</a>
+                                        @if($canEditRq)
+                                            <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
+                                        @endif
+                                        @if($canDuplicateRq)
+                                            <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="btn-row btn-copy">Copiar</a>
+                                        @endif
 
-                                        @if($isBorrador)
+                                        @if($isBorrador && $canSendRq)
                                             <form method="POST" action="{{ route('rq-mina.enviar', $rq['id']) }}" onsubmit="return confirm('¿Enviar este RQ?');">
                                                 @csrf
                                                 <button type="submit" class="btn-row btn-send">Enviar</button>
                                             </form>
                                         @endif
 
-                                        <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar definitivamente este RQ Mina? Se borraran su RQ Proserge, Man Power, herramientas, asistencia, supervisores y registros operativos relacionados. No se borraran trabajadores, minas ni catalogos maestros. Esta accion no se puede deshacer.');">
-                                            @csrf
-                                            <button type="submit" class="btn-row btn-danger">Eliminar</button>
-                                        </form>
+                                        @if($canDeleteRq)
+                                            <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar definitivamente este RQ Mina? Se borraran su RQ Proserge, Man Power, herramientas, asistencia, supervisores y registros operativos relacionados. No se borraran trabajadores, minas ni catalogos maestros. Esta accion no se puede deshacer.');">
+                                                @csrf
+                                                <button type="submit" class="btn-row btn-danger">Eliminar</button>
+                                            </form>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>

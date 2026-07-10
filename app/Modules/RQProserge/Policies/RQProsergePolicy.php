@@ -11,12 +11,12 @@ class RQProsergePolicy
 {
     public function viewAny(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver');
+        return PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'ver');
     }
 
     public function view(Usuario $usuario, RQProserge $rqProserge): bool
     {
-        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'ver')) {
             return false;
         }
 
@@ -25,7 +25,20 @@ class RQProsergePolicy
 
     public function assign(Usuario $usuario, RQProserge $rqProserge): bool
     {
-        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'asignar')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'asignar')) {
+            return false;
+        }
+
+        if (in_array($rqProserge->estado, ['CERRADO', 'CANCELADO'], true)) {
+            return false;
+        }
+
+        return $this->canAccessMina($usuario, $rqProserge->mina_id);
+    }
+
+    public function update(Usuario $usuario, RQProserge $rqProserge): bool
+    {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'actualizar')) {
             return false;
         }
 
@@ -55,7 +68,7 @@ class RQProsergePolicy
 
     private function isRrhhOrPrivileged(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCan($usuario, 'rq_proserge', 'ver');
+        return PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'ver');
     }
 
     private function isPrivileged(Usuario $usuario): bool
@@ -63,6 +76,6 @@ class RQProsergePolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'rq_proserge', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'administrar');
     }
 }

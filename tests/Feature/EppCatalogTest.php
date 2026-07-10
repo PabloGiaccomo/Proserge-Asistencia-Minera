@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\EppRegistro;
 use App\Models\EppEntrega;
+use App\Models\Mina;
 use App\Models\Personal;
+use App\Models\PersonalMina;
 use App\Modules\Epps\Services\EppService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
@@ -155,5 +157,202 @@ class EppCatalogTest extends TestCase
         $this->assertSame('11/01/2027', $summary['fecha_vencimiento_calendario']);
         $this->assertSame(EppEntrega::ESTADO_ENTREGADO, $summary['estado']);
         $this->assertSame('Entrega vigente', $summary['observacion']);
+    }
+
+    public function test_entregas_se_pueden_filtrar_por_id_de_trabajador(): void
+    {
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '87654321',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '87654321',
+            'nombre_completo' => 'Trabajador Enlace Vencimiento',
+            'puesto' => 'OPERARIO',
+            'qr_code' => 'QR-TEST-FILTRO-ID',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $otroPersonal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '11223344',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '11223344',
+            'nombre_completo' => 'Trabajador Fuera De Filtro',
+            'puesto' => 'OPERARIO',
+            'qr_code' => 'QR-TEST-FILTRO-ID-OTRO',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $epp = app(EppService::class)->storeCatalog([
+            'nombre' => 'Respirador',
+            'vida_util_dias' => 30,
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+
+        foreach ([$personal, $otroPersonal] as $worker) {
+            EppEntrega::query()->create([
+                'id' => (string) Str::uuid(),
+                'personal_id' => $worker->id,
+                'epp_id' => $epp->id,
+                'cantidad' => 1,
+                'fecha_entrega' => '2026-07-01',
+                'fecha_vencimiento_calendario' => '2026-07-31',
+                'vida_util_dias_snapshot' => 30,
+                'estado' => EppEntrega::ESTADO_ENTREGADO,
+            ]);
+        }
+
+        $data = app(EppService::class)->pageData(['q' => $personal->id]);
+
+        $this->assertSame(1, $data['entregas']->total());
+        $this->assertSame($personal->id, $data['entregas']->first()['personal']->id);
+    }
+
+    public function test_entregas_usa_limite_default_de_diez_y_respeta_selector(): void
+    {
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '44556677',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '44556677',
+            'nombre_completo' => 'Trabajador Paginado EPP',
+            'puesto' => 'OPERARIO',
+            'qr_code' => 'QR-TEST-EPP-PAGINADO',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $epp = app(EppService::class)->storeCatalog([
+            'nombre' => 'Lentes paginados',
+            'vida_util_dias' => 30,
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+
+        foreach (range(1, 12) as $index) {
+            EppEntrega::query()->create([
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personal->id,
+                'epp_id' => $epp->id,
+                'cantidad' => 1,
+                'fecha_entrega' => sprintf('2026-07-%02d', $index),
+                'fecha_vencimiento_calendario' => sprintf('2026-08-%02d', $index),
+                'vida_util_dias_snapshot' => 30,
+                'estado' => EppEntrega::ESTADO_ENTREGADO,
+            ]);
+        }
+
+        $defaultData = app(EppService::class)->pageData();
+        $selectedData = app(EppService::class)->pageData(['per_page' => 25]);
+
+        $this->assertSame(10, $defaultData['entregas']->perPage());
+        $this->assertCount(10, $defaultData['entregas']->items());
+        $this->assertSame(12, $defaultData['entregas']->total());
+
+        $this->assertSame(25, $selectedData['entregas']->perPage());
+        $this->assertCount(12, $selectedData['entregas']->items());
+        $this->assertSame([10, 25, 50, 100], $selectedData['perPageOptions']);
+    }
+
+    public function test_entregas_filtra_por_mina_epp_tipo_de_movimiento_y_fechas(): void
+    {
+        $minaA = Mina::query()->create([
+            'id' => (string) Str::uuid(),
+            'nombre' => 'Mina filtro A',
+            'unidad_minera' => 'Unidad filtro A',
+            'estado' => 'ACTIVO',
+        ]);
+        $minaB = Mina::query()->create([
+            'id' => (string) Str::uuid(),
+            'nombre' => 'Mina filtro B',
+            'unidad_minera' => 'Unidad filtro B',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $personalA = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '11112222',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '11112222',
+            'nombre_completo' => 'Trabajador Filtro A',
+            'puesto' => 'OPERARIO',
+            'qr_code' => 'QR-TEST-EPP-FILTRO-A',
+            'estado' => 'ACTIVO',
+        ]);
+        $personalB = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '33334444',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '33334444',
+            'nombre_completo' => 'Trabajador Filtro B',
+            'puesto' => 'MECANICO',
+            'qr_code' => 'QR-TEST-EPP-FILTRO-B',
+            'estado' => 'ACTIVO',
+        ]);
+
+        foreach ([[$personalA, $minaA], [$personalB, $minaB]] as [$personal, $mina]) {
+            PersonalMina::query()->create([
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personal->id,
+                'mina_id' => $mina->id,
+                'estado' => PersonalMina::ESTADO_HABILITADO,
+                'estado_habilitacion' => PersonalMina::ESTADO_HABILITADO,
+                'activo' => true,
+            ]);
+        }
+
+        $casco = app(EppService::class)->storeCatalog([
+            'nombre' => 'Casco filtro',
+            'vida_util_dias' => 30,
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+        $guantes = app(EppService::class)->storeCatalog([
+            'nombre' => 'Guantes filtro',
+            'vida_util_dias' => 30,
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+
+        EppEntrega::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalA->id,
+            'epp_id' => $casco->id,
+            'cantidad' => 1,
+            'fecha_entrega' => '2026-07-05',
+            'fecha_vencimiento_calendario' => '2026-08-04',
+            'vida_util_dias_snapshot' => 30,
+            'estado' => EppEntrega::ESTADO_ENTREGADO,
+        ]);
+        EppEntrega::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalB->id,
+            'epp_id' => $guantes->id,
+            'cantidad' => 1,
+            'fecha_entrega' => '2026-06-01',
+            'fecha_vencimiento_calendario' => '2026-07-01',
+            'vida_util_dias_snapshot' => 30,
+            'estado' => EppEntrega::ESTADO_CAMBIADO,
+            'devuelto_at' => '2026-07-20',
+            'motivo_cambio' => 'Cambio por desgaste',
+        ]);
+        EppEntrega::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personalA->id,
+            'epp_id' => $guantes->id,
+            'cantidad' => 1,
+            'fecha_entrega' => '2026-07-25',
+            'fecha_vencimiento_calendario' => '2026-08-24',
+            'vida_util_dias_snapshot' => 30,
+            'estado' => EppEntrega::ESTADO_ENTREGADO,
+            'motivo_cambio' => 'Renovacion por vencimiento',
+        ]);
+
+        $service = app(EppService::class);
+
+        $this->assertSame(2, $service->pageData(['mina_id' => $minaA->id])['entregas']->total());
+        $this->assertSame(1, $service->pageData(['epp_id' => $casco->id])['entregas']->total());
+        $this->assertSame(1, $service->pageData(['tipo_movimiento' => 'CAMBIO'])['entregas']->total());
+        $this->assertSame(1, $service->pageData(['tipo_movimiento' => 'RENOVACION'])['entregas']->total());
+        $this->assertSame(2, $service->pageData([
+            'fecha_desde' => '2026-07-15',
+            'fecha_hasta' => '2026-07-31',
+        ])['entregas']->total());
     }
 }

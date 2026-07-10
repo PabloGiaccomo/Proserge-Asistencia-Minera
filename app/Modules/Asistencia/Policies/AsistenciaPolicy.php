@@ -11,7 +11,7 @@ class AsistenciaPolicy
 {
     public function manage(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanAny($usuario, 'asistencias', ['crear', 'editar', 'actualizar', 'cerrar']);
+        return PermissionMatrix::userCanDirectAny($usuario, 'asistencias', ['ver', 'crear', 'editar', 'actualizar', 'registrar', 'cerrar', 'reabrir']);
     }
 
     public function canAccessMina(Usuario $usuario, string $minaId): bool
@@ -42,6 +42,6 @@ class AsistenciaPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'asistencias', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'asistencias', 'administrar');
     }
 }

@@ -111,7 +111,7 @@ class RQProsergeController extends Controller
             );
         }
 
-        if (!$this->service->canAssign($usuario, $rq)) {
+        if (!$this->service->canUpdate($usuario, $rq)) {
             return ApiResponse::error(
                 message: 'No autorizado para actualizar este RQ Proserge',
                 code: 'RQ_PROSERGE_FORBIDDEN',
@@ -127,11 +127,10 @@ class RQProsergeController extends Controller
             );
         }
 
-        $rq->fill($request->validated());
-        $rq->save();
+        $rq = $this->service->update($usuario, $rq, $request->validated());
 
         return ApiResponse::success(
-            data: RQProsergeResource::make($rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']))->resolve(),
+            data: RQProsergeResource::make($rq)->resolve(),
             message: 'RQ Proserge actualizado',
             code: 'RQ_PROSERGE_UPDATE_OK',
         );

@@ -3,6 +3,9 @@
 @section('title', 'Man Power - Detalle de Grupo')
 
 @section('content')
+@php
+    $canAssignManPower = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'man_power', 'asignar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -82,11 +85,15 @@
                         <td>{{ $persona['nombre'] ?? '-' }}</td>
                         <td>{{ $persona['cargo'] ?? '-' }}</td>
                         <td>
-                            <form action="{{ route('man-power.quitar-personal', $grupo['id']) }}" method="POST" style="display:inline;">
-                                @csrf
-                                <input type="hidden" name="trabajador_id" value="{{ $persona['id'] }}">
-                                <button type="submit" class="btn btn-sm btn-outline danger">Quitar</button>
-                            </form>
+                            @if($canAssignManPower)
+                                <form action="{{ route('man-power.quitar-personal', $grupo['id']) }}" method="POST" style="display:inline;">
+                                    @csrf
+                                    <input type="hidden" name="trabajador_id" value="{{ $persona['id'] }}">
+                                    <button type="submit" class="btn btn-sm btn-outline danger">Quitar</button>
+                                </form>
+                            @else
+                                <span class="text-muted">-</span>
+                            @endif
                         </td>
                     </tr>
                     @endforeach

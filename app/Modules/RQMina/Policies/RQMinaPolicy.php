@@ -42,7 +42,7 @@ class RQMinaPolicy
 
     public function view(Usuario $usuario, RQMina $rqMina): bool
     {
-        if (!PermissionMatrix::userCan($usuario, 'rq_mina', 'ver')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'ver')) {
             return false;
         }
 
@@ -59,7 +59,7 @@ class RQMinaPolicy
             return false;
         }
 
-        if (!PermissionMatrix::userCanAny($usuario, 'rq_mina', ['editar', 'actualizar'])) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'actualizar')) {
             return false;
         }
 
@@ -80,12 +80,24 @@ class RQMinaPolicy
             return false;
         }
 
-        return $this->update($usuario, $rqMina);
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'enviar')) {
+            return false;
+        }
+
+        if ($this->isPrivileged($usuario)) {
+            return true;
+        }
+
+        if ((string) $rqMina->created_by_usuario_id !== (string) $usuario->id) {
+            return false;
+        }
+
+        return $this->canAccessMina($usuario, $rqMina->mina_id);
     }
 
     public function delete(Usuario $usuario, RQMina $rqMina): bool
     {
-        if (!PermissionMatrix::userCan($usuario, 'rq_mina', 'eliminar')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'eliminar')) {
             return false;
         }
 
@@ -105,6 +117,6 @@ class RQMinaPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'rq_mina', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'administrar');
     }
 }

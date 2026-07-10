@@ -11,12 +11,12 @@ class ManPowerPolicy
 {
     public function viewParadas(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCan($usuario, 'man_power', 'ver');
+        return PermissionMatrix::userCanDirect($usuario, 'man_power', 'ver');
     }
 
     public function manageGrupos(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanAny($usuario, 'man_power', ['crear', 'editar', 'actualizar', 'asignar']);
+        return PermissionMatrix::userCanDirectAny($usuario, 'man_power', ['crear', 'editar', 'actualizar', 'asignar']);
     }
 
     public function canAccessMina(Usuario $usuario, string $minaId): bool
@@ -48,7 +48,7 @@ class ManPowerPolicy
 
     private function isAllowedRole(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCan($usuario, 'man_power', 'ver');
+        return PermissionMatrix::userCanDirect($usuario, 'man_power', 'ver');
     }
 
     private function isPrivileged(Usuario $usuario): bool
@@ -56,6 +56,6 @@ class ManPowerPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'man_power', 'administrar');
     }
 }

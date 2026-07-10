@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +24,9 @@ class DashboardApiTest extends TestCase
         DB::table('roles')->insert([
             'id' => $this->rolePlannerId,
             'nombre' => 'PLANNER',
-            'permisos' => json_encode([]),
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'inicio' => ['ver', 'dashboards'],
+            ])),
             'estado' => 'ACTIVO',
         ]);
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -23,8 +24,22 @@ class ManPowerApiTest extends TestCase
         $this->rolRrhhId = (string) Str::uuid();
 
         DB::table('roles')->insert([
-            ['id' => $this->rolPlannerId, 'nombre' => 'PLANNER', 'permisos' => json_encode([]), 'estado' => 'ACTIVO'],
-            ['id' => $this->rolRrhhId, 'nombre' => 'RRHH', 'permisos' => json_encode([]), 'estado' => 'ACTIVO'],
+            [
+                'id' => $this->rolPlannerId,
+                'nombre' => 'PLANNER',
+                'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                    'man_power' => ['ver', 'crear', 'editar', 'actualizar', 'asignar'],
+                ])),
+                'estado' => 'ACTIVO',
+            ],
+            [
+                'id' => $this->rolRrhhId,
+                'nombre' => 'RRHH',
+                'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                    'man_power' => ['ver'],
+                ])),
+                'estado' => 'ACTIVO',
+            ],
         ]);
     }
 

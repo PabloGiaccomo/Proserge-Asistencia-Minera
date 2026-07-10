@@ -1,6 +1,7 @@
 @php
     $trabajadorForDocs = $trabajador ?? $ficha?->personal;
     $canUploadDocuments = $canUploadDocuments ?? false;
+    $canDownloadDocuments = $canDownloadDocuments ?? false;
     $canReviewDocuments = $canReviewDocuments ?? false;
     $documentStateLabels = $documentStateLabels ?? \App\Modules\Personal\Support\PersonalFichaCatalog::documentStateLabels();
     $vidaLeyPhysicalStateLabels = $vidaLeyPhysicalStateLabels ?? \App\Modules\Personal\Support\PersonalFichaCatalog::vidaLeyPhysicalStateLabels();
@@ -143,10 +144,13 @@
                         @endif
                     </td>
                     <td>
-                        @if($archivo)
+                        @if($archivo && $canDownloadDocuments)
                             <a href="{{ route('personal.fichas.archivos.download', $archivo->id) }}">
                                 {{ $archivo->nombre_original ?: 'Descargar documento' }}
                             </a>
+                            <div class="doc-note">{{ $formatSize($archivo->size) }} - {{ optional($archivo->created_at)->format('d/m/Y H:i') }}</div>
+                        @elseif($archivo)
+                            <span>{{ $archivo->nombre_original ?: 'Documento cargado' }}</span>
                             <div class="doc-note">{{ $formatSize($archivo->size) }} - {{ optional($archivo->created_at)->format('d/m/Y H:i') }}</div>
                         @else
                             <span class="text-muted">Sin archivo</span>

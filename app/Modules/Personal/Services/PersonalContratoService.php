@@ -19,6 +19,10 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PersonalContratoService
 {
@@ -55,10 +59,10 @@ class PersonalContratoService
             ->find($contractId);
     }
 
-    public function listExpiringContracts(array $filters)
+    public function listExpiringContracts(array $filters, int $perPage = 0): mixed
     {
         if (!Schema::hasTable('personal_contratos')) {
-            return collect();
+            return $perPage > 0 ? new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage) : collect();
         }
 
         $rawMonth = $filters['mes'] ?? null;
@@ -85,6 +89,7 @@ class PersonalContratoService
         } else {
             $query
                 ->whereIn('estado', [
+                    PersonalContrato::ESTADO_PREPARACION,
                     PersonalContrato::ESTADO_ACTIVO,
                     PersonalContrato::ESTADO_CERRADO,
                     PersonalContrato::ESTADO_CESADO,
@@ -123,7 +128,97 @@ class PersonalContratoService
             });
         }
 
+        if ($perPage > 0) {
+            $paginator = $query->paginate($perPage);
+            $decorated = $this->decorateExpiringContracts($paginator->getCollection());
+            $paginator->setCollection($decorated);
+            return $paginator;
+        }
+
         return $this->decorateExpiringContracts($query->get());
+    }
+
+    public function downloadExpiringContracts(array $filters, ?string $filename = null): StreamedResponse
+    {
+        $contracts = $this->listExpiringContracts($filters);
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Vencimientos');
+
+        $headers = [
+            'Trabajador',
+            'Tipo documento',
+            'Documento',
+            'Cargo',
+            'Fecha inicio',
+            'Fecha fin',
+            'Dias restantes',
+            'Tipo contrato',
+            'Estado contrato',
+            'Estado laboral',
+            'Decision',
+            'Motivo no renovacion',
+            'Registrado por',
+            'Fecha decision',
+        ];
+
+        foreach ($headers as $index => $header) {
+            $sheet->setCellValue([$index + 1, 1], $header);
+        }
+
+        $decisionOptions = $this->decisionStateOptions();
+        $reasonOptions = $this->noRenewalReasonOptions();
+        $today = Carbon::today();
+
+        foreach ($contracts->values() as $rowIndex => $contract) {
+            /** @var PersonalContrato $contract */
+            $personal = $contract->personal;
+            $fechaFin = $contract->fecha_fin;
+            $days = $fechaFin ? (int) floor($today->diffInDays($fechaFin, false)) : null;
+            $decision = $contract->getAttribute('decision_visual')
+                ?: ($contract->estado_decision_renovacion ?: PersonalContrato::DECISION_PENDIENTE);
+            $registeredBy = $contract->decisionUsuario?->personal?->nombre_completo
+                ?: $contract->decisionUsuario?->email
+                ?: ((bool) $contract->getAttribute('decision_visual_inferida') ? 'Sistema' : '-');
+
+            $values = [
+                $personal?->nombre_completo ?: 'Sin trabajador',
+                $personal?->tipo_documento ?: 'DNI',
+                $personal?->numero_documento ?: $personal?->dni ?: '',
+                $contract->puesto ?: $personal?->puesto ?: '',
+                $this->formatExportDate($contract->fecha_inicio),
+                $this->formatExportDate($contract->fecha_fin),
+                $days === null ? 'Sin fecha' : (string) $days,
+                $contract->getAttribute('tipo_contrato_label') ?: ($contract->tipo_contrato ?: '-'),
+                $contract->getAttribute('estado_visual') ?: strtoupper((string) $contract->estado),
+                $personal?->estado ?: '-',
+                $decisionOptions[$decision] ?? $decision,
+                $contract->motivo_no_renovacion ? ($reasonOptions[$contract->motivo_no_renovacion] ?? $contract->motivo_no_renovacion) : '-',
+                $registeredBy,
+                $this->formatExportDateTime($contract->fecha_decision),
+            ];
+
+            foreach ($values as $columnIndex => $value) {
+                $sheet->setCellValue([$columnIndex + 1, $rowIndex + 2], (string) $value);
+            }
+        }
+
+        $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
+        $sheet->freezePane('A2');
+        $sheet->getStyle('A1:' . $lastColumn . '1')->getFont()->setBold(true);
+
+        for ($columnIndex = 1; $columnIndex <= count($headers); $columnIndex++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($columnIndex))->setAutoSize(true);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        $downloadName = $filename ?: 'vencimientos_contratos_' . now()->format('Ymd_His') . '.xlsx';
+
+        return response()->streamDownload(function () use ($writer): void {
+            $writer->save('php://output');
+        }, $downloadName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     public function contractTypeOptions(): array
@@ -3013,5 +3108,31 @@ class PersonalContratoService
         $itemEnd = $itemEnd ?: $itemStart;
 
         return $itemEnd >= $rangeStart && $itemStart <= $rangeEnd;
+    }
+
+    private function formatExportDate(mixed $date): string
+    {
+        if (!$date) {
+            return '-';
+        }
+
+        try {
+            return Carbon::parse($date)->format('d/m/Y');
+        } catch (\Throwable) {
+            return '-';
+        }
+    }
+
+    private function formatExportDateTime(mixed $date): string
+    {
+        if (!$date) {
+            return '-';
+        }
+
+        try {
+            return Carbon::parse($date)->format('d/m/Y H:i');
+        } catch (\Throwable) {
+            return '-';
+        }
     }
 }

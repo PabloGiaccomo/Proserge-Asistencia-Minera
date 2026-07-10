@@ -5,8 +5,9 @@
 @section('content')
 @php
     $permissions = session('user.permissions', []);
-    $canEdit = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'minas', 'editar');
-    $canDelete = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'minas', 'eliminar');
+    $canEdit = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'minas', 'editar');
+    $canDeactivate = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'minas', 'desactivar');
+    $canDelete = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'minas', 'eliminar');
 @endphp
 <div class="page-header">
     <div class="page-header-content">
@@ -18,7 +19,7 @@
             @if($canEdit)
                 <a href="{{ route('catalogos.minas.edit', $item['id']) }}" class="btn btn-primary">Editar</a>
             @endif
-            @if($canDelete && ($item['activo'] ?? true))
+            @if($canDeactivate && ($item['activo'] ?? true))
                 <form method="POST" action="{{ route('catalogos.minas.inactivate', $item['id']) }}" style="display:inline-block;" onsubmit="return confirm('Deseas inactivar esta mina y sus paraderos?');">
                     @csrf
                     <button type="submit" class="btn btn-outline" style="color:#B91C1C; border-color:#FCA5A5;">Inactivar</button>

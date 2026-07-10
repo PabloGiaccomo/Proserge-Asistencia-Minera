@@ -199,7 +199,9 @@
                 <h1 class="page-title">Bienestar</h1>
                 <p class="page-subtitle">Bloqueos de disponibilidad y ocupación del personal</p>
             </div>
-            <a href="{{ route('bienestar.bloqueos.create') }}" class="btn btn-primary btn-sm">Nuevo bloqueo</a>
+            @allowedDirect('bienestar', 'crear')
+                <a href="{{ route('bienestar.bloqueos.create') }}" class="btn btn-primary btn-sm">Nuevo bloqueo</a>
+            @endallowedDirect
         </div>
     </div>
 

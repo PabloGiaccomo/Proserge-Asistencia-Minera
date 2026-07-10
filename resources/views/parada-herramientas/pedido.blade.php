@@ -57,15 +57,19 @@
             <p class="page-subtitle">{{ $item['lugar'] ?? '-' }} | Semana {{ $item['semana'] ?? '-' }} | {{ $textoPedido }}</p>
         </div>
         <div class="page-actions">
-            <a href="{{ route('herramientas-parada.index') }}" class="btn btn-outline">Volver</a>
+            <a href="{{ route('logistica.index', ['tab' => 'herramientas']) }}" class="btn btn-outline">Volver</a>
             @if($puedeCompletarRequerimiento)
                 <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn btn-outline">Completar requerimiento</a>
             @else
                 <span class="btn btn-outline is-disabled" aria-disabled="true" title="El limite de envio vencio o la lista ya fue enviada.">Requerimiento cerrado</span>
             @endif
-            <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => $esRecepcion ? 'entrega' : 'recepcion']) }}" class="btn btn-outline">
-                {{ $esRecepcion ? 'Ver entregas' : 'Registrar recepcion' }}
-            </a>
+            @if($esRecepcion || $puedeActualizarPedido)
+                <a href="{{ route('herramientas-parada.confirmar-pedido', [$item['rq_mina_id'], 'modo' => $esRecepcion ? 'entrega' : 'recepcion']) }}" class="btn btn-outline">
+                    {{ $esRecepcion ? 'Ver entregas' : 'Registrar recepcion' }}
+                </a>
+            @else
+                <span class="btn btn-outline is-disabled" aria-disabled="true" title="No tienes permiso para registrar recepciones.">Registrar recepcion</span>
+            @endif
         </div>
     </div>
 

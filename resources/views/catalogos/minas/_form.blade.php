@@ -4,6 +4,10 @@
     $title = $isEdit ? 'Editar Mina' : 'Nueva Mina';
     $button = $isEdit ? 'Guardar cambios' : 'Crear mina';
     $paraderos = old('paraderos', $item['paraderos'] ?? []);
+    $permissions = session('user.permissions', []);
+    $canSubmit = $isEdit
+        ? \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'minas', 'actualizar')
+        : \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'minas', 'crear');
 @endphp
 
 <div class="page-header">
@@ -100,7 +104,9 @@
             </div>
 
             <div style="display:flex; gap:10px; margin-top:18px;">
-                <button type="submit" class="btn btn-primary">{{ $button }}</button>
+                @if($canSubmit)
+                    <button type="submit" class="btn btn-primary">{{ $button }}</button>
+                @endif
                 <a href="{{ route('catalogos.minas.index') }}" class="btn btn-outline">Cancelar</a>
             </div>
         </form>

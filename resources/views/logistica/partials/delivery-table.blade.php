@@ -128,9 +128,26 @@
                             'estado',
                             'status',
                         ]);
+
+                        $workerDocument = trim((string) $dni);
+                        $workerId = trim((string) data_get($row, 'personal_id', data_get($row, 'personal.id', '')));
+                        $workerSearch = ! in_array($workerDocument, ['', '-', $fallback], true)
+                            ? $workerDocument
+                            : $workerId;
+                        $workerUrl = $workerSearch !== ''
+                            ? route('logistica.index', ['tab' => 'entregas-epp', 'trabajador' => $workerSearch])
+                            : null;
                     @endphp
                     <tr>
-                        <td>{{ $worker }}</td>
+                        <td>
+                            @if($workerUrl)
+                                <a href="{{ $workerUrl }}" class="lgt-worker-link" title="Ver entregas y cambios de {{ $worker }}">
+                                    {{ $worker }}
+                                </a>
+                            @else
+                                {{ $worker }}
+                            @endif
+                        </td>
                         <td>{{ $dni }}</td>
                         <td>{{ $item }}</td>
                         <td>{{ $size }}</td>

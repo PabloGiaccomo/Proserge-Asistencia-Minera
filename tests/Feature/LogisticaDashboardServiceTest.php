@@ -107,6 +107,48 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame('ABC-123; chofer Juan', $row['placas_asignadas']);
     }
 
+    public function test_filtros_de_proximos_vencimientos_afectan_solo_la_tabla(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 08:00:00'));
+
+        $mineA = $this->createMine('MARCOBRE');
+        $mineB = $this->createMine('BOROO');
+        $workerA = $this->createPersonal('ACTIVO', 'TRABAJADOR FILTRADO');
+        $workerB = $this->createPersonal('ACTIVO', 'TRABAJADOR VIGENTE');
+        $eppA = $this->createEpp('CASCO FILTRO');
+        $eppB = $this->createEpp('CASCO VIGENTE');
+
+        $this->attachMine($workerA, $mineA, PersonalMina::ESTADO_HABILITADO);
+        $this->attachMine($workerB, $mineB, PersonalMina::ESTADO_HABILITADO);
+        $this->createDelivery($workerA, $eppA, '2026-07-01', '2026-07-20');
+        $this->createDelivery($workerB, $eppB, '2026-07-01', '2026-09-01');
+
+        $filtered = app(LogisticaDashboardService::class)->pageData([
+            'tab' => 'vencimientos',
+            'venc_q' => 'FILTRADO',
+            'venc_mina_id' => $mineA,
+            'venc_epp_id' => $eppA,
+            'venc_talla' => 'No aplica',
+            'venc_estado' => 'POR_VENCER',
+            'venc_rango' => '15',
+            'venc_fecha_desde' => '2026-07-19',
+            'venc_fecha_hasta' => '2026-07-21',
+        ]);
+
+        $this->assertCount(1, $filtered['filteredExpiringDeliveries']);
+        $this->assertSame('TRABAJADOR FILTRADO', $filtered['filteredExpiringDeliveries']->first()['trabajador']);
+        $this->assertSame(1, $filtered['metrics']['expiring_epp']);
+
+        $vigentes = app(LogisticaDashboardService::class)->pageData([
+            'tab' => 'vencimientos',
+            'venc_estado' => 'VIGENTE',
+            'venc_rango' => '',
+        ]);
+
+        $this->assertSame('TRABAJADOR VIGENTE', $vigentes['filteredExpiringDeliveries']->first()['trabajador']);
+        $this->assertSame(1, $vigentes['metrics']['expiring_epp']);
+    }
+
     private function createPersonal(string $state, string $name): Personal
     {
         return Personal::query()->create([

@@ -1,4 +1,7 @@
 @once
+@php
+    $canConfigureRqOptions = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'configurar');
+@endphp
 <style>
 .rq-field-options-panel {
     position: fixed;
@@ -54,8 +57,9 @@
 <script>
 window.RQMinaFieldOptionsConfig = {
     indexUrl: @json(route('rq-mina.opciones-campo.index')),
-    storeUrl: @json(route('rq-mina.opciones-campo.store')),
-    deleteUrlTemplate: @json(route('rq-mina.opciones-campo.destroy', ['optionId' => '__ID__'])),
+    storeUrl: @json($canConfigureRqOptions ? route('rq-mina.opciones-campo.store') : null),
+    deleteUrlTemplate: @json($canConfigureRqOptions ? route('rq-mina.opciones-campo.destroy', ['optionId' => '__ID__']) : null),
+    canConfigure: @json($canConfigureRqOptions),
     csrf: @json(csrf_token()),
 };
 
@@ -135,11 +139,11 @@ window.RQMinaFieldOptionsConfig = {
         state.activeOptions.forEach(function(option) {
             html += '<div class="rq-field-options-row" data-option-id="' + String(option.id) + '">' +
                 '<span class="rq-field-options-value">' + escapeHtml(option.value) + '</span>' +
-                '<button type="button" class="rq-field-options-delete" data-delete-option-id="' + String(option.id) + '" aria-label="Quitar opcion" title="Quitar opcion">&times;</button>' +
+                (config().canConfigure ? '<button type="button" class="rq-field-options-delete" data-delete-option-id="' + String(option.id) + '" aria-label="Quitar opcion" title="Quitar opcion">&times;</button>' : '') +
             '</div>';
         });
 
-        if (normalizedQuery && !hasExact) {
+        if (config().canConfigure && normalizedQuery && !hasExact) {
             html += '<div class="rq-field-options-row rq-field-options-add" data-add-option="1">Agregar "' + escapeHtml(query) + '"</div>';
         }
 
@@ -183,7 +187,7 @@ window.RQMinaFieldOptionsConfig = {
     async function saveOption(input, value) {
         const field = input.dataset.rqOptionField || '';
         const text = String(value || input.value || '').replace(/\s+/g, ' ').trim();
-        if (!field || !text || normalize(input.dataset.rqOptionSavedValue) === normalize(text)) {
+        if (!config().canConfigure || !config().storeUrl || !field || !text || normalize(input.dataset.rqOptionSavedValue) === normalize(text)) {
             return null;
         }
 
@@ -204,7 +208,7 @@ window.RQMinaFieldOptionsConfig = {
     }
 
     async function deleteOption(optionId) {
-        if (!optionId || !config().deleteUrlTemplate) return;
+        if (!config().canConfigure || !optionId || !config().deleteUrlTemplate) return;
         const url = config().deleteUrlTemplate.replace('__ID__', encodeURIComponent(optionId));
         await fetch(url, {
             method: 'DELETE',

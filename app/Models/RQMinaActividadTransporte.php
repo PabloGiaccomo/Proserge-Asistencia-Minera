@@ -51,6 +51,11 @@ class RQMinaActividadTransporte extends Model
         'recepcion_fecha',
         'recepcion_estado',
         'recepcion_observacion',
+        'capacidad_camion',
+        'doc_vehiculo_path',
+        'doc_proserge_path',
+        'doc_mantenimiento_path',
+        'doc_checklist_path',
         'orden',
     ];
 
@@ -60,6 +65,7 @@ class RQMinaActividadTransporte extends Model
         'recepcion_fecha' => 'date',
         'dias_uso' => 'integer',
         'orden' => 'integer',
+        'capacidad_camion' => 'string',
     ];
 
     public static function origenes(): array

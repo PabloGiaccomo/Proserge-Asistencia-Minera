@@ -17,6 +17,14 @@
         </div>
     </div>
 
+    @if(session('success'))
+        <div class="alert alert-success" style="margin-bottom:16px;">{{ session('success') }}</div>
+    @endif
+
+    @if(session('error'))
+        <div class="alert alert-error" style="margin-bottom:16px;">{{ session('error') }}</div>
+    @endif
+
     @include('seguridad.roles._form', ['mode' => 'edit'])
 </div>
 @endsection

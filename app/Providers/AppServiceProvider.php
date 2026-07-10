@@ -31,6 +31,10 @@ class AppServiceProvider extends ServiceProvider
             return PermissionMatrix::allows(session('user.permissions', []), $module, $action);
         });
 
+        Blade::if('allowedDirect', function (string $module, string $action = 'ver'): bool {
+            return PermissionMatrix::allowsDirect(session('user.permissions', []), $module, $action);
+        });
+
         if (app()->runningInConsole()) {
             return;
         }

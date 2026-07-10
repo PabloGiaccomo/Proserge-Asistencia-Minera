@@ -33,21 +33,25 @@
 
         @php
             $permissions = session('user.permissions', []);
-            $canInicio = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'inicio', 'ver');
-            $canPersonal = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'personal', 'ver');
-            $canBienestar = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'bienestar', 'ver');
-            $canRQMina = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'rq_mina', 'ver');
-            $canRQProserge = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'rq_proserge', 'ver');
-            $canManPower = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'man_power', 'ver');
-            $canHerramientas = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'herramientas', 'ver');
-            $canEpps = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'epps', 'ver');
-            $canMiAsistencia = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'mi_asistencia', 'ver');
-            $canEvaluaciones = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'evaluaciones', 'ver');
-            $canAsistencias = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'asistencias', 'ver');
-            $canFaltas = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'faltas', 'ver');
-            $canCatalogos = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'catalogos', 'ver');
-            $canUsuarios = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'usuarios', 'ver');
-            $canRoles = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'roles', 'ver');
+            $permissionMatrix = \App\Support\Rbac\PermissionMatrix::normalize($permissions);
+            $canSeeModule = static fn (string $module): bool => (($permissionMatrix[$module]['ver'] ?? false) === true);
+
+            $canInicio = $canSeeModule('inicio');
+            $canPersonal = $canSeeModule('personal');
+            $canVencimientos = $canSeeModule('vencimientos');
+            $canHabilitacionMinera = $canSeeModule('habilitacion_minera');
+            $canBienestar = $canSeeModule('bienestar');
+            $canRQMina = $canSeeModule('rq_mina');
+            $canRQProserge = $canSeeModule('rq_proserge');
+            $canManPower = $canSeeModule('man_power');
+            $canLogistica = $canSeeModule('logistica');
+            $canMiAsistencia = $canSeeModule('mi_asistencia');
+            $canEvaluaciones = $canSeeModule('evaluaciones');
+            $canAsistencias = $canSeeModule('asistencias');
+            $canFaltas = $canSeeModule('faltas');
+            $canCatalogos = $canSeeModule('catalogos');
+            $canUsuarios = $canSeeModule('usuarios');
+            $canRoles = $canSeeModule('roles');
         @endphp
 
         <nav class="sidebar-nav">
@@ -61,21 +65,27 @@
             </div>
             @endif
 
-            @if($canPersonal)
+            @if($canPersonal || $canVencimientos || $canHabilitacionMinera)
             <div class="nav-group">
                 <div class="nav-group-title">Personal</div>
+                @if($canPersonal)
                 <a href="{{ route('personal.index') }}" class="nav-item {{ request()->is('personal*') ? 'active' : '' }}">
                     <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/></svg></span>
                     <span class="nav-label">Personal</span>
                 </a>
+                @endif
+                @if($canVencimientos)
                 <a href="{{ route('personal.contratos.expiring') }}" class="nav-item {{ request()->is('personal/contratos/vencimientos') ? 'active' : '' }}">
                     <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>
                     <span class="nav-label">Vencimientos</span>
                 </a>
+                @endif
+                @if($canHabilitacionMinera)
                 <a href="{{ route('personal.habilitacion-minera.index') }}" class="nav-item {{ request()->is('personal/habilitacion-minera*') ? 'active' : '' }}">
                     <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg></span>
                     <span class="nav-label">Habilitacion minera</span>
                 </a>
+                @endif
             </div>
             @endif
 
@@ -89,7 +99,7 @@
             </div>
             @endif
 
-            @if($canRQMina || $canRQProserge || $canManPower || $canHerramientas || $canEpps || $canMiAsistencia)
+            @if($canRQMina || $canRQProserge || $canManPower || $canLogistica || $canMiAsistencia)
             <div class="nav-group">
                 <div class="nav-group-title">Operación</div>
                 <div class="nav-subgroup">
@@ -111,16 +121,10 @@
                         <span class="nav-label">Man Power</span>
                     </a>
                     @endif
-                    @if($canEpps)
-                    <a href="{{ url('/logistica') }}" class="nav-item {{ request()->is('logistica*') ? 'active' : '' }}">
+                    @if($canLogistica)
+                    <a href="{{ route('logistica.index') }}" class="nav-item {{ request()->is('logistica*') ? 'active' : '' }}">
                         <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="10" width="3" height="6" rx="1"/><rect x="12" y="7" width="3" height="9" rx="1"/><rect x="17" y="12" width="3" height="4" rx="1"/><path d="M7 5h10"/></svg></span>
                         <span class="nav-label">Logistica</span>
-                    </a>
-                    @endif
-                    @if($canHerramientas)
-                    <a href="{{ route('herramientas-parada.index') }}" class="nav-item {{ request()->is('herramientas-parada*') ? 'active' : '' }}">
-                        <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a4 4 0 0 1-5.1 5.1l-8.4 8.4a2 2 0 0 1-2.8-2.8l8.4-8.4a4 4 0 0 1 5.1-5.1l-3.3 3z"/><path d="M5 11l3 3"/></svg></span>
-                        <span class="nav-label">Herramientas</span>
                     </a>
                     @endif
                     @if($canMiAsistencia)

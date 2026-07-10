@@ -83,6 +83,24 @@ class ParadaHerramientaService
             ->map(fn (RQMina $rq): array => $this->toListRow($rq));
     }
 
+    public function deadlineAlerts(iterable $items, int $limit = 5): array
+    {
+        return collect($items)
+            ->filter(function (array $item): bool {
+                $days = (int) ($item['dias_para_limite'] ?? 999);
+                $status = strtoupper((string) ($item['estado_lista'] ?? ''));
+
+                return $status !== 'ENVIADO' && $days >= 0 && $days <= 7;
+            })
+            ->sortBy([
+                ['dias_para_limite', 'asc'],
+                ['fecha_limite_envio', 'asc'],
+            ])
+            ->take($limit)
+            ->values()
+            ->all();
+    }
+
     public function findParadaForUser(Usuario $usuario, string $rqMinaId): ?RQMina
     {
         $rq = RQMina::query()
@@ -1495,10 +1513,10 @@ class ParadaHerramientaService
 
     private function canUpdatePedido(Usuario $usuario): bool
     {
-        return $this->isLogistica($usuario)
-            || PermissionMatrix::userCan($usuario, 'herramientas', 'actualizar')
-            || PermissionMatrix::userCan($usuario, 'herramientas', 'administrar')
-            || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
+        $permissions = PermissionMatrix::effectivePermissions($usuario);
+
+        return PermissionMatrix::allowsDirect($permissions, 'herramientas', 'registrar')
+            || PermissionMatrix::allowsDirect($permissions, 'herramientas', 'administrar');
     }
 
     private function isLogistica(Usuario $usuario): bool
@@ -1569,7 +1587,7 @@ class ParadaHerramientaService
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'herramientas', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'herramientas', 'administrar');
     }
 
     private function jefesPlaneamiento(): array
@@ -1602,7 +1620,7 @@ class ParadaHerramientaService
                 $roleName = strtoupper((string) optional($usuario->rol)->nombre);
 
                 return in_array($roleName, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-                    || PermissionMatrix::userCan($usuario, 'man_power', 'administrar');
+                    || PermissionMatrix::userCanDirect($usuario, 'man_power', 'administrar');
             })
             ->pluck('id')
             ->map(fn ($id) => (string) $id)

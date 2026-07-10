@@ -704,12 +704,14 @@
                 <div class="temporales-actions-wrap">
                     <button type="button" class="btn btn-primary" id="temporalesActionsButton" aria-expanded="false" aria-haspopup="true">Acciones</button>
                     <div class="temporales-actions-menu" id="temporalesActionsMenu">
-                        @allowed('personal', 'editar')
+                        @allowedDirect('personal', 'editar')
                             <button type="button" class="temporales-action-item" id="openActivateLinkModal">Activar link</button>
                             <button type="button" class="temporales-action-item" id="openEmailTemplateModal">Editar correo de envio</button>
-                            <button type="button" class="temporales-action-item" id="openBulkEmailModal">Enviar comunicaciones</button>
                             <button type="button" class="temporales-action-item" id="openBulkExtendModal">Ampliar links activos</button>
-                        @endallowed
+                        @endallowedDirect
+                        @allowedDirect('personal', 'enviar')
+                            <button type="button" class="temporales-action-item" id="openBulkEmailModal">Enviar comunicaciones</button>
+                        @endallowedDirect
                     </div>
                 </div>
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver a Personal</a>
@@ -741,7 +743,7 @@
         <div class="bulk-email-progress-detail" id="bulkEmailProgressDetail">Preparando envio...</div>
     </div>
 
-    @allowed('personal', 'editar')
+    @allowedDirect('personal', 'editar')
         <div id="activateLinkModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('activateLinkModal')">
             <div class="modal-backdrop" onclick="closeModal('activateLinkModal')"></div>
             <div class="modal-content activate-link-modal" onclick="event.stopPropagation()">
@@ -769,9 +771,9 @@
                 </form>
             </div>
         </div>
-    @endallowed
+    @endallowedDirect
 
-    @allowed('personal', 'editar')
+    @allowedDirect('personal', 'editar')
         <div id="emailTemplateModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('emailTemplateModal')">
             <div class="modal-backdrop" onclick="closeModal('emailTemplateModal')"></div>
             <div class="modal-content email-template-modal" onclick="event.stopPropagation()">
@@ -820,9 +822,9 @@
                 </form>
             </div>
         </div>
-    @endallowed
+    @endallowedDirect
 
-    @allowed('personal', 'editar')
+    @allowedDirect('personal', 'enviar')
         <div id="bulkEmailModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('bulkEmailModal')">
             <div class="modal-backdrop" onclick="closeModal('bulkEmailModal')"></div>
             <div class="modal-content bulk-email-modal" onclick="event.stopPropagation()">
@@ -872,9 +874,9 @@
                 </form>
             </div>
         </div>
-    @endallowed
+    @endallowedDirect
 
-    @allowed('personal', 'editar')
+    @allowedDirect('personal', 'editar')
         <div id="bulkExtendModal" class="modal" style="display:none;" onclick="if (event.target === this) closeModal('bulkExtendModal')">
             <div class="modal-backdrop" onclick="closeModal('bulkExtendModal')"></div>
             <div class="modal-content bulk-extend-modal" onclick="event.stopPropagation()">
@@ -902,7 +904,7 @@
                 </form>
             </div>
         </div>
-    @endallowed
+    @endallowedDirect
 
     <div class="ficha-card">
         <div class="ficha-card-header">
@@ -1060,7 +1062,7 @@
                                                 <path d="M10 9H8"/>
                                             </svg>
                                         </a>
-                                        @if($correo && $row['url'])
+                                        @if($correo && $row['url'] && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'enviar'))
                                             <button type="button"
                                                 class="btn btn-outline btn-xs js-send-email temporal-icon-btn"
                                                 data-send-url="{{ route('personal.fichas.send-email', $ficha->id) }}"
@@ -1080,7 +1082,7 @@
                                                 </svg>
                                             </button>
                                         @endif
-                                        @allowed('personal', 'eliminar')
+                                        @allowedDirect('personal', 'editar')
                                             @if($row['url'] && $link && !$ficha->submitted_at)
                                                 <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form">
                                                     @csrf
@@ -1111,6 +1113,8 @@
                                                     </button>
                                                 </form>
                                             @endif
+                                        @endallowedDirect
+                                        @allowedDirect('personal', 'eliminar')
                                             <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" class="js-temporal-action-form" onsubmit="return confirm('Se eliminara este registro de Temporales y links, pero el trabajador seguira en Personal.');">
                                                 @csrf
                                                 <button type="submit" class="btn btn-danger btn-xs temporal-icon-btn" title="Quitar de Temporales y links" aria-label="Quitar de Temporales y links">
@@ -1123,7 +1127,7 @@
                                                     </svg>
                                                 </button>
                                             </form>
-                                        @endallowed
+                                        @endallowedDirect
                                     </div>
                                 </td>
                             </tr>

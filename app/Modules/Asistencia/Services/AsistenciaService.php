@@ -8,6 +8,7 @@ use App\Models\GrupoTrabajo;
 use App\Models\GrupoTrabajoDetalle;
 use App\Models\Usuario;
 use App\Modules\Asistencia\Policies\AsistenciaPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -93,7 +94,7 @@ class AsistenciaService
 
     public function marcar(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
 
@@ -130,7 +131,7 @@ class AsistenciaService
 
     public function marcarMasivo(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
 
@@ -175,7 +176,7 @@ class AsistenciaService
 
     public function cerrar(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'cerrar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
 
@@ -191,7 +192,7 @@ class AsistenciaService
 
     public function reabrir(Usuario $usuario, GrupoTrabajo $grupo): array
     {
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'reabrir') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
 

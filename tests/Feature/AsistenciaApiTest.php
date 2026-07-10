@@ -24,7 +24,7 @@ class AsistenciaApiTest extends TestCase
             'id' => $this->rolPlannerId,
             'nombre' => 'PLANNER',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'asistencias' => ['ver', 'actualizar', 'cerrar'],
+                'asistencias' => ['ver', 'actualizar', 'registrar', 'cerrar', 'reabrir'],
             ])),
             'estado' => 'ACTIVO',
         ]);

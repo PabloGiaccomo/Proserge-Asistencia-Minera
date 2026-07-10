@@ -51,7 +51,7 @@
                                 <a href="{{ route('faltas.show', $item['id']) }}" class="btn btn-sm btn-outline">
                                     Ver
                                 </a>
-                                @if(($item['estado'] ?? '') == 'pendiente')
+                                @if(($item['estado'] ?? '') == 'pendiente' && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'corregir'))
                                 <a href="{{ route('faltas.corregir', $item['id']) }}" class="btn btn-sm btn-outline">
                                     Corregir
                                 </a>

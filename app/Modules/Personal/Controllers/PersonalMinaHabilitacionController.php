@@ -10,6 +10,7 @@ use App\Models\PersonalMinaExamenIntento;
 use App\Models\PersonalMina;
 use App\Modules\Personal\Services\PersonalMinaExcelImportService;
 use App\Modules\Personal\Services\PersonalMinaHabilitacionService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +29,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function index(Request $request): View
     {
+        $this->assertMiningPermission('ver');
+
         $filters = [
             'mina_id' => $request->input('mina_id', ''),
             'trabajador' => $request->input('trabajador', ''),
@@ -46,13 +49,15 @@ class PersonalMinaHabilitacionController extends WebPageController
         $upcomingExpirationDays = 60;
         $scheduledExamDays = 60;
 
+        $canViewPrices = $this->canMiningPermission(['ver_historial_precios', 'configurar']);
+
         return view('personal.habilitacion-minera.index', [
             'filters' => $filters,
             'assignments' => $this->service->listGroupedByWorker($filters),
             'requirements' => $this->service->listRequirements($filters['mina_id'] ?: null),
             'exams' => $this->service->listMiningExams(),
             'allExams' => $this->service->listAllMiningExams(),
-            'priceHistory' => $this->service->listPriceHistory(),
+            'priceHistory' => $canViewPrices ? $this->service->listPriceHistory() : collect(),
             'mines' => $this->service->activeMines(),
             'workers' => $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit'], $filters['worker_page']),
             'workersTotal' => $this->service->workerOptionsTotal($filters['trabajador'] ?: null),
@@ -72,6 +77,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function storeExam(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission(['crear', 'configurar']);
+
         $validated = $request->validate([
             'nombre' => ['required', 'string', 'max:191'],
             'descripcion' => ['nullable', 'string', 'max:5000'],
@@ -112,6 +119,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function updateExam(Request $request, string $examId): RedirectResponse
     {
+        $this->assertMiningPermission(['editar', 'configurar']);
+
         $exam = ExamenMinero::query()->find($examId);
         abort_if(!$exam, 404);
 
@@ -156,6 +165,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function storeExamPrice(Request $request, string $examId): RedirectResponse
     {
+        $this->assertMiningPermission('configurar');
+
         $exam = ExamenMinero::query()->find($examId);
         abort_if(!$exam, 404);
 
@@ -183,6 +194,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function storeRequirement(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission('configurar');
+
         $validated = $request->validate([
             'mina_id' => ['required', 'string', 'size:36'],
             'examen_id' => ['nullable', 'string', 'size:36'],
@@ -221,6 +234,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function assign(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission('asignar');
+
         $validated = $request->validate([
             'personal_id' => ['required', 'string', 'size:36'],
             'mina_id' => ['required', 'string', 'size:36'],
@@ -251,6 +266,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function update(Request $request, string $assignmentId): RedirectResponse
     {
+        $this->assertMiningPermission(['actualizar', 'editar']);
+
         $assignment = PersonalMina::query()->find($assignmentId);
         abort_if(!$assignment, 404);
 
@@ -278,6 +295,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function deactivate(Request $request, string $assignmentId): RedirectResponse
     {
+        $this->assertMiningPermission('desasignar');
+
         $assignment = PersonalMina::query()->find($assignmentId);
         abort_if(!$assignment, 404);
 
@@ -294,6 +313,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function deactivateRequirement(Request $request, string $requirementId): RedirectResponse|JsonResponse
     {
+        $this->assertMiningPermission('configurar');
+
         $requirement = MinaRequisito::query()->find($requirementId);
         abort_if(!$requirement, 404);
 
@@ -320,6 +341,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function generateExams(Request $request, string $assignmentId): RedirectResponse
     {
+        $this->assertMiningPermission('programar');
+
         $assignment = PersonalMina::query()->find($assignmentId);
         abort_if(!$assignment, 404);
 
@@ -345,6 +368,8 @@ class PersonalMinaHabilitacionController extends WebPageController
             'observacion' => ['nullable', 'string', 'max:5000'],
         ]);
 
+        $this->assertMiningPermission($this->isSchedulingAttempt($validated) ? 'programar' : 'registrar');
+
         try {
             $this->service->registerAttempt($workerExam, $validated, $request->file('archivo'), $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
@@ -361,6 +386,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function completeScheduledAttempt(Request $request, string $attemptId): RedirectResponse
     {
+        $this->assertMiningPermission('registrar');
+
         $attempt = PersonalMinaExamenIntento::query()->find($attemptId);
         abort_if(!$attempt, 404);
 
@@ -389,6 +416,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function notApplicable(Request $request, string $workerExamId): RedirectResponse
     {
+        $this->assertMiningPermission('registrar');
+
         $workerExam = PersonalMinaExamen::query()->find($workerExamId);
         abort_if(!$workerExam, 404);
 
@@ -412,6 +441,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function convalidate(Request $request, string $workerExamId): RedirectResponse
     {
+        $this->assertMiningPermission('convalidar');
+
         $workerExam = PersonalMinaExamen::query()->find($workerExamId);
         abort_if(!$workerExam, 404);
 
@@ -436,6 +467,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function downloadAttempt(string $attemptId)
     {
+        $this->assertMiningPermission('ver');
+
         $attempt = PersonalMinaExamenIntento::query()->find($attemptId);
         abort_if(!$attempt || trim((string) $attempt->archivo_path) === '', 404);
         abort_unless(Storage::disk('local')->exists($attempt->archivo_path), 404);
@@ -448,6 +481,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function previewImport(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission('importar');
+
         $validated = $request->validate([
             'archivo' => ['required', 'file', 'mimes:xlsx,xls,xlsm,csv', 'max:20480'],
         ]);
@@ -470,6 +505,8 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function confirmImport(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission('importar');
+
         $preview = session('habilitacion_mina_import_preview');
         if (!$preview || ($request->input('token') && $request->input('token') !== ($preview['token'] ?? null))) {
             return redirect()
@@ -496,10 +533,33 @@ class PersonalMinaHabilitacionController extends WebPageController
 
     public function syncCurrent(Request $request): RedirectResponse
     {
+        $this->assertMiningPermission('actualizar');
+
         $result = $this->service->syncCurrentInformation($this->requireAuthenticatedUser());
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
             ->with('success', 'Estados recalculados: ' . collect($result)->map(fn ($value, $key) => str_replace('_', ' ', $key) . ': ' . $value)->implode(', '));
+    }
+
+    private function assertMiningPermission(string|array $actions): void
+    {
+        abort_unless($this->canMiningPermission($actions), 403, 'No tienes permiso para realizar esta accion.');
+    }
+
+    private function canMiningPermission(string|array $actions): bool
+    {
+        return PermissionMatrix::allowsAny(
+            session('user.permissions', []),
+            'habilitacion_minera',
+            is_array($actions) ? $actions : [$actions],
+        );
+    }
+
+    private function isSchedulingAttempt(array $validated): bool
+    {
+        return strtoupper(trim((string) ($validated['resultado'] ?? ''))) === PersonalMinaExamenIntento::RESULTADO_PENDIENTE
+            && filled($validated['fecha_programacion'] ?? null)
+            && blank($validated['fecha_realizacion'] ?? null);
     }
 }

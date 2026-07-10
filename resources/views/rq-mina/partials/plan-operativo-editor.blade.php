@@ -3,6 +3,8 @@
     $planOperativo = $planOperativo ?? [];
     $weekNumber = $weekNumber ?? null;
     $weekYear = $weekYear ?? null;
+    $paradaFechaInicio = $paradaFechaInicio ?? '';
+    $paradaFechaFin = $paradaFechaFin ?? '';
 @endphp
 
 @once
@@ -68,7 +70,20 @@
     color:#64748b;
     cursor:not-allowed;
 }
-.rq-plan-transport-row { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:10px; align-items:start; margin-bottom:12px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fcfdff; }
+.rq-plan-saits-grid { display:flex; flex-wrap:wrap; gap:6px; }
+.rq-plan-sait-chip { display:inline-flex; align-items:center; gap:5px; border:1.5px solid #dbe4ef; border-radius:999px; padding:5px 12px; background:#fff; color:#334155; font-size:12px; font-weight:700; cursor:pointer; transition:all .18s cubic-bezier(.16,1,.3,1); user-select:none; }
+.rq-plan-sait-chip:hover { border-color:#0d9488; background:#f0fdfa; transform:translateY(-1px); box-shadow:0 2px 8px rgba(13,148,136,.12); }
+.rq-plan-sait-chip.is-checked { border-color:#0d9488; background:linear-gradient(135deg,#ccfbf1,#f0fdfa); color:#0f766e; box-shadow:0 0 0 1.5px #0d9488,0 2px 6px rgba(13,148,136,.15); }
+.rq-plan-sait-chip:active { transform:translateY(0); }
+.rq-plan-sait-check { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
+.rq-plan-empty-saits { padding:8px 0; color:#94a3b8; font-size:12px; font-style:italic; }
+/* --- Transporte: tarjeta con diseno mejorado --- */
+.rq-plan-transport-row { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.04); margin-bottom:16px; overflow:hidden; transition:box-shadow .2s ease,border-color .2s ease; animation:rqTransportSlideIn .3s cubic-bezier(.16,1,.3,1); }
+.rq-plan-transport-row:hover { border-color:#cbd5e1; box-shadow:0 4px 12px rgba(0,0,0,.06),0 2px 4px rgba(0,0,0,.04); }
+.rq-plan-transport-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(135deg,#f8fafc,#f1f5f9); border-bottom:1px solid #eef2f7; }
+.rq-plan-transport-number { font-size:12px; font-weight:700; color:#1e293b; display:inline-flex; align-items:center; gap:8px; }
+.rq-plan-transport-number-badge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; background:#0f766e; color:#fff; border-radius:6px; font-size:11px; font-weight:800; line-height:1; }
+.rq-plan-transport-body { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:14px; padding:14px; align-items:start; }
 .rq-plan-transport-field { min-width:0; }
 .rq-plan-transport-field.span-2 { grid-column:span 2; }
 .rq-plan-transport-field.span-3 { grid-column:span 3; }
@@ -76,23 +91,36 @@
 .rq-plan-transport-field.span-5 { grid-column:span 5; }
 .rq-plan-transport-field.span-6 { grid-column:span 6; }
 .rq-plan-transport-field.span-12 { grid-column:1 / -1; }
-.rq-plan-transport-actions { grid-column:1 / -1; display:flex; align-items:center; justify-content:flex-end; gap:8px; }
-.rq-plan-transport-hint { display:block; margin-top:5px; color:#64748b; font-size:11px; line-height:1.35; }
+.rq-plan-transport-remove { border:1px solid #fecaca; background:#fef2f2; color:#b91c1c; border-radius:6px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer; transition:all .15s ease; display:inline-flex; align-items:center; gap:4px; }
+.rq-plan-transport-remove:hover { background:#fee2e2; border-color:#f87171; }
+.rq-plan-transport-hint { display:block; margin-top:4px; color:#94a3b8; font-size:10px; line-height:1.4; }
+
+/* Boton agregar transporte */
+.rq-plan-btn-add-transport { border:2px dashed #cbd5e1; background:#f8fafc; color:#334155; border-radius:10px; padding:9px 14px; font-size:12px; font-weight:700; cursor:pointer; transition:all .2s ease; display:inline-flex; align-items:center; gap:6px; }
+.rq-plan-btn-add-transport:hover { border-color:#0d9488; background:#ecfeff; color:#0f766e; }
+
+/* Badge de conteo */
+.rq-plan-transport-count { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; border-radius:999px; background:#e2e8f0; color:#334155; font-size:10px; font-weight:800; padding:0 6px; line-height:1; vertical-align:middle; }
+
+/* Empty state transporte */
+.rq-plan-transport-empty { border:2px dashed #e2e8f0; border-radius:12px; padding:24px; text-align:center; color:#94a3b8; font-size:12px; background:#fafbfc; line-height:1.6; }
+
+@keyframes rqTransportSlideIn { from { opacity:0; transform:translateY(-6px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
 .rq-plan-btn { border:1px solid #cbd5e1; background:#fff; color:#0f172a; border-radius:8px; padding:8px 10px; font-size:12px; font-weight:700; cursor:pointer; }
 .rq-plan-btn:hover { background:#f8fafc; }
 .rq-plan-btn.primary { border-color:#0f766e; background:#0f766e; color:#fff; }
 .rq-plan-btn.danger { border-color:#fecaca; background:#fef2f2; color:#b91c1c; }
 .modalrq-container { max-width:min(1180px, calc(100vw - 32px)); }
 @media (max-width:900px) {
-    .rq-plan-group-head, .rq-plan-activity-head, .rq-plan-activity-grid, .rq-plan-supervisors, .rq-plan-transport-row { grid-template-columns:1fr; }
+    .rq-plan-group-head, .rq-plan-activity-head, .rq-plan-activity-grid, .rq-plan-supervisors { grid-template-columns:1fr; }
+    .rq-plan-transport-body { grid-template-columns:1fr; }
     .rq-plan-transport-field,
     .rq-plan-transport-field.span-2,
     .rq-plan-transport-field.span-3,
     .rq-plan-transport-field.span-4,
     .rq-plan-transport-field.span-5,
     .rq-plan-transport-field.span-6,
-    .rq-plan-transport-field.span-12,
-    .rq-plan-transport-actions { grid-column:auto; }
+    .rq-plan-transport-field.span-12 { grid-column:auto; }
     .rq-plan-group-actions { justify-content:flex-start; }
     .rq-plan-activity-actions { justify-content:flex-start; }
     .rq-plan-activity-wide { grid-column:auto; }
@@ -181,11 +209,10 @@ function initRQMinaPlanEditor(root) {
         return field?.value || fallback;
     }
 
-    function dateInputs() {
-        const form = root.closest('form') || document;
+    function paradaFechas() {
         return {
-            start: form.querySelector('input[name="fecha_inicio"]'),
-            end: form.querySelector('input[name="fecha_fin"]'),
+            inicio: '{{ $paradaFechaInicio }}',
+            fin: '{{ $paradaFechaFin }}',
         };
     }
 
@@ -194,9 +221,9 @@ function initRQMinaPlanEditor(root) {
         const byExisting = turnos.filter(t => t.fecha || t.dia_label);
         if (byExisting.length) return byExisting;
 
-        const inputs = dateInputs();
-        const startValue = inputs.start ? inputs.start.value : '';
-        const endValue = inputs.end ? inputs.end.value : '';
+        const fechas = paradaFechas();
+        const startValue = fechas.inicio;
+        const endValue = fechas.fin;
         if (!startValue) {
             return ['Lun','Mar','Mie','Jue','Vie','Sab','Dom'].map((label, index) => ({ fecha: '', dia_label: label, orden: index + 1 }));
         }
@@ -251,36 +278,6 @@ function initRQMinaPlanEditor(root) {
         return '<div class="rq-plan-field rq-plan-transport-field span-' + span + '"><label>' + escapeHtml(label) + '</label>' + content + (hint ? '<span class="rq-plan-transport-hint">' + escapeHtml(hint) + '</span>' : '') + '</div>';
     }
 
-    function todayValue() {
-        const now = new Date();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        return now.getFullYear() + '-' + month + '-' + day;
-    }
-
-    function calculateTransportDays(startValue, endValue) {
-        if (!startValue || !endValue) return '';
-        const start = new Date(startValue + 'T00:00:00');
-        const end = new Date(endValue + 'T00:00:00');
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
-            return '';
-        }
-        return String(Math.floor((end - start) / 86400000) + 1);
-    }
-
-    function syncTransportDays(row) {
-        if (!row) return;
-        const start = row.querySelector('[name$="[fecha_inicio]"]');
-        const end = row.querySelector('[name$="[fecha_fin]"]');
-        const days = row.querySelector('[name$="[dias_uso]"]');
-        if (!start || !end || !days) return;
-
-        const calculated = calculateTransportDays(start.value, end.value);
-        if (calculated !== '') {
-            days.value = calculated;
-        }
-    }
-
     function activityTemplate(groupIndex, activityIndex, activity) {
         const key = activity.client_key || activity.id || (Date.now() + '-' + groupIndex + '-' + activityIndex);
         const prefix = 'plan_operativo[' + groupIndex + '][actividades][' + activityIndex + ']';
@@ -332,48 +329,60 @@ function initRQMinaPlanEditor(root) {
         '</div>';
     }
 
+    function getPlanSaits() {
+        const saits = [];
+        plan.forEach(function(g) {
+            const activities = Array.isArray(g.actividades) ? g.actividades : [];
+            activities.forEach(function(a) {
+                const saitVal = (a.sait || '').trim();
+                if (saitVal !== '' && saits.indexOf(saitVal) === -1) {
+                    saits.push(saitVal);
+                }
+            });
+        });
+        return saits;
+    }
+
+    function saitCheckboxesHtml(prefix, currentValue) {
+        const saits = getPlanSaits();
+        const selected = (currentValue || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+
+        if (saits.length === 0) {
+            return '<div class="rq-plan-empty-saits">Agrega SAIT / punto en las actividades para seleccionar alcance.</div>' +
+                '<input type="hidden" name="' + prefix + '[alcance]" value="' + escapeHtml(currentValue || '') + '">';
+        }
+
+        const chips = saits.map(function(sait) {
+            const isChecked = selected.indexOf(sait) !== -1;
+            return '<label class="rq-plan-sait-chip' + (isChecked ? ' is-checked' : '') + '">' +
+                '<input type="checkbox" class="rq-plan-sait-check" value="' + escapeHtml(sait) + '"' + (isChecked ? ' checked' : '') + ' data-alcance-prefix="' + escapeHtml(prefix) + '">' +
+                '<span>' + escapeHtml(sait) + '</span>' +
+            '</label>';
+        }).join('');
+
+        return '<div class="rq-plan-saits-grid" data-alcance-grid="' + escapeHtml(prefix) + '">' + chips + '</div>' +
+            '<input type="hidden" class="rq-plan-alcance-input" name="' + prefix + '[alcance]" value="' + escapeHtml(currentValue || '') + '">';
+    }
+
     function transportTemplate(groupIndex, transportIndex, row) {
+        const num = transportIndex + 1;
         const prefix = 'plan_operativo[' + groupIndex + '][transportes][' + transportIndex + ']';
-        const originOptions = [
-            { value: '', label: 'Seleccionar' },
-            { value: 'EMPRESA', label: 'Empresa' },
-            { value: 'ALQUILADO', label: 'Alquilado' },
-            { value: 'OTRO', label: 'Otro' },
-        ];
-        const logisticStateOptions = [
-            { value: 'REQUERIDO', label: 'Requerido' },
-            { value: 'ASIGNADO', label: 'Asignado' },
-            { value: 'EN_USO', label: 'En uso' },
-            { value: 'RETIRADO', label: 'Retirado' },
-            { value: 'REEMPLAZADO', label: 'Reemplazado' },
-            { value: 'DEVUELTO', label: 'Devuelto' },
-            { value: 'INCIDENCIA', label: 'Incidencia' },
-        ];
-        const receptionOptions = [
-            { value: 'PENDIENTE', label: 'Pendiente' },
-            { value: 'RECIBIDO', label: 'Recibido' },
-            { value: 'INCOMPLETO', label: 'Incompleto' },
-            { value: 'NO_LLEGO', label: 'No llego' },
-            { value: 'CON_OBSERVACION', label: 'Con observacion' },
-        ];
+        const fechas = paradaFechas();
+        const defaultStart = fechas.inicio;
+        const defaultEnd = fechas.fin;
 
         return '<div class="rq-plan-transport-row">' +
-            transportField('Alcance', input(prefix + '[alcance]', row.alcance || '', 'Ej. Sector, area, SAIT o varios SAIT', '', 'rq_mina.plan.transporte_alcance'), 3) +
-            transportField('Unidad de carga', input(prefix + '[unidad_carga]', row.unidad_carga || '', 'Unidad de carga', '', 'rq_mina.plan.unidad_carga'), 2) +
-            transportField('Origen', selectInput(prefix + '[origen]', row.origen || '', originOptions), 2) +
-            transportField('Transporte solicitado', textarea(prefix + '[unidades_transporte]', row.unidades_transporte || '', 'Van 15, minibus 35, alquilado...', 'rq_mina.plan.unidades_transporte'), 5) +
-            transportField('Placas asignadas', input(prefix + '[placas_asignadas]', row.placas_asignadas || '', 'ABC-123; XYZ-789', '', 'rq_mina.plan.placas_transporte'), 3) +
-            transportField('Fecha inicio', dateInput(prefix + '[fecha_inicio]', row.fecha_inicio || ''), 2) +
-            transportField('Fecha fin', dateInput(prefix + '[fecha_fin]', row.fecha_fin || ''), 2) +
-            transportField('Dias de uso', input(prefix + '[dias_uso]', row.dias_uso || '', 'Auto', 'rq-plan-real-input', '', false, ' readonly aria-readonly="true" autocomplete="off" tabindex="-1"'), 2) +
-            transportField('Estado logistico', selectInput(prefix + '[estado_logistico]', row.estado_logistico || 'REQUERIDO', logisticStateOptions), 3) +
-            transportField('Indicaciones iniciales', textarea(prefix + '[indicaciones]', row.indicaciones || '', 'Ej. Desde miercoles turno A', 'rq_mina.plan.transporte_indicaciones'), 4) +
-            transportField('Motivo de cambio', textarea(prefix + '[comentario_cambio]', row.comentario_cambio || '', 'Explica cambios una semana antes o durante la parada', 'rq_mina.plan.transporte_comentarios'), 4, 'Usalo cuando se agregue, retire o cambie un transporte cerca del inicio o durante la parada.') +
-            transportField('Incidencia operativa', textarea(prefix + '[incidencia_operativa]', row.incidencia_operativa || '', 'Malogro, reemplazo, retiro, choque...', 'rq_mina.plan.transporte_incidencias'), 4, 'Opcional para malogros, reemplazos, retiros o devoluciones durante la parada.') +
-            transportField('Fecha de retorno', dateInput(prefix + '[recepcion_fecha]', row.recepcion_fecha || ''), 2) +
-            transportField('Recepcion', selectInput(prefix + '[recepcion_estado]', row.recepcion_estado || 'PENDIENTE', receptionOptions), 3) +
-            transportField('Detalle de retorno', textarea(prefix + '[recepcion_observacion]', row.recepcion_observacion || '', 'Detalle si llego incompleto, no llego o tiene observacion', 'rq_mina.plan.transporte_recepcion'), 5) +
-            '<div class="rq-plan-transport-actions"><button type="button" class="rq-plan-btn danger" data-remove-transport>Quitar transporte</button></div>' +
+            '<div class="rq-plan-transport-header">' +
+                '<span class="rq-plan-transport-number"><span class="rq-plan-transport-number-badge">' + num + '</span> Transporte #' + num + '</span>' +
+                '<button type="button" class="rq-plan-transport-remove" data-remove-transport>✕ Quitar</button>' +
+            '</div>' +
+            '<div class="rq-plan-transport-body">' +
+                transportField('Alcance (SAIT)', saitCheckboxesHtml(prefix, row.alcance || ''), 3) +
+                transportField('Unidad de carga', input(prefix + '[unidad_carga]', row.unidad_carga || '', 'Unidad de carga', '', 'rq_mina.plan.unidad_carga'), 2) +
+                transportField('Transporte solicitado', textarea(prefix + '[unidades_transporte]', row.unidades_transporte || '', 'Van 15, minibus 35, alquilado...', 'rq_mina.plan.unidades_transporte'), 5) +
+                transportField('Fecha inicio', dateInput(prefix + '[fecha_inicio]', row.fecha_inicio || defaultStart), 2) +
+                transportField('Fecha fin', dateInput(prefix + '[fecha_fin]', row.fecha_fin || defaultEnd), 2) +
+            '</div>' +
         '</div>';
     }
 
@@ -409,7 +418,7 @@ function initRQMinaPlanEditor(root) {
                     '<div data-activities>' + activities.map((activity, i) => activityTemplate(groupIndex, i, activity)).join('') + '</div>' +
                 '</div>' +
                 '<div class="rq-plan-section">' +
-                    '<div class="rq-plan-section-title"><h4>Unidades de carga y transporte</h4><button type="button" class="rq-plan-btn" data-add-transport>Agregar transporte</button></div>' +
+                    '<div class="rq-plan-section-title"><h4>🚛 Unidades de carga y transporte <span class="rq-plan-transport-count">' + transports.length + '</span></h4><button type="button" class="rq-plan-btn-add-transport" data-add-transport>+ Agregar transporte</button></div>' +
                     '<div data-transports>' + transports.map((transport, i) => transportTemplate(groupIndex, i, transport)).join('') + '</div>' +
                 '</div>' +
                 '</div>' +
@@ -423,7 +432,6 @@ function initRQMinaPlanEditor(root) {
         if (window.RQMinaPersonalAutocomplete) {
             window.RQMinaPersonalAutocomplete.refresh(root);
         }
-        body.querySelectorAll('.rq-plan-transport-row').forEach(syncTransportDays);
         applyCollapseState();
     }
 
@@ -478,19 +486,9 @@ function initRQMinaPlanEditor(root) {
                 group.transportes.push({
                     alcance: fieldValue(transportEl, '[alcance]'),
                     unidad_carga: fieldValue(transportEl, '[unidad_carga]'),
-                    origen: fieldValue(transportEl, '[origen]'),
                     unidades_transporte: fieldValue(transportEl, '[unidades_transporte]'),
-                    placas_asignadas: fieldValue(transportEl, '[placas_asignadas]'),
                     fecha_inicio: fieldValue(transportEl, '[fecha_inicio]'),
                     fecha_fin: fieldValue(transportEl, '[fecha_fin]'),
-                    dias_uso: fieldValue(transportEl, '[dias_uso]'),
-                    estado_logistico: fieldValue(transportEl, '[estado_logistico]'),
-                    indicaciones: fieldValue(transportEl, '[indicaciones]'),
-                    comentario_cambio: fieldValue(transportEl, '[comentario_cambio]'),
-                    incidencia_operativa: fieldValue(transportEl, '[incidencia_operativa]'),
-                    recepcion_fecha: fieldValue(transportEl, '[recepcion_fecha]'),
-                    recepcion_estado: fieldValue(transportEl, '[recepcion_estado]'),
-                    recepcion_observacion: fieldValue(transportEl, '[recepcion_observacion]'),
                 });
             });
 
@@ -574,6 +572,24 @@ function initRQMinaPlanEditor(root) {
     });
 
     root.addEventListener('change', function(event) {
+        const saitCheck = event.target.closest('.rq-plan-sait-check');
+        if (saitCheck) {
+            const chip = saitCheck.closest('.rq-plan-sait-chip');
+            if (chip) {
+                chip.classList.toggle('is-checked', saitCheck.checked);
+            }
+            const prefix = saitCheck.dataset.alcancePrefix;
+            if (prefix) {
+                const grid = root.querySelector('[data-alcance-grid="' + prefix + '"]');
+                const hidden = root.querySelector('.rq-plan-alcance-input[name="' + prefix + '[alcance]"]');
+                if (grid && hidden) {
+                    const checks = Array.from(grid.querySelectorAll('.rq-plan-sait-check:checked'));
+                    hidden.value = checks.map(function(cb) { return cb.value; }).join(',');
+                    syncFromDom();
+                }
+            }
+            return;
+        }
         const transportEl = event.target.closest('.rq-plan-transport-row');
         if (!transportEl) {
             return;
@@ -581,16 +597,7 @@ function initRQMinaPlanEditor(root) {
 
         const name = event.target.getAttribute('name') || '';
         if (name.endsWith('[fecha_inicio]') || name.endsWith('[fecha_fin]')) {
-            syncTransportDays(transportEl);
             syncFromDom();
-        }
-
-        if (name.endsWith('[recepcion_estado]') && event.target.value && event.target.value !== 'PENDIENTE') {
-            const receptionDate = transportEl.querySelector('[name$="[recepcion_fecha]"]');
-            if (receptionDate && !receptionDate.value) {
-                receptionDate.value = todayValue();
-                syncFromDom();
-            }
         }
     });
 

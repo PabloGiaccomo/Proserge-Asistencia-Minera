@@ -69,6 +69,7 @@
         'NO_LLEGO' => 'No llego',
         'CON_OBSERVACION' => 'Con observacion',
     ];
+    $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'editar');
 @endphp
 
 <style>
@@ -134,9 +135,11 @@
             <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
                 Plan operativo
             </a>
-            <a href="{{ route('rq-mina.edit', $item['id']) }}" class="btn btn-primary">
-                Editar
-            </a>
+            @if($canEditRq)
+                <a href="{{ route('rq-mina.edit', $item['id']) }}" class="btn btn-primary">
+                    Editar
+                </a>
+            @endif
         </div>
     </div>
 </div>
@@ -401,16 +404,13 @@
                                                     @endif
                                                 </td>
                                                 <td>
-                                                    @if(!empty($row['indicaciones']))
-                                                        <span class="rqm-plan-note"><strong>Inicio:</strong> {{ $row['indicaciones'] }}</span>
-                                                    @endif
                                                     @if(!empty($row['comentario_cambio']))
                                                         <span class="rqm-plan-note"><strong>Cambio:</strong> {{ $row['comentario_cambio'] }}</span>
                                                     @endif
                                                     @if(!empty($row['incidencia_operativa']))
                                                         <span class="rqm-plan-note"><strong>Incidencia:</strong> {{ $row['incidencia_operativa'] }}</span>
                                                     @endif
-                                                    @if(empty($row['indicaciones']) && empty($row['comentario_cambio']) && empty($row['incidencia_operativa']))
+                                                    @if(empty($row['comentario_cambio']) && empty($row['incidencia_operativa']))
                                                         -
                                                     @endif
                                                 </td>

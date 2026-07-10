@@ -143,8 +143,12 @@
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">Volver</a>
-                <a href="{{ route('personal.contratos.index', $trabajador->id) }}" class="btn btn-outline btn-sm">Contratos</a>
-                <a href="{{ route('personal.edit', $trabajador->id) }}" class="btn btn-primary btn-sm">Editar trabajador</a>
+                @if($canViewContracts ?? false)
+                    <a href="{{ route('personal.contratos.index', $trabajador->id) }}" class="btn btn-outline btn-sm">Contratos</a>
+                @endif
+                @if($canEditWorker ?? false)
+                    <a href="{{ route('personal.edit', $trabajador->id) }}" class="btn btn-primary btn-sm">Editar trabajador</a>
+                @endif
             </div>
         </div>
     </div>
@@ -185,7 +189,7 @@
                         </span>
                     </div>
                     <div class="docs-actions">
-                        @if($contratoDatos?->signed_at)
+                        @if($contratoDatos?->signed_at && $canDownloadDocuments)
                             <a
                                 href="{{ route('personal.documentos.contrato-firmado', $trabajador->id) }}"
                                 class="btn btn-outline btn-xs docs-icon-btn"
@@ -245,6 +249,7 @@
                         'documentStateLabels' => $documentStateLabels,
                         'vidaLeyPhysicalStateLabels' => $vidaLeyPhysicalStateLabels,
                         'canUploadDocuments' => $canUploadDocuments,
+                        'canDownloadDocuments' => $canDownloadDocuments,
                         'canReviewDocuments' => $canReviewDocuments,
                         'trabajador' => $trabajador,
                         'ficha' => $ficha,
@@ -268,13 +273,15 @@
                             </div>
                             <div><span class="docs-status docs-status-ok">Cargado</span></div>
                             <div class="docs-actions">
-                                <a href="{{ route('personal.fichas.archivos.download', $archivo->id) }}" class="btn btn-outline btn-xs docs-icon-btn" title="Descargar documento" aria-label="Descargar documento">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <path d="M7 10l5 5 5-5"/>
-                                        <path d="M12 15V3"/>
-                                    </svg>
-                                </a>
+                                @if($canDownloadDocuments)
+                                    <a href="{{ route('personal.fichas.archivos.download', $archivo->id) }}" class="btn btn-outline btn-xs docs-icon-btn" title="Descargar documento" aria-label="Descargar documento">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                            <path d="M7 10l5 5 5-5"/>
+                                            <path d="M12 15V3"/>
+                                        </svg>
+                                    </a>
+                                @endif
                             </div>
                         </div>
                     @endforeach
@@ -309,6 +316,8 @@
                                 <div class="docs-actions">
                                     @if($isFuture)
                                         <span class="text-muted" style="font-size:12px;">PDF disponible al iniciar el periodo.</span>
+                                    @elseif(!$canDownloadDocuments)
+                                        <span class="text-muted" style="font-size:12px;">Sin permiso de descarga.</span>
                                     @else
                                         <a href="{{ route('personal.documentos.gestacion.pdf', ['id' => $trabajador->id, 'bloqueoId' => $bloqueo->id]) }}" class="btn btn-outline btn-xs docs-icon-btn" title="Descargar PDF de gestacion" aria-label="Descargar PDF de gestacion">
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

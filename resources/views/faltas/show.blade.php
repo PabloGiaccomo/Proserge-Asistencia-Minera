@@ -84,10 +84,12 @@
         <h3 class="card-title">Acciones</h3>
     </div>
     <div class="card-body">
-        @if(($item['estado'] ?? '') == 'pendiente')
+        @if(($item['estado'] ?? '') == 'pendiente' && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'corregir'))
         <a href="{{ route('faltas.corregir', $item['id']) }}" class="btn btn-primary">
             Corregir Asistencia
         </a>
+        @endif
+        @if(($item['estado'] ?? '') == 'pendiente' && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'anular'))
         <form action="{{ route('faltas.anular', $item['id']) }}" method="POST" style="display:inline; margin-left: 8px;">
             @csrf
             <button type="submit" class="btn btn-outline" onclick="return confirm('¿Anular esta falta?')">

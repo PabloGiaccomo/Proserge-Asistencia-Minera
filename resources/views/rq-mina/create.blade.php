@@ -13,6 +13,10 @@ $formAction = $formAction ?? route('rq-mina.store');
 $formMethod = $formMethod ?? 'POST';
 $submitLabel = $submitLabel ?? 'Guardar Parada';
 $isEdit = $formMode === 'edit';
+$rqPermissions = session('user.permissions', []);
+$canSubmitRqMina = $isEdit
+    ? \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'actualizar')
+    : \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'crear');
 @endphp
 
 @section('content')
@@ -120,7 +124,9 @@ $isEdit = $formMode === 'edit';
 
     <div class="form-actions">
         <a href="{{ route('rq-mina.index') }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">{{ $submitLabel }}</button>
+        @if($canSubmitRqMina)
+            <button type="submit" class="btn btn-primary">{{ $submitLabel }}</button>
+        @endif
     </div>
 </form>
 

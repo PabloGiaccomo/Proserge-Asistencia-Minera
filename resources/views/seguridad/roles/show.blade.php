@@ -3,6 +3,10 @@
 @section('title', 'Rol - Proserge')
 
 @section('content')
+@php
+    $rolePermissions = session('user.permissions', []);
+    $canEditRolePermissions = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($rolePermissions, 'roles', ['editar', 'actualizar']);
+@endphp
 <style>
 .permission-screen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .permission-screen-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
@@ -36,12 +40,20 @@
             </div>
             <div class="page-actions">
                 <a href="{{ route('seguridad.roles.index') }}" class="btn btn-outline">Volver</a>
-                @allowed('roles', 'editar')
+                @if($canEditRolePermissions)
                     <a href="{{ route('seguridad.roles.edit', $rol->id) }}" class="btn btn-primary">Editar permisos</a>
-                @endallowed
+                @endif
             </div>
         </div>
     </div>
+
+    @if(session('success'))
+        <div class="alert alert-success" style="margin-bottom:16px;">{{ session('success') }}</div>
+    @endif
+
+    @if(session('error'))
+        <div class="alert alert-error" style="margin-bottom:16px;">{{ session('error') }}</div>
+    @endif
 
     <div class="grid grid-2" style="align-items:start; margin-bottom:16px;">
         <div class="card">

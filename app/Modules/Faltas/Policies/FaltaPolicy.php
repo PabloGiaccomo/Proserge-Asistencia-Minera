@@ -11,7 +11,7 @@ class FaltaPolicy
 {
     public function manage(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanAny($usuario, 'faltas', ['ver', 'editar', 'actualizar', 'eliminar']);
+        return PermissionMatrix::userCanDirectAny($usuario, 'faltas', ['ver', 'editar', 'actualizar', 'eliminar', 'corregir', 'anular']);
     }
 
     public function view(Usuario $usuario, Falta $falta): bool
@@ -53,6 +53,6 @@ class FaltaPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'faltas', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'faltas', 'administrar');
     }
 }

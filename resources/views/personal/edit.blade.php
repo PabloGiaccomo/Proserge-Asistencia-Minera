@@ -4,6 +4,15 @@
 
 @section('content')
 @php
+    $personalPermissions = session('user.permissions', []);
+    $canUpdatePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($personalPermissions, 'personal', ['editar', 'actualizar', 'editar_ficha']);
+    $canUploadDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'subir_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_documentos', 'subir');
+    $canDownloadDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'descargar_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_documentos', 'descargar');
+    $canViewContracts = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_contratos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_contratos', 'ver');
+    $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'cesar_trabajador');
     $selectedLocations = collect(old('minas', $trabajador['minas'] ?? []))
         ->map(fn ($value) => trim((string) $value))
         ->filter(fn (string $value) => $value !== '')
@@ -49,9 +58,13 @@
                 <p class="page-subtitle">Actualiza la ficha completa del trabajador y su configuracion interna.</p>
             </div>
             <div class="page-actions personal-edit-action-bar">
-                <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
+                @if($canViewContracts)
+                    <a href="{{ route('personal.contratos.index', $trabajador['id'] ?? request('id')) }}" class="btn btn-outline">Contratos</a>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
-                <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
+                @if($canUpdatePersonal)
+                    <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
             </div>
         </div>
@@ -293,15 +306,19 @@
                                         <span class="ficha-required">*</span>
                                     @endif
                                 </label>
-                                @if($storedDoc)
+                                @if($storedDoc && $canDownloadDocuments)
                                     <div class="ficha-input" style="height:auto; min-height:42px; margin-bottom:8px;">
                                         <a href="{{ route('personal.fichas.archivos.download', $storedDoc->id) }}">{{ $storedDoc->nombre_original ?: 'Descargar documento actual' }}</a>
                                     </div>
                                 @endif
-                                <input id="documento_{{ $docKey }}" class="ficha-input" type="file" name="documentos[{{ $docKey }}]" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp">
-                                @error('documentos.' . $docKey)
-                                    <span class="ficha-error">{{ $message }}</span>
-                                @enderror
+                                @if($canUploadDocuments)
+                                    <input id="documento_{{ $docKey }}" class="ficha-input" type="file" name="documentos[{{ $docKey }}]" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp">
+                                    @error('documentos.' . $docKey)
+                                        <span class="ficha-error">{{ $message }}</span>
+                                    @enderror
+                                @elseif(!$storedDoc)
+                                    <div class="ficha-alert ficha-alert-warning">No tienes permiso para subir este documento.</div>
+                                @endif
                             </div>
                         @endforeach
                     </div>
@@ -374,7 +391,7 @@
                                 <label class="ficha-label">Cese rapido</label>
                                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                                     <button type="button" class="btn btn-outline btn-sm" id="set-indet-cese-today">Marcar cese hoy</button>
-                                    @if(!empty($trabajador['puede_cesar']))
+                                    @if($canCeasePersonal && !empty($trabajador['puede_cesar']))
                                         <button type="submit" form="ceaseWorkerForm" class="btn btn-outline btn-sm" onclick="return confirm('Se marcara a este trabajador como cesado.');">Cesar ahora</button>
                                     @endif
                                 </div>

@@ -186,7 +186,7 @@ class RQMinaService
             legacyMinaName: $payload['mina'] ?? null,
         );
 
-        if (!$destination || !PermissionMatrix::userCan($usuario, 'rq_mina', 'crear') || !$this->policy->canAccessMina($usuario, $destination['mina_id'])) {
+        if (!$destination || !PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'crear') || !$this->policy->canAccessMina($usuario, $destination['mina_id'])) {
             return null;
         }
 
@@ -759,7 +759,7 @@ class RQMinaService
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'rq_mina', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'administrar');
     }
 
     private function applyMineScope($query, Usuario $usuario): void

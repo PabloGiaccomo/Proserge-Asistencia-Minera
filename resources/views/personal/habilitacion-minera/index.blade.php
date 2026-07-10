@@ -5,9 +5,43 @@
 @section('content')
 @php
     $permissions = session('user.permissions', []);
-    $canManage = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
+    $canMining = fn (string $action): bool => \App\Support\Rbac\PermissionMatrix::allows($permissions, 'habilitacion_minera', $action);
+    $canMiningAny = fn (array $actions): bool => \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'habilitacion_minera', $actions);
+    $canViewMiningMatrix = $canMining('ver_matriz');
+    $canViewMiningExpirations = $canMining('ver_vencimientos');
+    $canViewMiningScheduled = $canMining('ver_programados');
+    $canCreateMiningExam = $canMiningAny(['crear', 'configurar']);
+    $canEditMiningExam = $canMiningAny(['editar', 'configurar']);
+    $canConfigureMining = $canMining('configurar');
+    $canAssignMining = $canMining('asignar');
+    $canUnassignMining = $canMining('desasignar');
+    $canUpdateMining = $canMiningAny(['actualizar', 'editar']);
+    $canProgramMining = $canMining('programar');
+    $canRegisterMining = $canMining('registrar');
+    $canConvalidateMining = $canMining('convalidar');
+    $canImportMining = $canMining('importar');
+    $canViewMiningPrices = $canMiningAny(['ver_historial_precios', 'configurar']);
+    $canManage = $canMiningAny([
+        'actualizar',
+        'editar',
+        'crear',
+        'asignar',
+        'desasignar',
+        'configurar',
+        'registrar',
+        'programar',
+        'convalidar',
+        'importar',
+        'administrar',
+    ]);
     $currentQuery = request()->query();
-    $activeMineView = in_array(request('vista'), ['worker', 'matrix', 'expiring', 'scheduled'], true) ? request('vista') : 'worker';
+    $allowedMineViews = array_filter([
+        'worker',
+        $canViewMiningMatrix ? 'matrix' : null,
+        $canViewMiningExpirations ? 'expiring' : null,
+        $canViewMiningScheduled ? 'scheduled' : null,
+    ]);
+    $activeMineView = in_array(request('vista'), $allowedMineViews, true) ? request('vista') : 'worker';
     $upcomingExpirationAllRows = collect($upcomingExpirations ?? []);
     $upcomingExpirationRows = $upcomingExpirationAllRows;
     $upcomingExpirationCount = $upcomingExpirationRows->count();
@@ -3052,34 +3086,44 @@
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                 <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">Personal</a>
 
-                @if($canManage)
+                @if($canCreateMiningExam || $canEditMiningExam || $canConfigureMining || $canImportMining || $canViewMiningPrices)
                     <div class="mine-actions-menu">
                         <button type="button" class="btn btn-primary btn-sm mine-actions-btn" onclick="toggleActionsMenu(this)">
                             Acciones &#9660;
                         </button>
 
                         <div class="mine-actions-panel">
+                            @if($canCreateMiningExam)
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-examen')">
                                 <span class="mine-action-item-title">Agregar examen</span>
                                 <span class="mine-action-item-copy">Crea un requisito reutilizable para una o varias minas.</span>
                             </button>
+                            @endif
+                            @if($canEditMiningExam)
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-editar-examen')">
                                 <span class="mine-action-item-title">Editar examen</span>
                                 <span class="mine-action-item-copy">Actualiza vigencia, intentos, precio, nota o estado.</span>
                             </button>
+                            @endif
+                            @if($canConfigureMining)
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-configuracion')">
                                 <span class="mine-action-item-title">Configurar exámenes por mina</span>
                                 <span class="mine-action-item-copy">Define qué requisitos corresponden a cada mina.</span>
                             </button>
+                            @endif
+                            @if($canImportMining)
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-excel')">
                                 <span class="mine-action-item-title">Importar Excel master con vista previa</span>
                                 <span class="mine-action-item-copy">En validacion: analiza primero, luego confirma la carga.</span>
                             </button>
+                            @endif
 
+                            @if($canViewMiningPrices)
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-precios')">
                                 <span class="mine-action-item-title">Historial de precios</span>
                                 <span class="mine-action-item-copy">Consulta y registra costos por fecha de vigencia.</span>
                             </button>
+                            @endif
                         </div>
                     </div>
                 @endif
@@ -3099,15 +3143,21 @@
         <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'worker']) data-mine-view-tab="worker" aria-selected="{{ $activeMineView === 'worker' ? 'true' : 'false' }}">
             Seleccionar trabajador
         </button>
-        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'matrix']) data-mine-view-tab="matrix" aria-selected="{{ $activeMineView === 'matrix' ? 'true' : 'false' }}">
-            Matriz operativa
-        </button>
-        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'expiring']) data-mine-view-tab="expiring" aria-selected="{{ $activeMineView === 'expiring' ? 'true' : 'false' }}">
-            Proximos vencimientos
-        </button>
-        <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'scheduled']) data-mine-view-tab="scheduled" aria-selected="{{ $activeMineView === 'scheduled' ? 'true' : 'false' }}">
-            Examenes programados
-        </button>
+        @if($canViewMiningMatrix)
+            <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'matrix']) data-mine-view-tab="matrix" aria-selected="{{ $activeMineView === 'matrix' ? 'true' : 'false' }}">
+                Matriz operativa
+            </button>
+        @endif
+        @if($canViewMiningExpirations)
+            <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'expiring']) data-mine-view-tab="expiring" aria-selected="{{ $activeMineView === 'expiring' ? 'true' : 'false' }}">
+                Proximos vencimientos
+            </button>
+        @endif
+        @if($canViewMiningScheduled)
+            <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'scheduled']) data-mine-view-tab="scheduled" aria-selected="{{ $activeMineView === 'scheduled' ? 'true' : 'false' }}">
+                Examenes programados
+            </button>
+        @endif
     </div>
 
     <div @class(['card', 'mine-mines-card', 'is-hidden' => $activeMineView !== 'worker']) data-mine-view-panel="worker">
@@ -3211,7 +3261,7 @@
                         @endif
                         <span class="mine-action-hint">{{ $tileAction }}</span>
 
-                        @if($canManage && $selectedWorker && $state !== 'BLOQUEADA' && !$assignment)
+                        @if($canAssignMining && $selectedWorker && $state !== 'BLOQUEADA' && !$assignment)
                             <div class="mine-tile-actions" onclick="event.stopPropagation()">
                                 <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" data-loading-message="Asignando trabajador a mina...">
                                     @csrf
@@ -3221,7 +3271,7 @@
                                     <button type="submit" class="btn btn-outline btn-xs">Asignar</button>
                                 </form>
                             </div>
-                        @elseif($canManage && $selectedWorker && $assignment)
+                        @elseif($canUnassignMining && $selectedWorker && $assignment)
                             <div class="mine-tile-actions" onclick="event.stopPropagation()">
                                 <form
                                     method="POST"
@@ -3342,7 +3392,7 @@
                                             Seleccionar
                                         </a>
 
-                                        @if($canManage)
+                                        @if($canAssignMining)
                                             <a
                                                 class="btn btn-outline btn-xs"
                                                 data-testid="worker-assign-{{ $worker->id }}"
@@ -3428,7 +3478,7 @@
                     </div>
 
                     <div class="selected-worker-actions">
-                        @if($canManage)
+                        @if($canAssignMining)
                             <button type="button" class="btn btn-outline btn-xs" onclick="openDialog('modal-asignar-mina')">
                                 Asignar a mina
                             </button>
@@ -3451,6 +3501,7 @@
         </div>
     </div>
 
+    @if($canViewMiningMatrix)
     <div @class(['card', 'mine-assignments-card', 'is-hidden' => $activeMineView !== 'matrix']) data-mine-view-panel="matrix">
         <div class="card-header mine-list-header">
             <div>
@@ -3646,7 +3697,7 @@
                                     <td>
                                         <div class="mine-general-grid">
                                             <span class="mine-next-action {{ $displayBadge }}">{{ $nextAction }}</span>
-                                            @if($canManage && $assignment)
+                                            @if($canUnassignMining && $assignment)
                                                 <form
                                                     method="POST"
                                                     action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $worker?->id, 'mina_id' => $assignment->mina_id])) }}"
@@ -3783,7 +3834,7 @@
                                             >
                                                 {{ $wa->mina?->nombre }} ({{ $wProgress['done'] }}/{{ $wProgress['total'] }})
                                             </button>
-                                            @if($canManage)
+                                            @if($canUnassignMining)
                                                 <form
                                                     method="POST"
                                                     action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $wa->id], $currentQuery, ['worker_id' => $worker?->id, 'mina_id' => $wa->mina_id])) }}"
@@ -3891,7 +3942,9 @@
             @endif
         </div>
     </div>
+    @endif
 
+    @if($canViewMiningExpirations)
     <div @class(['card', 'mine-expiring-card', 'is-hidden' => $activeMineView !== 'expiring']) data-mine-view-panel="expiring">
         <div class="card-header mine-list-header">
             <div>
@@ -4217,7 +4270,9 @@
             @endif
         </div>
     </div>
+    @endif
 
+    @if($canViewMiningScheduled)
     <div @class(['card', 'mine-scheduled-card', 'is-hidden' => $activeMineView !== 'scheduled']) data-mine-view-panel="scheduled">
         <div class="card-header mine-list-header">
             <div>
@@ -4519,8 +4574,9 @@
             @endif
         </div>
     </div>
+    @endif
 
-    @if($selectedWorker && $canManage)
+    @if($selectedWorker && ($canAssignMining || $canUnassignMining))
         <dialog id="modal-asignar-mina" class="mine-dialog is-wide">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -4548,7 +4604,7 @@
                             </span>
                             <span class="mine-muted">{{ $tile['reason'] ?? 'Sin proceso iniciado.' }}</span>
 
-                            @if(!$assignment && !$isBlocked)
+                            @if($canAssignMining && !$assignment && !$isBlocked)
                                 <form method="POST" action="{{ route('personal.habilitacion-minera.assign', array_merge($currentQuery, ['worker_id' => $selectedWorker->id])) }}" data-loading-message="Asignando trabajador a mina...">
                                     @csrf
                                     <input type="hidden" name="personal_id" value="{{ $selectedWorker->id }}">
@@ -4561,16 +4617,18 @@
                                     <button type="button" class="btn btn-outline btn-xs" onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($selectedWorker->nombre_completo) }}, {{ \Illuminate\Support\Js::from($tile['mine']->nombre) }})">
                                         Gestionar examenes
                                     </button>
-                                    <form
-                                        method="POST"
-                                        action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
-                                        data-loading-message="Desasignando mina del trabajador..."
-                                        onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
-                                    >
-                                        @csrf
-                                        <input type="hidden" name="observacion" value="Desasignado manualmente desde asignacion individual.">
-                                        <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
-                                    </form>
+                                    @if($canUnassignMining)
+                                        <form
+                                            method="POST"
+                                            action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
+                                            data-loading-message="Desasignando mina del trabajador..."
+                                            onsubmit="return confirm('Desasignar esta mina del trabajador? No se borra el historial ni los examenes registrados.');"
+                                        >
+                                            @csrf
+                                            <input type="hidden" name="observacion" value="Desasignado manualmente desde asignacion individual.">
+                                            <button type="submit" class="btn btn-outline btn-xs">Desasignar</button>
+                                        </form>
+                                    @endif
                                 </div>
                             @else
                                 <span class="mine-muted">No disponible para asignar.</span>
@@ -4619,14 +4677,14 @@
                                         Abrir gestion
                                     </button>
 
-                                    @if($canManage && $assignment->examenes->isEmpty())
+                                    @if($canProgramMining && $assignment->examenes->isEmpty())
                                         <form method="POST" action="{{ route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $assignment->id], $currentQuery)) }}" data-loading-message="Generando examenes requeridos...">
                                             @csrf
                                             <button type="submit" class="btn btn-primary btn-xs">Generar examenes</button>
                                         </form>
                                     @endif
 
-                                    @if($canManage)
+                                    @if($canUnassignMining)
                                         <form
                                             method="POST"
                                             action="{{ route('personal.habilitacion-minera.deactivate', array_merge(['assignmentId' => $assignment->id], $currentQuery, ['worker_id' => $selectedWorker->id, 'mina_id' => $tile['mine']->id])) }}"
@@ -4647,7 +4705,8 @@
         </dialog>
     @endif
 
-    @if($canManage)
+    @if($canCreateMiningExam || $canEditMiningExam || $canConfigureMining || $canImportMining || $canViewMiningPrices)
+        @if($canCreateMiningExam)
         <dialog id="modal-examen" class="mine-dialog is-compact">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -4664,7 +4723,11 @@
 
                     <div class="mine-helper-card is-full">
                         <strong>Uso:</strong>
-                        <span>Primero crea el examen aquí. Después entra a “Configurar exámenes por mina” para decir en qué minas aplica.</span>
+                        @if($canConfigureMining)
+                            <span>Primero crea el examen aqui. Despues entra a "Configurar examenes por mina" para decir en que minas aplica.</span>
+                        @else
+                            <span>Primero crea el examen aqui. Un usuario con permiso de configuracion podra asociarlo despues a las minas correspondientes.</span>
+                        @endif
                     </div>
 
                     <div class="mine-section-title is-full">
@@ -4761,6 +4824,9 @@
             </div>
         </dialog>
 
+        @endif
+
+        @if($canEditMiningExam)
         <dialog id="modal-editar-examen" class="mine-dialog is-wide">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -4830,6 +4896,9 @@
             </div>
         </dialog>
 
+        @endif
+
+        @if($canViewMiningPrices)
         <dialog id="modal-configuracion" class="mine-dialog is-wide no-body-scroll">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -4924,7 +4993,9 @@
                 </div>
             </div>
         </dialog>
+        @endif
 
+        @if($canImportMining)
         <dialog id="modal-excel" class="mine-dialog is-wide" data-persistent-modal="true" data-modal-storage-key="mineExcelImportModalOpen">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -5039,7 +5110,9 @@
                 });
             </script>
         @endif
+        @endif
 
+        @if($canConfigureMining)
         <dialog id="modal-precios" class="mine-dialog is-wide">
             <div class="mine-dialog-header">
                 <div class="mine-dialog-title">
@@ -5055,6 +5128,7 @@
                     <details class="mine-details-card">
                         <summary>{{ $exam->nombre }} · {{ $exam->empresa_paga ? 'Empresa paga' : 'Sin pago empresa' }}</summary>
 
+                        @if($canConfigureMining)
                         <form method="POST" action="{{ route('personal.habilitacion-minera.examenes.prices.store', array_merge(['examId' => $exam->id], $currentQuery)) }}" class="mine-form" data-loading-message="Guardando precio del examen...">
                             @csrf
                             <label>Precio<input type="number" min="0" step="0.01" name="precio" required></label>
@@ -5066,6 +5140,7 @@
                                 <button type="submit" class="btn btn-outline btn-xs">Agregar precio</button>
                             </div>
                         </form>
+                        @endif
 
                         @foreach($exam->precios as $price)
                             <div class="mine-muted">
@@ -5076,6 +5151,7 @@
                 @endforeach
             </div>
         </dialog>
+        @endif
     @endif
 </div>
 
@@ -5951,7 +6027,10 @@ const completeAttemptUrlTemplate = @json(route('personal.habilitacion-minera.exa
 const noAplicaUrlTemplate = @json(route('personal.habilitacion-minera.exam.not-applicable', ['workerExamId' => '__EXAM__']));
 const convalidateUrlTemplate = @json(route('personal.habilitacion-minera.exam.convalidate', ['workerExamId' => '__EXAM__']));
 const csrfToken = @json(csrf_token());
-const canManageMining = @json($canManage);
+const canProgramMining = @json($canProgramMining);
+const canRegisterMining = @json($canRegisterMining);
+const canConvalidateMining = @json($canConvalidateMining);
+const canManageMining = canRegisterMining || canProgramMining || canConvalidateMining;
 const examStateLabels = @json($examStateOptions);
 const attemptResultLabels = @json($attemptResultOptions);
 
@@ -6139,7 +6218,7 @@ function renderProgrammedPanel(exam, scheduledAttempts) {
             html += '<span class="mine-muted">' + escHtml(attempt.observacion) + '</span>';
         }
 
-        if (isDue && canManageMining) {
+        if (isDue && canRegisterMining) {
             html += renderCompleteScheduledForm(attempt);
         } else if (!isDue) {
             html += '<span class="mine-muted">Aún no se habilita la carga de resultado porque la fecha programada no ha pasado.</span>';
@@ -6179,11 +6258,11 @@ function renderWorkerExamCard(exam, focusExamId) {
     const attemptsAvailable = attemptsUsed < attemptsMax;
     const resolvedStates = ['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA'];
     const resolved = resolvedStates.includes(exam.estado);
-    const canRegisterAttempt = canManageMining && !resolved && attemptsAvailable;
+    const canRegisterAttempt = canRegisterMining && !resolved && attemptsAvailable;
     const scheduledAttempts = (exam.intentos || []).filter(function(attempt) {
         return attempt.fecha_programacion && attempt.resultado === 'PENDIENTE';
     });
-    const canSchedule = canRegisterAttempt && scheduledAttempts.length === 0;
+    const canSchedule = canProgramMining && !resolved && attemptsAvailable && scheduledAttempts.length === 0;
     const badgeClass = examBadgeClass(exam);
     const stateLabel = examStateLabels[exam.estado] || exam.estado;
     const expirationLabel = expirationTextForExam(exam);
@@ -6203,13 +6282,21 @@ function renderWorkerExamCard(exam, focusExamId) {
     html += '</div>';
     html += '<div class="mine-muted">' + escHtml(details.join(' · ')) + '</div>';
     html += '<div class="mine-exam-action-row">';
-    html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="schedule">Programar examen</button>';
+    if (canProgramMining) {
+        html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="schedule">Programar examen</button>';
+    }
     html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="scheduled">Ver programados' + (scheduledAttempts.length ? ' (' + scheduledAttempts.length + ')' : '') + '</button>';
-    html += '<button type="button" class="btn btn-primary btn-xs" data-exam-action-toggle="performed">Registrar examen realizado</button>';
+    if (canRegisterMining) {
+        html += '<button type="button" class="btn btn-primary btn-xs" data-exam-action-toggle="performed">Registrar examen realizado</button>';
+    }
     html += '</div>';
-    html += '<div class="mine-exam-panel" data-exam-action-panel="schedule">' + renderScheduleForm(exam, canSchedule) + '</div>';
+    if (canProgramMining) {
+        html += '<div class="mine-exam-panel" data-exam-action-panel="schedule">' + renderScheduleForm(exam, canSchedule) + '</div>';
+    }
     html += '<div class="mine-exam-panel" data-exam-action-panel="scheduled">' + renderProgrammedPanel(exam, scheduledAttempts) + '</div>';
-    html += '<div class="mine-exam-panel" data-exam-action-panel="performed">' + renderPerformedForm(exam, canRegisterAttempt) + '</div>';
+    if (canRegisterMining) {
+        html += '<div class="mine-exam-panel" data-exam-action-panel="performed">' + renderPerformedForm(exam, canRegisterAttempt) + '</div>';
+    }
 
     if (exam.intentos && exam.intentos.length) {
         html += '<div class="mine-attempt-list">';
@@ -6230,7 +6317,7 @@ function renderWorkerExamCard(exam, focusExamId) {
         html += '</div>';
     }
 
-    if (exam.estado !== 'NO_APLICA' && exam.estado !== 'CONVALIDADO') {
+    if (canRegisterMining && exam.estado !== 'NO_APLICA' && exam.estado !== 'CONVALIDADO') {
         html += '<details class="mine-details-card">';
         html += '<summary><span>Marcar no aplica</span><span class="mine-badge info">Por área</span></summary>';
         html += '<form method="POST" action="' + noAplicaUrlTemplate.replace('__EXAM__', exam.id) + '" class="mine-form" data-loading-message="Marcando examen como no aplica...">';
@@ -6271,7 +6358,7 @@ function openWorkerExams(assignmentId, workerName, mineName, focusExamId) {
         html += '<div class="mine-exam-titleline"><strong>Sin examenes generados</strong><span class="mine-badge info">Pendiente de inicio</span></div>';
         html += '<span class="mine-muted">La mina ya esta asignada, pero todavia no tiene sus examenes creados para gestionar programacion, resultados o no aplica.</span>';
         html += '</div>';
-        if (canManageMining && data.generate_exams_url) {
+        if (canProgramMining && data.generate_exams_url) {
             html += '<form method="POST" action="' + escAttr(data.generate_exams_url) + '" class="mine-form" data-loading-message="Generando examenes requeridos...">';
             html += '<input type="hidden" name="_token" value="' + csrfToken + '">';
             html += '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Generar examenes requeridos</button>';

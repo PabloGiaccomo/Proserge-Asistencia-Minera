@@ -9,7 +9,7 @@ class DashboardPolicy
 {
     public function view(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCan($usuario, 'inicio', 'ver');
+        return PermissionMatrix::userCanDirect($usuario, 'inicio', 'ver');
     }
 
     public function isPrivileged(Usuario $usuario): bool
@@ -17,6 +17,6 @@ class DashboardPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'inicio', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'inicio', 'administrar');
     }
 }

@@ -7,6 +7,7 @@ use App\Models\PersonalBloqueo;
 use App\Models\Usuario;
 use App\Http\Controllers\Controller;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
+use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -21,6 +22,8 @@ class BienestarPageController extends Controller
 
     public function index(Request $request): View
     {
+        $this->assertWellbeingPermission('ver');
+
         $search = trim((string) $request->query('search', ''));
         $from = $this->resolveDate($request->query('fecha_inicio'), Carbon::today()->toDateString());
         $to = $this->resolveDate($request->query('fecha_fin'), Carbon::today()->addDays(14)->toDateString());
@@ -122,6 +125,8 @@ class BienestarPageController extends Controller
 
     public function show(string $id): View
     {
+        $this->assertWellbeingPermission('ver');
+
         $trabajador = Personal::query()
             ->with('fichaColaborador')
             ->select(['id', 'dni', 'nombre_completo', 'puesto', 'estado'])
@@ -159,6 +164,8 @@ class BienestarPageController extends Controller
 
     public function storeBloqueo(Request $request, string $id)
     {
+        $this->assertWellbeingPermission('crear');
+
         $trabajador = Personal::query()->with('fichaColaborador')->findOrFail($id);
 
         $payload = $request->validate([
@@ -216,6 +223,8 @@ class BienestarPageController extends Controller
 
     public function createBloqueo(): View
     {
+        $this->assertWellbeingPermission('crear');
+
         $trabajadores = Personal::query()
             ->with('fichaColaborador')
             ->select(['id', 'dni', 'nombre_completo', 'estado'])
@@ -229,6 +238,8 @@ class BienestarPageController extends Controller
 
     public function storeBloqueoGeneral(Request $request)
     {
+        $this->assertWellbeingPermission('crear');
+
         $payload = $request->validate([
             'personal_id' => ['required', 'string', 'exists:personal,id'],
             'tipo' => ['required', 'string', 'max:40'],
@@ -286,6 +297,8 @@ class BienestarPageController extends Controller
 
     public function editBloqueo(string $bloqueoId): View
     {
+        $this->assertWellbeingPermission(['editar', 'actualizar']);
+
         $bloqueo = PersonalBloqueo::query()
             ->with(['personal:id,dni,nombre_completo'])
             ->findOrFail($bloqueoId);
@@ -298,6 +311,8 @@ class BienestarPageController extends Controller
 
     public function updateBloqueo(Request $request, string $bloqueoId)
     {
+        $this->assertWellbeingPermission(['editar', 'actualizar']);
+
         $bloqueo = PersonalBloqueo::query()->with('personal.fichaColaborador')->findOrFail($bloqueoId);
 
         $payload = $request->validate([
@@ -337,6 +352,8 @@ class BienestarPageController extends Controller
 
     public function anularBloqueo(string $bloqueoId)
     {
+        $this->assertWellbeingPermission(['eliminar', 'anular']);
+
         $bloqueo = PersonalBloqueo::query()->with('personal')->findOrFail($bloqueoId);
 
         $bloqueo->update([
@@ -362,6 +379,15 @@ class BienestarPageController extends Controller
         } catch (\Throwable) {
             return $default;
         }
+    }
+
+    private function assertWellbeingPermission(string|array $actions): void
+    {
+        abort_unless(
+            PermissionMatrix::allowsAny(session('user.permissions', []), 'bienestar', is_array($actions) ? $actions : [$actions]),
+            403,
+            'No tienes permiso para realizar esta accion.',
+        );
     }
 
     private function resolveMonthStart(string $monthInput): Carbon

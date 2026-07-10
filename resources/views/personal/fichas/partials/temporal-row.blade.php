@@ -77,7 +77,7 @@
                     <path d="M10 9H8"/>
                 </svg>
             </a>
-            @if($correo && $row['url'])
+            @if($correo && $row['url'] && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'enviar'))
                 <button type="button"
                     class="btn btn-outline btn-xs js-send-email temporal-icon-btn"
                     data-send-url="{{ route('personal.fichas.send-email', $ficha->id) }}"
@@ -97,7 +97,7 @@
                     </svg>
                 </button>
             @endif
-            @allowed('personal', 'eliminar')
+            @allowedDirect('personal', 'editar')
                 @if($row['url'] && $link && !$ficha->submitted_at)
                     <form method="POST" action="{{ route('personal.fichas.extend', $ficha->id) }}" class="js-temporal-action-form" data-action-name="ampliado">
                         @csrf
@@ -128,6 +128,8 @@
                         </button>
                     </form>
                 @endif
+            @endallowedDirect
+            @allowedDirect('personal', 'eliminar')
                 <form method="POST" action="{{ route('personal.fichas.destroy', $ficha->id) }}" class="js-temporal-action-form" data-remove-row="true" onsubmit="return confirm('Se eliminara este registro de Temporales y links, pero el trabajador seguira en Personal.');">
                     @csrf
                     <button type="submit" class="btn btn-danger btn-xs temporal-icon-btn" title="Quitar de Temporales y links" aria-label="Quitar de Temporales y links">
@@ -140,7 +142,7 @@
                         </svg>
                     </button>
                 </form>
-            @endallowed
+            @endallowedDirect
         </div>
     </td>
 </tr>

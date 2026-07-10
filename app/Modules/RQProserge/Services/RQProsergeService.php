@@ -80,7 +80,7 @@ class RQProsergeService
 
     public function create(Usuario $usuario, array $payload): ?RQProserge
     {
-        if (!PermissionMatrix::userCan($usuario, 'rq_proserge', 'crear')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'crear')) {
             return null;
         }
 
@@ -435,6 +435,27 @@ class RQProsergeService
         return $this->policy->assign($usuario, $rq);
     }
 
+    public function canUpdate(Usuario $usuario, RQProserge $rq): bool
+    {
+        return $this->policy->update($usuario, $rq);
+    }
+
+    public function update(Usuario $usuario, RQProserge $rq, array $payload): ?RQProserge
+    {
+        if (!$this->policy->update($usuario, $rq)) {
+            return null;
+        }
+
+        if ($this->finishedParadaModificationError($rq)) {
+            return null;
+        }
+
+        $rq->fill($payload);
+        $rq->save();
+
+        return $rq->load(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']);
+    }
+
     public function modificationBlockedByFinishedParada(RQProserge $rq): ?array
     {
         return $this->finishedParadaModificationError($rq);
@@ -636,14 +657,14 @@ class RQProsergeService
 
     private function resolveResponsibleRrhhId(Usuario $actor): string
     {
-        if (PermissionMatrix::userCanAny($actor, 'rq_proserge', ['asignar', 'actualizar', 'administrar'])) {
+        if (PermissionMatrix::userCanDirectAny($actor, 'rq_proserge', ['asignar', 'actualizar', 'administrar'])) {
             return (string) $actor->id;
         }
 
         $candidate = Usuario::query()
             ->with(['rol', 'rolesAdicionales'])
             ->get()
-            ->first(fn (Usuario $usuario): bool => PermissionMatrix::userCanAny($usuario, 'rq_proserge', ['asignar', 'actualizar', 'administrar']));
+            ->first(fn (Usuario $usuario): bool => PermissionMatrix::userCanDirectAny($usuario, 'rq_proserge', ['asignar', 'actualizar', 'administrar']));
 
         return (string) ($candidate?->id ?? $actor->id);
     }
@@ -663,7 +684,7 @@ class RQProsergeService
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'rq_proserge', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'administrar');
     }
 
     public function createForUser(Usuario $usuario, array $payload): array

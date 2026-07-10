@@ -10,7 +10,7 @@ class EvaluacionesPolicy
 {
     public function manage(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanAny($usuario, 'evaluaciones', ['crear', 'editar', 'actualizar']);
+        return PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['ver', 'crear', 'editar', 'actualizar']);
     }
 
     public function canAccessDestino(Usuario $usuario, ?string $destinoTipo, ?string $destinoId): bool
@@ -44,6 +44,6 @@ class EvaluacionesPolicy
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
         return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCan($usuario, 'evaluaciones', 'administrar');
+            || PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'administrar');
     }
 }

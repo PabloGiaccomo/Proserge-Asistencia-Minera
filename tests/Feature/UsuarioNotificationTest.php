@@ -16,7 +16,7 @@ class UsuarioNotificationTest extends TestCase
     public function test_crear_usuario_notifica_a_roles_personalizados_con_permiso(): void
     {
         $actorRoleId = $this->createRole('CREADOR_USUARIOS_' . Str::upper(Str::random(6)), [
-            'usuarios' => ['crear', 'ver'],
+            'usuarios' => ['crear', 'ver', 'asignar'],
         ]);
         $recipientRoleId = $this->createRole('JEFE_USUARIOS_' . Str::upper(Str::random(6)), [
             'usuarios' => ['crear', 'ver'],

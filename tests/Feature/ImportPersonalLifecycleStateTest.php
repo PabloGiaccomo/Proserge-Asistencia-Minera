@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\PersonalFicha;
 use App\Modules\Personal\Services\ImportPersonalService;
+use App\Modules\Personal\Services\PersonalContratoService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -192,6 +193,73 @@ class ImportPersonalLifecycleStateTest extends TestCase
             'fecha_inicio' => '2026-07-01',
             'fecha_fin' => '2026-12-31',
         ]);
+    }
+
+    public function test_imported_preparation_contract_dates_appear_in_contract_expirations(): void
+    {
+        $user = $this->createUser();
+
+        app(ImportPersonalService::class)->import($this->personnelDataUpload([
+            [
+                'JORGE',
+                'VENCIMIENTO',
+                'IMPORTADO',
+                'MASCULINO',
+                'SOLTERO',
+                'PERUANO',
+                'O+',
+                '-',
+                'DNI',
+                '71000112',
+                '1991-03-15',
+                'PERU',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                '959111555',
+                'jorge.vencimiento@test.local',
+                'AV. TEST 456',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                'MECANICO IMPORTADO',
+                'SE',
+                'BCP',
+                '00123456780',
+                '00212345678901234560',
+                'SECUNDARIA COMPLETA',
+                'MECANICO',
+                '-',
+                'IE TEST',
+                '2011',
+                '5 ANOS',
+                'SISTEMA PRIVADO DE PENSIONES',
+                'AFP PRIMA',
+                '2500',
+                '42',
+                'L',
+                '34',
+                'M',
+                'CONTACTO TEST',
+                'HERMANO',
+                '959333555',
+                '2026-07-01',
+                '2026-07-01',
+                '2026-09-29',
+                '2026-12-31',
+            ],
+        ]), $user);
+
+        $contracts = app(PersonalContratoService::class)->listExpiringContracts([
+            'mes' => 12,
+            'anio' => 2026,
+            'cargo' => 'MECANICO IMPORTADO',
+        ]);
+
+        $this->assertCount(1, $contracts);
+        $this->assertSame('PREPARACION', strtoupper((string) $contracts->first()->estado));
+        $this->assertSame('VENCIMIENTO IMPORTADO JORGE', $contracts->first()->personal->nombre_completo);
+        $this->assertFalse((bool) $contracts->first()->getAttribute('can_register_decision'));
     }
 
     public function test_personnel_data_import_updates_existing_worker_and_clears_dash_contract_end(): void
@@ -387,7 +455,7 @@ class ImportPersonalLifecycleStateTest extends TestCase
                 'CONTRATO',
                 'BANCO',
                 'CUENTA SUELDO',
-                'CCI SUENTA SUELDO',
+                'CCI CUENTA SUELDO',
                 'GRADO DE INSTRUCCION',
                 'PROFESION Y/O CARRERA',
                 'TITULADO',

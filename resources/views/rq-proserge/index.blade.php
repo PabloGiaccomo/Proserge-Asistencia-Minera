@@ -189,6 +189,7 @@
         ],
     ];
     $rqMinaList = $data['data'] ?? [];
+    $canAssignRqProserge = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_proserge', 'asignar');
 @endphp
 
 <div
@@ -196,6 +197,7 @@
     id="rrhhScreen"
     data-rq='@json($rqMinaList)'
     data-worker-search-url="{{ route('rq-proserge.personal.buscar') }}"
+    data-can-assign="{{ $canAssignRqProserge ? '1' : '0' }}"
     data-csrf="{{ csrf_token() }}"
 >
     <header class="rrhh-header">
@@ -240,6 +242,7 @@
     const screen = document.getElementById('rrhhScreen');
     const rqData = JSON.parse(screen.dataset.rq || '[]');
     const workerSearchUrl = screen.dataset.workerSearchUrl || '';
+    const canAssignRqProserge = screen.dataset.canAssign === '1';
     const csrfToken = screen.dataset.csrf || '';
 
     const searchInput = document.getElementById('rqSearchInput');
@@ -532,8 +535,8 @@
                             </div>
                         </div>
                     </div>
-                    <button type="button" class="btn-assign ${disableAssign ? 'disabled' : ''}" ${disableAssign ? 'disabled' : ''}>Asignar</button>
-                    <button type="button" class="btn-unassign ${disableAssign ? 'disabled' : ''}" ${disableAssign ? 'disabled' : ''}>Desasignar</button>
+                    ${canAssignRqProserge ? `<button type="button" class="btn-assign ${disableAssign ? 'disabled' : ''}" ${disableAssign ? 'disabled' : ''}>Asignar</button>` : ''}
+                    ${canAssignRqProserge ? `<button type="button" class="btn-unassign ${disableAssign ? 'disabled' : ''}" ${disableAssign ? 'disabled' : ''}>Desasignar</button>` : ''}
                 </div>
 
                 <div class="asignaciones-zone">
@@ -568,13 +571,13 @@
                     <span>${escapeHtml(row.comentario || '-')}</span>
                     <small>${escapeHtml(row.fecha_inicio || '-')} a ${escapeHtml(row.fecha_fin || '-')}</small>
                 </div>
-                <button
+                ${canAssignRqProserge ? `<button
                     type="button"
                     class="btn-unassign btn-unassign-small js-rq-unassign"
                     data-rq-id="${escapeHtml(item.id)}"
                     data-assignment-id="${escapeHtml(row.id || '')}"
                     ${row.id ? '' : 'disabled'}
-                >Desasignar</button>
+                >Desasignar</button>` : ''}
             </div>
         `).join('');
     }
@@ -632,7 +635,7 @@
                 </div>
                 ${cambiosHtml}
 
-                <div class="field-group worker-search-field">
+                ${canAssignRqProserge ? `<div class="field-group worker-search-field">
                     <label>Trabajador</label>
                     <input
                         class="js-rq-worker-search"
@@ -644,7 +647,7 @@
                     >
                     <input type="hidden" class="js-rq-worker-id">
                     <div class="worker-search-results" data-worker-results></div>
-                </div>
+                </div>` : ''}
 
                 <div class="puesto-grid">
                     <div class="field-group">
@@ -654,7 +657,7 @@
                     ${availabilityBox(puesto.disponibilidad)}
                 </div>
 
-                <div class="puesto-actions-row">
+                ${canAssignRqProserge ? `<div class="puesto-actions-row">
                     <div class="dates-inline">
                         <div class="date-field">
                             <label>Fecha inicio</label>
@@ -673,7 +676,7 @@
                         data-puesto="${escapeHtml(puesto.nombre || '')}"
                         ${disableAssign ? 'disabled' : ''}
                     >Asignar</button>
-                </div>
+                </div>` : ''}
 
                 <div data-card-message></div>
                 <div class="asignaciones-zone">

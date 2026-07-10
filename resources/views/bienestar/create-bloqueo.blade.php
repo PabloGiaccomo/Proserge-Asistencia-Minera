@@ -3,6 +3,9 @@
 @section('title', 'Nuevo Bloqueo - Bienestar')
 
 @section('content')
+@php
+    $canCreateBlocking = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'bienestar', 'crear');
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -72,7 +75,9 @@
                     <textarea name="detalle" class="form-control" rows="3" placeholder="Detalle adicional">{{ old('detalle') }}</textarea>
                 </div>
                 <div style="display:flex; gap:8px;">
+                    @if($canCreateBlocking)
                     <button type="submit" class="btn btn-primary btn-sm">Registrar bloqueo</button>
+                    @endif
                     <a href="{{ route('bienestar.index') }}" class="btn btn-outline btn-sm">Cancelar</a>
                 </div>
             </form>

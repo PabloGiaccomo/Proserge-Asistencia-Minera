@@ -3,6 +3,9 @@
 @section('title', 'Evaluación de Desempeño - Detalle')
 
 @section('content')
+@php
+    $canEditEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'editar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -17,9 +20,11 @@
                 </svg>
                 Volver
             </a>
+            @if($canEditEvaluation)
             <a href="{{ route('evaluaciones.desempeno.edit', $item['id']) }}" class="btn btn-primary">
                 Editar
             </a>
+            @endif
         </div>
     </div>
 </div>

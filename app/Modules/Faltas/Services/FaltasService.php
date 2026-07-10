@@ -5,6 +5,7 @@ namespace App\Modules\Faltas\Services;
 use App\Models\Falta;
 use App\Models\Usuario;
 use App\Modules\Faltas\Policies\FaltaPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -86,7 +87,7 @@ class FaltasService
 
     public function update(Usuario $usuario, Falta $falta, array $payload): array
     {
-        if (!$this->policy->update($usuario, $falta)) {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'faltas', ['editar', 'actualizar']) || !$this->policy->update($usuario, $falta)) {
             return $this->forbidden();
         }
 
@@ -98,7 +99,7 @@ class FaltasService
 
     public function corregirAsistencia(Usuario $usuario, Falta $falta, array $payload): array
     {
-        if (!$this->policy->update($usuario, $falta)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'faltas', 'corregir') || !$this->policy->update($usuario, $falta)) {
             return $this->forbidden();
         }
 
@@ -107,7 +108,7 @@ class FaltasService
 
     public function anular(Usuario $usuario, Falta $falta, array $payload): array
     {
-        if (!$this->policy->update($usuario, $falta)) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'faltas', 'anular') || !$this->policy->update($usuario, $falta)) {
             return $this->forbidden();
         }
 

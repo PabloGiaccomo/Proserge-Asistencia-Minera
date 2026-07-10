@@ -3,6 +3,14 @@
 @section('title', 'Usuarios - Proserge')
 
 @section('content')
+@php
+    $permissions = session('user.permissions', []);
+    $canCreateUser = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'crear')
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'asignar');
+    $canEditUser = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($permissions, 'usuarios', ['editar', 'actualizar']);
+    $canAssignRoles = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'asignar');
+    $canScopeUser = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'scope');
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top">
@@ -11,9 +19,9 @@
                 <p class="page-subtitle">Cada usuario debe estar vinculado a un trabajador real del módulo Personal.</p>
             </div>
             <div class="page-actions">
-                @allowed('usuarios', 'crear')
+                @if($canCreateUser)
                     <a href="{{ route('usuarios.create') }}" class="btn btn-primary">Nuevo Usuario</a>
-                @endallowed
+                @endif
             </div>
         </div>
     </div>
@@ -87,6 +95,7 @@
                                 @php
                                     $estado = $hasEstadoColumn ? strtoupper((string) $usuario->estado) : 'ACTIVO';
                                     $rolesExtra = $usuario->rolesAdicionales ?? collect();
+                                    $toggleAction = $estado === 'ACTIVO' ? 'desactivar' : 'activar';
                                 @endphp
                                 <tr>
                                     <td><code>{{ $usuario->id }}</code></td>
@@ -114,19 +123,19 @@
                                     <td>
                                         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                                             <a href="{{ route('usuarios.show', $usuario->id) }}" class="btn btn-sm btn-outline">Ver</a>
-                                            @allowed('usuarios', 'editar')
+                                            @if($canEditUser || $canAssignRoles || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', $toggleAction))
                                                 <a href="{{ route('usuarios.show', $usuario->id) }}#edicion" class="btn btn-sm btn-outline">Editar</a>
-                                            @endallowed
-                                            @allowed('usuarios', 'administrar')
+                                            @endif
+                                            @if($canScopeUser)
                                                 <a href="{{ route('usuarios.scope', $usuario->id) }}" class="btn btn-sm btn-outline">Scope Mina</a>
-                                            @endallowed
+                                            @endif
                                             @if($hasEstadoColumn)
-                                                @allowed('usuarios', 'administrar')
+                                                @allowedDirect('usuarios', $toggleAction)
                                                 <form method="POST" action="{{ route('usuarios.toggle-estado', $usuario->id) }}">
                                                     @csrf
                                                     <button type="submit" class="btn btn-sm btn-outline">{{ $estado === 'ACTIVO' ? 'Desactivar' : 'Activar' }}</button>
                                                 </form>
-                                                @endallowed
+                                                @endallowedDirect
                                             @endif
                                         </div>
                                     </td>

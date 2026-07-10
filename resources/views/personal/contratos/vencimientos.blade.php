@@ -5,10 +5,23 @@
 @section('content')
 @php
     $permissions = session('user.permissions', []);
-    $canManage = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
-    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allows($permissions, 'personal', 'exportar');
+    $canRegisterVencimiento = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'vencimientos', 'registrar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', 'registrar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'vencimientos', 'actualizar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', 'actualizar');
+    $canRenewFromVencimientos = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'vencimientos', 'renovar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', 'renovar');
+    $canExportVencimientos = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'vencimientos', 'exportar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_vencimientos', 'exportar');
+    $canViewWorkerDetail = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_detalle');
+    $canViewPersonalReason = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_motivo');
+    $canManage = $canRegisterVencimiento;
+    $canDownloadContractFormats = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'descargar_formato_contrato');
     $canViewContractAmounts = $canManage || $canDownloadContractFormats;
     $canSelectRows = $canManage || $canDownloadContractFormats;
+    $defaultDecisionState = $canRenewFromVencimientos
+        ? \App\Models\PersonalContrato::DECISION_RENOVAR
+        : \App\Models\PersonalContrato::DECISION_EN_EVALUACION;
     $month = (int) ($filters['mes'] ?? now()->month);
     $year = (int) ($filters['anio'] ?? now()->year);
     $workerFilter = trim((string) ($filters['trabajador'] ?? ''));
@@ -825,23 +838,30 @@ textarea.expiry-field {
     <div class="card">
         <div class="card-header expiry-card-header">
             <div>
-                <span class="card-title">Contratos encontrados: {{ $contratos->count() }}</span>
+                <span class="card-title">Contratos encontrados: {{ method_exists($contratos, 'total') ? $contratos->total() : $contratos->count() }}</span>
                 @if($canSelectRows && $contratos->isNotEmpty())
                     <div class="expiry-muted" id="expirySelectedCount">0 trabajadores seleccionados</div>
                 @endif
             </div>
-            @if($canDownloadContractFormats && $contratos->isNotEmpty())
-                <div class="expiry-actions-menu" data-expiry-actions-menu>
-                    <button type="button" class="btn btn-primary btn-sm expiry-actions-toggle" id="expiryActionsToggle" aria-expanded="false" aria-controls="expiryActionsList">
-                        Acciones
-                        <span aria-hidden="true">v</span>
-                    </button>
-                    <div class="expiry-actions-list" id="expiryActionsList" hidden>
-                        <button type="button" data-expiry-contract-format-action>
-                            <span>Renovacion de contrato</span>
-                            <small id="expiryActionsSelectedBadge">0 sel.</small>
-                        </button>
-                    </div>
+            @if($canExportVencimientos || ($canDownloadContractFormats && $contratos->isNotEmpty()))
+                <div class="expiry-filter-actions">
+                    @if($canExportVencimientos)
+                        <a href="{{ route('personal.contratos.expiring.export', request()->query()) }}" class="btn btn-primary btn-sm">Exportar Excel</a>
+                    @endif
+                    @if($canDownloadContractFormats && $contratos->isNotEmpty())
+                        <div class="expiry-actions-menu" data-expiry-actions-menu>
+                            <button type="button" class="btn btn-primary btn-sm expiry-actions-toggle" id="expiryActionsToggle" aria-expanded="false" aria-controls="expiryActionsList">
+                                Acciones
+                                <span aria-hidden="true">v</span>
+                            </button>
+                            <div class="expiry-actions-list" id="expiryActionsList" hidden>
+                                <button type="button" data-expiry-contract-format-action>
+                                    <span>Renovacion de contrato</span>
+                                    <small id="expiryActionsSelectedBadge">0 sel.</small>
+                                </button>
+                            </div>
+                        </div>
+                    @endif
                 </div>
             @endif
         </div>
@@ -888,11 +908,14 @@ textarea.expiry-field {
                                     $contractType = $contrato->getAttribute('tipo_contrato_visual') ?: 'SIN_TIPO';
                                     $contractTypeLabel = $contrato->getAttribute('tipo_contrato_label') ?: ($contractType === 'SIN_TIPO' ? '-' : $contractType);
                                     $enListaNegra = (bool) ($personal?->en_lista_negra ?? false);
-                                    $listaNegraMotivo = trim((string) ($personal?->lista_negra_motivo ?? ''));
+                                    $showBlacklistReason = $enListaNegra && $canViewPersonalReason;
+                                    $listaNegraMotivo = $showBlacklistReason ? trim((string) ($personal?->lista_negra_motivo ?? '')) : '';
                                     $listaNegraPor = $personal?->relationLoaded('listaNegraPor') ? $personal?->listaNegraPor : null;
-                                    $listaNegraPorNombre = trim((string) ($listaNegraPor?->personal?->nombre_completo ?: $listaNegraPor?->email ?: 'No registrado'));
+                                    $listaNegraPorNombre = $showBlacklistReason
+                                        ? trim((string) ($listaNegraPor?->personal?->nombre_completo ?: $listaNegraPor?->email ?: 'No registrado'))
+                                        : '';
                                     $listaNegraFecha = '-';
-                                    if ($personal?->lista_negra_at) {
+                                    if ($showBlacklistReason && $personal?->lista_negra_at) {
                                         try {
                                             $listaNegraFecha = \Illuminate\Support\Carbon::parse($personal->lista_negra_at)->format('d/m/Y H:i');
                                         } catch (\Throwable) {
@@ -909,6 +932,9 @@ textarea.expiry-field {
                                         'lista_negra_fecha' => $listaNegraFecha,
                                         'lista_negra_por_nombre' => $listaNegraPorNombre,
                                     ];
+                                    $workerDetailUrl = ($canViewWorkerDetail && $contrato->personal_id)
+                                        ? route('personal.show', $contrato->personal_id)
+                                        : '';
                                     $previousContractsPayload = collect($contrato->getAttribute('previous_contracts_summary') ?? [])
                                         ->map(fn ($item): array => [
                                             'numero' => (int) ($item['numero'] ?? 0),
@@ -924,7 +950,7 @@ textarea.expiry-field {
                                     data-can-decision="{{ $canRegisterDecision ? '1' : '0' }}"
                                     data-contract-type="{{ $contractType }}"
                                     data-next-start="{{ $nextStart }}"
-                                    data-worker-url="{{ route('personal.show', $contrato->personal_id) }}"
+                                    data-worker-url="{{ $workerDetailUrl }}"
                                     data-contract-worker='@json($workerPayload)'
                                     data-worker-name="{{ $personal?->nombre_completo ?: 'Trabajador' }}"
                                     data-worker-document="{{ $workerDocument ?: '' }}"
@@ -1032,7 +1058,19 @@ textarea.expiry-field {
                                                     </svg>
                                                 </button>
                                             @endif
-                                            @if($enListaNegra)
+                                            @if($canViewWorkerDetail && $workerDetailUrl !== '')
+                                                <a
+                                                    href="{{ $workerDetailUrl }}"
+                                                    class="expiry-icon-action"
+                                                    title="Ver detalle"
+                                                    aria-label="Ver detalle de {{ $personal?->nombre_completo ?: 'trabajador' }}">
+                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                        <path d="M2.5 12C4.7 7.8 8 5.7 12 5.7C16 5.7 19.3 7.8 21.5 12C19.3 16.2 16 18.3 12 18.3C8 18.3 4.7 16.2 2.5 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                                                        <path d="M12 15.2C13.8 15.2 15.2 13.8 15.2 12C15.2 10.2 13.8 8.8 12 8.8C10.2 8.8 8.8 10.2 8.8 12C8.8 13.8 10.2 15.2 12 15.2Z" stroke="currentColor" stroke-width="2"/>
+                                                    </svg>
+                                                </a>
+                                            @endif
+                                            @if($showBlacklistReason)
                                                 <button
                                                     type="button"
                                                     class="expiry-icon-action js-expiry-blacklist-reason"
@@ -1045,7 +1083,7 @@ textarea.expiry-field {
                                                         <path d="M10.3 4.2L2.8 17.2C2 18.6 3 20.3 4.6 20.3H19.4C21 20.3 22 18.6 21.2 17.2L13.7 4.2C12.9 2.8 11.1 2.8 10.3 4.2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
                                                     </svg>
                                                 </button>
-                                            @elseif(!$canManage)
+                                            @elseif(!$canManage && !$canViewWorkerDetail)
                                                 <span class="expiry-muted">-</span>
                                             @endif
                                         </div>
@@ -1055,6 +1093,76 @@ textarea.expiry-field {
                         </tbody>
                     </table>
                 </div>
+
+                @if($contratos instanceof \Illuminate\Pagination\LengthAwarePaginator && $contratos->hasPages())
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
+                        <div style="display:flex; align-items:center; gap:10px; color:#475569; font-size:13px;">
+                            <span>Mostrando {{ $contratos->firstItem() }} - {{ $contratos->lastItem() }} de {{ $contratos->total() }}</span>
+                            <label style="display:flex; align-items:center; gap:6px; font-weight:800; font-size:12px; color:#475569;">
+                                Por pagina
+                                <select name="per_page" class="expiry-field" style="width:auto; min-width:70px; padding:6px 8px; font-size:13px;" onchange="this.form.submit()" form="expiryFiltersForm">
+                                    @foreach($perPageOptions ?? [10, 25, 50, 100] as $opt)
+                                        <option value="{{ $opt }}" @selected(($currentPerPage ?? 25) === $opt)>{{ $opt }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                        </div>
+                        <nav style="display:flex; align-items:center; gap:4px;" aria-label="Navegacion de paginas">
+                            @if($contratos->onFirstPage())
+                                <span style="padding:6px 10px; border:1px solid #e2e8f0; border-radius:8px; color:#94a3b8; font-size:13px; font-weight:800;">&laquo; Anterior</span>
+                            @else
+                                <a href="{{ $contratos->appends(request()->query())->previousPageUrl() }}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px; color:#0f172a; font-size:13px; font-weight:800; text-decoration:none;" rel="prev">&laquo; Anterior</a>
+                            @endif
+
+                            @php
+                                $current = $contratos->currentPage();
+                                $last = $contratos->lastPage();
+                                $startPage = max(1, $current - 2);
+                                $endPage = min($last, $current + 2);
+                            @endphp
+
+                            @if($startPage > 1)
+                                <a href="{{ $contratos->appends(request()->query())->url(1) }}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px; color:#0f172a; font-size:13px; font-weight:800; text-decoration:none;">1</a>
+                                @if($startPage > 2)
+                                    <span style="padding:6px 4px; color:#94a3b8;">&hellip;</span>
+                                @endif
+                            @endif
+
+                            @for($page = $startPage; $page <= $endPage; $page++)
+                                @if($page === $current)
+                                    <span style="padding:6px 10px; border:1px solid #0d9488; border-radius:8px; background:#0d9488; color:#fff; font-size:13px; font-weight:800;">{{ $page }}</span>
+                                @else
+                                    <a href="{{ $contratos->appends(request()->query())->url($page) }}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px; color:#0f172a; font-size:13px; font-weight:800; text-decoration:none;">{{ $page }}</a>
+                                @endif
+                            @endfor
+
+                            @if($endPage < $last)
+                                @if($endPage < $last - 1)
+                                    <span style="padding:6px 4px; color:#94a3b8;">&hellip;</span>
+                                @endif
+                                <a href="{{ $contratos->appends(request()->query())->url($last) }}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px; color:#0f172a; font-size:13px; font-weight:800; text-decoration:none;">{{ $last }}</a>
+                            @endif
+
+                            @if($contratos->hasMorePages())
+                                <a href="{{ $contratos->appends(request()->query())->nextPageUrl() }}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px; color:#0f172a; font-size:13px; font-weight:800; text-decoration:none;" rel="next">Siguiente &raquo;</a>
+                            @else
+                                <span style="padding:6px 10px; border:1px solid #e2e8f0; border-radius:8px; color:#94a3b8; font-size:13px; font-weight:800;">Siguiente &raquo;</span>
+                            @endif
+                        </nav>
+                    </div>
+                @elseif($contratos instanceof \Illuminate\Pagination\LengthAwarePaginator)
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0; color:#64748b; font-size:13px; font-weight:700;">
+                        <span>Total: {{ $contratos->total() }} contratos</span>
+                        <label style="display:flex; align-items:center; gap:6px; font-weight:800; font-size:12px; color:#475569;">
+                            Por pagina
+                            <select name="per_page" class="expiry-field" style="width:auto; min-width:70px; padding:6px 8px; font-size:13px;" onchange="this.form.submit()" form="expiryFiltersForm">
+                                @foreach($perPageOptions ?? [10, 25, 50, 100] as $opt)
+                                    <option value="{{ $opt }}" @selected(($currentPerPage ?? 25) === $opt)>{{ $opt }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                    </div>
+                @endif
             @endif
         </div>
     </div>
@@ -1117,7 +1225,8 @@ textarea.expiry-field {
                                     \App\Models\PersonalContrato::DECISION_RENOVAR,
                                     \App\Models\PersonalContrato::DECISION_NO_RENOVAR,
                                 ], true))
-                                    <option value="{{ $key }}" @selected($key === \App\Models\PersonalContrato::DECISION_RENOVAR)>{{ $label }}</option>
+                                    @continue($key === \App\Models\PersonalContrato::DECISION_RENOVAR && !$canRenewFromVencimientos)
+                                    <option value="{{ $key }}" @selected($key === $defaultDecisionState)>{{ $label }}</option>
                                 @endif
                             @endforeach
                         </select>
@@ -1384,6 +1493,7 @@ textarea.expiry-field {
     const decisionLabels = @json($decisionOptions);
     const decisionRenew = @json(\App\Models\PersonalContrato::DECISION_RENOVAR);
     const decisionNoRenew = @json(\App\Models\PersonalContrato::DECISION_NO_RENOVAR);
+    const defaultDecisionState = @json($defaultDecisionState);
     const checks = Array.from(document.querySelectorAll('.js-expiry-contract-worker-check'));
     const selectAll = document.getElementById('expirySelectAllWorkers');
     const selectedCount = document.getElementById('expirySelectedCount');
@@ -1529,7 +1639,7 @@ textarea.expiry-field {
             }).join('');
         }
         if (modalState) {
-            modalState.value = decisionRenew;
+            modalState.value = defaultDecisionState;
         }
         if (renewalStart) {
             renewalStart.value = selected[0].closest('tr')?.dataset.nextStart || '';
@@ -1545,7 +1655,7 @@ textarea.expiry-field {
     }
 
     function toggleDecisionFields() {
-        const value = modalState?.value || decisionRenew;
+        const value = modalState?.value || defaultDecisionState;
         const isRenew = value === decisionRenew;
         const isNoRenew = value === decisionNoRenew;
         document.querySelectorAll('[data-expiry-renewal-field]').forEach(function (field) {
@@ -1707,7 +1817,7 @@ textarea.expiry-field {
                 throw new Error(data.message || 'No se pudo registrar la decision.');
             }
 
-            const selectedState = String(modalState?.value || decisionRenew);
+            const selectedState = String(modalState?.value || defaultDecisionState);
             const label = decisionLabels[selectedState] || 'Decision registrada';
             selected.forEach(function (input) {
                 const row = input.closest('tr');

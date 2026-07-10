@@ -4,6 +4,7 @@
 
 @php
 $parada_id = request('parada_id', 'MP-202');
+$canCreateManPowerGroup = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'man_power', 'crear');
 
 $grupos = [
     [
@@ -60,10 +61,12 @@ $grupos = [
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
                 Volver a Man Power
             </a>
-            <a href="{{ route('man-power.grupo-crear', ['parada_id' => $parada_id]) }}" class="btn-nuevo">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Nuevo Grupo
-            </a>
+            @if($canCreateManPowerGroup)
+                <a href="{{ route('man-power.grupo-crear', ['parada_id' => $parada_id]) }}" class="btn-nuevo">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Nuevo Grupo
+                </a>
+            @endif
         </div>
         <div class="header-main">
             <h1 class="page-title">Grupos de Trabajo</h1>

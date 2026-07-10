@@ -26,8 +26,17 @@
     };
 
     $permissions = session('user.permissions', []);
-    $canManageContracts = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']);
-    $canDeleteContracts = \App\Support\Rbac\PermissionMatrix::allowsAny($permissions, 'personal', ['eliminar', 'administrar']);
+    $canPrepareContracts = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'actualizar');
+    $canRenewContract = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($permissions, 'personal', ['renovar', 'actualizar'])
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_contratos', 'renovar');
+    $canReentryContract = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($permissions, 'personal', ['reingresar', 'actualizar'])
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_contratos', 'reingresar');
+    $canEditContractData = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'editar_datos_contrato');
+    $canUploadSignedContractFile = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'subir_contrato_firmado');
+    $canDeleteContracts = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'eliminar');
+    $canEditWorker = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($permissions, 'personal', ['editar', 'actualizar', 'editar_ficha']);
+    $canViewDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'ver');
     $estadoPersonal = strtoupper((string) ($trabajador['estado'] ?? $personal->estado ?? ''));
     $preparingContract = $contratos
         ->filter(fn ($contrato): bool => strtoupper((string) $contrato->estado) === 'PREPARACION')
@@ -401,11 +410,15 @@
                 <p class="page-subtitle">{{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}</p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-                @if($canManageContracts)
+                @if($canPrepareContracts)
                     <a href="{{ route('personal.antiguo.regularize', $personal->id) }}" class="btn btn-outline btn-sm">Regularizar contratos</a>
                 @endif
-                <a href="{{ route('personal.documentos.index', $personal->id) }}" class="btn btn-outline btn-sm">Documentos</a>
-                <a href="{{ route('personal.edit', $personal->id) }}" class="btn btn-outline btn-sm">Editar trabajador</a>
+                @if($canViewDocuments)
+                    <a href="{{ route('personal.documentos.index', $personal->id) }}" class="btn btn-outline btn-sm">Documentos</a>
+                @endif
+                @if($canEditWorker)
+                    <a href="{{ route('personal.edit', $personal->id) }}" class="btn btn-outline btn-sm">Editar trabajador</a>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-primary btn-sm">Volver</a>
             </div>
         </div>
@@ -433,7 +446,7 @@
         </div>
     </div>
 
-    @if($canManageContracts)
+    @if($canPrepareContracts || $canRenewContract || $canReentryContract)
         <div class="contract-flow-card">
             @if($hasPreparation)
                 <div class="contract-flow-head">
@@ -447,9 +460,11 @@
                             @endif
                         </p>
                     </div>
-                    <a href="{{ route('personal.contrato-datos.edit', $personal->id) }}" class="btn btn-primary btn-sm">Editar contrato en preparacion</a>
+                    @if($canEditContractData)
+                        <a href="{{ route('personal.contrato-datos.edit', $personal->id) }}" class="btn btn-primary btn-sm">Editar contrato en preparacion</a>
+                    @endif
                 </div>
-            @elseif($hasRenewableContract)
+            @elseif($hasRenewableContract && $canRenewContract)
                 <div class="contract-flow-head">
                     <div>
                         <h2 class="contract-flow-title">Renovar contrato</h2>
@@ -480,7 +495,7 @@
                         <button type="submit" class="btn btn-primary btn-sm">Renovar contrato</button>
                     </div>
                 </form>
-            @elseif($estadoPersonal === 'CESADO')
+            @elseif($estadoPersonal === 'CESADO' && $canReentryContract)
                 <div class="contract-flow-head">
                     <div>
                         <h2 class="contract-flow-title">Reingresar trabajador</h2>
@@ -545,9 +560,9 @@
                                     $activadoPor = $contrato->activadoPor?->personal?->nombre_completo ?: $contrato->activadoPor?->email ?: 'No registrado';
                                     $cerradoPor = $contrato->cerradoPor?->personal?->nombre_completo ?: $contrato->cerradoPor?->email ?: 'No registrado';
                                     $estadoContrato = strtoupper((string) $contrato->estado);
-                                    $canEditContract = $canManageContracts && $estadoContrato !== 'ANULADO';
+                                    $canEditContract = $canEditContractData && $estadoContrato !== 'ANULADO';
                                     $canAnnul = $canDeleteContracts && $estadoContrato !== 'ANULADO';
-                                    $canUploadSignedContract = $canManageContracts && $contratoService->canUploadSignedFileForContract($contrato);
+                                    $canUploadSignedContract = $canUploadSignedContractFile && $contratoService->canUploadSignedFileForContract($contrato);
                                     $contractLabel = $contratoService->contractDisplayLabel($contrato);
                                     $relatedRenewals = $renewalsByOrigin->get($contrato->id, collect());
                                 @endphp

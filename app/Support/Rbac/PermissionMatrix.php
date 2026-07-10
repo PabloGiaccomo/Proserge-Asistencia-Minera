@@ -128,6 +128,29 @@ class PermissionMatrix
         return false;
     }
 
+    public static function allowsDirect(mixed $rawPermissions, string $module, string $action = 'ver'): bool
+    {
+        $matrix = self::normalize($rawPermissions);
+
+        if (($matrix[$module][$action] ?? false) === true) {
+            return true;
+        }
+
+        return $action !== 'administrar'
+            && (($matrix[$module]['administrar'] ?? false) === true);
+    }
+
+    public static function allowsDirectAny(mixed $rawPermissions, string $module, array $actions): bool
+    {
+        foreach ($actions as $action) {
+            if (self::allowsDirect($rawPermissions, $module, $action)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function allowsAny(mixed $rawPermissions, string $module, array $actions): bool
     {
         foreach ($actions as $action) {
@@ -148,6 +171,15 @@ class PermissionMatrix
         return self::allows(self::effectivePermissions($usuario), $module, $action);
     }
 
+    public static function userCanDirect(?Usuario $usuario, string $module, string $action = 'ver'): bool
+    {
+        if (!$usuario) {
+            return false;
+        }
+
+        return self::allowsDirect(self::effectivePermissions($usuario), $module, $action);
+    }
+
     public static function userCanAny(?Usuario $usuario, string $module, array $actions): bool
     {
         if (!$usuario) {
@@ -155,6 +187,15 @@ class PermissionMatrix
         }
 
         return self::allowsAny(self::effectivePermissions($usuario), $module, $actions);
+    }
+
+    public static function userCanDirectAny(?Usuario $usuario, string $module, array $actions): bool
+    {
+        if (!$usuario) {
+            return false;
+        }
+
+        return self::allowsDirectAny(self::effectivePermissions($usuario), $module, $actions);
     }
 
     private static function matrixAllows(array $matrix, string $module, string $action): bool
@@ -186,6 +227,14 @@ class PermissionMatrix
             }
         }
 
+        foreach (self::relatedModulesFor($module) as $relatedModule) {
+            $checks[] = [$relatedModule, $action];
+
+            foreach (self::fallbackActionsFor($action) as $fallbackAction) {
+                $checks[] = [$relatedModule, $fallbackAction];
+            }
+        }
+
         return collect($checks)
             ->unique(fn (array $check) => $check[0] . '.' . $check[1])
             ->values()
@@ -198,12 +247,26 @@ class PermissionMatrix
             'personal_ingresos',
             'personal_documentos',
             'personal_contratos',
+            'vencimientos',
             'personal_vencimientos',
             'personal_puestos',
             'personal_lista_negra',
             'habilitacion_minera' => 'personal',
             'transportes' => 'rq_mina',
             default => null,
+        };
+    }
+
+    private static function relatedModulesFor(string $module): array
+    {
+        return match ($module) {
+            'vencimientos' => ['personal_vencimientos'],
+            'personal_vencimientos' => ['vencimientos'],
+            'logistica' => ['epps', 'herramientas', 'transportes'],
+            'epps',
+            'herramientas',
+            'transportes' => ['logistica'],
+            default => [],
         };
     }
 
@@ -228,6 +291,9 @@ class PermissionMatrix
             'subir_contrato_firmado',
             'gestionar_lista_negra',
             'gestionar_puestos' => [$action],
+            'activar',
+            'desactivar',
+            'rechazar',
             'crear',
             'editar',
             'actualizar',
@@ -325,7 +391,37 @@ class PermissionMatrix
     {
         return match ($legacyAction) {
             'read' => ['ver'],
-            'write' => ['crear', 'editar', 'actualizar', 'asignar'],
+            'write' => [
+                'crear',
+                'editar',
+                'actualizar',
+                'importar',
+                'exportar',
+                'configurar',
+                'registrar',
+                'programar',
+                'asignar',
+                'desasignar',
+                'completar',
+                'entregar',
+                'recepcionar',
+                'devolver',
+                'subir',
+                'enviar',
+                'duplicar',
+                'corregir',
+                'reabrir',
+                'renovar',
+                'regularizar',
+                'reingresar',
+                'anular',
+                'cerrar',
+                'marcar_no_aplica',
+                'observar',
+                'aprobar',
+                'comunicar',
+                'convalidar',
+            ],
             'manage', 'admin' => ['administrar'],
             default => [],
         };

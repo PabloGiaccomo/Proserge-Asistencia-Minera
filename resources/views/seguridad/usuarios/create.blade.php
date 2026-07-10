@@ -3,6 +3,9 @@
 @section('title', 'Nuevo Usuario - Proserge')
 
 @section('content')
+@php
+    $canAssignRoles = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'usuarios', 'asignar');
+@endphp
 <div class="module-page">
     <div class="page-header">
         <div class="page-header-top">
@@ -95,6 +98,11 @@
                     </div>
                     <div class="form-actions" style="justify-content: flex-start;">
                         <a href="{{ route('usuarios.show', $trabajadorSeleccionado->usuario->id) }}" class="btn btn-outline">Ver usuario existente</a>
+                    </div>
+                @elseif(!$canAssignRoles)
+                    <div class="alert alert-error">
+                        <strong>No tienes permiso para asignar roles.</strong>
+                        <p style="margin-top: 8px;">Para crear un usuario es necesario definir su rol inicial.</p>
                     </div>
                 @else
                     <form method="POST" action="{{ route('usuarios.store') }}">

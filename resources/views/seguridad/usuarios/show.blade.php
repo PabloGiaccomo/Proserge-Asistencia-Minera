@@ -8,6 +8,14 @@
     $areaRoleIds = $usuario->rolesAdicionales->filter(fn ($rol) => ($rol->pivot->tipo ?? null) === 'area')->pluck('id')->values()->all();
     $cargoRoleIds = $usuario->rolesAdicionales->filter(fn ($rol) => ($rol->pivot->tipo ?? null) === 'cargo')->pluck('id')->values()->all();
     $notificationsAllowed = !isset($notificationUserSetting) || $notificationUserSetting === null || (bool) $notificationUserSetting->in_app_enabled;
+    $permissions = session('user.permissions', []);
+    $canEditUser = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($permissions, 'usuarios', ['editar', 'actualizar']);
+    $canAssignRoles = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'asignar');
+    $canActivateUser = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'activar');
+    $canDeactivateUser = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'desactivar');
+    $canChangeStatus = $hasEstadoColumn && ($estado === 'ACTIVO' ? $canDeactivateUser : $canActivateUser);
+    $canSaveUser = $canEditUser || $canAssignRoles || $canChangeStatus;
+    $canScopeUser = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', 'scope');
 @endphp
 <div class="module-page">
     <div class="page-header">
@@ -18,9 +26,9 @@
             </div>
             <div class="page-actions">
                 <a href="{{ route('usuarios.index') }}" class="btn btn-outline">Volver</a>
-                @allowed('usuarios', 'administrar')
+                @if($canScopeUser)
                     <a href="{{ route('usuarios.scope', $usuario->id) }}" class="btn btn-outline">Scope Mina</a>
-                @endallowed
+                @endif
             </div>
         </div>
     </div>
@@ -69,33 +77,48 @@
                 <span class="card-title">Editar credenciales y permisos base</span>
             </div>
             <div class="card-body">
-                @allowed('usuarios', 'editar')
+                @if($canSaveUser)
                 <form method="POST" action="{{ route('usuarios.update', $usuario->id) }}">
                     @csrf
                     @method('PUT')
 
                     <div class="form-group">
                         <label class="form-label required">Correo</label>
-                        <input type="email" name="email" class="form-control" value="{{ old('email', $usuario->email) }}" required>
+                        @if($canEditUser)
+                            <input type="email" name="email" class="form-control" value="{{ old('email', $usuario->email) }}" required>
+                        @else
+                            <input type="hidden" name="email" value="{{ $usuario->email }}">
+                            <input type="email" class="form-control" value="{{ $usuario->email }}" readonly>
+                        @endif
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label required">Rol</label>
-                            <select name="rol_id" class="form-control" required>
-                                <option value="">Selecciona un rol</option>
-                                @foreach($roles as $rol)
-                                    <option value="{{ $rol->id }}" {{ old('rol_id', $usuario->rol_id) === $rol->id ? 'selected' : '' }}>{{ $rol->nombre }}</option>
-                                @endforeach
-                            </select>
+                            @if($canAssignRoles)
+                                <select name="rol_id" class="form-control" required>
+                                    <option value="">Selecciona un rol</option>
+                                    @foreach($roles as $rol)
+                                        <option value="{{ $rol->id }}" {{ old('rol_id', $usuario->rol_id) === $rol->id ? 'selected' : '' }}>{{ $rol->nombre }}</option>
+                                    @endforeach
+                                </select>
+                            @else
+                                <input type="hidden" name="rol_id" value="{{ $usuario->rol_id }}">
+                                <input type="text" class="form-control" value="{{ $usuario->rol?->nombre ?? '-' }}" readonly>
+                            @endif
                         </div>
                         @if($hasEstadoColumn)
                             <div class="form-group">
                                 <label class="form-label required">Estado</label>
-                                <select name="estado" class="form-control" required>
-                                    <option value="ACTIVO" {{ old('estado', $estado) === 'ACTIVO' ? 'selected' : '' }}>Activo</option>
-                                    <option value="INACTIVO" {{ old('estado', $estado) === 'INACTIVO' ? 'selected' : '' }}>Inactivo</option>
-                                </select>
+                                @if($canChangeStatus)
+                                    <select name="estado" class="form-control" required>
+                                        <option value="ACTIVO" {{ old('estado', $estado) === 'ACTIVO' ? 'selected' : '' }}>Activo</option>
+                                        <option value="INACTIVO" {{ old('estado', $estado) === 'INACTIVO' ? 'selected' : '' }}>Inactivo</option>
+                                    </select>
+                                @else
+                                    <input type="hidden" name="estado" value="{{ $estado }}">
+                                    <input type="text" class="form-control" value="{{ $estado }}" readonly>
+                                @endif
                             </div>
                         @endif
                     </div>
@@ -107,6 +130,7 @@
                         $cargos = ($roleBuckets['cargos'] ?? collect());
                     @endphp
 
+                    @if($canAssignRoles)
                     <div class="role-accesses" data-role-manager>
                         <h3 class="role-accesses-title">Roles del usuario</h3>
 
@@ -168,6 +192,24 @@
                             </div>
                         </div>
                     </div>
+                    @else
+                        <div class="role-accesses">
+                            <h3 class="role-accesses-title">Roles del usuario</h3>
+                            <p style="color: var(--color-text-secondary); margin: 0 0 12px;">No tienes permiso para asignar o cambiar roles.</p>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                <span class="badge badge-success">{{ $usuario->rol?->nombre ?? '-' }}</span>
+                                @foreach($usuario->rolesAdicionales as $rol)
+                                    <span class="badge badge-info">{{ $rol->nombre }}</span>
+                                @endforeach
+                            </div>
+                            @foreach($areaRoleIds as $roleId)
+                                <input type="hidden" name="area_role_ids[]" value="{{ $roleId }}">
+                            @endforeach
+                            @foreach($cargoRoleIds as $roleId)
+                                <input type="hidden" name="cargo_role_ids[]" value="{{ $roleId }}">
+                            @endforeach
+                        </div>
+                    @endif
 
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">Guardar cambios</button>
@@ -175,7 +217,7 @@
                 </form>
                 @else
                     <p style="color: var(--color-text-secondary);">No tienes permiso para editar este usuario.</p>
-                @endallowed
+                @endif
             </div>
         </div>
     </div>
@@ -186,7 +228,7 @@
                 <span class="card-title">Cambiar contraseña</span>
             </div>
             <div class="card-body">
-                @allowed('usuarios', 'administrar')
+                @allowedDirect('usuarios', 'configurar')
                 <form method="POST" action="{{ route('usuarios.password', $usuario->id) }}">
                     @csrf
                     <div class="form-row">
@@ -205,7 +247,7 @@
                 </form>
                 @else
                     <p style="color: var(--color-text-secondary);">No tienes permiso para cambiar contraseñas.</p>
-                @endallowed
+                @endallowedDirect
             </div>
         </div>
 
@@ -225,9 +267,9 @@
                     </div>
                 @endif
 
-                @allowed('usuarios', 'administrar')
+                @if($canScopeUser)
                     <a href="{{ route('usuarios.scope', $usuario->id) }}" class="btn btn-outline">Configurar Scope Mina</a>
-                @endallowed
+                @endif
             </div>
         </div>
     </div>
@@ -238,7 +280,7 @@
             <span class="card-badge">{{ ($notificationTypes ?? collect())->count() }} tipos</span>
         </div>
         <div class="card-body">
-            @allowed('usuarios', 'administrar')
+            @allowedDirect('usuarios', 'configurar')
                 <form method="POST" action="{{ route('usuarios.notificaciones', $usuario->id) }}">
                     @csrf
                     <div class="notification-screen-card" style="margin-bottom:14px;">
@@ -315,7 +357,7 @@
                 </form>
             @else
                 <p style="color: var(--color-text-secondary);">No tienes permiso para administrar notificaciones de usuario.</p>
-            @endallowed
+            @endallowedDirect
         </div>
     </div>
 

@@ -92,6 +92,10 @@ class LogisticaDashboardService
         $missingSizeWorkers = $this->missingSizeWorkers($workers);
         $stockRows = $this->stockRows($requirements, $workers);
         $expiringDeliveries = $this->expiringDeliveries($activeDeliveries);
+        $filteredExpiringDeliveries = $this->filterExpiringDeliveries(
+            $this->expiringDeliveries($activeDeliveries, false),
+            $filters['vencimientos']
+        );
         $mineSummary = $this->mineSummary($workers);
         $cargoSummary = $this->cargoSummary($workers);
         $heatmap = $this->missingHeatmap($workerEppRows);
@@ -144,6 +148,7 @@ class LogisticaDashboardService
             'stockRows' => $stockRows,
             'recentDeliveries' => $this->recentDeliveries($deliveries),
             'expiringDeliveries' => $expiringDeliveries,
+            'filteredExpiringDeliveries' => $filteredExpiringDeliveries,
             'urgentActions' => $urgentActions,
             'toolsRows' => $this->toolsRows(),
             'serviceRows' => $this->serviceRows(),
@@ -178,7 +183,7 @@ class LogisticaDashboardService
 
     private function filters(array $query, array $tabs): array
     {
-        $tab = in_array($query['tab'] ?? '', $tabs, true) ? (string) $query['tab'] : self::TAB_DASHBOARD;
+        $tab = $this->normalizeTab((string) ($query['tab'] ?? ''), $tabs);
 
         return [
             'tab' => $tab,
@@ -194,7 +199,27 @@ class LogisticaDashboardService
             'fecha_hasta' => trim((string) ($query['fecha_hasta'] ?? '')),
             'epps' => $this->arrayFilter($query['epps'] ?? []),
             'tallas' => $this->arrayFilter($query['tallas'] ?? []),
+            'vencimientos' => [
+                'q' => trim((string) ($query['venc_q'] ?? '')),
+                'mina_id' => trim((string) ($query['venc_mina_id'] ?? '')),
+                'epp_id' => trim((string) ($query['venc_epp_id'] ?? '')),
+                'talla' => trim((string) ($query['venc_talla'] ?? '')),
+                'estado' => trim((string) ($query['venc_estado'] ?? '')),
+                'rango' => trim((string) ($query['venc_rango'] ?? '30')),
+                'fecha_desde' => trim((string) ($query['venc_fecha_desde'] ?? '')),
+                'fecha_hasta' => trim((string) ($query['venc_fecha_hasta'] ?? '')),
+            ],
         ];
+    }
+
+    private function normalizeTab(string $tab, array $tabs): string
+    {
+        $tab = match ($tab) {
+            'entregas-epp', 'entregas_epp', 'epp-entregas' => self::TAB_ENTREGAS,
+            default => $tab,
+        };
+
+        return in_array($tab, $tabs, true) ? $tab : self::TAB_DASHBOARD;
     }
 
     private function arrayFilter(mixed $value): array
@@ -254,22 +279,75 @@ class LogisticaDashboardService
             return collect();
         }
 
+        $today = now()->startOfDay();
+
         return RQMina::query()
             ->with('mina:id,nombre')
             ->latest('fecha_inicio')
             ->limit(150)
             ->get(['id', 'mina_id', 'area', 'fecha_inicio', 'fecha_fin'])
-            ->map(function (RQMina $rqMina): array {
+            ->map(function (RQMina $rqMina) use ($today): array {
                 $mina = $rqMina->mina?->nombre ?: 'Sin mina';
                 $area = $rqMina->area ?: 'Sin area';
-                $inicio = $rqMina->fecha_inicio?->format('d/m/Y') ?: 'sin inicio';
-                $fin = $rqMina->fecha_fin?->format('d/m/Y') ?: 'sin fin';
+                $inicioDate = $rqMina->fecha_inicio;
+                $finDate = $rqMina->fecha_fin;
+                $inicioLabel = $inicioDate?->format('d/m/Y') ?: 'sin inicio';
+                $finLabel = $finDate?->format('d/m/Y') ?: 'sin fin';
+
+                $diasParaInicio = $inicioDate ? (int) $today->diffInDays($inicioDate, false) : null;
+                $diasParaFin = $finDate ? (int) $today->diffInDays($finDate, false) : null;
+
+                if ($inicioDate && $inicioDate->lte($today) && $finDate && $finDate->gte($today)) {
+                    $estado = 'EN_CURSO';
+                    $estadoLabel = 'En curso';
+                    $tiempoTexto = 'Día ' . ((int) $today->diffInDays($inicioDate) + 1) . ' de ' . ((int) $inicioDate->diffInDays($finDate) + 1);
+                } elseif ($diasParaInicio !== null && $diasParaInicio < 0) {
+                    $estado = 'FINALIZADA';
+                    $estadoLabel = 'Finalizada';
+                    $diasTranscurridos = abs($diasParaFin ?? abs($diasParaInicio));
+                    $tiempoTexto = 'Terminó hace ' . $diasTranscurridos . ' día' . ($diasTranscurridos !== 1 ? 's' : '');
+                } elseif ($diasParaInicio !== null && $diasParaInicio <= 7) {
+                    $estado = 'POR_INICIAR';
+                    $estadoLabel = 'Muy próxima';
+                    $tiempoTexto = 'Comienza en ' . $diasParaInicio . ' día' . ($diasParaInicio !== 1 ? 's' : '');
+                } elseif ($diasParaInicio !== null) {
+                    $estado = 'PROXIMA';
+                    $estadoLabel = 'Próxima';
+                    $tiempoTexto = 'Comienza en ' . $diasParaInicio . ' día' . ($diasParaInicio !== 1 ? 's' : '');
+                } else {
+                    $estado = 'SIN_FECHA';
+                    $estadoLabel = 'Sin fecha';
+                    $tiempoTexto = '';
+                }
 
                 return [
                     'id' => $rqMina->id,
-                    'label' => "{$mina} - {$area} ({$inicio} al {$fin})",
+                    'mina_id' => $rqMina->mina_id,
+                    'mina_nombre' => $mina,
+                    'area' => $rqMina->area ?: '',
+                    'fecha_inicio' => $inicioDate?->toDateString() ?: '',
+                    'fecha_fin' => $finDate?->toDateString() ?: '',
+                    'fecha_inicio_label' => $inicioLabel,
+                    'fecha_fin_label' => $finLabel,
+                    'estado' => $estado,
+                    'estado_label' => $estadoLabel,
+                    'tiempo_texto' => $tiempoTexto,
+                    'dias_para_inicio' => $diasParaInicio,
+                    'label' => "{$mina} - {$area} ({$inicioLabel} al {$finLabel})",
                 ];
-            });
+            })
+            ->sort(function (array $a, array $b): int {
+                $order = ['EN_CURSO' => 0, 'POR_INICIAR' => 1, 'PROXIMA' => 2, 'FINALIZADA' => 3, 'SIN_FECHA' => 4];
+                $aOrder = $order[$a['estado']] ?? 99;
+                $bOrder = $order[$b['estado']] ?? 99;
+
+                if ($aOrder !== $bOrder) {
+                    return $aOrder <=> $bOrder;
+                }
+
+                return ($a['dias_para_inicio'] ?? 999) <=> ($b['dias_para_inicio'] ?? 999);
+            })
+            ->values();
     }
 
     private function tallaOptions(Collection $epps): Collection
@@ -724,6 +802,19 @@ class LogisticaDashboardService
         return (string) ($relations->first()?->mina?->nombre ?: 'Sin mina');
     }
 
+    private function workerMineIds(Personal $worker): array
+    {
+        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+
+        return $relations
+            ->pluck('mina_id')
+            ->filter()
+            ->map(static fn ($id): string => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     private function classifyDeliveryState(?EppEntrega $delivery): string
     {
         if (! $delivery) {
@@ -1168,11 +1259,11 @@ class LogisticaDashboardService
             ->values();
     }
 
-    private function expiringDeliveries(Collection $activeDeliveries): Collection
+    private function expiringDeliveries(Collection $activeDeliveries, bool $onlyNextThirtyDays = true): Collection
     {
         $today = now()->startOfDay();
 
-        return $activeDeliveries
+        $rows = $activeDeliveries
             ->filter(fn (EppEntrega $delivery): bool => $delivery->fecha_vencimiento_calendario !== null)
             ->map(function (EppEntrega $delivery) use ($today): array {
                 $row = $this->deliveryRow($delivery);
@@ -1190,10 +1281,74 @@ class LogisticaDashboardService
                 );
 
                 return $row;
-            })
-            ->filter(fn (array $row): bool => $row['dias'] <= 30)
+            });
+
+        if ($onlyNextThirtyDays) {
+            $rows = $rows->filter(fn (array $row): bool => $row['dias'] <= 30);
+        }
+
+        return $rows
             ->sortBy('dias')
-            ->take(100)
+            ->take($onlyNextThirtyDays ? 100 : 300)
+            ->values();
+    }
+
+    private function filterExpiringDeliveries(Collection $rows, array $filters): Collection
+    {
+        $search = $this->normalizeText($filters['q'] ?? '');
+        $mineId = trim((string) ($filters['mina_id'] ?? ''));
+        $eppId = trim((string) ($filters['epp_id'] ?? ''));
+        $talla = $this->normalizeText($filters['talla'] ?? '');
+        $estado = strtoupper(trim((string) ($filters['estado'] ?? '')));
+        $rango = trim((string) ($filters['rango'] ?? '30'));
+        $desde = $this->normalizeDate($filters['fecha_desde'] ?? null);
+        $hasta = $this->normalizeDate($filters['fecha_hasta'] ?? null);
+
+        return $rows
+            ->filter(function (array $row) use ($search): bool {
+                if ($search === '') {
+                    return true;
+                }
+
+                $haystack = $this->normalizeText(implode(' ', [
+                    $row['trabajador'] ?? '',
+                    $row['documento'] ?? '',
+                    $row['epp'] ?? '',
+                ]));
+
+                return str_contains($haystack, $search);
+            })
+            ->filter(fn (array $row): bool => $mineId === '' || in_array($mineId, (array) ($row['mina_ids'] ?? []), true))
+            ->filter(fn (array $row): bool => $eppId === '' || (string) ($row['epp_id'] ?? '') === $eppId)
+            ->filter(fn (array $row): bool => $talla === '' || $this->normalizeText($row['talla'] ?? '') === $talla)
+            ->filter(fn (array $row): bool => $estado === '' || (string) ($row['estado_visual'] ?? '') === $estado)
+            ->filter(function (array $row) use ($rango): bool {
+                $days = (int) ($row['dias'] ?? 0);
+
+                return match ($rango) {
+                    'vencidos' => $days < 0,
+                    '7' => $days >= 0 && $days <= 7,
+                    '15' => $days >= 0 && $days <= 15,
+                    '30' => $days <= 30,
+                    default => true,
+                };
+            })
+            ->filter(function (array $row) use ($desde, $hasta): bool {
+                $date = $row['fecha_vencimiento_iso'] ?? null;
+                if (! $date) {
+                    return false;
+                }
+
+                if ($desde && $date < $desde) {
+                    return false;
+                }
+
+                if ($hasta && $date > $hasta) {
+                    return false;
+                }
+
+                return true;
+            })
             ->values();
     }
 
@@ -1208,14 +1363,19 @@ class LogisticaDashboardService
 
         return [
             'trabajador' => $delivery->personal?->nombre_completo ?: 'Sin trabajador',
+            'personal_id' => (string) ($delivery->personal_id ?? ''),
             'documento' => $delivery->personal?->dni ?: $delivery->personal?->numero_documento ?: '-',
             'mina' => $mine,
+            'mina_ids' => $delivery->personal ? $this->workerMineIds($delivery->personal) : [],
             'puesto' => $delivery->personal?->puesto ?: 'Por definir',
+            'epp_id' => (string) ($delivery->epp_id ?? ''),
             'epp' => $delivery->epp?->nombre ?: 'Sin EPP',
             'talla' => $this->deliverySize($delivery),
             'cantidad' => (int) ($delivery->cantidad ?? 1),
             'fecha_entrega' => $delivery->fecha_entrega?->format('d/m/Y') ?: '-',
+            'fecha_entrega_iso' => $delivery->fecha_entrega?->toDateString(),
             'fecha_vencimiento' => $delivery->fecha_vencimiento_calendario?->format('d/m/Y') ?: '-',
+            'fecha_vencimiento_iso' => $delivery->fecha_vencimiento_calendario?->toDateString(),
             'estado' => $delivery->estado,
             'tipo_movimiento' => $movement,
             'responsable' => $delivery->registradoPor?->email ?: 'Sistema',
@@ -1312,6 +1472,14 @@ class LogisticaDashboardService
                     'recepcion_estado' => $transporte->recepcion_estado ?: RQMinaActividadTransporte::RECEPCION_PENDIENTE,
                     'recepcion_estado_label' => $this->receptionStateLabel($transporte->recepcion_estado ?: RQMinaActividadTransporte::RECEPCION_PENDIENTE),
                     'recepcion_observacion' => $transporte->recepcion_observacion ?: '',
+                    'origen' => $transporte->origen ?: '',
+                    'origen_label' => $this->transportOriginLabel($transporte->origen),
+                    'placas_asignadas' => $transporte->placas_asignadas ?: '',
+                    'capacidad_camion' => $transporte->capacidad_camion ?: '',
+                    'doc_vehiculo_path' => $transporte->doc_vehiculo_path ?: '',
+                    'doc_proserge_path' => $transporte->doc_proserge_path ?: '',
+                    'doc_mantenimiento_path' => $transporte->doc_mantenimiento_path ?: '',
+                    'doc_checklist_path' => $transporte->doc_checklist_path ?: '',
                 ];
             });
     }
@@ -1354,6 +1522,11 @@ class LogisticaDashboardService
                         'recepcion_fecha',
                         'recepcion_estado',
                         'recepcion_observacion',
+                        'capacidad_camion',
+                        'doc_vehiculo_path',
+                        'doc_proserge_path',
+                        'doc_mantenimiento_path',
+                        'doc_checklist_path',
                     ]),
                     'fecha_evento' => now(),
                     'usuario_id' => $usuario->id,
@@ -1396,6 +1569,11 @@ class LogisticaDashboardService
             'recepcion_fecha' => $this->normalizeDate($payload['recepcion_fecha'] ?? null),
             'recepcion_estado' => $recepcion,
             'recepcion_observacion' => trim((string) ($payload['recepcion_observacion'] ?? '')) ?: null,
+            'capacidad_camion' => trim((string) ($payload['capacidad_camion'] ?? '')) ?: null,
+            'doc_vehiculo_path' => trim((string) ($payload['doc_vehiculo_path'] ?? '')) ?: $transporte->getOriginal('doc_vehiculo_path'),
+            'doc_proserge_path' => trim((string) ($payload['doc_proserge_path'] ?? '')) ?: $transporte->getOriginal('doc_proserge_path'),
+            'doc_mantenimiento_path' => trim((string) ($payload['doc_mantenimiento_path'] ?? '')) ?: $transporte->getOriginal('doc_mantenimiento_path'),
+            'doc_checklist_path' => trim((string) ($payload['doc_checklist_path'] ?? '')) ?: $transporte->getOriginal('doc_checklist_path'),
         ];
     }
 

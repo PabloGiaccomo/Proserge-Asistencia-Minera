@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Mina;
 use App\Modules\Catalogos\Services\MinaCatalogService;
 use App\Shared\Support\ApiResponse;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 
 class MinaController extends Controller
@@ -49,6 +50,10 @@ class MinaController extends Controller
 
     public function store(Request $request)
     {
+        if (!PermissionMatrix::userCanDirect($request->user(), 'minas', 'crear')) {
+            return $this->forbidden();
+        }
+
         $validated = $request->validate($this->rules());
 
         $mina = $this->service->create($this->buildPayload($validated));
@@ -63,6 +68,10 @@ class MinaController extends Controller
 
     public function update(Request $request, string $id)
     {
+        if (!PermissionMatrix::userCanDirectAny($request->user(), 'minas', ['editar', 'actualizar'])) {
+            return $this->forbidden();
+        }
+
         $mina = $this->service->find($id);
         if (!$mina) {
             return ApiResponse::error(
@@ -82,8 +91,12 @@ class MinaController extends Controller
         );
     }
 
-    public function inactivate(string $id)
+    public function inactivate(Request $request, string $id)
     {
+        if (!PermissionMatrix::userCanDirect($request->user(), 'minas', 'desactivar')) {
+            return $this->forbidden();
+        }
+
         $mina = $this->service->find($id);
         if (!$mina) {
             return ApiResponse::error(
@@ -157,5 +170,14 @@ class MinaController extends Controller
             'estado' => $validated['estado'],
             'paraderos' => array_values(array_filter($validated['paraderos'] ?? [], fn ($item) => is_array($item))),
         ];
+    }
+
+    private function forbidden()
+    {
+        return ApiResponse::error(
+            message: 'No tienes permiso para realizar esta accion.',
+            code: 'PERMISSION_DENIED',
+            status: 403,
+        );
     }
 }

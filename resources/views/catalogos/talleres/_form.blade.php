@@ -3,6 +3,10 @@
     $action = $isEdit ? route('catalogos.talleres.update', $item['id']) : route('catalogos.talleres.store');
     $title = $isEdit ? 'Editar Taller' : 'Nuevo Taller';
     $button = $isEdit ? 'Guardar cambios' : 'Crear taller';
+    $permissions = session('user.permissions', []);
+    $canSubmit = $isEdit
+        ? \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'talleres', 'actualizar')
+        : \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'talleres', 'crear');
 @endphp
 
 <div class="page-header">
@@ -49,7 +53,9 @@
             </div>
 
             <div style="display:flex; gap:10px; margin-top:18px;">
-                <button type="submit" class="btn btn-primary">{{ $button }}</button>
+                @if($canSubmit)
+                    <button type="submit" class="btn btn-primary">{{ $button }}</button>
+                @endif
                 <a href="{{ route('catalogos.talleres.index') }}" class="btn btn-outline">Cancelar</a>
             </div>
         </form>

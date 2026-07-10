@@ -9,6 +9,8 @@
     $fechaFin = !empty($item['fecha_fin']) ? \Carbon\Carbon::parse($item['fecha_fin']) : null;
     $semana = $fechaInicio ? $fechaInicio->isoWeek() : null;
     $anioSemana = $fechaInicio ? $fechaInicio->isoWeekYear() : null;
+    $canImportPlan = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'importar');
+    $canUpdatePlan = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'actualizar');
 @endphp
 
 @section('content')
@@ -46,7 +48,9 @@
             </p>
         </div>
         <div class="page-actions">
-            <a href="{{ route('rq-mina.plan.importar', $item['id']) }}" class="btn btn-primary">Importar plan operativo</a>
+            @if($canImportPlan)
+                <a href="{{ route('rq-mina.plan.importar', $item['id']) }}" class="btn btn-primary">Importar plan operativo</a>
+            @endif
             <a href="{{ route('rq-mina.show', $item['id']) }}" class="btn btn-outline">Volver</a>
         </div>
     </div>
@@ -124,11 +128,15 @@
         'planOperativo' => $planOperativo,
         'weekNumber' => $semana,
         'weekYear' => $anioSemana,
+        'paradaFechaInicio' => $item['fecha_inicio'] ?? '',
+        'paradaFechaFin' => $item['fecha_fin'] ?? '',
     ])
 
     <div class="form-actions" style="margin-top:16px;">
         <a href="{{ route('rq-mina.show', $item['id']) }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Guardar plan operativo</button>
+        @if($canUpdatePlan)
+            <button type="submit" class="btn btn-primary">Guardar plan operativo</button>
+        @endif
     </div>
 </form>
 

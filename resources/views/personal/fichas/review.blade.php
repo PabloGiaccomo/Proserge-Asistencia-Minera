@@ -151,6 +151,7 @@
                         'documentStateLabels' => $documentStateLabels,
                         'vidaLeyPhysicalStateLabels' => $vidaLeyPhysicalStateLabels,
                         'canUploadDocuments' => $canUploadDocuments,
+                        'canDownloadDocuments' => $canDownloadDocuments,
                         'canReviewDocuments' => $canReviewDocuments,
                         'trabajador' => $ficha->personal,
                         'ficha' => $ficha,
@@ -188,40 +189,42 @@
         </div>
     </div>
 
-    <div class="ficha-card">
-        <div class="ficha-card-header">
-            <div>
-                <h2 class="ficha-card-title">Decision de RRHH</h2>
-                <p class="ficha-card-subtitle">Aprobar deja al trabajador pendiente de contrato firmado.</p>
+    @if($canReviewDocuments)
+        <div class="ficha-card">
+            <div class="ficha-card-header">
+                <div>
+                    <h2 class="ficha-card-title">Decision de RRHH</h2>
+                    <p class="ficha-card-subtitle">Aprobar deja al trabajador pendiente de contrato firmado.</p>
+                </div>
+            </div>
+            <div class="ficha-card-body">
+                @if($ficha->estado === \App\Models\PersonalFicha::ESTADO_OBSERVADO)
+                    <div class="ficha-alert ficha-alert-warning">
+                        <strong>Ficha observada.</strong>
+                        El trabajador debe revisar sus datos. Puedes reenviar el correo con la observacion registrada.
+                        @if($ficha->observaciones_revision)
+                            <div style="margin-top:8px;">{{ $ficha->observaciones_revision }}</div>
+                        @endif
+                    </div>
+                    <form method="POST" action="{{ route('personal.fichas.resend-observation', $ficha->id) }}" style="margin-bottom:16px;">
+                        @csrf
+                        <button type="submit" class="btn btn-primary">Reenviar correo</button>
+                    </form>
+                @endif
+                <form id="approveFichaForm" method="POST" action="{{ route('personal.fichas.approve', $ficha->id) }}" class="ficha-workspace">
+                    @csrf
+                    <div class="ficha-field">
+                        <label class="ficha-label" for="observaciones_revision">Observaciones</label>
+                        <textarea class="ficha-textarea" id="observaciones_revision" name="observaciones_revision">{{ old('observaciones_revision', $ficha->observaciones_revision) }}</textarea>
+                        @error('observaciones_revision') <span class="ficha-error">{{ $message }}</span> @enderror
+                    </div>
+                    <div class="ficha-actions-bar">
+                        <button type="submit" formaction="{{ route('personal.fichas.observe', $ficha->id) }}" class="btn btn-outline">Marcar observado</button>
+                        <button type="submit" class="btn btn-primary">Aprobar trabajador</button>
+                    </div>
+                </form>
             </div>
         </div>
-        <div class="ficha-card-body">
-            @if($ficha->estado === \App\Models\PersonalFicha::ESTADO_OBSERVADO)
-                <div class="ficha-alert ficha-alert-warning">
-                    <strong>Ficha observada.</strong>
-                    El trabajador debe revisar sus datos. Puedes reenviar el correo con la observacion registrada.
-                    @if($ficha->observaciones_revision)
-                        <div style="margin-top:8px;">{{ $ficha->observaciones_revision }}</div>
-                    @endif
-                </div>
-                <form method="POST" action="{{ route('personal.fichas.resend-observation', $ficha->id) }}" style="margin-bottom:16px;">
-                    @csrf
-                    <button type="submit" class="btn btn-primary">Reenviar correo</button>
-                </form>
-            @endif
-            <form id="approveFichaForm" method="POST" action="{{ route('personal.fichas.approve', $ficha->id) }}" class="ficha-workspace">
-                @csrf
-                <div class="ficha-field">
-                    <label class="ficha-label" for="observaciones_revision">Observaciones</label>
-                    <textarea class="ficha-textarea" id="observaciones_revision" name="observaciones_revision">{{ old('observaciones_revision', $ficha->observaciones_revision) }}</textarea>
-                    @error('observaciones_revision') <span class="ficha-error">{{ $message }}</span> @enderror
-                </div>
-                <div class="ficha-actions-bar">
-                    <button type="submit" formaction="{{ route('personal.fichas.observe', $ficha->id) }}" class="btn btn-outline">Marcar observado</button>
-                    <button type="submit" class="btn btn-primary">Aprobar trabajador</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    @endif
 </div>
 @endsection

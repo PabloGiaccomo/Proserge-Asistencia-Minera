@@ -23,6 +23,11 @@ class EppPageController extends WebPageController
             'tab' => 'entregas',
             'q' => $request->query('q'),
             'estado' => $request->query('estado'),
+            'mina_id' => $request->query('mina_id'),
+            'epp_id' => $request->query('epp_id'),
+            'tipo_movimiento' => $request->query('tipo_movimiento'),
+            'fecha_desde' => $request->query('fecha_desde'),
+            'fecha_hasta' => $request->query('fecha_hasta'),
             'per_page' => $request->query('per_page'),
         ], static fn ($value): bool => $value !== null && $value !== '');
 

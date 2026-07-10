@@ -14,6 +14,10 @@ use App\Support\Rbac\PermissionMatrix;
 
 class RoleManagementService
 {
+    public function __construct(private readonly AdminProtectionService $adminProtection)
+    {
+    }
+
     public function ensureBaseRoles(): void
     {
         if (!Schema::hasTable('roles')) {
@@ -38,6 +42,16 @@ class RoleManagementService
 
             if (blank($rol->estado ?? null)) {
                 $updates['estado'] = $definition['estado'];
+            }
+
+            if ($this->adminProtection->isAdminRoleName($rol->nombre)) {
+                if (json_encode(PermissionMatrix::normalize($rol->permisos ?? [])) !== json_encode(PermissionCatalog::fullAccessMatrix())) {
+                    $updates['permisos'] = PermissionCatalog::fullAccessMatrix();
+                }
+
+                if (strtoupper((string) $rol->estado) !== 'ACTIVO') {
+                    $updates['estado'] = 'ACTIVO';
+                }
             }
 
             if ($updates !== []) {
@@ -85,17 +99,29 @@ class RoleManagementService
 
     public function update(Rol $rol, array $payload): Rol
     {
-        $rol->nombre = strtoupper(trim((string) $payload['nombre']));
-        $rol->estado = strtoupper(trim((string) ($payload['estado'] ?? 'ACTIVO')));
-        $rol->permisos = PermissionMatrix::normalize($payload['permisos'] ?? []);
+        $this->ensureBaseRoles();
 
-        if ($this->hasDescripcionColumn()) {
-            $rol->descripcion = trim((string) ($payload['descripcion'] ?? '')) ?: null;
-        }
+        return DB::transaction(function () use ($rol, $payload): Rol {
+            $lockedRol = Rol::query()->lockForUpdate()->findOrFail($rol->getKey());
+            $this->adminProtection->assertRoleUpdateAllowed($lockedRol, $payload);
 
-        $rol->save();
+            return $this->decorate($this->persistRolePayload($lockedRol, $payload)->fresh(['usuarios']));
+        });
+    }
 
-        return $this->decorate($rol->fresh(['usuarios']));
+    public function updateWithNotificationPreferences(Rol $rol, array $payload, array $typeIds, array $enabledMap): Rol
+    {
+        $this->ensureBaseRoles();
+
+        return DB::transaction(function () use ($rol, $payload, $typeIds, $enabledMap): Rol {
+            $lockedRol = Rol::query()->lockForUpdate()->findOrFail($rol->getKey());
+            $this->adminProtection->assertRoleUpdateAllowed($lockedRol, $payload);
+            $updatedRol = $this->persistRolePayload($lockedRol, $payload);
+
+            $this->syncNotificationRolePreferenceRows($updatedRol, $typeIds, $enabledMap);
+
+            return $this->decorate($updatedRol->fresh(['usuarios']));
+        });
     }
 
     public function duplicate(Rol $rol): Rol
@@ -113,10 +139,15 @@ class RoleManagementService
 
     public function toggle(Rol $rol): Rol
     {
-        $rol->estado = strtoupper((string) $rol->estado) === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
-        $rol->save();
+        return DB::transaction(function () use ($rol): Rol {
+            $lockedRol = Rol::query()->lockForUpdate()->findOrFail($rol->getKey());
+            $this->adminProtection->assertRoleToggleAllowed($lockedRol);
 
-        return $this->decorate($rol);
+            $lockedRol->estado = strtoupper((string) $lockedRol->estado) === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+            $lockedRol->save();
+
+            return $this->decorate($lockedRol);
+        });
     }
 
     public function modules(): array
@@ -185,6 +216,13 @@ class RoleManagementService
 
     public function syncNotificationRolePreferences(Rol $rol, array $typeIds, array $enabledMap): void
     {
+        DB::transaction(function () use ($rol, $typeIds, $enabledMap): void {
+            $this->syncNotificationRolePreferenceRows($rol, $typeIds, $enabledMap);
+        });
+    }
+
+    private function syncNotificationRolePreferenceRows(Rol $rol, array $typeIds, array $enabledMap): void
+    {
         if (!Schema::hasTable('notification_role_preferences') || !Schema::hasTable('notification_types')) {
             return;
         }
@@ -211,38 +249,62 @@ class RoleManagementService
             ->unique()
             ->values();
 
-        DB::transaction(function () use ($rol, $ids, $enabledIds, $existing): void {
-            foreach ($ids as $typeId) {
-                if (!$existing->has($typeId)) {
-                    continue;
-                }
-
-                $isEnabled = $enabledIds->contains($typeId);
-
-                NotificationRolePreference::query()->updateOrCreate(
-                    [
-                        'rol_id' => $rol->id,
-                        'notification_type_id' => $typeId,
-                    ],
-                    [
-                        'id' => NotificationRolePreference::query()
-                                ->where('rol_id', $rol->id)
-                                ->where('notification_type_id', $typeId)
-                                ->value('id') ?? (string) Str::uuid(),
-                        'is_enabled' => $isEnabled,
-                    ]
-                );
+        foreach ($ids as $typeId) {
+            if (!$existing->has($typeId)) {
+                continue;
             }
-        });
+
+            $isEnabled = $enabledIds->contains($typeId);
+
+            NotificationRolePreference::query()->updateOrCreate(
+                [
+                    'rol_id' => $rol->id,
+                    'notification_type_id' => $typeId,
+                ],
+                [
+                    'id' => NotificationRolePreference::query()
+                            ->where('rol_id', $rol->id)
+                            ->where('notification_type_id', $typeId)
+                            ->value('id') ?? (string) Str::uuid(),
+                    'is_enabled' => $isEnabled,
+                ]
+            );
+        }
+    }
+
+    private function persistRolePayload(Rol $rol, array $payload): Rol
+    {
+        $name = strtoupper(trim((string) $payload['nombre']));
+        $isAdmin = $this->adminProtection->isAdminRoleName($rol->nombre)
+            || $this->adminProtection->isAdminRoleName($name);
+
+        $rol->nombre = $name;
+        $rol->estado = $isAdmin ? 'ACTIVO' : strtoupper(trim((string) ($payload['estado'] ?? 'ACTIVO')));
+        $rol->permisos = $isAdmin
+            ? PermissionCatalog::fullAccessMatrix()
+            : PermissionMatrix::normalize($payload['permisos'] ?? ($rol->permisos ?? []));
+
+        if ($this->hasDescripcionColumn()) {
+            $rol->descripcion = trim((string) ($payload['descripcion'] ?? '')) ?: null;
+        }
+
+        $rol->save();
+
+        return $rol;
     }
 
     private function buildCreatePayload(array $payload): array
     {
+        $name = strtoupper(trim((string) $payload['nombre']));
+        $isAdmin = $this->adminProtection->isAdminRoleName($name);
+
         return [
             'id' => $payload['id'] ?? (string) Str::uuid(),
-            'nombre' => strtoupper(trim((string) $payload['nombre'])),
-            'permisos' => PermissionMatrix::normalize($payload['permisos'] ?? []),
-            'estado' => strtoupper(trim((string) ($payload['estado'] ?? 'ACTIVO'))),
+            'nombre' => $name,
+            'permisos' => $isAdmin
+                ? PermissionCatalog::fullAccessMatrix()
+                : PermissionMatrix::normalize($payload['permisos'] ?? []),
+            'estado' => $isAdmin ? 'ACTIVO' : strtoupper(trim((string) ($payload['estado'] ?? 'ACTIVO'))),
             ...($this->hasDescripcionColumn() ? ['descripcion' => trim((string) ($payload['descripcion'] ?? '')) ?: null] : []),
         ];
     }
@@ -281,7 +343,9 @@ class RoleManagementService
 
     private function decorate(Rol $rol): Rol
     {
-        $rol->permisos = PermissionMatrix::normalize($rol->permisos ?? []);
+        $rol->permisos = $this->adminProtection->isAdminRoleName($rol->nombre)
+            ? PermissionCatalog::fullAccessMatrix()
+            : PermissionMatrix::normalize($rol->permisos ?? []);
 
         return $rol;
     }

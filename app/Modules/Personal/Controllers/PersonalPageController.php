@@ -117,6 +117,8 @@ class PersonalPageController extends WebPageController
     public function index(Request $request)
     {
         if (strtolower((string) $request->query('export')) === 'excel') {
+            $this->assertPersonalPermission(['exportar_excel', 'exportar']);
+
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
         }
 
@@ -175,6 +177,8 @@ class PersonalPageController extends WebPageController
 
     public function exportForm(Request $request): View
     {
+        $this->assertPersonalPermission(['exportar_excel', 'exportar']);
+
         $availableColumns = $this->exportService->availableColumns();
         $config = PersonalExportConfig::fromInput($request->query(), array_keys($availableColumns), true);
         $preview = $this->exportService->preview($config);
@@ -192,6 +196,8 @@ class PersonalPageController extends WebPageController
 
     public function exportWorkers(Request $request): JsonResponse
     {
+        $this->assertPersonalPermission(['exportar_excel', 'exportar']);
+
         return response()->json([
             'workers' => $this->exportService->searchWorkers((string) $request->query('q', '')),
         ]);
@@ -199,6 +205,8 @@ class PersonalPageController extends WebPageController
 
     public function exportPreview(Request $request): JsonResponse
     {
+        $this->assertPersonalPermission(['exportar_excel', 'exportar']);
+
         $availableColumns = $this->exportService->availableColumns();
         $config = PersonalExportConfig::fromInput($request->all(), array_keys($availableColumns), false);
 
@@ -209,6 +217,8 @@ class PersonalPageController extends WebPageController
 
     public function exportDownload(Request $request)
     {
+        $this->assertPersonalPermission(['exportar_excel', 'exportar']);
+
         $availableColumns = $this->exportService->availableColumns();
         $config = PersonalExportConfig::fromInput($request->all(), array_keys($availableColumns), false);
 
@@ -237,12 +247,21 @@ class PersonalPageController extends WebPageController
         );
     }
 
-    public function show(string $id): RedirectResponse
+    public function show(string $id): View
     {
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
-        return redirect()->route('personal.edit', $id);
+        $trabajador = PersonalResource::make($personal)->resolve();
+        $ficha = $personal->fichaColaborador;
+        $ficha?->loadMissing(['familiares', 'archivos']);
+
+        return view('personal.show', [
+            'id' => $id,
+            'personal' => $personal,
+            'trabajador' => $trabajador,
+            'ficha' => $ficha,
+        ]);
     }
 
     public function regularizeAntiguo(string $id): View
@@ -304,6 +323,8 @@ class PersonalPageController extends WebPageController
 
     public function edit(string $id): View
     {
+        $this->assertPersonalPermission(['editar', 'actualizar', 'editar_ficha']);
+
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
@@ -450,10 +471,16 @@ class PersonalPageController extends WebPageController
 
     public function update(Request $request, string $id): RedirectResponse
     {
+        $this->assertPersonalPermission(['editar', 'actualizar', 'editar_ficha']);
+
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
 
         if ($request->has('fields')) {
+            if ($request->hasFile('documentos')) {
+                $this->assertCanUploadPersonalDocuments();
+            }
+
             $validated = $request->validate($this->editFichaRules());
 
             $this->fichaService->updateManual(
@@ -507,9 +534,30 @@ class PersonalPageController extends WebPageController
         return redirect()->route('personal.index')->with('success', 'Trabajador actualizado correctamente');
     }
 
+    private function assertPersonalPermission(array $actions): void
+    {
+        abort_unless(
+            PermissionMatrix::allowsDirectAny(session('user.permissions', []), 'personal', $actions),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+    }
+
+    private function assertCanUploadPersonalDocuments(): void
+    {
+        $permissions = session('user.permissions', []);
+
+        abort_unless(
+            PermissionMatrix::allowsDirect($permissions, 'personal', 'subir_documentos')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'subir'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+    }
+
     public function destroy(string $id): RedirectResponse
     {
-        abort_unless(PermissionMatrix::userCan($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -530,7 +578,7 @@ class PersonalPageController extends WebPageController
     public function cease(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'cesar_trabajador'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'personal', 'cesar_trabajador'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -558,7 +606,7 @@ class PersonalPageController extends WebPageController
     public function addToListaNegra(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'gestionar_lista_negra'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'personal', 'gestionar_lista_negra'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -586,7 +634,7 @@ class PersonalPageController extends WebPageController
     public function removeFromListaNegra(string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'gestionar_lista_negra'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'personal', 'gestionar_lista_negra'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -607,7 +655,7 @@ class PersonalPageController extends WebPageController
     public function activate(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
-        abort_unless(PermissionMatrix::userCan($usuario, 'personal', 'activar_trabajador'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'personal', 'activar_trabajador'), 403);
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);

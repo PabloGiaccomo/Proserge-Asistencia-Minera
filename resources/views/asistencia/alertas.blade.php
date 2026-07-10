@@ -102,7 +102,6 @@ $alertas = [
                     </div>
                     <div class="alerta-actions">
                         <button class="btn btn-sm btn-outline">Ver detalle</button>
-                        <button class="btn btn-sm btn-primary">Acción</button>
                     </div>
                 </div>
                 @endforeach

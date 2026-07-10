@@ -116,9 +116,9 @@ class PersonalFichaController extends WebPageController
             ->with(['personal', 'familiares', 'link', 'archivos', 'documentoEstados'])
             ->findOrFail($id);
         $permissions = session('user.permissions', []);
-        $canViewSensitiveFichaData = PermissionMatrix::allows($permissions, 'personal', 'ver_datos_sensibles');
+        $canViewSensitiveFichaData = PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles');
         $canExportSensitiveFichaPdf = $canViewSensitiveFichaData
-            && PermissionMatrix::allows($permissions, 'personal', 'exportar');
+            && PermissionMatrix::allowsDirect($permissions, 'personal', 'exportar');
 
         return view('personal.fichas.review', [
             'ficha' => $ficha,
@@ -130,8 +130,11 @@ class PersonalFichaController extends WebPageController
             'documentSummary' => $this->fichaService->documentSummary($ficha),
             'documentStateLabels' => PersonalFichaCatalog::documentStateLabels(),
             'vidaLeyPhysicalStateLabels' => PersonalFichaCatalog::vidaLeyPhysicalStateLabels(),
-            'canUploadDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['actualizar', 'administrar']),
-            'canReviewDocuments' => PermissionMatrix::allowsAny($permissions, 'personal', ['aprobar', 'administrar']),
+            'canUploadDocuments' => PermissionMatrix::allowsDirect($permissions, 'personal', 'subir_documentos')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'subir'),
+            'canDownloadDocuments' => PermissionMatrix::allowsDirect($permissions, 'personal', 'descargar_documentos')
+                || PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'descargar'),
+            'canReviewDocuments' => PermissionMatrix::allowsDirect($permissions, 'personal', 'aprobar'),
             'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
             'canExportSensitiveFichaPdf' => $canExportSensitiveFichaPdf,
         ]);
@@ -200,7 +203,8 @@ class PersonalFichaController extends WebPageController
     public function pdf(string $id): Response
     {
         abort_unless(
-            PermissionMatrix::allows(session('user.permissions', []), 'personal', 'ver_datos_sensibles'),
+            PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'ver_datos_sensibles')
+                && PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'exportar'),
             403
         );
 
@@ -240,6 +244,13 @@ class PersonalFichaController extends WebPageController
 
     public function downloadArchivo(string $id)
     {
+        abort_unless(
+            PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'descargar_documentos')
+                || PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal_documentos', 'descargar'),
+            403,
+            'No tienes permiso para realizar esta accion.'
+        );
+
         $archivo = PersonalFichaArchivo::query()->findOrFail($id);
 
         abort_unless(Storage::disk('local')->exists($archivo->path), 404);
@@ -249,7 +260,7 @@ class PersonalFichaController extends WebPageController
 
     public function extendTemporal(Request $request, string $id): JsonResponse|RedirectResponse
     {
-        $this->assertCanDeletePersonal();
+        $this->assertCanEditPersonal();
 
         $ficha = PersonalFicha::query()->with(['personal', 'link'])->findOrFail($id);
         $this->fichaService->extendLink($ficha);
@@ -588,6 +599,11 @@ class PersonalFichaController extends WebPageController
 
     private function assertCanDeletePersonal(): void
     {
-        abort_unless(PermissionMatrix::userCan($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($this->requireAuthenticatedUser(), 'personal', 'eliminar'), 403);
+    }
+
+    private function assertCanEditPersonal(): void
+    {
+        abort_unless(PermissionMatrix::userCanDirect($this->requireAuthenticatedUser(), 'personal', 'editar'), 403);
     }
 }

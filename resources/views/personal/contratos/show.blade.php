@@ -47,6 +47,12 @@
     $value = fn ($array, string $key, $fallback = '-') => filled(data_get($array, $key)) ? data_get($array, $key) : $fallback;
     $periodoInicio = $contrato->fecha_inicio ?: data_get($snapshot, 'rango.fecha_inicio');
     $periodoFin = $contrato->fecha_fin ?: data_get($snapshot, 'rango.fecha_fin');
+    $permissions = session('user.permissions', []);
+    $canViewDocuments = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'ver');
+    $canDownloadSignedContract = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'descargar_documentos')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_documentos', 'descargar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal_contratos', 'descargar');
 @endphp
 
 <style>
@@ -147,7 +153,9 @@
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
                 <a href="{{ route('personal.contratos.index', $personal->id) }}" class="btn btn-outline btn-sm">Contratos</a>
-                <a href="{{ route('personal.documentos.index', $personal->id) }}" class="btn btn-outline btn-sm">Documentos</a>
+                @if($canViewDocuments)
+                    <a href="{{ route('personal.documentos.index', $personal->id) }}" class="btn btn-outline btn-sm">Documentos</a>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-primary btn-sm">Volver</a>
             </div>
         </div>
@@ -158,7 +166,7 @@
             <span class="card-title">Resumen del contrato</span>
         </div>
         <div class="card-body contract-detail-grid">
-            @if($signedContractFileExists ?? false)
+            @if(($signedContractFileExists ?? false) && $canDownloadSignedContract)
                 <div class="contract-detail-item">
                     <div class="contract-detail-label">Documento de contrato firmado</div>
                     <div class="contract-detail-value">

@@ -14,6 +14,11 @@
 @endsection
 
 @section('content')
+@php
+    $canCreateSupervisorEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'crear');
+    $canUpdateSupervisorEvaluation = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'editar')
+        || \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'evaluaciones', 'actualizar');
+@endphp
 <div class="mb-4">
     <!-- API Configuration -->
     <div class="card">
@@ -192,6 +197,7 @@
                     <div class="kpi-value" id="score" style="font-size: 32px;">0.00%</div>
                 </div>
                 <div class="flex gap-3">
+                    @if($canCreateSupervisorEvaluation)
                     <button class="btn btn-success" id="createBtn">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -199,6 +205,8 @@
                         </svg>
                         Crear evaluación
                     </button>
+                    @endif
+                    @if($canUpdateSupervisorEvaluation)
                     <button class="btn btn-secondary" id="updateBtn">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -206,6 +214,7 @@
                         </svg>
                         Actualizar
                     </button>
+                    @endif
                 </div>
             </div>
         </div>
@@ -346,7 +355,8 @@ function loadForm(d) {
     scoreEl.innerText = ((d.puntaje_final || 0).toFixed ? d.puntaje_final.toFixed(2) : Number(d.puntaje_final || 0).toFixed(2)) + '%';
 }
 
-document.getElementById('createBtn').onclick = async () => {
+const createBtn = document.getElementById('createBtn');
+if (createBtn) createBtn.onclick = async () => {
     const res = await api('/evaluaciones/supervisor', 'POST', payload());
     alert(res.message || res.code);
     if (res.ok && res.data) { 
@@ -356,7 +366,8 @@ document.getElementById('createBtn').onclick = async () => {
     }
 };
 
-document.getElementById('updateBtn').onclick = async () => {
+const updateBtn = document.getElementById('updateBtn');
+if (updateBtn) updateBtn.onclick = async () => {
     const id = val('evalId');
     if (!id) { alert('Ingresa ID a actualizar'); return; }
     const res = await api('/evaluaciones/supervisor/' + id, 'PUT', payload());

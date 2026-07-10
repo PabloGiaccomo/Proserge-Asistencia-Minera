@@ -112,18 +112,18 @@ Route::middleware('web.auth')->group(function (): void {
     
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.index');
-    Route::get('/personal/exportar', [PersonalPageController::class, 'exportForm'])->middleware('web.permission:personal,exportar_excel')->name('personal.export.form');
-    Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->middleware('web.permission:personal,exportar_excel')->name('personal.export.download');
-    Route::get('/personal/exportar/personal', [PersonalPageController::class, 'exportWorkers'])->middleware('web.permission:personal,exportar_excel')->name('personal.export.workers');
-    Route::post('/personal/exportar/preview', [PersonalPageController::class, 'exportPreview'])->middleware('web.permission:personal,exportar_excel')->name('personal.export.preview');
+    Route::get('/personal/exportar', [PersonalPageController::class, 'exportForm'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.form');
+    Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.download');
+    Route::get('/personal/exportar/personal', [PersonalPageController::class, 'exportWorkers'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.workers');
+    Route::post('/personal/exportar/preview', [PersonalPageController::class, 'exportPreview'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.preview');
     Route::get('/personal/formatos-contrato', [PersonalContratoFormatoController::class, 'templates'])->middleware('web.permission:personal,descargar_formato_contrato')->name('personal.contrato-formatos.templates');
     Route::get('/personal/formatos-contrato/personal', [PersonalContratoFormatoController::class, 'searchWorkers'])->middleware('web.permission:personal,descargar_formato_contrato')->name('personal.contrato-formatos.personal');
     Route::post('/personal/formatos-contrato/preview', [PersonalContratoFormatoController::class, 'preview'])->middleware('web.permission:personal,descargar_formato_contrato')->name('personal.contrato-formatos.preview');
     Route::post('/personal/formatos-contrato/descargar', [PersonalContratoFormatoController::class, 'download'])->middleware('web.permission:personal,descargar_formato_contrato')->name('personal.contrato-formatos.download');
-    Route::get('/personal/puestos', [PersonalPuestoController::class, 'index'])->middleware('web.permission:personal,gestionar_puestos')->name('personal.puestos.index');
-    Route::post('/personal/puestos', [PersonalPuestoController::class, 'store'])->middleware('web.permission:personal,gestionar_puestos')->name('personal.puestos.store');
-    Route::put('/personal/puestos/{id}', [PersonalPuestoController::class, 'update'])->middleware('web.permission:personal,gestionar_puestos')->name('personal.puestos.update');
-    Route::delete('/personal/puestos/{id}', [PersonalPuestoController::class, 'destroy'])->middleware('web.permission:personal,gestionar_puestos')->name('personal.puestos.destroy');
+    Route::get('/personal/puestos', [PersonalPuestoController::class, 'index'])->middleware('web.permission:personal_puestos,ver')->name('personal.puestos.index');
+    Route::post('/personal/puestos', [PersonalPuestoController::class, 'store'])->middleware('web.permission:personal_puestos,crear')->name('personal.puestos.store');
+    Route::put('/personal/puestos/{id}', [PersonalPuestoController::class, 'update'])->middleware('web.permission:personal_puestos,actualizar')->name('personal.puestos.update');
+    Route::delete('/personal/puestos/{id}', [PersonalPuestoController::class, 'destroy'])->middleware('web.permission:personal_puestos,eliminar')->name('personal.puestos.destroy');
     Route::get('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'edit'])->middleware('web.permission:personal,editar_datos_contrato')->name('personal.contrato-datos.edit');
     Route::put('/personal/{id}/datos-contrato', [PersonalContratoDatoController::class, 'update'])->middleware('web.permission:personal,editar_datos_contrato')->name('personal.contrato-datos.update');
     Route::post('/personal/{id}/contrato-firmado', [PersonalContratoDatoController::class, 'signedContract'])->middleware('web.permission:personal,subir_contrato_firmado')->name('personal.contrato-datos.signed');
@@ -140,14 +140,14 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/fichas/activar-link/buscar', [PersonalFichaController::class, 'searchActivateLinkWorkers'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link.search');
     Route::post('/personal/fichas/activar-link', [PersonalFichaController::class, 'activateLinkForWorker'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link');
     Route::post('/personal/fichas/correo-envio', [PersonalFichaController::class, 'updateEmailTemplate'])->middleware('web.permission:personal,editar')->name('personal.fichas.email-template.update');
-    Route::post('/personal/fichas/enviar-correos-masivo', [PersonalFichaController::class, 'sendBulkTemporalEmails'])->middleware('web.permission:personal,editar')->name('personal.fichas.send-bulk-email');
+    Route::post('/personal/fichas/enviar-correos-masivo', [PersonalFichaController::class, 'sendBulkTemporalEmails'])->middleware('web.permission:personal,enviar')->name('personal.fichas.send-bulk-email');
     Route::post('/personal/fichas/ampliar-links-activos', [PersonalFichaController::class, 'extendBulkActiveLinks'])->middleware('web.permission:personal,editar')->name('personal.fichas.extend-bulk-active');
     Route::post('/personal/fichas/{id}/extender', [PersonalFichaController::class, 'extendTemporal'])->middleware('web.permission:personal,editar')->name('personal.fichas.extend');
-    Route::post('/personal/fichas/{id}/enviar-correo', [PersonalFichaController::class, 'sendTemporalEmail'])->middleware('web.permission:personal,editar')->name('personal.fichas.send-email');
+    Route::post('/personal/fichas/{id}/enviar-correo', [PersonalFichaController::class, 'sendTemporalEmail'])->middleware('web.permission:personal,enviar')->name('personal.fichas.send-email');
     Route::post('/personal/fichas/{id}/regularizar-link', [PersonalFichaController::class, 'regularizeLink'])->middleware('web.permission:personal,editar')->name('personal.fichas.regularize-link');
     Route::post('/personal/fichas/{id}/eliminar', [PersonalFichaController::class, 'destroyTemporal'])->middleware('web.permission:personal,eliminar')->name('personal.fichas.destroy');
     Route::get('/personal/fichas/{id}/revisar', [PersonalFichaController::class, 'review'])->middleware('web.permission:personal,ver_ficha')->name('personal.fichas.review');
-    Route::get('/personal/fichas/archivos/{id}/descargar', [PersonalFichaController::class, 'downloadArchivo'])->middleware('web.permission:personal,ver_documentos')->name('personal.fichas.archivos.download');
+    Route::get('/personal/fichas/archivos/{id}/descargar', [PersonalFichaController::class, 'downloadArchivo'])->middleware('web.permission:personal,descargar_documentos')->name('personal.fichas.archivos.download');
     Route::post('/personal/fichas/{id}/aprobar', [PersonalFichaController::class, 'approve'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.approve');
     Route::post('/personal/fichas/{id}/observar', [PersonalFichaController::class, 'observe'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.observe');
     Route::post('/personal/fichas/{id}/reenviar-observacion', [PersonalFichaController::class, 'resendObservationEmail'])->middleware('web.permission:personal,aprobar')->name('personal.fichas.resend-observation');
@@ -157,52 +157,53 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/fichas/exportar/pdf/{jobId}/procesar', [PersonalFichaController::class, 'processPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.process');
     Route::get('/personal/fichas/exportar/pdf/{jobId}/descargar', [PersonalFichaController::class, 'downloadPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.download');
     Route::post('/personal/documentos/descargar', [PersonalDocumentoController::class, 'downloadBulk'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.download-bulk');
-    Route::get('/personal/contratos/vencimientos', [PersonalContratoController::class, 'expiring'])->middleware('web.permission:personal,ver')->name('personal.contratos.expiring');
-    Route::post('/personal/contratos/decisiones/registrar', [PersonalContratoController::class, 'bulkDecision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.bulk-decision');
-    Route::post('/personal/contratos/{contractId}/decision', [PersonalContratoController::class, 'decision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.decision');
-    Route::post('/personal/contratos/{contractId}/preparar-renovacion', [PersonalContratoController::class, 'prepareFromDecision'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.prepare-from-decision');
-    Route::post('/personal/contratos/{contractId}/cerrar-no-renovado', [PersonalContratoController::class, 'closeNotRenewed'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.close-not-renewed');
-    Route::get('/personal/habilitacion-minera', [PersonalMinaHabilitacionController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.habilitacion-minera.index');
-    Route::post('/personal/habilitacion-minera/examenes', [PersonalMinaHabilitacionController::class, 'storeExam'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.examenes.store');
-    Route::post('/personal/habilitacion-minera/examenes/{examId}', [PersonalMinaHabilitacionController::class, 'updateExam'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.examenes.update');
-    Route::post('/personal/habilitacion-minera/examenes/{examId}/precios', [PersonalMinaHabilitacionController::class, 'storeExamPrice'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.examenes.prices.store');
-    Route::post('/personal/habilitacion-minera/requisitos', [PersonalMinaHabilitacionController::class, 'storeRequirement'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.requisitos.store');
-    Route::post('/personal/habilitacion-minera/requisitos/{requirementId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivateRequirement'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.requisitos.deactivate');
-    Route::post('/personal/habilitacion-minera/importar/preview', [PersonalMinaHabilitacionController::class, 'previewImport'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.import.preview');
-    Route::post('/personal/habilitacion-minera/importar/confirmar', [PersonalMinaHabilitacionController::class, 'confirmImport'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.import.confirm');
-    Route::post('/personal/habilitacion-minera/sincronizar-actual', [PersonalMinaHabilitacionController::class, 'syncCurrent'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.sync-current');
-    Route::post('/personal/habilitacion-minera/asignaciones', [PersonalMinaHabilitacionController::class, 'assign'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.assign');
-    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}', [PersonalMinaHabilitacionController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.update');
-    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivate'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.deactivate');
-    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/generar-examenes', [PersonalMinaHabilitacionController::class, 'generateExams'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.generate-exams');
-    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/intentos', [PersonalMinaHabilitacionController::class, 'storeAttempt'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam-attempts.store');
-    Route::post('/personal/habilitacion-minera/intentos/{attemptId}/completar', [PersonalMinaHabilitacionController::class, 'completeScheduledAttempt'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam-attempts.complete');
-    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/no-aplica', [PersonalMinaHabilitacionController::class, 'notApplicable'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam.not-applicable');
-    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/convalidar', [PersonalMinaHabilitacionController::class, 'convalidate'])->middleware('web.permission:personal,actualizar')->name('personal.habilitacion-minera.exam.convalidate');
-    Route::get('/personal/habilitacion-minera/intentos/{attemptId}/archivo', [PersonalMinaHabilitacionController::class, 'downloadAttempt'])->middleware('web.permission:personal,ver')->name('personal.habilitacion-minera.attempt.download');
+    Route::get('/personal/contratos/vencimientos', [PersonalContratoController::class, 'expiring'])->middleware('web.permission:vencimientos,ver')->name('personal.contratos.expiring');
+    Route::get('/personal/contratos/vencimientos/exportar', [PersonalContratoController::class, 'exportExpiring'])->middleware('web.permission:vencimientos,exportar')->name('personal.contratos.expiring.export');
+    Route::post('/personal/contratos/decisiones/registrar', [PersonalContratoController::class, 'bulkDecision'])->middleware('web.permission:vencimientos,registrar')->name('personal.contratos.bulk-decision');
+    Route::post('/personal/contratos/{contractId}/decision', [PersonalContratoController::class, 'decision'])->middleware('web.permission:vencimientos,registrar')->name('personal.contratos.decision');
+    Route::post('/personal/contratos/{contractId}/preparar-renovacion', [PersonalContratoController::class, 'prepareFromDecision'])->middleware('web.permission:vencimientos,renovar')->name('personal.contratos.prepare-from-decision');
+    Route::post('/personal/contratos/{contractId}/cerrar-no-renovado', [PersonalContratoController::class, 'closeNotRenewed'])->middleware('web.permission:vencimientos,cerrar')->name('personal.contratos.close-not-renewed');
+    Route::get('/personal/habilitacion-minera', [PersonalMinaHabilitacionController::class, 'index'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.index');
+    Route::post('/personal/habilitacion-minera/examenes', [PersonalMinaHabilitacionController::class, 'storeExam'])->middleware('web.permission:habilitacion_minera,crear|configurar')->name('personal.habilitacion-minera.examenes.store');
+    Route::post('/personal/habilitacion-minera/examenes/{examId}', [PersonalMinaHabilitacionController::class, 'updateExam'])->middleware('web.permission:habilitacion_minera,editar|configurar')->name('personal.habilitacion-minera.examenes.update');
+    Route::post('/personal/habilitacion-minera/examenes/{examId}/precios', [PersonalMinaHabilitacionController::class, 'storeExamPrice'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.examenes.prices.store');
+    Route::post('/personal/habilitacion-minera/requisitos', [PersonalMinaHabilitacionController::class, 'storeRequirement'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.requisitos.store');
+    Route::post('/personal/habilitacion-minera/requisitos/{requirementId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivateRequirement'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.requisitos.deactivate');
+    Route::post('/personal/habilitacion-minera/importar/preview', [PersonalMinaHabilitacionController::class, 'previewImport'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.import.preview');
+    Route::post('/personal/habilitacion-minera/importar/confirmar', [PersonalMinaHabilitacionController::class, 'confirmImport'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.import.confirm');
+    Route::post('/personal/habilitacion-minera/sincronizar-actual', [PersonalMinaHabilitacionController::class, 'syncCurrent'])->middleware('web.permission:habilitacion_minera,actualizar')->name('personal.habilitacion-minera.sync-current');
+    Route::post('/personal/habilitacion-minera/asignaciones', [PersonalMinaHabilitacionController::class, 'assign'])->middleware('web.permission:habilitacion_minera,asignar')->name('personal.habilitacion-minera.assign');
+    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}', [PersonalMinaHabilitacionController::class, 'update'])->middleware('web.permission:habilitacion_minera,actualizar|editar')->name('personal.habilitacion-minera.update');
+    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivate'])->middleware('web.permission:habilitacion_minera,desasignar')->name('personal.habilitacion-minera.deactivate');
+    Route::post('/personal/habilitacion-minera/asignaciones/{assignmentId}/generar-examenes', [PersonalMinaHabilitacionController::class, 'generateExams'])->middleware('web.permission:habilitacion_minera,programar')->name('personal.habilitacion-minera.generate-exams');
+    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/intentos', [PersonalMinaHabilitacionController::class, 'storeAttempt'])->middleware('web.permission:habilitacion_minera,registrar|programar')->name('personal.habilitacion-minera.exam-attempts.store');
+    Route::post('/personal/habilitacion-minera/intentos/{attemptId}/completar', [PersonalMinaHabilitacionController::class, 'completeScheduledAttempt'])->middleware('web.permission:habilitacion_minera,registrar')->name('personal.habilitacion-minera.exam-attempts.complete');
+    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/no-aplica', [PersonalMinaHabilitacionController::class, 'notApplicable'])->middleware('web.permission:habilitacion_minera,registrar')->name('personal.habilitacion-minera.exam.not-applicable');
+    Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/convalidar', [PersonalMinaHabilitacionController::class, 'convalidate'])->middleware('web.permission:habilitacion_minera,convalidar')->name('personal.habilitacion-minera.exam.convalidate');
+    Route::get('/personal/habilitacion-minera/intentos/{attemptId}/archivo', [PersonalMinaHabilitacionController::class, 'downloadAttempt'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.attempt.download');
     Route::get('/personal/{id}/contratos', [PersonalContratoController::class, 'index'])->middleware('web.permission:personal,ver_contratos')->name('personal.contratos.index');
-    Route::post('/personal/{id}/contratos/renovar', [PersonalContratoController::class, 'renew'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.renew');
-    Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,actualizar')->name('personal.contratos.reentry');
-    Route::get('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'downloadSignedContract'])->middleware('web.permission:personal,ver_contratos')->name('personal.contratos.signed.download');
+    Route::post('/personal/{id}/contratos/renovar', [PersonalContratoController::class, 'renew'])->middleware('web.permission:personal,renovar|actualizar')->name('personal.contratos.renew');
+    Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,reingresar|actualizar')->name('personal.contratos.reentry');
+    Route::get('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'downloadSignedContract'])->middleware('web.permission:personal,descargar_documentos')->name('personal.contratos.signed.download');
     Route::post('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'uploadSignedContract'])->middleware('web.permission:personal,subir_contrato_firmado')->name('personal.contratos.signed');
     Route::put('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'update'])->middleware('web.permission:personal,editar_datos_contrato')->name('personal.contratos.update');
     Route::get('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'show'])->middleware('web.permission:personal,ver_contratos')->name('personal.contratos.show');
     Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
     Route::get('/personal/{id}/documentos', [PersonalDocumentoController::class, 'index'])->middleware('web.permission:personal,ver_documentos')->name('personal.documentos.index');
-    Route::post('/personal/{id}/documentos', [PersonalDocumentoController::class, 'store'])->middleware('web.permission:personal,actualizar')->name('personal.documentos.store');
+    Route::post('/personal/{id}/documentos', [PersonalDocumentoController::class, 'store'])->middleware('web.permission:personal,subir_documentos')->name('personal.documentos.store');
     Route::post('/personal/{id}/documentos/descargar', [PersonalDocumentoController::class, 'downloadSelected'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.download-selected');
     Route::post('/personal/{id}/documentos/{tipo}/estado', [PersonalDocumentoController::class, 'updateEstado'])->middleware('web.permission:personal,aprobar')->name('personal.documentos.estado');
-    Route::get('/personal/{id}/documentos/contrato-firmado', [PersonalDocumentoController::class, 'contratoFirmado'])->middleware('web.permission:personal,ver_documentos')->name('personal.documentos.contrato-firmado');
-    Route::get('/personal/{id}/gestacion/{bloqueoId}/pdf', [PersonalDocumentoController::class, 'gestacionPdf'])->middleware('web.permission:personal,ver_documentos')->name('personal.documentos.gestacion.pdf');
-    Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.edit');
-    Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.update');
+    Route::get('/personal/{id}/documentos/contrato-firmado', [PersonalDocumentoController::class, 'contratoFirmado'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.contrato-firmado');
+    Route::get('/personal/{id}/gestacion/{bloqueoId}/pdf', [PersonalDocumentoController::class, 'gestacionPdf'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.gestacion.pdf');
+    Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.edit');
+    Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.update');
     Route::post('/personal/{id}/cesar', [PersonalPageController::class, 'cease'])->middleware('web.permission:personal,cesar_trabajador')->name('personal.cease');
     Route::post('/personal/{id}/lista-negra', [PersonalPageController::class, 'addToListaNegra'])->middleware('web.permission:personal,gestionar_lista_negra')->name('personal.lista-negra.store');
     Route::post('/personal/{id}/lista-negra/quitar', [PersonalPageController::class, 'removeFromListaNegra'])->middleware('web.permission:personal,gestionar_lista_negra')->name('personal.lista-negra.remove');
     Route::post('/personal/{id}/activar', [PersonalPageController::class, 'activate'])->middleware('web.permission:personal,activar_trabajador')->name('personal.activate');
     Route::post('/personal/{id}/eliminar', [PersonalPageController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.destroy');
-    Route::get('/personal/importar', [PersonalImportController::class, 'showImportForm'])->middleware('web.permission:personal,importar_master_general')->name('personal.importar');
-    Route::post('/personal/importar', [PersonalImportController::class, 'import'])->middleware('web.permission:personal,importar_master_general')->name('personal.importar.post');
+    Route::get('/personal/importar', [PersonalImportController::class, 'showImportForm'])->middleware('web.permission:personal,importar|importar_master_general')->name('personal.importar');
+    Route::post('/personal/importar', [PersonalImportController::class, 'import'])->middleware('web.permission:personal,importar|importar_master_general')->name('personal.importar.post');
     Route::get('/personal/{id}', [PersonalPageController::class, 'show'])->middleware('web.permission:personal,ver_detalle')->name('personal.show');
     
     // Mi Asistencia
@@ -218,39 +219,39 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/man-power/grupos/{id}', [ManPowerPageController::class, 'grupoDetalle'])->middleware('web.permission:man_power,ver')->name('man-power.grupo-detalle');
 
     // Herramientas por parada
-    Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('logistica.index');
-    Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:epps,actualizar')->name('logistica.transportes.update');
+    Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:logistica,ver')->name('logistica.index');
+    Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:logistica,actualizar')->name('logistica.transportes.update');
 
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
-    Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.catalogo.importar');
+    Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,importar')->name('herramientas-parada.catalogo.importar');
     Route::get('/herramientas-parada/catalogo/sugerencias', [ParadaHerramientaPageController::class, 'sugerenciasCatalogo'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.catalogo.sugerencias');
     Route::get('/herramientas-parada/catalogo/observaciones', [ParadaHerramientaPageController::class, 'sugerenciasObservaciones'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.catalogo.observaciones');
     Route::get('/herramientas-parada/{rqMinaId}/confirmar-pedido', [ParadaHerramientaPageController::class, 'confirmarPedido'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.confirmar-pedido');
     Route::get('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'show'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.show');
     Route::post('/herramientas-parada/{rqMinaId}', [ParadaHerramientaPageController::class, 'save'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.save');
-    Route::post('/herramientas-parada/{rqMinaId}/pedido', [ParadaHerramientaPageController::class, 'updatePedido'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.pedido');
-    Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.enviar');
-    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/importar-formato', [ParadaHerramientaPageController::class, 'importarFormato'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.importar-formato');
-    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/recordatorio-supervisor', [ParadaHerramientaPageController::class, 'recordarSupervisor'])->middleware('web.permission:herramientas,actualizar')->name('herramientas-parada.recordar-supervisor');
+    Route::post('/herramientas-parada/{rqMinaId}/pedido', [ParadaHerramientaPageController::class, 'updatePedido'])->middleware('web.permission:herramientas,registrar')->name('herramientas-parada.pedido');
+    Route::post('/herramientas-parada/{rqMinaId}/enviar', [ParadaHerramientaPageController::class, 'enviar'])->middleware('web.permission:herramientas,enviar')->name('herramientas-parada.enviar');
+    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/importar-formato', [ParadaHerramientaPageController::class, 'importarFormato'])->middleware('web.permission:herramientas,importar')->name('herramientas-parada.importar-formato');
+    Route::post('/herramientas-parada/{rqMinaId}/grupos/{grupoId}/recordatorio-supervisor', [ParadaHerramientaPageController::class, 'recordarSupervisor'])->middleware('web.permission:herramientas,enviar')->name('herramientas-parada.recordar-supervisor');
 
     // EPP logistica
     Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
     Route::get('/epps/personal/buscar', [EppPageController::class, 'buscarPersonal'])->middleware('web.permission:epps,ver')->name('epps.personal.buscar');
     Route::get('/epps/entregas/ultima', [EppPageController::class, 'ultimaEntrega'])->middleware('web.permission:epps,ver')->name('epps.entregas.ultima');
-    Route::post('/epps/catalogo', [EppPageController::class, 'storeCatalog'])->middleware('web.permission:epps,actualizar')->name('epps.catalogo.store');
-    Route::put('/epps/catalogo/{id}', [EppPageController::class, 'updateCatalog'])->middleware('web.permission:epps,actualizar')->name('epps.catalogo.update');
-    Route::post('/epps/entregas', [EppPageController::class, 'storeEntrega'])->middleware('web.permission:epps,actualizar')->name('epps.entregas.store');
-    Route::post('/epps/entregas/{id}/cerrar', [EppPageController::class, 'closeEntrega'])->middleware('web.permission:epps,actualizar')->name('epps.entregas.close');
+    Route::post('/epps/catalogo', [EppPageController::class, 'storeCatalog'])->middleware('web.permission:epps,configurar')->name('epps.catalogo.store');
+    Route::put('/epps/catalogo/{id}', [EppPageController::class, 'updateCatalog'])->middleware('web.permission:epps,editar')->name('epps.catalogo.update');
+    Route::post('/epps/entregas', [EppPageController::class, 'storeEntrega'])->middleware('web.permission:epps,registrar')->name('epps.entregas.store');
+    Route::post('/epps/entregas/{id}/cerrar', [EppPageController::class, 'closeEntrega'])->middleware('web.permission:epps,registrar')->name('epps.entregas.close');
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');
     Route::get('/rq-mina/personal/buscar', [RQMinaPageController::class, 'buscarPersonal'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.personal.buscar');
     Route::get('/rq-mina/opciones-campo', [RQMinaPageController::class, 'opcionesCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.index');
-    Route::post('/rq-mina/opciones-campo', [RQMinaPageController::class, 'guardarOpcionCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.store');
-    Route::delete('/rq-mina/opciones-campo/{optionId}', [RQMinaPageController::class, 'eliminarOpcionCampo'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.opciones-campo.destroy');
-    Route::get('/rq-mina/create', [RQMinaPageController::class, 'create'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.create');
+    Route::post('/rq-mina/opciones-campo', [RQMinaPageController::class, 'guardarOpcionCampo'])->middleware('web.permission:rq_mina,configurar')->name('rq-mina.opciones-campo.store');
+    Route::delete('/rq-mina/opciones-campo/{optionId}', [RQMinaPageController::class, 'eliminarOpcionCampo'])->middleware('web.permission:rq_mina,configurar')->name('rq-mina.opciones-campo.destroy');
+    Route::get('/rq-mina/create', [RQMinaPageController::class, 'create'])->middleware('web.permission:rq_mina,crear|duplicar')->name('rq-mina.create');
     Route::get('/rq-mina/{id}/edit', [RQMinaPageController::class, 'edit'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.edit');
-    Route::get('/rq-mina/{id}/plan/importar', [RQMinaPageController::class, 'importarPlan'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.plan.importar');
+    Route::get('/rq-mina/{id}/plan/importar', [RQMinaPageController::class, 'importarPlan'])->middleware('web.permission:rq_mina,importar')->name('rq-mina.plan.importar');
     Route::get('/rq-mina/{id}/plan', [RQMinaPageController::class, 'plan'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.plan');
     Route::get('/rq-mina/{id}', [RQMinaPageController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.show');
 
@@ -265,9 +266,9 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/bienestar', [BienestarPageController::class, 'index'])->middleware('web.permission:bienestar,ver')->name('bienestar.index');
     Route::get('/bienestar/bloqueos/nuevo', [BienestarPageController::class, 'createBloqueo'])->middleware('web.permission:bienestar,crear')->name('bienestar.bloqueos.create');
     Route::post('/bienestar/bloqueos', [BienestarPageController::class, 'storeBloqueoGeneral'])->middleware('web.permission:bienestar,crear')->name('bienestar.bloqueos.store-general');
-    Route::get('/bienestar/bloqueos/{bloqueoId}/editar', [BienestarPageController::class, 'editBloqueo'])->middleware('web.permission:bienestar,editar')->name('bienestar.bloqueos.edit');
-    Route::put('/bienestar/bloqueos/{bloqueoId}', [BienestarPageController::class, 'updateBloqueo'])->middleware('web.permission:bienestar,actualizar')->name('bienestar.bloqueos.update');
-    Route::post('/bienestar/bloqueos/{bloqueoId}/anular', [BienestarPageController::class, 'anularBloqueo'])->middleware('web.permission:bienestar,actualizar')->name('bienestar.bloqueos.anular');
+    Route::get('/bienestar/bloqueos/{bloqueoId}/editar', [BienestarPageController::class, 'editBloqueo'])->middleware('web.permission:bienestar,editar|actualizar')->name('bienestar.bloqueos.edit');
+    Route::put('/bienestar/bloqueos/{bloqueoId}', [BienestarPageController::class, 'updateBloqueo'])->middleware('web.permission:bienestar,editar|actualizar')->name('bienestar.bloqueos.update');
+    Route::post('/bienestar/bloqueos/{bloqueoId}/anular', [BienestarPageController::class, 'anularBloqueo'])->middleware('web.permission:bienestar,eliminar|anular')->name('bienestar.bloqueos.anular');
     Route::get('/bienestar/{id}', [BienestarPageController::class, 'show'])->middleware('web.permission:bienestar,ver')->name('bienestar.show');
     Route::post('/bienestar/{id}/bloqueos', [BienestarPageController::class, 'storeBloqueo'])->middleware('web.permission:bienestar,crear')->name('bienestar.bloqueos.store');
 
@@ -281,13 +282,13 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/asistencia/alertas', [AsistenciaPageController::class, 'alertas'])->middleware('web.permission:asistencias,ver')->name('asistencia.alertas');
     Route::get('/asistencia/grupos', [AsistenciaPageController::class, 'grupos'])->middleware('web.permission:asistencias,ver')->name('asistencia.grupos');
     Route::get('/asistencia/grupos/{grupoId}', [AsistenciaPageController::class, 'show'])->middleware('web.permission:asistencias,ver')->name('asistencia.show');
-    Route::get('/asistencia/grupos/{grupoId}/marcar', [AsistenciaPageController::class, 'marcar'])->middleware('web.permission:asistencias,editar')->name('asistencia.marcar');
-    Route::get('/asistencia/grupos/{grupoId}/masivo', [AsistenciaPageController::class, 'masivo'])->middleware('web.permission:asistencias,editar')->name('asistencia.masivo');
+    Route::get('/asistencia/grupos/{grupoId}/marcar', [AsistenciaPageController::class, 'marcar'])->middleware('web.permission:asistencias,registrar')->name('asistencia.marcar');
+    Route::get('/asistencia/grupos/{grupoId}/masivo', [AsistenciaPageController::class, 'masivo'])->middleware('web.permission:asistencias,registrar')->name('asistencia.masivo');
 
     // Faltas
     Route::get('/faltas', [FaltasPageController::class, 'index'])->middleware('web.permission:faltas,ver')->name('faltas.index');
     Route::get('/faltas/{id}', [FaltasPageController::class, 'show'])->middleware('web.permission:faltas,ver')->name('faltas.show');
-    Route::get('/faltas/{id}/corregir', [FaltasPageController::class, 'corregir'])->middleware('web.permission:faltas,editar')->name('faltas.corregir');
+    Route::get('/faltas/{id}/corregir', [FaltasPageController::class, 'corregir'])->middleware('web.permission:faltas,corregir')->name('faltas.corregir');
 
     // Evaluaciones
     Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.index');
@@ -305,11 +306,11 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/usuarios/crear', [UsuarioPageController::class, 'create'])->middleware('web.permission:usuarios,crear')->name('usuarios.create');
     Route::post('/usuarios', [UsuarioPageController::class, 'store'])->middleware('web.permission:usuarios,crear')->name('usuarios.store');
     Route::get('/usuarios/{id}', [UsuarioPageController::class, 'show'])->middleware('web.permission:usuarios,ver')->name('usuarios.show');
-    Route::put('/usuarios/{id}', [UsuarioPageController::class, 'update'])->middleware('web.permission:usuarios,actualizar')->name('usuarios.update');
-    Route::post('/usuarios/{id}/estado', [UsuarioPageController::class, 'toggleEstado'])->middleware('web.permission:usuarios,administrar')->name('usuarios.toggle-estado');
-    Route::post('/usuarios/{id}/password', [UsuarioPageController::class, 'updatePassword'])->middleware('web.permission:usuarios,administrar')->name('usuarios.password');
-    Route::post('/usuarios/{id}/notificaciones', [UsuarioPageController::class, 'updateNotificationPreferences'])->middleware('web.permission:usuarios,administrar')->name('usuarios.notificaciones');
-    Route::get('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'editarScope'])->middleware('web.permission:usuarios,administrar')->name('usuarios.scope');
+    Route::put('/usuarios/{id}', [UsuarioPageController::class, 'update'])->middleware('web.permission:usuarios,editar|actualizar|asignar|activar|desactivar')->name('usuarios.update');
+    Route::post('/usuarios/{id}/estado', [UsuarioPageController::class, 'toggleEstado'])->middleware('web.permission:usuarios,activar|desactivar')->name('usuarios.toggle-estado');
+    Route::post('/usuarios/{id}/password', [UsuarioPageController::class, 'updatePassword'])->middleware('web.permission:usuarios,configurar')->name('usuarios.password');
+    Route::post('/usuarios/{id}/notificaciones', [UsuarioPageController::class, 'updateNotificationPreferences'])->middleware('web.permission:usuarios,configurar')->name('usuarios.notificaciones');
+    Route::get('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'editarScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope');
 
     // Catálogos - Hub
     Route::get('/catalogos', [CatalogoHubController::class, 'index'])->middleware('web.permission:catalogos,ver')->name('catalogos.index');
@@ -319,7 +320,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/catalogos/minas/{id}', [MinaPageController::class, 'show'])->middleware('web.permission:minas,ver')->name('catalogos.minas.show');
     Route::get('/catalogos/minas/{id}/editar', [MinaPageController::class, 'edit'])->middleware('web.permission:minas,editar')->name('catalogos.minas.edit');
     Route::put('/catalogos/minas/{id}', [MinaPageController::class, 'update'])->middleware('web.permission:minas,actualizar')->name('catalogos.minas.update');
-    Route::post('/catalogos/minas/{id}/inactivar', [MinaPageController::class, 'inactivate'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.inactivate');
+    Route::post('/catalogos/minas/{id}/inactivar', [MinaPageController::class, 'inactivate'])->middleware('web.permission:minas,desactivar')->name('catalogos.minas.inactivate');
     Route::post('/catalogos/minas/{id}/eliminar', [MinaPageController::class, 'destroy'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.destroy');
     Route::post('/catalogos/minas/{id}/eliminar-definitivo', [MinaPageController::class, 'forceDestroy'])->middleware('web.permission:minas,eliminar')->name('catalogos.minas.force-destroy');
     Route::get('/catalogos/talleres', [TallerPageController::class, 'index'])->middleware('web.permission:talleres,ver')->name('catalogos.talleres.index');
@@ -344,17 +345,17 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/seguridad/roles/crear', [RolPageController::class, 'create'])->middleware('web.permission:roles,crear')->name('seguridad.roles.create');
     Route::post('/seguridad/roles', [RolPageController::class, 'store'])->middleware('web.permission:roles,crear')->name('seguridad.roles.store');
     Route::get('/seguridad/roles/{id}', [RolPageController::class, 'show'])->middleware('web.permission:roles,ver')->name('seguridad.roles.show');
-    Route::get('/seguridad/roles/{id}/editar', [RolPageController::class, 'edit'])->middleware('web.permission:roles,editar')->name('seguridad.roles.edit');
-    Route::put('/seguridad/roles/{id}', [RolPageController::class, 'update'])->middleware('web.permission:roles,actualizar')->name('seguridad.roles.update');
-    Route::post('/seguridad/roles/{id}/duplicar', [RolPageController::class, 'duplicate'])->middleware('web.permission:roles,crear')->name('seguridad.roles.duplicate');
-    Route::post('/seguridad/roles/{id}/estado', [RolPageController::class, 'toggleEstado'])->middleware('web.permission:roles,administrar')->name('seguridad.roles.toggle');
+    Route::get('/seguridad/roles/{id}/editar', [RolPageController::class, 'edit'])->middleware('web.permission:roles,editar|actualizar')->name('seguridad.roles.edit');
+    Route::put('/seguridad/roles/{id}', [RolPageController::class, 'update'])->middleware('web.permission:roles,editar|actualizar')->name('seguridad.roles.update');
+    Route::post('/seguridad/roles/{id}/duplicar', [RolPageController::class, 'duplicate'])->middleware('web.permission:roles,duplicar')->name('seguridad.roles.duplicate');
+    Route::post('/seguridad/roles/{id}/estado', [RolPageController::class, 'toggleEstado'])->middleware('web.permission:roles,activar|desactivar')->name('seguridad.roles.toggle');
     Route::get('/seguridad/permisos', [PermisoPageController::class, 'index'])->middleware('web.permission:roles,ver')->name('seguridad.permisos.index');
 
     // POST Routes
     Route::post('/rq-mina', [RQMinaPageController::class, 'store'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.store');
     Route::put('/rq-mina/{id}', [RQMinaPageController::class, 'update'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.update');
     Route::put('/rq-mina/{id}/plan', [RQMinaPageController::class, 'updatePlan'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.plan.update');
-    Route::post('/rq-mina/{id}/enviar', [RQMinaPageController::class, 'enviar'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.enviar');
+    Route::post('/rq-mina/{id}/enviar', [RQMinaPageController::class, 'enviar'])->middleware('web.permission:rq_mina,enviar')->name('rq-mina.enviar');
     Route::post('/rq-mina/{id}/eliminar', [RQMinaPageController::class, 'destroy'])->middleware('web.permission:rq_mina,eliminar')->name('rq-mina.destroy');
 
     Route::post('/rq-proserge', [RQProsergePageController::class, 'store'])->middleware('web.permission:rq_proserge,crear')->name('rq-proserge.store');
@@ -366,16 +367,16 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/man-power/grupos/{id}', [ManPowerPageController::class, 'updateGrupo'])->middleware('web.permission:man_power,actualizar')->name('man-power.actualizar-grupo');
     Route::post('/man-power/grupos/{id}/quitar-personal', [ManPowerPageController::class, 'quitarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.quitar-personal');
 
-    Route::post('/asistencia/grupos/{grupoId}/marcar', [AsistenciaPageController::class, 'marcarPost'])->middleware('web.permission:asistencias,actualizar')->name('asistencia.marcar-post');
-    Route::post('/asistencia/grupos/{grupoId}/marcar-masivo', [AsistenciaPageController::class, 'marcarMasivoPost'])->middleware('web.permission:asistencias,actualizar')->name('asistencia.marcar-masivo-post');
+    Route::post('/asistencia/grupos/{grupoId}/marcar', [AsistenciaPageController::class, 'marcarPost'])->middleware('web.permission:asistencias,registrar')->name('asistencia.marcar-post');
+    Route::post('/asistencia/grupos/{grupoId}/marcar-masivo', [AsistenciaPageController::class, 'marcarMasivoPost'])->middleware('web.permission:asistencias,registrar')->name('asistencia.marcar-masivo-post');
     Route::post('/asistencia/grupos/{grupoId}/cerrar', [AsistenciaPageController::class, 'cerrar'])->middleware('web.permission:asistencias,cerrar')->name('asistencia.cerrar');
-    Route::post('/asistencia/grupos/{grupoId}/reabrir', [AsistenciaPageController::class, 'reabrir'])->middleware('web.permission:asistencias,actualizar')->name('asistencia.reabrir');
+    Route::post('/asistencia/grupos/{grupoId}/reabrir', [AsistenciaPageController::class, 'reabrir'])->middleware('web.permission:asistencias,reabrir')->name('asistencia.reabrir');
 
-    Route::post('/faltas/{id}/corregir-asistencia', [FaltasPageController::class, 'corregirPost'])->middleware('web.permission:faltas,actualizar')->name('faltas.corregir-post');
-    Route::post('/faltas/{id}/anular', [FaltasPageController::class, 'anular'])->middleware('web.permission:faltas,eliminar')->name('faltas.anular');
+    Route::post('/faltas/{id}/corregir-asistencia', [FaltasPageController::class, 'corregirPost'])->middleware('web.permission:faltas,corregir')->name('faltas.corregir-post');
+    Route::post('/faltas/{id}/anular', [FaltasPageController::class, 'anular'])->middleware('web.permission:faltas,anular')->name('faltas.anular');
 
     Route::post('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'store'])->middleware('web.permission:evaluaciones,crear')->name('evaluaciones.desempeno.store');
     Route::put('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'update'])->middleware('web.permission:evaluaciones,actualizar')->name('evaluaciones.desempeno.update');
 
-    Route::put('/usuarios/{usuarioId}/mina-scope', [UsuarioPageController::class, 'syncScope'])->middleware('web.permission:usuarios,administrar')->name('usuarios.scope-update');
+    Route::put('/usuarios/{usuarioId}/mina-scope', [UsuarioPageController::class, 'syncScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope-update');
 });

@@ -5,12 +5,21 @@ namespace App\Modules\Seguridad\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Rol;
 use App\Shared\Support\ApiResponse;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 
 class RolController extends Controller
 {
     public function index(Request $request)
     {
+        if (!PermissionMatrix::userCanDirect($request->user(), 'roles', 'ver')) {
+            return ApiResponse::error(
+                message: 'No tienes permiso para consultar roles.',
+                code: 'ROLES_FORBIDDEN',
+                status: 403,
+            );
+        }
+
         $estado = strtoupper($request->string('estado')->toString());
 
         $query = Rol::query()->orderBy('nombre');

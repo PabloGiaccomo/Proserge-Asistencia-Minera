@@ -15,33 +15,17 @@ class ParadaHerramientaPageController extends WebPageController
     {
     }
 
-    public function index(Request $request): View
+    public function index(Request $request): RedirectResponse
     {
-        $usuario = $this->requireAuthenticatedUser();
-        $this->service->emitDeadlineReminders();
-
-        $filters = [
+        $query = [
+            'tab' => 'herramientas',
             'q' => trim((string) $request->query('q', '')),
             'estado_lista' => trim((string) $request->query('estado_lista', '')),
         ];
 
-        $items = $this->service->listParadas($usuario, $filters)->all();
-        $deadlineAlerts = collect($items)
-            ->filter(function (array $item): bool {
-                $days = (int) ($item['dias_para_limite'] ?? 999);
-                $status = strtoupper((string) ($item['estado_lista'] ?? ''));
+        $query = array_filter($query, static fn ($value): bool => $value !== '');
 
-                return $status !== 'ENVIADO' && $days >= 0 && $days <= 7;
-            })
-            ->sortBy([
-                ['dias_para_limite', 'asc'],
-                ['fecha_limite_envio', 'asc'],
-            ])
-            ->take(5)
-            ->values()
-            ->all();
-
-        return view('parada-herramientas.index', compact('items', 'filters', 'deadlineAlerts'));
+        return redirect()->route('logistica.index', $query);
     }
 
     public function show(string $rqMinaId): View|RedirectResponse
@@ -50,7 +34,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $item = $this->service->toDetailView($rq, $usuario);
@@ -64,7 +48,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $item = $this->service->toDetailView($rq, $usuario);
@@ -79,7 +63,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $result = $this->service->saveLista($usuario, $rq, [
@@ -103,7 +87,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $result = $this->service->enviarLista($usuario, $rq);
@@ -123,7 +107,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $result = $this->service->enviarRecordatorioSupervisor($usuario, $rq, $grupoId);
@@ -137,7 +121,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $request->validate([
@@ -162,7 +146,7 @@ class ParadaHerramientaPageController extends WebPageController
         $result = $this->service->importarCatalogo($usuario, $request->file('archivo'));
 
         return redirect()
-            ->route('herramientas-parada.index')
+            ->route('logistica.index', ['tab' => 'herramientas'])
             ->with(($result['ok'] ?? false) ? 'success' : 'error', $result['message'] ?? 'No se pudo actualizar el catalogo.');
     }
 
@@ -198,7 +182,7 @@ class ParadaHerramientaPageController extends WebPageController
         $rq = $this->service->findParadaForUser($usuario, $rqMinaId);
 
         if (!$rq) {
-            return redirect()->route('herramientas-parada.index')->with('error', 'Parada no encontrada o sin permisos.');
+            return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
         $result = $this->service->updatePedido($usuario, $rq, [

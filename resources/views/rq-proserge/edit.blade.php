@@ -3,6 +3,9 @@
 @section('title', 'RQ Proserge - Editar')
 
 @section('content')
+@php
+    $canUpdateRqProserge = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_proserge', 'actualizar');
+@endphp
 <div class="page-header">
     <div class="page-header-content">
         <div>
@@ -62,7 +65,9 @@
 
     <div class="form-actions">
         <a href="{{ route('rq-proserge.index') }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @if($canUpdateRqProserge)
+            <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        @endif
     </div>
 </form>
 @endsection
