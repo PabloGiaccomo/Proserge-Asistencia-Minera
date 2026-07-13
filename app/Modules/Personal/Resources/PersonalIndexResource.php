@@ -3,6 +3,7 @@
 namespace App\Modules\Personal\Resources;
 
 use App\Models\PersonalContrato;
+use App\Models\PersonalFicha;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Carbon\Carbon;
@@ -47,35 +48,27 @@ class PersonalIndexResource extends JsonResource
             })
             ->first();
 
-        $contratosCerrados = $contratosOperativos
-            ->filter(fn ($contratoLaboral): bool => PersonalNormalizer::isFinalizedContractState($contratoLaboral->estado ?? ''))
+        // Pre-compute sort keys once, avoid redundant sorting across 7+ lookups
+        $sortKeys = [];
+        foreach ($contratosOperativos as $c) {
+            $sortKeys[$c->id] = PersonalNormalizer::contractHistorySortKey($c);
+        }
+        $sortedContracts = $contratosOperativos->sortByDesc(fn ($c): string => $sortKeys[$c->id] ?? '')->values();
+
+        $ultimoContratoLaboral = $sortedContracts->first();
+        $contratoActual = $sortedContracts->first(fn ($c): bool => in_array(strtoupper((string) ($c->estado ?? '')), ['PREPARACION', 'ACTIVO'], true));
+        $contratoActivo = $sortedContracts->first(fn ($c): bool => strtoupper((string) ($c->estado ?? '')) === 'ACTIVO');
+        $contratoVigenteFirmado = $sortedContracts->first(fn ($c): bool => strtoupper((string) ($c->estado ?? '')) === 'ACTIVO'
+            && $c->signed_at
+            && trim((string) ($c->signed_contract_path ?? '')) !== ''
+            && (!optional($c->fecha_fin)->toDateString()
+                || optional($c->fecha_fin)->toDateString() >= $todayString));
+        $contratoPreparacion = $sortedContracts->first(fn ($c): bool => strtoupper((string) ($c->estado ?? '')) === 'PREPARACION');
+
+        $contratosCerrados = $sortedContracts
+            ->filter(fn ($c): bool => PersonalNormalizer::isFinalizedContractState($c->estado ?? ''))
             ->values();
-        $ultimoContratoLaboral = $contratosOperativos
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
-        $contratoActual = $contratosOperativos
-            ->filter(fn ($contratoLaboral): bool => in_array(strtoupper((string) ($contratoLaboral->estado ?? '')), ['PREPARACION', 'ACTIVO'], true))
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
-        $contratoActivo = $contratosOperativos
-            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'ACTIVO')
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
-        $contratoVigenteFirmado = $contratosOperativos
-            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'ACTIVO'
-                && $contratoLaboral->signed_at
-                && trim((string) ($contratoLaboral->signed_contract_path ?? '')) !== ''
-                && (!optional($contratoLaboral->fecha_fin)->toDateString()
-                    || optional($contratoLaboral->fecha_fin)->toDateString() >= $todayString))
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
-        $contratoPreparacion = $contratosOperativos
-            ->filter(fn ($contratoLaboral): bool => strtoupper((string) ($contratoLaboral->estado ?? '')) === 'PREPARACION')
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
-        $ultimoContratoCerrado = $contratosCerrados
-            ->sortByDesc(fn ($contratoLaboral): string => PersonalNormalizer::contractHistorySortKey($contratoLaboral))
-            ->first();
+        $ultimoContratoCerrado = $contratosCerrados->first();
 
         $contrato = PersonalNormalizer::contract($this->contrato);
         $fichaData = is_array($ficha?->datos_json ?? null) ? $ficha->datos_json : [];
@@ -132,6 +125,7 @@ class PersonalIndexResource extends JsonResource
         $contratoVencido = !$hasCurrentSignedContract && $fechaFinContrato !== null && $fechaFinContrato !== '' && $fechaFinContrato < $todayString;
         $ceseVigente = $fechaCese !== null && $fechaCese !== '' && $fechaCese <= $todayString;
         $revisarFicha = in_array($estadoPersonal, ['FICHA_ENVIADA', 'OBSERVADO'], true);
+        $fichaAprobada = strtoupper((string) ($ficha?->estado ?? '')) === PersonalFicha::ESTADO_APROBADO;
         $faltaContrato = $estadoPersonal === 'FALTA_CONTRATO';
         $noFirmoContrato = $estadoPersonal === 'NO_FIRMO_CONTRATO';
         $pendienteContratoFirmado = (bool) ($this->pendiente_contrato_firmado ?? false);
@@ -140,7 +134,7 @@ class PersonalIndexResource extends JsonResource
         $terminarFicha = !$hasCurrentSignedContract && (
             in_array($estadoPersonal, ['PENDIENTE_COMPLETAR_FICHA', 'LINK_VENCIDO'], true)
             || $ficha === null
-            || count($missingRequiredFichaFields) > 0
+            || (!$fichaAprobada && count($missingRequiredFichaFields) > 0)
         );
         $bienestarInactivo = $primaryBloqueo && in_array((string) $primaryBloqueo->tipo, ['vacaciones', 'descanso_medico'], true);
         $intermitenteActivo = $contrato === 'INTER' && ($hasParadaActiva || $hasRqProsergeParadaActiva);
@@ -201,7 +195,7 @@ class PersonalIndexResource extends JsonResource
         $listaNegraPorNombre = trim((string) ($listaNegraPor?->personal?->nombre_completo ?: $listaNegraPor?->email ?: ''));
         $baseReentryContract = $contratoActual
             ?: $ultimoContratoCerrado
-            ?: $contratosOperativos->sortByDesc(fn ($contratoLaboral) => (int) ($contratoLaboral->contrato_numero ?? 0))->first();
+            ?: $sortedContracts->first();
         $reentryData = [
             'puesto' => $puestoNombre,
             'tipo_contrato' => PersonalNormalizer::contract($baseReentryContract?->tipo_contrato ?: $contrato),

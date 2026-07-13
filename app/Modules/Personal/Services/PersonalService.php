@@ -15,6 +15,7 @@ use App\Models\PersonalPuesto;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -81,30 +82,59 @@ class PersonalService
 
     public function listForIndex(array $filters): Collection
     {
-        $query = $this->buildFilteredQuery($filters)->with(['minas']);
+        $query = $this->buildFilteredQuery($filters)->with(['minas:minas.id,minas.nombre']);
 
+        $this->applyEagerForIndex($query);
+
+        return $query->get();
+    }
+
+    public function paginatedForIndex(array $filters, int $perPage = 10): LengthAwarePaginator
+    {
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = max(10, min(100, $perPage));
+
+        $query = $this->buildFilteredQuery($filters)->with(['minas:minas.id,minas.nombre']);
+
+        $this->applyEagerForIndex($query);
+
+        return $query->paginate($perPage, ['personal.*'], 'page', $page);
+    }
+
+    private function applyEagerForIndex(Builder $query): void
+    {
         if (Schema::hasTable('personal_puestos') && Schema::hasColumn('personal', 'puesto_id')) {
-            $query->with('puestoCatalogo');
+            $query->with('puestoCatalogo:id,nombre,funciones');
         }
 
         if (Schema::hasTable('personal_fichas')) {
-            $query->with('fichaColaborador');
+            $query->with([
+                'fichaColaborador' => function ($q): void {
+                    $q->select(
+                        'personal_fichas.id',
+                        'personal_fichas.personal_id',
+                        'personal_fichas.estado',
+                        'personal_fichas.submitted_at',
+                        'personal_fichas.datos_json'
+                    );
+                },
+            ]);
         }
 
         if (Schema::hasTable('personal_contratos')) {
-            $query->with(['contratosLaborales.cerradoPor.personal']);
+            $query->with('contratosLaborales');
         }
 
         if (Schema::hasTable('personal_contrato_datos')) {
-            $query->with('contratoDatos');
+            $query->with('contratoDatos:id,personal_id,downloaded_at,signed_at,fecha_firma,signed_contract_original_name,signed_contract_path,sueldo_num,sueldo_hora_paradas');
         }
 
         if (Schema::hasColumn('personal', 'cesado_by_usuario_id')) {
-            $query->with('cesadoPor.personal');
+            $query->with('cesadoPor.personal:id,nombre_completo');
         }
 
         if (Schema::hasColumn('personal', 'lista_negra_by_usuario_id')) {
-            $query->with('listaNegraPor.personal');
+            $query->with('listaNegraPor.personal:id,nombre_completo');
         }
 
         if (Schema::hasTable('personal_bloqueo')) {
@@ -112,6 +142,7 @@ class PersonalService
                 'bloqueos' => function ($q): void {
                     $q->where('estado', 'ACTIVO')
                         ->where('visible_para_planner', true)
+                        ->select('id', 'personal_id', 'tipo', 'motivo', 'detalle', 'fecha_inicio', 'fecha_fin')
                         ->orderBy('fecha_inicio')
                         ->orderBy('fecha_fin');
                 },
@@ -126,12 +157,12 @@ class PersonalService
                         ->whereDate('fecha_fin', '>=', $today)
                         ->whereHas('rqProserge', function ($rq): void {
                             $rq->whereNotIn('estado', ['CANCELADO', 'CERRADO']);
-                        });
+                        })
+                        ->select('id', 'personal_id')
+                        ->limit(1);
                 },
             ]);
         }
-
-        return $query->get();
     }
 
     public function buildFilteredQuery(array $filters): Builder

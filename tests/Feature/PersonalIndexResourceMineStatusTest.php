@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Personal;
 use App\Models\PersonalContrato;
+use App\Models\PersonalFicha;
 use App\Modules\Personal\Resources\PersonalIndexResource;
+use App\Modules\Personal\Services\PersonalService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +45,32 @@ class PersonalIndexResourceMineStatusTest extends TestCase
 
         $this->assertSame('proceso', $row['minas_estado']['BOROO']);
         $this->assertSame('habilitado', $row['situacion']);
+    }
+
+    public function test_index_listing_keeps_ficha_relation_when_loaded_with_selected_columns(): void
+    {
+        $personal = $this->createActivePersonalWithSignedContract();
+        $ficha = PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_APROBADO,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $personal->dni,
+            'datos_json' => [
+                'tipo_documento' => 'DNI',
+                'numero_documento' => $personal->dni,
+            ],
+            'submitted_at' => now(),
+            'approved_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $workers = app(PersonalService::class)->listForIndex(['ids' => [$personal->id]]);
+        $row = (new PersonalIndexResource($workers->first()))->toArray(Request::create('/personal'));
+
+        $this->assertSame($ficha->id, $row['ficha_id']);
+        $this->assertSame(PersonalFicha::ESTADO_APROBADO, $row['estado_ficha']);
     }
 
     private function createActivePersonalWithSignedContract(): Personal

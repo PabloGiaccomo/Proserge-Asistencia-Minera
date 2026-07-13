@@ -124,33 +124,11 @@ class PersonalPageController extends WebPageController
 
         $this->runIndexMaintenance();
 
-        $filters = $request->query();
-        $visibleStateFilter = strtoupper(trim((string) ($filters['estado'] ?? '')));
-        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true) === false) {
-            $visibleStateFilter = match (strtolower((string) ($filters['estado'] ?? ''))) {
-                'activo' => 'ACTIVO',
-                'inactivo' => 'INACTIVO',
-                'cesado' => 'CESADO',
-                default => '',
-            };
-        }
-        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
-            unset($filters['estado']);
-        }
-
+        $filters = $this->extractIndexFilters($request);
         $trabajadores = PersonalIndexResource::collection(
             $this->service->listForIndex($filters)
         )->resolve();
-
-        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
-            $trabajadores = array_values(array_filter($trabajadores, function (array $trabajador) use ($visibleStateFilter): bool {
-                if (!empty($trabajador['en_lista_negra'])) {
-                    return true;
-                }
-
-                return strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter;
-            }));
-        }
+        $trabajadores = $this->filterByVisibleState($trabajadores, (string) ($filters['visible_estado'] ?? ''));
 
         $catalogs = $this->getLocationCatalogs();
 
@@ -158,6 +136,69 @@ class PersonalPageController extends WebPageController
             'puestoOptions' => $this->puestoOptions(),
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
         ]));
+    }
+
+    public function apiList(Request $request): JsonResponse
+    {
+        $filters = $this->extractIndexFilters($request);
+        $perPage = $this->resolvePerPage($request);
+
+        $paginator = $this->service->paginatedForIndex($filters, $perPage);
+        $workers = PersonalIndexResource::collection($paginator->items())->resolve();
+
+        return response()->json([
+            'data' => $workers,
+            'total' => $paginator->total(),
+            'currentPage' => $paginator->currentPage(),
+            'lastPage' => $paginator->lastPage(),
+            'perPage' => $paginator->perPage(),
+            'from' => $paginator->firstItem(),
+            'to' => $paginator->lastItem(),
+        ]);
+    }
+
+    private function extractIndexFilters(Request $request): array
+    {
+        $filters = $request->query();
+
+        $visibleStateFilter = strtoupper(trim((string) ($filters['estado'] ?? '')));
+        if (!in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
+            $visibleStateFilter = match (strtolower((string) ($filters['estado'] ?? ''))) {
+                'activo' => 'ACTIVO',
+                'inactivo' => 'INACTIVO',
+                'cesado' => 'CESADO',
+                default => '',
+            };
+        }
+
+        if (in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
+            unset($filters['estado']);
+            $filters['visible_estado'] = $visibleStateFilter;
+        }
+
+        return $filters;
+    }
+
+    private function resolvePerPage(Request $request): int
+    {
+        $perPage = (int) ($request->query('per_page', 10));
+
+        return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 10;
+    }
+
+    private function filterByVisibleState(array $trabajadores, string $visibleStateFilter): array
+    {
+        if (!in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
+            return $trabajadores;
+        }
+
+        return array_values(array_filter($trabajadores, function (array $trabajador) use ($visibleStateFilter): bool {
+            if (!empty($trabajador['en_lista_negra'])) {
+                return true;
+            }
+
+            return strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter;
+        }));
     }
 
     private function runIndexMaintenance(): void

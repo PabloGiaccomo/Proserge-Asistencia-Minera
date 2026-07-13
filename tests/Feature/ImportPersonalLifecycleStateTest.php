@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\Personal;
 use App\Models\PersonalFicha;
+use App\Modules\Personal\Resources\PersonalIndexResource;
 use App\Modules\Personal\Services\ImportPersonalService;
 use App\Modules\Personal\Services\PersonalContratoService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -340,6 +342,74 @@ class ImportPersonalLifecycleStateTest extends TestCase
             'fecha_fin_contrato' => null,
             'periodo_prueba_fin' => '2026-04-10',
         ]);
+    }
+
+    public function test_imported_indefinite_worker_without_contract_end_does_not_require_finishing_ficha(): void
+    {
+        $user = $this->createUser();
+
+        app(ImportPersonalService::class)->import($this->personnelDataUpload([
+            [
+                'LUIS',
+                'INDETERMINADO',
+                'SIN FIN',
+                'MASCULINO',
+                'SOLTERO',
+                'PERUANO',
+                'O+',
+                '-',
+                'DNI',
+                '71000113',
+                '1990-01-15',
+                'PERU',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                '959111777',
+                '-',
+                'AV. SIN FIN 123',
+                'AREQUIPA',
+                'AREQUIPA',
+                'AREQUIPA',
+                'OPERARIO INDETERMINADO',
+                'INDET',
+                'BCP',
+                '00123456789',
+                '00212345678901234567',
+                'SECUNDARIA COMPLETA',
+                'OPERARIO',
+                '-',
+                'IE TEST',
+                '2010',
+                '5 ANOS',
+                'SISTEMA PRIVADO DE PENSIONES',
+                'AFP PRIMA',
+                '2500',
+                '42',
+                'L',
+                '34',
+                'M',
+                'CONTACTO TEST',
+                'HERMANO',
+                '959333777',
+                '2026-07-01',
+                '2026-07-01',
+                '2026-09-29',
+                '-',
+            ],
+        ]), $user);
+
+        $personal = Personal::query()
+            ->with(['fichaColaborador', 'contratoDatos', 'contratosLaborales', 'minas'])
+            ->where('numero_documento', '71000113')
+            ->firstOrFail();
+
+        $row = (new PersonalIndexResource($personal))->toArray(request());
+
+        $this->assertSame('INDET', $personal->contrato);
+        $this->assertSame(PersonalFicha::ESTADO_APROBADO, $row['estado_ficha']);
+        $this->assertNull($personal->contratoDatos?->fecha_fin_contrato);
+        $this->assertNotSame('terminar_ficha', $row['situacion']);
     }
 
     private function createPersonal(string $dni, string $estado): string
