@@ -8,8 +8,11 @@
         request('estado'),
         request('tipo'),
         request('mina'),
+        request('minas'),
         request('mina_estado'),
+        request('mina_estados'),
         request('contrato'),
+        request('q') ?: request('search'),
         request('sort') && request('sort') !== 'nombre' ? request('sort') : null,
     ])->filter(fn ($value) => filled($value))->count();
     $personalPermissions = session('user.permissions', []);
@@ -36,6 +39,26 @@
     $canManagePuestos = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_puestos', 'ver')
         || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'gestionar_puestos');
     $documentDownloadOptions = \App\Modules\Personal\Support\PersonalFichaCatalog::documentRequirements();
+    $paginationMeta = $paginationMeta ?? [
+        'total' => count($trabajadores ?? []),
+        'currentPage' => 1,
+        'lastPage' => 1,
+        'perPage' => max(10, count($trabajadores ?? [])),
+        'from' => empty($trabajadores ?? []) ? null : 1,
+        'to' => count($trabajadores ?? []),
+        'serverSide' => false,
+    ];
+    $paginationTotal = (int) ($paginationMeta['total'] ?? count($trabajadores ?? []));
+    $serverOccupationMineFilters = collect(\Illuminate\Support\Arr::wrap(request('minas', [])))
+        ->map(fn ($value) => trim((string) $value))
+        ->filter()
+        ->values()
+        ->all();
+    $serverOccupationStateFilters = collect(\Illuminate\Support\Arr::wrap(request('mina_estados', [])))
+        ->map(fn ($value) => strtoupper(\App\Modules\Personal\Support\PersonalNormalizer::text($value)))
+        ->filter(fn ($value) => in_array($value, ['HABILITADO', 'EN_PROCESO', 'NO_HABILITADO'], true))
+        ->values()
+        ->all();
 @endphp
 <style>
 .acciones-dropdown .accion-item {
@@ -2262,6 +2285,9 @@
 
 <!-- Filter Panel -->
     <form method="GET" action="{{ route('personal.index') }}" class="filter-panel-compact" id="filterPanel" style="display: none;">
+        <input type="hidden" name="page" value="1">
+        <input type="hidden" name="per_page" value="{{ (int) ($paginationMeta['perPage'] ?? request('per_page', 25)) }}">
+        <input type="hidden" name="q" value="{{ request('q', request('search')) }}">
         <div class="filter-panel-compact-row">
             <!-- Ordenar por -->
             <div class="filter-compact-group">
@@ -2424,7 +2450,7 @@
                 </svg>
                 Vista
             </button>
-            <span class="card-badge" id="personalCount">{{ count($trabajadores ?? []) }} trabajadores</span>
+            <span class="card-badge" id="personalCount">{{ $paginationTotal }} trabajadores</span>
         </div>
     </div>
 
@@ -2434,7 +2460,7 @@
             <span class="card-title">Listado de Personal</span>
         </div>
         <div class="card-body">
-            @if(empty($trabajadores))
+            @if($paginationTotal === 0)
                 <div class="empty-state">
                     <div class="empty-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -4652,6 +4678,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const paginationInfos = [paginationInfo, paginationInfoTop].filter(Boolean);
     const paginationWrap = document.getElementById('personalPagination');
     const countBadge = document.getElementById('personalCount');
+    const serverPagination = @json($paginationMeta);
+    const hasServerPagination = !!(serverPagination && serverPagination.serverSide);
+    const serverSearchValue = @json((string) request('q', request('search', '')));
+    const serverOccupationFilters = @json([
+        'minas' => $serverOccupationMineFilters,
+        'states' => $serverOccupationStateFilters,
+    ]);
     const searchInput = document.getElementById('personal-search');
     const sortNombre = document.getElementById('dgSortNombre');
     const sortDni = document.getElementById('dgSortDni');
@@ -4891,6 +4924,74 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
 
+    let serverOccupationFilterTimer = null;
+
+    const collectSelectedMineStateParams = function () {
+        const states = [];
+        if (ocupShowHabilitadoToggle?.checked) states.push('HABILITADO');
+        if (ocupShowProcesoToggle?.checked) states.push('EN_PROCESO');
+        if (ocupShowNoHabilitadoToggle?.checked) states.push('NO_HABILITADO');
+
+        if (states.length === 0 && ocupShowHabilitadoToggle) {
+            ocupShowHabilitadoToggle.checked = true;
+            states.push('HABILITADO');
+        }
+
+        return states;
+    };
+
+    const navigateServerOccupationFilter = function () {
+        if (!hasServerPagination) {
+            return;
+        }
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete('minas');
+        url.searchParams.delete('minas[]');
+        url.searchParams.delete('mina_estados');
+        url.searchParams.delete('mina_estados[]');
+
+        if (ocupFilterRowsToggle?.checked) {
+            const selectedLocations = [
+                ...collectSelectedOcupMinas(),
+                ...collectSelectedOcupOffices(),
+                ...collectSelectedOcupWorkshops(),
+            ];
+            const selectedStates = collectSelectedMineStateParams();
+
+            if (selectedLocations.length === 0) {
+                url.searchParams.append('minas[]', '__sin_resultados__');
+            } else {
+                selectedLocations.forEach(function (value) {
+                    url.searchParams.append('minas[]', value);
+                });
+            }
+
+            selectedStates.forEach(function (value) {
+                url.searchParams.append('mina_estados[]', value);
+            });
+        }
+
+        url.searchParams.set('page', '1');
+        url.searchParams.set('per_page', String(Number(pageSize || serverPagination?.perPage || 25)));
+
+        if (url.toString() !== window.location.href) {
+            clearViewState();
+            window.location.href = url.toString();
+        }
+    };
+
+    const scheduleServerOccupationFilter = function () {
+        if (!hasServerPagination) {
+            return false;
+        }
+
+        window.clearTimeout(serverOccupationFilterTimer);
+        serverOccupationFilterTimer = window.setTimeout(navigateServerOccupationFilter, 250);
+
+        return true;
+    };
+
     const syncFilterIndicators = function () {
         const occupationFilterActive =
             !isOccupationSelectionDefault() ||
@@ -4974,18 +5075,45 @@ document.addEventListener('DOMContentLoaded', function () {
         gridShell.style.removeProperty('--personal-grid-expanded-width');
     };
 
+    const navigateServerPage = function (page, nextPageSize) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('page', String(Math.max(1, Number(page || 1))));
+        url.searchParams.set('per_page', String(Number(nextPageSize || pageSize || serverPagination?.perPage || 25)));
+        window.location.href = url.toString();
+    };
+
+    const navigateServerSearch = function (query) {
+        const url = new URL(window.location.href);
+        const normalizedQuery = String(query || '').trim();
+
+        url.searchParams.delete('search');
+        if (normalizedQuery.length > 0) {
+            url.searchParams.set('q', normalizedQuery);
+        } else {
+            url.searchParams.delete('q');
+        }
+
+        url.searchParams.set('page', '1');
+        url.searchParams.set('per_page', String(Number(pageSize || serverPagination?.perPage || 25)));
+
+        if (url.toString() !== window.location.href) {
+            clearViewState();
+            window.location.href = url.toString();
+        }
+    };
+
     const buildPageSizeOptions = function (totalCount, preferredValue) {
         if (pageSizeSelects.length === 0) return;
         const total = Math.max(1, Number(totalCount || rows.length || 1));
         const preferred = Number(preferredValue || 0);
-        const base = [10, 50, 100, 200, 300, total];
+        const base = hasServerPagination ? [10, 25, 50, 100] : [10, 50, 100, 200, 300, total];
 
-        if (Number.isFinite(preferred) && preferred > 0 && preferred <= total) {
+        if (Number.isFinite(preferred) && preferred > 0 && (hasServerPagination || preferred <= total)) {
             base.push(preferred);
         }
 
         const values = Array.from(new Set(base.filter(function (value) {
-            return Number.isFinite(value) && value > 0 && value <= total;
+            return Number.isFinite(value) && value > 0 && (hasServerPagination || value <= total);
         }))).sort(function (a, b) {
             return a - b;
         });
@@ -5341,14 +5469,20 @@ document.addEventListener('DOMContentLoaded', function () {
     puestoFilterCheckboxes = populateCheckboxGroup(puestoFilterChecks, rows.map(r => r.dataset.puesto || ''), 'js-dg-puesto-check');
     contratoFilterCheckboxes = populateCheckboxGroup(contratoFilterChecks, rows.map(r => r.dataset.contrato || ''), 'js-dg-contrato-check');
 
-    let currentPage = 1;
-    let pageSize = Number((pageSizeSelect || pageSizeSelectTop)?.value || 9);
+    let currentPage = hasServerPagination ? Number(serverPagination.currentPage || 1) : 1;
+    let pageSize = hasServerPagination
+        ? Number(serverPagination.perPage || 25)
+        : Number((pageSizeSelect || pageSizeSelectTop)?.value || 9);
     setBootProgress(18, 'Cargando preferencias...');
 
-    buildPageSizeOptions(rows.length, savedState.pageSize || pageSize);
+    buildPageSizeOptions(hasServerPagination ? serverPagination.total : rows.length, hasServerPagination ? pageSize : (savedState.pageSize || pageSize));
 
-    if (searchInput && typeof savedState.search === 'string') {
-        searchInput.value = savedState.search;
+    if (searchInput) {
+        if (hasServerPagination) {
+            searchInput.value = serverSearchValue;
+        } else if (typeof savedState.search === 'string') {
+            searchInput.value = savedState.search;
+        }
     }
 
     if (pageSizeSelects.length > 0) {
@@ -5356,7 +5490,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const optionValues = Array.from(primarySelect.options).map(function (option) {
             return String(option.value);
         });
-        const preferredPageSize = String(savedState.pageSize || '');
+        const preferredPageSize = String(hasServerPagination ? pageSize : (savedState.pageSize || ''));
         let nextPageSize = optionValues[0] || '10';
 
         if (preferredPageSize && optionValues.indexOf(preferredPageSize) !== -1) {
@@ -5369,50 +5503,78 @@ document.addEventListener('DOMContentLoaded', function () {
         pageSize = Number(nextPageSize || 10);
     }
 
-    if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
-    if (sortDni && typeof savedState.sortDni === 'string') sortDni.value = savedState.sortDni;
-    applyCheckedValues(puestoFilterCheckboxes, normalizeSavedFilterValues(savedState.puestos, savedState.puesto));
-    applyCheckedValues(contratoFilterCheckboxes, normalizeSavedFilterValues(savedState.contratos, savedState.contrato));
-    applyCheckedValues(estadoFilterCheckboxes, normalizeSavedFilterValues(savedState.estados, savedState.estado));
-    applyCheckedValues(bienestarFilterCheckboxes, normalizeSavedFilterValues(savedState.bienestares, savedState.bienestar));
+    if (!hasServerPagination) {
+        if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
+        if (sortDni && typeof savedState.sortDni === 'string') sortDni.value = savedState.sortDni;
+        applyCheckedValues(puestoFilterCheckboxes, normalizeSavedFilterValues(savedState.puestos, savedState.puesto));
+        applyCheckedValues(contratoFilterCheckboxes, normalizeSavedFilterValues(savedState.contratos, savedState.contrato));
+        applyCheckedValues(estadoFilterCheckboxes, normalizeSavedFilterValues(savedState.estados, savedState.estado));
+        applyCheckedValues(bienestarFilterCheckboxes, normalizeSavedFilterValues(savedState.bienestares, savedState.bienestar));
+    }
 
     setBootProgress(42, 'Aplicando columnas y filtros...');
     applyVisibleColumns(savedState.visibleColumns || defaultVisibleColumns);
     applyExpandedState(!!savedState.expanded);
     applyGroupedOccupation(savedState.occupationGrouped !== false);
-    if (Array.isArray(savedState.selectedOcupMinas)) {
-        ocupMineCheckboxes.forEach(function (input) {
-            input.checked = savedState.selectedOcupMinas.indexOf(input.value) !== -1;
-        });
-    }
-    if (Array.isArray(savedState.selectedOcupOffices)) {
-        ocupOfficeCheckboxes.forEach(function (input) {
-            input.checked = savedState.selectedOcupOffices.indexOf(input.value) !== -1;
-        });
-    }
-    if (Array.isArray(savedState.selectedOcupWorkshops)) {
-        ocupWorkshopCheckboxes.forEach(function (input) {
-            input.checked = savedState.selectedOcupWorkshops.indexOf(input.value) !== -1;
-        });
-    }
-    if (ocupShowHabilitadoToggle) {
-        ocupShowHabilitadoToggle.checked = savedState.showOcupHabilitado !== false;
-    }
-    if (ocupShowProcesoToggle) {
-        ocupShowProcesoToggle.checked = savedState.showOcupProceso !== false;
-    }
-    if (ocupShowNoHabilitadoToggle) {
-        ocupShowNoHabilitadoToggle.checked = savedState.showOcupNoHabilitado !== false;
-    }
-    if (ocupFilterRowsToggle) {
-        ocupFilterRowsToggle.checked = !!savedState.filterRowsByOccupation;
-        if (!isOccupationSelectionDefault()) {
+    const serverOcupMines = Array.isArray(serverOccupationFilters.minas) ? serverOccupationFilters.minas : [];
+    const serverOcupStates = Array.isArray(serverOccupationFilters.states) ? serverOccupationFilters.states : [];
+    const hasServerOcupFilters = serverOcupMines.length > 0 || serverOcupStates.length > 0;
+
+    if (hasServerPagination && hasServerOcupFilters) {
+        if (serverOcupMines.length > 0) {
+            applyCheckedValues(ocupMineCheckboxes, serverOcupMines);
+            applyCheckedValues(ocupOfficeCheckboxes, serverOcupMines);
+            applyCheckedValues(ocupWorkshopCheckboxes, serverOcupMines);
+        }
+
+        if (serverOcupStates.length > 0) {
+            if (ocupShowHabilitadoToggle) ocupShowHabilitadoToggle.checked = serverOcupStates.indexOf('HABILITADO') !== -1;
+            if (ocupShowProcesoToggle) ocupShowProcesoToggle.checked = serverOcupStates.indexOf('EN_PROCESO') !== -1;
+            if (ocupShowNoHabilitadoToggle) ocupShowNoHabilitadoToggle.checked = serverOcupStates.indexOf('NO_HABILITADO') !== -1;
+        }
+
+        if (ocupFilterRowsToggle) {
             ocupFilterRowsToggle.checked = true;
         }
+    } else if (!hasServerPagination) {
+        if (Array.isArray(savedState.selectedOcupMinas)) {
+            ocupMineCheckboxes.forEach(function (input) {
+                input.checked = savedState.selectedOcupMinas.indexOf(input.value) !== -1;
+            });
+        }
+        if (Array.isArray(savedState.selectedOcupOffices)) {
+            ocupOfficeCheckboxes.forEach(function (input) {
+                input.checked = savedState.selectedOcupOffices.indexOf(input.value) !== -1;
+            });
+        }
+        if (Array.isArray(savedState.selectedOcupWorkshops)) {
+            ocupWorkshopCheckboxes.forEach(function (input) {
+                input.checked = savedState.selectedOcupWorkshops.indexOf(input.value) !== -1;
+            });
+        }
+        if (ocupShowHabilitadoToggle) {
+            ocupShowHabilitadoToggle.checked = savedState.showOcupHabilitado !== false;
+        }
+        if (ocupShowProcesoToggle) {
+            ocupShowProcesoToggle.checked = savedState.showOcupProceso !== false;
+        }
+        if (ocupShowNoHabilitadoToggle) {
+            ocupShowNoHabilitadoToggle.checked = savedState.showOcupNoHabilitado !== false;
+        }
+        if (ocupFilterRowsToggle) {
+            ocupFilterRowsToggle.checked = !!savedState.filterRowsByOccupation;
+            if (!isOccupationSelectionDefault()) {
+                ocupFilterRowsToggle.checked = true;
+            }
+        }
+    } else if (ocupFilterRowsToggle) {
+        ocupFilterRowsToggle.checked = false;
     }
     applyOccupationVisibility();
     setBootProgress(64, 'Preparando tabla...');
-    currentPage = Number(savedState.currentPage || 1);
+    if (!hasServerPagination) {
+        currentPage = Number(savedState.currentPage || 1);
+    }
 
     const normalizeFilterValues = function (values) {
         return values.map(function (value) {
@@ -5472,7 +5634,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const applyFiltersAndSort = function() {
-        const search = normalizeText(searchInput?.value || '');
+        const search = hasServerPagination ? '' : normalizeText(searchInput?.value || '');
         const searchTokens = search.split(' ').filter(Boolean);
         const puestos = normalizeFilterValues(collectSelectedPuestos());
         const contratos = normalizeFilterValues(collectSelectedContratos());
@@ -5572,6 +5734,60 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const renderGrid = function(resetPage) {
+        if (hasServerPagination) {
+            const filtered = applyFiltersAndSort();
+            const total = Number(serverPagination.total || 0);
+            const from = Number(serverPagination.from || 0);
+            const to = Number(serverPagination.to || 0);
+            const totalPages = Math.max(1, Number(serverPagination.lastPage || 1));
+            currentPage = clampPage(Number(serverPagination.currentPage || currentPage || 1), totalPages);
+            pageSize = Number(serverPagination.perPage || pageSize || 25);
+            syncPageSizeOptions(total, pageSize);
+
+            rows.forEach(r => r.style.display = 'none');
+            filtered.forEach(r => r.style.display = 'table-row');
+
+            const hasLocalFilter = filtered.length !== rows.length;
+            const paginationText = total === 0
+                ? '0 resultados'
+                : (hasLocalFilter
+                    ? 'Mostrando ' + filtered.length + ' de ' + rows.length + ' en esta pagina (' + total + ' total)'
+                    : 'Mostrando ' + from + '-' + to + ' de ' + total);
+
+            paginationInfos.forEach(function (node) {
+                node.textContent = paginationText;
+            });
+            if (countBadge) {
+                countBadge.textContent = total + ' trabajadores';
+            }
+            syncFilterIndicators();
+            renderPagination(totalPages);
+            updateDocumentDownloadSelectionState();
+            scheduleScrollbarSync();
+            saveViewState({
+                search: searchInput?.value || '',
+                currentPage: currentPage,
+                pageSize: pageSize,
+                sortNombre: sortNombre?.value || '',
+                sortDni: sortDni?.value || '',
+                puestos: collectSelectedPuestos(),
+                contratos: collectSelectedContratos(),
+                estados: collectSelectedEstados(),
+                bienestares: collectSelectedBienestares(),
+                visibleColumns: collectVisibleColumns(),
+                selectedOcupMinas: collectSelectedOcupMinas(),
+                selectedOcupOffices: collectSelectedOcupOffices(),
+                selectedOcupWorkshops: collectSelectedOcupWorkshops(),
+                showOcupHabilitado: !!ocupShowHabilitadoToggle?.checked,
+                showOcupProceso: !!ocupShowProcesoToggle?.checked,
+                showOcupNoHabilitado: !!ocupShowNoHabilitadoToggle?.checked,
+                filterRowsByOccupation: !!ocupFilterRowsToggle?.checked,
+                occupationGrouped: !!ocupGroupedToggle?.checked,
+                expanded: !!gridShell?.classList.contains('is-expanded'),
+            });
+            return;
+        }
+
         if (resetPage) currentPage = 1;
         const filtered = applyFiltersAndSort();
         const total = filtered.length;
@@ -5624,19 +5840,42 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const simpleSearchInput = document.getElementById('personal-search');
     const simpleSearchClear = document.querySelector('[data-simple-search-clear]');
+    let simpleSearchTimer = null;
     if (simpleSearchInput && simpleSearchClear) {
         const syncSearchClear = function () {
             simpleSearchClear.style.display = simpleSearchInput.value.trim().length > 0 ? 'flex' : 'none';
         };
 
+        if (hasServerPagination) {
+            simpleSearchInput.setAttribute('title', 'Presiona Enter para buscar en todo el personal.');
+        }
+
         simpleSearchInput.addEventListener('input', function () {
             syncSearchClear();
+            if (hasServerPagination) {
+                window.clearTimeout(simpleSearchTimer);
+                return;
+            }
             renderGrid(true);
+        });
+        simpleSearchInput.addEventListener('keydown', function (event) {
+            if (!hasServerPagination || event.key !== 'Enter') {
+                return;
+            }
+
+            event.preventDefault();
+            window.clearTimeout(simpleSearchTimer);
+            navigateServerSearch(simpleSearchInput.value);
         });
         simpleSearchClear.addEventListener('click', function () {
             simpleSearchInput.value = '';
-            simpleSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
             syncSearchClear();
+            if (hasServerPagination) {
+                window.clearTimeout(simpleSearchTimer);
+                navigateServerSearch('');
+                return;
+            }
+            simpleSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
             simpleSearchInput.focus();
         });
 
@@ -5660,6 +5899,10 @@ document.addEventListener('DOMContentLoaded', function () {
             pageSizeSelects.forEach(function (otherSelect) {
                 otherSelect.value = String(pageSize);
             });
+            if (hasServerPagination) {
+                navigateServerPage(1, pageSize);
+                return;
+            }
             renderGrid(true);
         });
     });
@@ -5683,6 +5926,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const handleOccupationFilterSelectionChange = function () {
         enableOccupationRowFiltering();
         applyOccupationVisibility();
+        if (scheduleServerOccupationFilter()) {
+            return;
+        }
         renderGrid(true);
     };
 
@@ -5706,6 +5952,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (ocupFilterRowsToggle) {
         ocupFilterRowsToggle.addEventListener('change', function () {
             applyOccupationVisibility();
+            if (scheduleServerOccupationFilter()) {
+                return;
+            }
             renderGrid(true);
         });
     }
@@ -5744,6 +5993,10 @@ document.addEventListener('DOMContentLoaded', function () {
             const btn = event.target.closest('button[data-page]');
             if (!btn || btn.hasAttribute('disabled')) return;
             currentPage = Number(btn.dataset.page || 1);
+            if (hasServerPagination) {
+                navigateServerPage(currentPage, pageSize);
+                return;
+            }
             renderGrid(false);
         });
     }
@@ -5880,6 +6133,9 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             applyOccupationVisibility();
+            if (scheduleServerOccupationFilter()) {
+                return;
+            }
             renderGrid(true);
         });
     });

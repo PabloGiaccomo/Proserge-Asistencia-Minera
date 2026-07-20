@@ -19,7 +19,7 @@ class PermissionMatrix
         }
 
         if (self::isLegacyFlatList($rawPermissions)) {
-            return self::normalizeLegacyList($rawPermissions, $matrix);
+            return self::applyDerivedPermissions(self::normalizeLegacyList($rawPermissions, $matrix));
         }
 
         foreach ($rawPermissions as $module => $actions) {
@@ -47,9 +47,23 @@ class PermissionMatrix
                     $matrix[$module]['dashboards'] = true;
                 }
             }
+
+            if ($module === 'logistica' && (($matrix[$module]['ver'] ?? false) === true)) {
+                $tabActions = array_values(PermissionCatalog::logisticsTabActions());
+                $hasExplicitTabVisibility = collect($tabActions)
+                    ->contains(fn (string $tabAction): bool => array_key_exists($tabAction, $actions));
+
+                if (! $hasExplicitTabVisibility) {
+                    foreach ($tabActions as $tabAction) {
+                        if (array_key_exists($tabAction, $matrix[$module])) {
+                            $matrix[$module][$tabAction] = true;
+                        }
+                    }
+                }
+            }
         }
 
-        return $matrix;
+        return self::applyDerivedPermissions($matrix);
     }
 
     public static function normalizeForRole(?string $roleName, mixed $rawPermissions): array
@@ -206,6 +220,19 @@ class PermissionMatrix
 
         return $matrix[$module][$action] === true
             || ($action !== 'administrar' && ($matrix[$module]['administrar'] ?? false) === true);
+    }
+
+    private static function applyDerivedPermissions(array $matrix): array
+    {
+        if (($matrix['logistica']['ver_logistica_entregas'] ?? false) === true) {
+            foreach (PermissionCatalog::availableModuleActions()['epps'] ?? [] as $action) {
+                if (array_key_exists($action, $matrix['epps'] ?? [])) {
+                    $matrix['epps'][$action] = true;
+                }
+            }
+        }
+
+        return $matrix;
     }
 
     private static function fallbackPermissionChecks(string $module, string $action): array

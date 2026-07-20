@@ -136,7 +136,7 @@ class RQProsergeApiTest extends TestCase
         ]);
     }
 
-    public function test_no_asigna_trabajador_en_proceso_de_habilitacion_a_rq_proserge(): void
+    public function test_asigna_trabajador_en_proceso_de_habilitacion_a_rq_proserge(): void
     {
         [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
         $rrhhId = $this->crearUsuario($this->rolRrhhId);
@@ -161,10 +161,45 @@ class RQProsergeApiTest extends TestCase
             'fecha_fin' => '2026-05-03',
         ]);
 
-        $response->assertStatus(422)
-            ->assertJsonPath('code', 'PERSONAL_MINE_IN_PROCESS');
+        $response->assertOk()
+            ->assertJsonPath('code', 'RQ_PROSERGE_ASSIGN_OK');
 
-        $this->assertDatabaseMissing('rq_proserge_detalle', [
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'rq_proserge_id' => $rqProsergeId,
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+        ]);
+    }
+
+    public function test_asigna_trabajador_no_habilitado_en_mina_si_no_tiene_otros_bloqueos(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+
+        DB::table('personal_mina')
+            ->where('personal_id', $personalId)
+            ->where('mina_id', $minaId)
+            ->update([
+                'estado' => 'NO_HABILITADO',
+                'estado_habilitacion' => 'NO_HABILITADO',
+                'activo' => true,
+            ]);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('code', 'RQ_PROSERGE_ASSIGN_OK');
+
+        $this->assertDatabaseHas('rq_proserge_detalle', [
             'rq_proserge_id' => $rqProsergeId,
             'rq_mina_detalle_id' => $rqMinaDetalleId,
             'personal_id' => $personalId,
@@ -257,6 +292,32 @@ class RQProsergeApiTest extends TestCase
         $this->assertNotNull($item);
         $this->assertTrue($item['disponible']);
         $this->assertNull($item['motivo_codigo']);
+    }
+
+    public function test_busqueda_muestra_estado_de_habilitacion_de_mina_sin_bloquear(): void
+    {
+        [$minaId, $rqProsergeId] = $this->crearEscenarioBase();
+        $personalId = $this->crearPersonal($minaId);
+
+        DB::table('personal')->where('id', $personalId)->update([
+            'nombre_completo' => 'ALARCON MINA EN PROCESO',
+        ]);
+        DB::table('personal_mina')
+            ->where('personal_id', $personalId)
+            ->where('mina_id', $minaId)
+            ->update([
+                'estado' => 'EN_PROCESO',
+                'estado_habilitacion' => 'EN_PROCESO',
+            ]);
+
+        $rq = \App\Models\RQProserge::query()->findOrFail($rqProsergeId);
+        $items = app(RQProsergeService::class)->searchAvailablePersonal($rq, 'alarcon mina', '2026-05-01', '2026-05-03');
+        $item = collect($items)->firstWhere('personal_id', $personalId);
+
+        $this->assertNotNull($item);
+        $this->assertTrue($item['disponible']);
+        $this->assertSame('EN_PROCESO', $item['mina_estado']['estado']);
+        $this->assertSame('En proceso en mina', $item['mina_estado']['label']);
     }
 
     public function test_asignacion_fuera_de_fechas_de_parada_se_bloquea(): void

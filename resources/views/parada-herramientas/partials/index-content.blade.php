@@ -54,11 +54,6 @@
             <h1 class="page-title">Herramientas y consumibles por parada</h1>
             <p class="page-subtitle">Listas semanales de equipos, herramientas, utillaje y consumibles por grupo</p>
         </div>
-        @if($canImportTools)
-            <button type="button" class="btn-filter tools-catalog-button" onclick="openToolsCatalogImport()">
-                Subir catalogo
-            </button>
-        @endif
     </div>
 
     @if($toolsShowAlerts && session('success'))
@@ -114,8 +109,6 @@
                         <tr>
                             <th>Parada</th>
                             <th>Semana</th>
-                            <th>Fechas</th>
-                            <th>Limite envio</th>
                             <th>Grupos</th>
                             <th>Estado lista</th>
                             <th>Acciones</th>
@@ -124,11 +117,10 @@
                     <tbody>
                         @foreach($items as $item)
                             @php
-                                $dias = (int) ($item['dias_para_limite'] ?? 0);
-                                $deadlineClass = $dias < 0 ? 'expired' : ($dias <= 2 ? 'urgent' : 'ok');
                                 $paradaIniciada = (bool) ($item['parada_iniciada'] ?? false);
                                 $paradaFinalizada = (bool) ($item['parada_finalizada'] ?? false);
                                 $puedeCompletarRequerimiento = (bool) ($item['puede_completar_requerimiento'] ?? false);
+                                $puedeActualizarPedido = (bool) ($item['puede_actualizar_pedido'] ?? false);
                             @endphp
                             <tr>
                                 <td>
@@ -140,21 +132,6 @@
                                 <td>
                                     <span class="week-pill">Sem. {{ $item['semana'] ?? '-' }}</span>
                                     <div class="week-year">{{ $item['anio_semana'] ?? '' }}</div>
-                                </td>
-                                <td>{{ $item['fecha_inicio'] ?? '-' }} al {{ $item['fecha_fin'] ?? '-' }}</td>
-                                <td>
-                                    <div class="deadline {{ $deadlineClass }}">
-                                        <strong>{{ $item['fecha_limite_envio'] ?? '-' }}</strong>
-                                        <span>
-                                            @if($dias < 0)
-                                                Vencido hace {{ abs($dias) }} dia(s)
-                                            @elseif($dias === 0)
-                                                Vence hoy
-                                            @else
-                                                Faltan {{ $dias }} dia(s)
-                                            @endif
-                                        </span>
-                                    </div>
                                 </td>
                                 <td>{{ (int) ($item['grupos_count'] ?? 0) }}</td>
                                 <td><span class="tools-status {{ $estadoClass($item['estado_lista'] ?? 'PENDIENTE') }}">{{ ucfirst(strtolower($item['estado_lista'] ?? 'Pendiente')) }}</span></td>
@@ -168,13 +145,23 @@
                                                 </svg>
                                                 <span>Completar requerimiento</span>
                                             </a>
+                                        @elseif($puedeActualizarPedido && strtoupper(($item['estado_lista'] ?? '')) === 'ENVIADO')
+                                            <a href="{{ route('herramientas-parada.show', $item['rq_mina_id']) }}" class="btn-row btn-row-outline tools-action-link">
+                                                <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path d="M4 7h11v10H4z"></path>
+                                                    <path d="M15 10h3l2 3v4h-5z"></path>
+                                                    <path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                    <path d="M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                </svg>
+                                                <span>Actualizar pedido</span>
+                                            </a>
                                         @else
-                                            <span class="btn-row btn-row-outline tools-action-link is-disabled" title="{{ $dias < 0 ? 'El limite de envio vencio; el requerimiento quedo cerrado.' : 'El requerimiento ya fue enviado.' }}" aria-disabled="true">
+                                            <span class="btn-row btn-row-outline tools-action-link is-disabled" title="{{ ($item['limite_envio_vencido'] ?? false) ? 'El limite de envio vencio; el requerimiento quedo cerrado.' : 'El requerimiento ya fue enviado.' }}" aria-disabled="true">
                                                 <svg class="tools-action-icon" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path d="M7 11V8a5 5 0 0 1 10 0v3"></path>
                                                     <path d="M6 11h12v9H6z"></path>
                                                 </svg>
-                                                <span>{{ $dias < 0 ? 'Limite vencido' : 'Requerimiento cerrado' }}</span>
+                                                <span>{{ ($item['limite_envio_vencido'] ?? false) ? 'Limite vencido' : 'Requerimiento cerrado' }}</span>
                                             </span>
                                         @endif
                                         @if($paradaIniciada)

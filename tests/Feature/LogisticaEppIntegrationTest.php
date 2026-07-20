@@ -34,7 +34,74 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('Fecha desde')
             ->assertSee('Fecha hasta')
             ->assertSee('Registrar entrega')
+            ->assertSee('data-epp-filter-toggle', false)
+            ->assertSee('aria-controls="eppFilterBody"', false)
             ->assertSee('Catalogo de EPP');
+    }
+
+    public function test_logistica_kardex_usa_rutas_relativas_para_busqueda(): void
+    {
+        $session = $this->sessionWithEppPermissions();
+
+        $response = $this
+            ->withSession($session)
+            ->get(route('logistica.index', ['tab' => 'kardex']));
+
+        $response
+            ->assertOk()
+            ->assertSee('id="kardexPersonalSearch"', false)
+            ->assertSee('data-personal-search-url="/epps/personal/buscar"', false)
+            ->assertSee('data-kardex-detail-url="/epps/kardex"', false)
+            ->assertSee('data-kardex-download-url="/epps/kardex/descargar"', false);
+    }
+
+    public function test_logistica_oculta_pestanas_sin_permiso_visual_del_rol(): void
+    {
+        $session = $this->sessionWithSelections([
+            'logistica' => ['ver', 'ver_logistica_entregas'],
+            'epps' => ['ver'],
+        ]);
+
+        $response = $this
+            ->withSession($session)
+            ->get(route('logistica.index', ['tab' => 'kardex']));
+
+        $response
+            ->assertOk()
+            ->assertSee('data-logistics-tab-link="entregas"', false)
+            ->assertSee('data-logistics-tab-panel="entregas" aria-hidden="false"', false)
+            ->assertDontSee('data-logistics-tab-link="kardex"', false)
+            ->assertDontSee('data-logistics-tab-panel="kardex"', false)
+            ->assertDontSee('data-logistics-tab-link="cesados"', false);
+    }
+
+    public function test_kardex_busqueda_personal_devuelve_opciones_por_palabras(): void
+    {
+        $session = $this->sessionWithEppPermissions();
+
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '74185296',
+            'numero_documento' => '74185296',
+            'nombre_completo' => 'CALCINA AGUILAR EDGAR JAIME',
+            'puesto' => 'MECANICO',
+            'qr_code' => 'QR-KARDEX-74185296',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $this
+            ->withSession($session)
+            ->getJson(route('epps.personal.buscar', [
+                'q' => 'jaime edgar',
+                'limit' => 10,
+            ]))
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $personal->id,
+                'nombre' => 'CALCINA AGUILAR EDGAR JAIME',
+                'documento' => '74185296',
+                'puesto' => 'MECANICO',
+            ]);
     }
 
     public function test_epps_index_redirige_a_logistica_entregas(): void
@@ -251,11 +318,54 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('<option value="25" selected>25 registros</option>', false);
     }
 
+    public function test_identificacion_renderiza_herramientas_y_consumibles(): void
+    {
+        $session = $this->sessionWithEppPermissions();
+
+        foreach ([
+            ['categoria' => 'HERRAMIENTA', 'descripcion' => 'LLAVE DE GOLPE', 'unidad' => 'UND'],
+            ['categoria' => 'CONSUMIBLE', 'descripcion' => 'DISCO DE CORTE', 'unidad' => 'UND'],
+        ] as $item) {
+            DB::table('parada_herramienta_catalogos')->insert([
+                'id' => (string) Str::uuid(),
+                'categoria' => $item['categoria'],
+                'descripcion' => $item['descripcion'],
+                'descripcion_normalizada' => $item['descripcion'],
+                'unidad' => $item['unidad'],
+                'unidad_normalizada' => $item['unidad'],
+                'activo' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this
+            ->withSession($session)
+            ->get(route('logistica.index', [
+                'tab' => 'identificacion',
+                'ident_categoria' => 'HERRAMIENTA',
+            ]))
+            ->assertOk()
+            ->assertSee('data-logistics-tab-panel="identificacion"', false)
+            ->assertSee('LLAVE DE GOLPE')
+            ->assertSee('Catalogo de parada');
+
+        $this
+            ->withSession($session)
+            ->get(route('logistica.index', [
+                'tab' => 'identificacion',
+                'ident_categoria' => 'CONSUMIBLE',
+            ]))
+            ->assertOk()
+            ->assertSee('data-logistics-tab-panel="identificacion"', false)
+            ->assertSee('DISCO DE CORTE')
+            ->assertSee('Catalogo de parada');
+    }
+
     private function sessionWithEppPermissions(): array
     {
         return $this->sessionWithSelections([
             'logistica' => ['ver', 'actualizar'],
-            'epps' => ['ver', 'actualizar', 'editar', 'registrar', 'configurar'],
         ]);
     }
 
@@ -263,6 +373,18 @@ class LogisticaEppIntegrationTest extends TestCase
     {
         $roleId = (string) Str::uuid();
         $userId = (string) Str::uuid();
+        $logisticsTabActions = array_values(PermissionCatalog::logisticsTabActions());
+
+        if (isset($selections['logistica'])
+            && in_array('ver', $selections['logistica'], true)
+            && count(array_intersect($logisticsTabActions, $selections['logistica'])) === 0
+        ) {
+            $selections['logistica'] = array_values(array_unique(array_merge(
+                $selections['logistica'],
+                $logisticsTabActions,
+            )));
+        }
+
         $permissions = PermissionCatalog::matrixFromSelections($selections);
 
         DB::table('roles')->insert([

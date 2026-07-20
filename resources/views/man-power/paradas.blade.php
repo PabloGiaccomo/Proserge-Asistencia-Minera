@@ -120,46 +120,4 @@ $paradas = [
     </div>
 </div>
 
-<style>
-.paradas-page { padding: 24px; max-width: 1200px; margin: 0 auto; }
-
-.header-section { margin-bottom: 24px; }
-.page-title { font-size: 28px; font-weight: 700; color: #1e293b; margin: 0; }
-.page-subtitle { font-size: 14px; color: #64748b; margin: 4px 0 0; }
-
-.tabs-nav { display: flex; gap: 8px; margin-bottom: 20px; background: white; padding: 8px; border-radius: 12px; width: fit-content; }
-.tab { padding: 10px 20px; border-radius: 8px; color: #64748b; text-decoration: none; font-size: 14px; font-weight: 500; }
-.tab:hover { background: #f1f5f9; }
-.tab.active { background: #19d3c5; color: white; }
-
-.filters-bar { background: white; border-radius: 16px; padding: 20px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-.filters-grid { display: grid; grid-template-columns: 2fr 1fr auto; gap: 16px; align-items: end; }
-.filter-group { display: flex; flex-direction: column; gap: 6px; }
-.filter-label { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; }
-.filter-input, .filter-select { padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; background: #f8fafc; }
-.filter-input:focus, .filter-select:focus { outline: none; border-color: #19d3c5; }
-.btn-filter { padding: 10px 18px; background: #19d3c5; color: white; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
-
-.paradas-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
-.parada-card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-.parada-header { display: flex; justify-content: space-between; margin-bottom: 16px; }
-.parada-rq { font-size: 12px; font-weight: 600; color: #64748b; }
-.parada-nombre { font-size: 16px; font-weight: 600; color: #1e293b; margin: 4px 0; }
-.parada-fechas { font-size: 13px; color: #64748b; margin: 0; }
-.estado-badge { padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-.estado-badge.borrador { background: rgba(245,158,11,0.15); color: #d97706; }
-.estado-badge.enviado { background: rgba(59,130,246,0.15); color: #2563eb; }
-.estado-badge.aprobado { background: rgba(16,185,129,0.15); color: #059669; }
-
-.parada-stats { display: flex; gap: 24px; padding: 16px 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; margin-bottom: 16px; }
-.stat { display: flex; flex-direction: column; }
-.stat-value { font-size: 20px; font-weight: 700; color: #1e293b; }
-.stat-label { font-size: 12px; color: #64748b; }
-
-.parada-actions { display: flex; gap: 10px; }
-.btn-detalle { flex: 1; padding: 10px; background: #19d3c5; color: white; text-align: center; border-radius: 10px; text-decoration: none; font-size: 14px; font-weight: 600; }
-.btn-detalle:hover { background: #14b5a8; }
-
-@media (max-width: 768px) { .filters-grid { grid-template-columns: 1fr; } }
-</style>
 @endsection

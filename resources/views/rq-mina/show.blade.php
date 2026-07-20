@@ -72,51 +72,6 @@
     $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'editar');
 @endphp
 
-<style>
-.rqm-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:14px; }
-.rqm-kpi { border:1px solid #e2e8f0; border-radius:12px; padding:12px; background:#fff; }
-.rqm-kpi-label { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px; }
-.rqm-kpi-value { font-size:22px; font-weight:700; color:#0f172a; line-height:1.1; }
-.rqm-kpi-sub { font-size:12px; color:#64748b; margin-top:5px; }
-.rqm-chip { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600; }
-.rqm-chip.borrador { background:#fff7ed; color:#9a3412; }
-.rqm-chip.enviado { background:#dcfce7; color:#166534; }
-.rqm-chip.cerrado { background:#dbeafe; color:#1d4ed8; }
-.rqm-chip.cancelado { background:#fee2e2; color:#991b1b; }
-.rqm-progress { width:100%; height:8px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
-.rqm-progress > span { display:block; height:100%; background:linear-gradient(90deg,#14b8a6,#0ea5e9); }
-.rqm-change-alert { border:1px solid #fed7aa; background:#fff7ed; color:#9a3412; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
-.rqm-change-alert h3 { margin:0 0 8px; color:#9a3412; font-size:15px; }
-.rqm-change-alert ul { margin:0; padding-left:18px; display:grid; gap:5px; }
-.rqm-change-alert li { font-size:13px; font-weight:600; }
-.rqm-change-alert span { color:#c2410c; font-weight:500; }
-.rqm-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
-.rqm-meta-item { border:1px solid #f1f5f9; border-radius:10px; padding:10px; }
-.rqm-meta-label { display:block; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.4px; }
-.rqm-meta-value { font-size:14px; color:#0f172a; font-weight:600; margin-top:4px; }
-.rqm-transport-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px; }
-.rqm-transport-summary-item { border:1px solid #e2e8f0; border-radius:10px; padding:10px; background:#f8fafc; }
-.rqm-transport-summary-item strong { display:block; margin-top:4px; color:#0f172a; font-size:20px; line-height:1.1; }
-.rqm-transport-summary-wide { grid-column:1/-1; }
-.rqm-transport-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.rqm-transport-chip { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; background:#ecfeff; color:#0e7490; font-size:12px; font-weight:700; }
-.rqm-plan-group { border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; margin-bottom:14px; }
-.rqm-plan-group-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
-.rqm-plan-group-head strong { color:#0f172a; }
-.rqm-plan-group-head span { color:#64748b; font-size:12px; }
-.rqm-plan-table { width:100%; border-collapse:collapse; min-width:980px; }
-.rqm-plan-table th, .rqm-plan-table td { border-bottom:1px solid #eef2f7; padding:8px; font-size:12px; vertical-align:top; text-align:left; }
-.rqm-plan-table th { background:#fff; color:#475569; font-size:11px; text-transform:uppercase; }
-.rqm-plan-turnos { display:flex; flex-direction:column; gap:3px; min-width:150px; }
-.rqm-plan-turnos span { border-radius:6px; background:#f8fafc; padding:3px 5px; color:#475569; }
-.rqm-plan-transport { margin:12px; padding:10px; border:1px solid #e2e8f0; border-radius:10px; background:#fcfdff; }
-.rqm-plan-transport h4 { margin:0 0 8px; font-size:13px; color:#0f172a; }
-.rqm-plan-note { display:block; margin-top:4px; color:#64748b; font-size:11px; line-height:1.35; }
-.rqm-plan-badge { display:inline-flex; align-items:center; width:max-content; border-radius:999px; padding:4px 8px; background:#eef2ff; color:#3730a3; font-size:11px; font-weight:700; }
-.rqm-plan-badge.warning { background:#fef3c7; color:#92400e; }
-.rqm-plan-badge.success { background:#dcfce7; color:#166534; }
-</style>
-
 <div class="page-header">
     <div class="page-header-content">
         <div>

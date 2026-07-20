@@ -12,61 +12,6 @@
     $hasLegacySignedFile = $contratoDatos?->signed_at && $contratoDatos?->signed_contract_path;
 @endphp
 
-<style>
-.legacy-regularize-page {
-    display: grid;
-    gap: 16px;
-}
-.legacy-summary-grid,
-.legacy-form-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 14px;
-}
-.legacy-summary-item {
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 12px;
-    background: #fff;
-}
-.legacy-summary-label {
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-    text-transform: uppercase;
-}
-.legacy-summary-value {
-    margin-top: 4px;
-    color: #0f172a;
-    font-weight: 800;
-    overflow-wrap: anywhere;
-}
-.legacy-note {
-    margin: 0;
-    color: #64748b;
-    font-size: 13px;
-    line-height: 1.45;
-}
-.legacy-warning {
-    border: 1px solid #fde68a;
-    background: #fffbeb;
-    color: #92400e;
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 13px;
-    font-weight: 700;
-}
-.legacy-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.legacy-field-hidden {
-    display: none !important;
-}
-</style>
-
 <div class="module-page legacy-regularize-page">
     <div class="page-header">
         <div class="page-header-top" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">

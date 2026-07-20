@@ -40,15 +40,24 @@ class PersonalImportController extends Controller
                     $result['camposActualizados'] ?? 0,
                 );
             } elseif (($result['tipoImportacion'] ?? null) === 'datos_personal') {
-                $message = sprintf(
-                    'Importacion de datos del personal completada: %d nuevo(s), %d actualizado(s), %d ficha(s) actualizada(s), %d dato(s) de contrato sincronizado(s).',
-                    $result['nuevos'] ?? 0,
-                    $result['actualizados'] ?? 0,
-                    $result['fichasActualizadas'] ?? 0,
-                    $result['contratoDatosActualizados'] ?? 0,
-                );
-                if (($result['activacionesBloqueadas'] ?? 0) > 0) {
-                    $message .= ' ' . ($result['activacionesBloqueadas'] ?? 0) . ' trabajador(es) quedaron pendientes por contrato firmado vigente.';
+                $nuevos = $result['nuevos'] ?? 0;
+                $actualizados = $result['actualizados'] ?? 0;
+                $fichas = $result['fichasActualizadas'] ?? 0;
+                $contratoDatos = $result['contratoDatosActualizados'] ?? 0;
+                $bloqueadas = $result['activacionesBloqueadas'] ?? 0;
+
+                $message = 'Importacion de datos del personal completada.';
+
+                $detalles = [];
+                if ($nuevos > 0) $detalles[] = "{$nuevos} nuevo(s) creado(s)";
+                if ($actualizados > 0) $detalles[] = "{$actualizados} actualizado(s)";
+                if ($fichas > 0) $detalles[] = "{$fichas} ficha(s) actualizada(s)";
+                if ($contratoDatos > 0) $detalles[] = "{$contratoDatos} dato(s) de contrato sincronizado(s)";
+                if ($detalles !== []) {
+                    $message .= ' ✅ ' . implode(', ', $detalles) . '.';
+                }
+                if ($bloqueadas > 0) {
+                    $message .= ' ⚠️ ' . $bloqueadas . ' trabajador(es) pendiente(s) por contrato firmado.';
                 }
             } else {
                 $message = sprintf(

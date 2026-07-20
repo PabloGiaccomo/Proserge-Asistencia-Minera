@@ -2,57 +2,6 @@
 @php
     $canConfigureRqOptions = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'configurar');
 @endphp
-<style>
-.rq-field-options-panel {
-    position: fixed;
-    z-index: 9999;
-    display: none;
-    width: 320px;
-    max-height: 280px;
-    overflow: auto;
-    border: 1px solid #dbe4ef;
-    border-radius: 10px;
-    background: #fff;
-    box-shadow: 0 14px 36px rgba(15, 23, 42, .16);
-}
-.rq-field-options-panel.is-open { display: block; }
-.rq-field-options-row {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    border: 0;
-    background: #fff;
-    color: #0f172a;
-    padding: 9px 10px;
-    text-align: left;
-    cursor: pointer;
-    font-size: 12px;
-}
-.rq-field-options-row:hover { background: #f8fafc; }
-.rq-field-options-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rq-field-options-add { color: #0f766e; font-weight: 800; }
-.rq-field-options-delete {
-    flex: 0 0 auto;
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    border: 1px solid #fecaca;
-    background: #fff7f7;
-    color: #b91c1c;
-    line-height: 18px;
-    text-align: center;
-    font-size: 13px;
-    cursor: pointer;
-}
-.rq-field-options-delete:hover { background: #fee2e2; }
-.rq-field-options-empty {
-    padding: 10px;
-    color: #64748b;
-    font-size: 12px;
-}
-</style>
 
 <script>
 window.RQMinaFieldOptionsConfig = {

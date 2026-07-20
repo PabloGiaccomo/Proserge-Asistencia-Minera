@@ -21,69 +21,7 @@
 @endphp
 
 @once
-    <style>
-        .ingreso-form-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .ingreso-readonly {
-            height: auto;
-            min-height: 42px;
-            display: flex;
-            align-items: center;
-            white-space: pre-wrap;
-        }
-
-        .ingreso-file-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 8px;
-            padding: 10px 12px;
-            border: 1px solid #dbe3ef;
-            border-radius: 8px;
-            background: #f8fafc;
-            color: #334155;
-            font-size: 13px;
-        }
-
-        .ingreso-declarations {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .public-signature-help {
-            margin-bottom: 12px;
-            padding: 12px 14px;
-            border: 1px solid #dbeafe;
-            border-radius: 8px;
-            background: #f8fbff;
-            color: #334155;
-            font-size: 13px;
-            line-height: 1.55;
-        }
-
-        .public-signature-help strong {
-            display: block;
-            margin-bottom: 6px;
-            color: #0f172a;
-            font-weight: 800;
-        }
-
-        .signature-pad {
-            display: block;
-            width: 100%;
-            min-height: 220px;
-            border: 1px dashed #93a4bd;
-            border-radius: 10px;
-            background: #fff;
-            touch-action: none;
-        }
-    </style>
+    
 @endonce
 
 <div class="ingreso-form-stack">

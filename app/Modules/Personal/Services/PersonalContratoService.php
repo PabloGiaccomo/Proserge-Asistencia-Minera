@@ -95,10 +95,47 @@ class PersonalContratoService
                     PersonalContrato::ESTADO_CESADO,
                     PersonalContrato::ESTADO_NO_RENOVADO,
                 ])
-                ->whereNotNull('fecha_fin')
-                ->whereDate('fecha_fin', '>=', $start->toDateString())
-                ->whereDate('fecha_fin', '<=', $end->toDateString())
-                ->orderBy('fecha_fin')
+                ->where(function ($query) use ($start, $end): void {
+                    $query
+                        ->where(function ($ownContractQuery) use ($start, $end): void {
+                            $ownContractQuery
+                                ->whereNotNull('fecha_fin')
+                                ->whereDate('fecha_fin', '>=', $start->toDateString())
+                                ->whereDate('fecha_fin', '<=', $end->toDateString());
+                        })
+                        ->orWhereIn('origen_contrato_id', function (Builder $originQuery) use ($start, $end): void {
+                            $originQuery
+                                ->select('id')
+                                ->from('personal_contratos')
+                                ->whereIn('estado', [
+                                    PersonalContrato::ESTADO_ACTIVO,
+                                    PersonalContrato::ESTADO_CERRADO,
+                                    PersonalContrato::ESTADO_CESADO,
+                                    PersonalContrato::ESTADO_NO_RENOVADO,
+                                ])
+                                ->whereNotNull('fecha_fin')
+                                ->whereDate('fecha_fin', '>=', $start->toDateString())
+                                ->whereDate('fecha_fin', '<=', $end->toDateString());
+                        });
+                })
+                ->orderByRaw(
+                    'case when exists (
+                        select 1
+                        from personal_contratos as contrato_posterior
+                        where contrato_posterior.personal_id = personal_contratos.personal_id
+                            and contrato_posterior.id <> personal_contratos.id
+                            and contrato_posterior.estado <> ?
+                            and contrato_posterior.contrato_numero > personal_contratos.contrato_numero
+                            and (
+                                personal_contratos.fecha_fin is null
+                                or contrato_posterior.fecha_inicio is null
+                                or contrato_posterior.fecha_inicio >= personal_contratos.fecha_fin
+                            )
+                        limit 1
+                    ) then 1 else 0 end',
+                    [PersonalContrato::ESTADO_ANULADO]
+                )
+                ->orderByRaw('COALESCE((select origen_vencimiento.fecha_fin from personal_contratos as origen_vencimiento where origen_vencimiento.id = personal_contratos.origen_contrato_id limit 1), personal_contratos.fecha_fin)')
                 ->orderBy('contrato_numero');
         }
 
@@ -1972,8 +2009,75 @@ class PersonalContratoService
             $contract->setAttribute('tipo_contrato_visual', $contractType);
             $contract->setAttribute('tipo_contrato_label', $contractType !== '' ? PersonalNormalizer::contractLabel($contractType) : '');
 
+            [$laborState, $laborLabel] = $this->visualLaborStateForExpiringContract($contract, $related);
+            $contract->setAttribute('estado_laboral_visual', $laborState);
+            $contract->setAttribute('estado_laboral_visual_label', $laborLabel);
+
             return $contract;
         });
+    }
+
+    private function visualLaborStateForExpiringContract(PersonalContrato $contract, Collection $related): array
+    {
+        $personalState = strtoupper(trim((string) ($contract->personal?->estado ?? '')));
+        $currentActive = $this->currentContractByStates($related, [PersonalContrato::ESTADO_ACTIVO]);
+        $currentOperational = $this->currentOperationalContract($related);
+
+        if ($currentActive) {
+            return ['ACTIVO', 'Activo'];
+        }
+
+        if ($personalState === 'CESADO' && $currentOperational) {
+            return ['FALTA_CONTRATO', 'Falta contrato'];
+        }
+
+        return [$personalState, $this->laborStateLabel($personalState)];
+    }
+
+    private function currentOperationalContract(Collection $contracts): ?PersonalContrato
+    {
+        return $this->currentContractByStates($contracts, [
+            PersonalContrato::ESTADO_ACTIVO,
+            PersonalContrato::ESTADO_PREPARACION,
+        ]);
+    }
+
+    private function currentContractByStates(Collection $contracts, array $states): ?PersonalContrato
+    {
+        $today = Carbon::today()->toDateString();
+        $states = array_map(static fn (string $state): string => strtoupper($state), $states);
+
+        return $contracts
+            ->filter(function (PersonalContrato $contract) use ($states, $today): bool {
+                $state = strtoupper((string) $contract->estado);
+                if (!in_array($state, $states, true)) {
+                    return false;
+                }
+
+                $start = optional($contract->fecha_inicio)->toDateString();
+                $end = optional($contract->fecha_fin)->toDateString();
+
+                return ($start === null || $start <= $today) && ($end === null || $end >= $today);
+            })
+            ->sortByDesc(fn (PersonalContrato $contract): string => PersonalNormalizer::contractHistorySortKey($contract))
+            ->first();
+    }
+
+    private function laborStateLabel(string $state): string
+    {
+        return match ($state) {
+            'ACTIVO' => 'Activo',
+            'FALTA_CONTRATO' => 'Falta contrato',
+            'NO_FIRMO_CONTRATO' => 'No firmo contrato',
+            'INACTIVO' => 'Inactivo',
+            'CESADO' => 'Cesado',
+            'PENDIENTE_COMPLETAR_FICHA' => 'Pendiente completar ficha',
+            'FICHA_ENVIADA' => 'Ficha enviada',
+            'OBSERVADO' => 'Observado',
+            'APROBADO' => 'Aprobado',
+            'LINK_VENCIDO' => 'Link vencido',
+            default => $state !== '' ? ucfirst(strtolower(str_replace('_', ' ', $state))) : '-',
+        };
     }
 
     private function effectiveContractType(PersonalContrato $contract): string

@@ -33,6 +33,7 @@ class EppRegistro extends Model
         'tallas',
         'requiere_color',
         'colores',
+        'otros_atributos',
         'estado',
     ];
 
@@ -45,6 +46,7 @@ class EppRegistro extends Model
         'tallas' => 'array',
         'requiere_color' => 'boolean',
         'colores' => 'array',
+        'otros_atributos' => 'array',
     ];
 
     public function entregas(): HasMany

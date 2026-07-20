@@ -31,6 +31,7 @@ class DisponibilidadPersonalService
 
             $blockers = [];
             $okLines = [];
+            $mineStatus = $this->mineStatusPayload(null);
 
             if (strtoupper((string) $personal->estado) === 'CESADO') {
                 $blockers[] = [
@@ -74,22 +75,16 @@ class DisponibilidadPersonalService
                 ->first();
 
             if (!$personalMina) {
-                $blockers[] = [
-                    'code' => 'PERSONAL_WITHOUT_MINE_ASSIGNMENT',
-                    'message' => 'Personal sin habilitacion para la mina',
-                    'line' => 'No tiene asignacion activa para la mina seleccionada.',
-                ];
+                $mineStatus = $this->mineStatusPayload(PersonalMina::ESTADO_NO_HABILITADO);
+                $okLines[] = 'Sin habilitacion registrada para la mina seleccionada. Se permite asignar si no tiene otros bloqueos.';
             } else {
                 $estadoMina = $personalMina->estadoHabilitacionActual();
+                $mineStatus = $this->mineStatusPayload($estadoMina);
 
-                if ($estadoMina !== PersonalMina::ESTADO_HABILITADO) {
-                    $blockers[] = [
-                        'code' => $this->mineStateReasonCode($estadoMina),
-                        'message' => $this->mineStateReasonMessage($estadoMina),
-                        'line' => $this->mineStateLine($estadoMina),
-                    ];
-                } else {
+                if ($estadoMina === PersonalMina::ESTADO_HABILITADO) {
                     $okLines[] = 'Habilitado para la mina seleccionada.';
+                } else {
+                    $okLines[] = $this->mineStateLine($estadoMina).' Se permite asignar si no tiene otros bloqueos.';
                 }
             }
 
@@ -152,7 +147,8 @@ class DisponibilidadPersonalService
                 return $this->businessUnavailable(
                     (string) $first['code'],
                     (string) $first['message'],
-                    array_values(array_map(fn (array $blocker): string => (string) $blocker['line'], $blockers))
+                    array_values(array_map(fn (array $blocker): string => (string) $blocker['line'], $blockers)),
+                    ['mina_estado' => $mineStatus]
                 );
             }
 
@@ -163,6 +159,7 @@ class DisponibilidadPersonalService
                 'reason_message' => null,
                 'lineas' => $okLines,
                 'technical_error' => false,
+                'mina_estado' => $mineStatus,
             ];
         } catch (Throwable $e) {
             return [
@@ -177,16 +174,16 @@ class DisponibilidadPersonalService
         }
     }
 
-    private function businessUnavailable(string $reasonCode, string $reasonMessage, array $lineas = []): array
+    private function businessUnavailable(string $reasonCode, string $reasonMessage, array $lineas = [], array $extra = []): array
     {
-        return [
+        return array_merge([
             'ok' => true,
             'available' => false,
             'reason_code' => $reasonCode,
             'reason_message' => $reasonMessage,
             'lineas' => $lineas !== [] ? $lineas : [$reasonMessage],
             'technical_error' => false,
-        ];
+        ], $extra);
     }
 
     private function contractCoverageForRange(string $personalId, string $fechaInicio, string $fechaFin): ?object
@@ -269,6 +266,29 @@ class DisponibilidadPersonalService
             PersonalMina::ESTADO_OBSERVADO => 'Habilitacion minera observada para la mina seleccionada.',
             PersonalMina::ESTADO_FINALIZADO_POR_DESAPROBACION => 'Proceso de habilitacion finalizado por desaprobacion.',
             default => 'Estado de habilitacion minera no asignable: '.$estadoMina.'.',
+        };
+    }
+
+    private function mineStatusPayload(?string $estadoMina): array
+    {
+        $state = strtoupper((string) ($estadoMina ?: PersonalMina::ESTADO_NO_HABILITADO));
+
+        return match ($state) {
+            PersonalMina::ESTADO_HABILITADO => [
+                'estado' => PersonalMina::ESTADO_HABILITADO,
+                'label' => 'Habilitado en mina',
+                'class' => 'is-enabled',
+            ],
+            PersonalMina::ESTADO_EN_PROCESO => [
+                'estado' => PersonalMina::ESTADO_EN_PROCESO,
+                'label' => 'En proceso en mina',
+                'class' => 'is-process',
+            ],
+            default => [
+                'estado' => PersonalMina::ESTADO_NO_HABILITADO,
+                'label' => 'No habilitado en mina',
+                'class' => 'is-not-enabled',
+            ],
         };
     }
 

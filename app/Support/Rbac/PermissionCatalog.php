@@ -53,6 +53,15 @@ class PermissionCatalog
         'ver_vencimientos',
         'ver_programados',
         'ver_historial_precios',
+        'ver_logistica_dashboard',
+        'ver_logistica_entregas',
+        'ver_logistica_vencimientos',
+        'ver_logistica_herramientas',
+        'ver_logistica_servicios',
+        'ver_logistica_identificacion',
+        'ver_logistica_costos',
+        'ver_logistica_kardex',
+        'ver_logistica_cesados',
         'dashboards',
         'crear',
         'editar',
@@ -110,6 +119,7 @@ class PermissionCatalog
     /** @var array<int, string> */
     private const HIDDEN_MODULES = [
         'personal_vencimientos',
+        'epps',
     ];
 
     /** @var array<string, array<int, string>> */
@@ -178,7 +188,33 @@ class PermissionCatalog
         'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'exportar', 'importar', 'enviar', 'configurar', 'duplicar', 'administrar'],
         'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
         'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar', 'administrar'],
-        'logistica' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'exportar', 'importar', 'registrar', 'configurar', 'asignar', 'enviar', 'entregar', 'recepcionar', 'devolver', 'administrar'],
+        'logistica' => [
+            'ver',
+            'ver_logistica_dashboard',
+            'ver_logistica_entregas',
+            'ver_logistica_vencimientos',
+            'ver_logistica_herramientas',
+            'ver_logistica_servicios',
+            'ver_logistica_identificacion',
+            'ver_logistica_costos',
+            'ver_logistica_kardex',
+            'ver_logistica_cesados',
+            'dashboards',
+            'crear',
+            'editar',
+            'actualizar',
+            'eliminar',
+            'exportar',
+            'importar',
+            'registrar',
+            'configurar',
+            'asignar',
+            'enviar',
+            'entregar',
+            'recepcionar',
+            'devolver',
+            'administrar',
+        ],
         'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar', 'administrar'],
         'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'entregar', 'recepcionar', 'administrar'],
         'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver', 'administrar'],
@@ -230,6 +266,24 @@ class PermissionCatalog
         }
 
         return $labels;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function logisticsTabActions(): array
+    {
+        return [
+            'dashboard' => 'ver_logistica_dashboard',
+            'entregas' => 'ver_logistica_entregas',
+            'vencimientos' => 'ver_logistica_vencimientos',
+            'herramientas' => 'ver_logistica_herramientas',
+            'servicios' => 'ver_logistica_servicios',
+            'identificacion' => 'ver_logistica_identificacion',
+            'costos' => 'ver_logistica_costos',
+            'kardex' => 'ver_logistica_kardex',
+            'cesados' => 'ver_logistica_cesados',
+        ];
     }
 
     public static function actions(): array
@@ -303,6 +357,15 @@ class PermissionCatalog
             'ver_vencimientos' => 'Ver proximos vencimientos',
             'ver_programados' => 'Ver examenes programados',
             'ver_historial_precios' => 'Ver historial de precios',
+            'ver_logistica_dashboard' => 'Ver Dashboard de Logistica',
+            'ver_logistica_entregas' => 'Ver entregas y cambios de EPP',
+            'ver_logistica_vencimientos' => 'Ver vencimientos de EPP',
+            'ver_logistica_herramientas' => 'Ver herramientas',
+            'ver_logistica_servicios' => 'Ver servicios y alquileres',
+            'ver_logistica_identificacion' => 'Ver identificacion de items',
+            'ver_logistica_costos' => 'Ver costos y facturacion',
+            'ver_logistica_kardex' => 'Ver Kardex',
+            'ver_logistica_cesados' => 'Ver cesados por entregar',
             'dashboards' => 'Dashboard',
             'crear' => 'Crear',
             'editar' => 'Editar',
@@ -367,6 +430,7 @@ class PermissionCatalog
     public static function baseRoleDefinitions(): array
     {
         $full = self::fullAccessMatrix();
+        $allLogisticsTabs = array_values(self::logisticsTabActions());
 
         return [
             [
@@ -415,7 +479,7 @@ class PermissionCatalog
                     'habilitacion_minera' => ['ver', 'actualizar', 'asignar', 'desasignar', 'registrar', 'programar', 'convalidar', 'importar', 'exportar'],
                     'rq_mina' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'importar', 'enviar', 'configurar', 'duplicar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'logistica' => ['ver', 'actualizar', 'enviar', 'entregar', 'recepcionar'],
+                    'logistica' => array_merge(['ver'], $allLogisticsTabs, ['actualizar', 'enviar', 'entregar', 'recepcionar']),
                     'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar'],
                     'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'entregar', 'recepcionar'],
                 ]),
@@ -471,7 +535,7 @@ class PermissionCatalog
                     'usuarios' => ['ver', 'crear', 'editar', 'actualizar', 'activar', 'desactivar', 'asignar', 'configurar', 'scope', 'administrar'],
                     'rq_proserge' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
                     'man_power' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'asignar'],
-                    'logistica' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'importar', 'registrar', 'enviar', 'entregar', 'recepcionar', 'devolver'],
+                    'logistica' => array_merge(['ver'], $allLogisticsTabs, ['crear', 'editar', 'actualizar', 'eliminar', 'importar', 'registrar', 'enviar', 'entregar', 'recepcionar', 'devolver']),
                     'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar'],
                     'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver'],
                     'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'anular'],
@@ -490,7 +554,7 @@ class PermissionCatalog
                     'evaluaciones' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar'],
                     'personal' => ['ver', 'ver_detalle', 'ver_documentos', 'ver_contratos', 'dashboards'],
                     'rq_mina' => ['ver', 'dashboards'],
-                    'logistica' => ['ver', 'registrar', 'devolver'],
+                    'logistica' => array_merge(['ver'], $allLogisticsTabs, ['registrar', 'devolver']),
                     'herramientas' => ['ver', 'actualizar', 'registrar', 'completar', 'entregar', 'recepcionar'],
                     'epps' => ['ver', 'registrar', 'devolver'],
                     'bienestar' => ['ver', 'dashboards'],

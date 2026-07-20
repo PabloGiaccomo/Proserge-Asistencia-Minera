@@ -32,6 +32,29 @@ document.addEventListener('DOMContentLoaded', function () {
         if (input) input.value = '';
     };
 
+    const normalizeOption = function (value) {
+        return String(value || '')
+            .trim()
+            .toLocaleUpperCase('es-PE')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+    };
+
+    const bankType = function (value) {
+        const normalized = normalizeOption(value);
+        if (normalized === 'BCP' || normalized.includes('BANCO DE CREDITO')) {
+            return 'BCP';
+        }
+        if (normalized === 'INTERBANK' || normalized.includes('INTERBANK')) {
+            return 'Interbank';
+        }
+        if (normalized === 'OTRO' || normalized === 'OTRA') {
+            return 'Otro';
+        }
+
+        return normalized === '' ? '' : 'Otro';
+    };
+
     const fillSelect = function (select, values) {
         if (!select) return;
         const selected = select.dataset.currentValue || select.value;
@@ -96,15 +119,16 @@ document.addEventListener('DOMContentLoaded', function () {
         setEnabled('domicilio_referencia', true);
 
         const banco = byKey('banco')?.value || '';
-        const bancoConCuenta = banco === 'BCP' || banco === 'Interbank';
+        const bancoNormalized = bankType(banco);
+        const bancoConCuenta = bancoNormalized === 'BCP' || bancoNormalized === 'Interbank';
         setVisible('numero_cuenta', bancoConCuenta);
         setEnabled('numero_cuenta', bancoConCuenta);
-        setVisible('banco_otro', banco === 'Otro');
-        setEnabled('banco_otro', banco === 'Otro');
-        setVisible('cci', banco !== '');
-        setEnabled('cci', banco !== '');
+        setVisible('banco_otro', bancoNormalized === 'Otro');
+        setEnabled('banco_otro', bancoNormalized === 'Otro');
+        setVisible('cci', bancoNormalized !== '');
+        setEnabled('cci', bancoNormalized !== '');
         if (!bancoConCuenta) clearField('numero_cuenta');
-        if (banco !== 'Otro') {
+        if (bancoNormalized !== 'Otro') {
             clearField('banco_otro');
         }
 

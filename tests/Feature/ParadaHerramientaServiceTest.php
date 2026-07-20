@@ -348,6 +348,17 @@ class ParadaHerramientaServiceTest extends TestCase
         ]);
 
         $service = app(ParadaHerramientaService::class);
+        DB::table('parada_herramienta_catalogos')->insert([
+            'id' => (string) Str::uuid(),
+            'categoria' => 'CONSUMIBLE',
+            'descripcion' => 'Consumible existente que no viene',
+            'descripcion_normalizada' => 'CONSUMIBLE EXISTENTE QUE NO VIENE',
+            'unidad' => 'UND',
+            'unidad_normalizada' => 'UND',
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
         $path = $this->writeHerramientasFormato([
             ['descripcion' => 'Llave stilson', 'cantidad' => 1],
             ['descripcion' => 'Tecle de cadena', 'cantidad' => 1],
@@ -373,7 +384,7 @@ class ParadaHerramientaServiceTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertSame(2, $result['summary']['herramientas']);
-        $this->assertSame(1, $result['summary']['consumibles']);
+        $this->assertSame(2, $result['summary']['consumibles']);
         $this->assertDatabaseHas('parada_herramienta_catalogos', [
             'categoria' => 'HERRAMIENTA',
             'descripcion' => 'Llave stilson',
@@ -387,11 +398,18 @@ class ParadaHerramientaServiceTest extends TestCase
             'descripcion' => 'Trapo industrial',
             'unidad' => 'KG',
         ]);
-        $this->assertDatabaseMissing('parada_herramienta_catalogos', [
-            'descripcion' => 'Cant. Recibida',
+        $this->assertDatabaseHas('parada_herramienta_catalogos', [
+            'categoria' => 'CONSUMIBLE',
+            'descripcion' => 'Consumible hoja auxiliar',
+            'unidad' => 'UND',
+        ]);
+        $this->assertDatabaseHas('parada_herramienta_catalogos', [
+            'categoria' => 'CONSUMIBLE',
+            'descripcion' => 'Consumible existente que no viene',
+            'activo' => true,
         ]);
         $this->assertDatabaseMissing('parada_herramienta_catalogos', [
-            'descripcion' => 'Consumible hoja auxiliar',
+            'descripcion' => 'Cant. Recibida',
         ]);
     }
 

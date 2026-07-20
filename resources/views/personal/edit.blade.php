@@ -23,33 +23,7 @@
     $stateByLocation = old('mina_estado', $trabajador['minas_estado'] ?? []);
     $familyRows = old('familiares', app(\App\Modules\Personal\Services\PersonalFichaService::class)->familyRowsForEdit($ficha));
 @endphp
-<style>
-    .personal-edit-action-bar {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
 
-    .personal-edit-action-bar .btn {
-        min-width: 128px;
-        justify-content: center;
-        white-space: nowrap;
-    }
-
-    @media (max-width: 760px) {
-        .personal-edit-action-bar {
-            width: 100%;
-            justify-content: stretch;
-        }
-
-        .personal-edit-action-bar .btn {
-            flex: 1 1 calc(50% - 8px);
-            min-width: 0;
-        }
-    }
-</style>
 <div class="module-page ficha-workspace">
     <div class="page-header">
         <div class="page-header-top">

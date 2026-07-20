@@ -10,6 +10,8 @@ class EppEntrega extends Model
     public const ESTADO_ENTREGADO = 'ENTREGADO';
     public const ESTADO_CAMBIADO = 'CAMBIADO';
     public const ESTADO_DEVUELTO = 'DEVUELTO';
+    public const ESTADO_USO_INCORRECTO = 'USO_INCORRECTO';
+    public const ESTADO_PERDIDA_OLVIDO = 'PERDIDA_OLVIDO';
 
     protected $table = 'epp_entregas';
 
@@ -22,6 +24,9 @@ class EppEntrega extends Model
         'personal_id',
         'epp_id',
         'cantidad',
+        'talla',
+        'color',
+        'atributos_json',
         'fecha_entrega',
         'fecha_vencimiento_calendario',
         'vida_util_dias_snapshot',
@@ -35,6 +40,7 @@ class EppEntrega extends Model
 
     protected $casts = [
         'cantidad' => 'integer',
+        'atributos_json' => 'array',
         'fecha_entrega' => 'date',
         'fecha_vencimiento_calendario' => 'date',
         'vida_util_dias_snapshot' => 'integer',

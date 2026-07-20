@@ -47,6 +47,26 @@ class PersonalIndexResourceMineStatusTest extends TestCase
         $this->assertSame('habilitado', $row['situacion']);
     }
 
+    public function test_index_filter_uses_current_habilitation_state_for_mine_status(): void
+    {
+        $borooId = $this->createMine('BOROO');
+        $cerroVerdeId = $this->createMine('CERRO VERDE');
+        $enabled = $this->createActivePersonalWithSignedContract();
+        $inProcess = $this->createActivePersonalWithSignedContract();
+        $otherMine = $this->createActivePersonalWithSignedContract();
+
+        $this->attachMine($enabled, $borooId, 'NO_HABILITADO', 'HABILITADO');
+        $this->attachMine($inProcess, $borooId, 'HABILITADO', 'EN_PROCESO');
+        $this->attachMine($otherMine, $cerroVerdeId, 'HABILITADO', 'HABILITADO');
+
+        $workers = app(PersonalService::class)->paginatedForIndex([
+            'minas' => ['BOROO'],
+            'mina_estados' => ['HABILITADO'],
+        ], 25);
+
+        $this->assertSame([$enabled->id], $workers->pluck('id')->all());
+    }
+
     public function test_index_listing_keeps_ficha_relation_when_loaded_with_selected_columns(): void
     {
         $personal = $this->createActivePersonalWithSignedContract();

@@ -6,7 +6,9 @@ use App\Models\EppEntrega;
 use App\Models\EppRegistro;
 use App\Models\Mina;
 use App\Models\ParadaHerramientaLista;
+use App\Models\ParadaHerramientaCatalogo;
 use App\Models\Personal;
+use App\Models\PersonalContrato;
 use App\Models\PersonalMina;
 use App\Models\RQMina;
 use App\Models\RQMinaActividadTransporte;
@@ -29,6 +31,8 @@ class LogisticaDashboardService
     private const TAB_SERVICIOS = 'servicios';
     private const TAB_IDENTIFICACION = 'identificacion';
     private const TAB_COSTOS = 'costos';
+    private const TAB_KARDEX = 'kardex';
+    private const TAB_CESADOS = 'cesados';
 
     private const EPP_ITEMS = [
         'casco' => 'Casco',
@@ -108,6 +112,7 @@ class LogisticaDashboardService
         $expiredEpp = $expiringDeliveries->where('estado_visual', 'VENCIDO')->count();
         $habilitatedWorkers = $this->habilitatedWorkersCount($workers, $filters);
         $coveragePct = $requiredEpp > 0 ? round(($deliveredEpp / $requiredEpp) * 100, 1) : 0;
+        $ceasedRows = $this->ceasedEppRows($filters);
 
         return [
             'tabs' => $this->tabOptions($tabs),
@@ -152,8 +157,14 @@ class LogisticaDashboardService
             'urgentActions' => $urgentActions,
             'toolsRows' => $this->toolsRows(),
             'serviceRows' => $this->serviceRows(),
-            'identityRows' => $this->identityRows($catalog),
+            'identityRows' => $this->identityRows($filters),
             'costRows' => $this->costRows($catalog),
+            'ceasedRows' => $ceasedRows,
+            'ceasedSummary' => [
+                'trabajadores' => $ceasedRows->count(),
+                'pendientes' => $ceasedRows->sum('pendientes'),
+                'resueltos' => $ceasedRows->sum('resueltos'),
+            ],
         ];
     }
 
@@ -167,6 +178,8 @@ class LogisticaDashboardService
             self::TAB_SERVICIOS => 'Servicios y alquileres',
             self::TAB_IDENTIFICACION => 'Identificacion de items',
             self::TAB_COSTOS => 'Costos y facturacion',
+            self::TAB_KARDEX => 'Kardex',
+            self::TAB_CESADOS => 'Cesados por entregar',
         ];
     }
 
@@ -199,6 +212,7 @@ class LogisticaDashboardService
             'fecha_hasta' => trim((string) ($query['fecha_hasta'] ?? '')),
             'epps' => $this->arrayFilter($query['epps'] ?? []),
             'tallas' => $this->arrayFilter($query['tallas'] ?? []),
+            'ident_categoria' => strtoupper(trim((string) ($query['ident_categoria'] ?? 'EPP'))),
             'vencimientos' => [
                 'q' => trim((string) ($query['venc_q'] ?? '')),
                 'mina_id' => trim((string) ($query['venc_mina_id'] ?? '')),
@@ -239,7 +253,7 @@ class LogisticaDashboardService
 
         return [
             'minas' => $this->hasTable('minas')
-                ? Mina::query()->orderBy('nombre')->get(['id', 'nombre'])
+                ? Mina::query()->activeOperational()->orderBy('nombre')->get(['id', 'nombre'])
                 : collect(),
             'cargos' => $this->hasTable('personal')
                 ? Personal::query()
@@ -282,7 +296,8 @@ class LogisticaDashboardService
         $today = now()->startOfDay();
 
         return RQMina::query()
-            ->with('mina:id,nombre')
+            ->with(['mina' => fn ($mine) => $mine->activeOperational()->select('id', 'nombre')])
+            ->whereHas('mina', fn ($mine) => $mine->activeOperational())
             ->latest('fecha_inicio')
             ->limit(150)
             ->get(['id', 'mina_id', 'area', 'fecha_inicio', 'fecha_fin'])
@@ -374,7 +389,8 @@ class LogisticaDashboardService
                     ->where(function ($query): void {
                         $query->where('activo', true)->orWhereNull('activo');
                     })
-                    ->with('mina:id,nombre'),
+                    ->whereHas('mina', fn ($mine) => $mine->activeOperational())
+                    ->with(['mina' => fn ($mine) => $mine->activeOperational()->select('id', 'nombre')]),
                 'fichaColaborador' => fn ($query) => $query->select([
                     'personal_fichas.id',
                     'personal_fichas.personal_id',
@@ -401,7 +417,8 @@ class LogisticaDashboardService
                 $relation->whereIn('mina_id', $filters['minas'])
                     ->where(function ($where): void {
                         $where->where('activo', true)->orWhereNull('activo');
-                    });
+                    })
+                    ->whereHas('mina', fn ($mine) => $mine->activeOperational());
             });
         }
 
@@ -425,7 +442,8 @@ class LogisticaDashboardService
                         $relation->whereIn('estado_habilitacion', $mineStates)
                             ->where(function ($active): void {
                                 $active->where('activo', true)->orWhereNull('activo');
-                            });
+                            })
+                            ->whereHas('mina', fn ($mine) => $mine->activeOperational());
                     });
                 }
             });
@@ -466,6 +484,7 @@ class LogisticaDashboardService
                     ->where(function ($active): void {
                         $active->where('activo', true)->orWhereNull('activo');
                     })
+                    ->whereHas('mina', fn ($mine) => $mine->activeOperational())
                     ->where(function ($state): void {
                         $state->where('estado_habilitacion', PersonalMina::ESTADO_HABILITADO)
                             ->orWhere(function ($legacy): void {
@@ -528,7 +547,8 @@ class LogisticaDashboardService
                     ->where(function ($active): void {
                         $active->where('activo', true)->orWhereNull('activo');
                     })
-                    ->with('mina:id,nombre'),
+                    ->whereHas('mina', fn ($mine) => $mine->activeOperational())
+                    ->with(['mina' => fn ($mine) => $mine->activeOperational()->select('id', 'nombre')]),
                 'epp:id,codigo,nombre,vida_util_dias,estado,precio_unitario,precio_alquiler,proveedor,stock,requiere_talla,tallas',
                 'registradoPor:id,email',
             ])
@@ -564,7 +584,7 @@ class LogisticaDashboardService
     {
         return $workers
             ->flatMap(function (Personal $personal): array {
-                return $personal->relacionesMina->map(function ($relation): array {
+                return $this->activeOperationalMineRelations($personal)->map(function ($relation): array {
                     return [
                         'mina' => $relation->mina?->nombre ?: 'Sin mina',
                         'estado' => $relation->estado_habilitacion ?: $relation->estado ?: 'SIN_ESTADO',
@@ -603,7 +623,7 @@ class LogisticaDashboardService
 
         return $workers
             ->filter(function (Personal $personal) use ($mineIds): bool {
-                $relations = $personal->relationLoaded('relacionesMina') ? $personal->relacionesMina : collect();
+                $relations = $this->activeOperationalMineRelations($personal);
 
                 return $relations->contains(function ($relation) use ($mineIds): bool {
                     $state = $relation->estado_habilitacion ?: $relation->estado;
@@ -785,7 +805,7 @@ class LogisticaDashboardService
 
     private function workerMines(Personal $worker): string
     {
-        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+        $relations = $this->activeOperationalMineRelations($worker);
 
         return $relations
             ->pluck('mina.nombre')
@@ -797,14 +817,14 @@ class LogisticaDashboardService
 
     private function workerPrimaryMine(Personal $worker): string
     {
-        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+        $mine = $this->workerPrimaryOperationalMine($worker);
 
-        return (string) ($relations->first()?->mina?->nombre ?: 'Sin mina');
+        return $mine !== '' ? $mine : 'Sin mina';
     }
 
     private function workerMineIds(Personal $worker): array
     {
-        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+        $relations = $this->activeOperationalMineRelations($worker);
 
         return $relations
             ->pluck('mina_id')
@@ -813,6 +833,27 @@ class LogisticaDashboardService
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function activeOperationalMineRelations(Personal $worker): Collection
+    {
+        $relations = $worker->relationLoaded('relacionesMina') ? $worker->relacionesMina : collect();
+
+        return $relations
+            ->filter(fn ($relation): bool => $relation->mina !== null && $this->isOperationalMineName($relation->mina?->nombre))
+            ->values();
+    }
+
+    private function workerPrimaryOperationalMine(Personal $worker): string
+    {
+        return (string) ($this->activeOperationalMineRelations($worker)->first()?->mina?->nombre ?: '');
+    }
+
+    private function isOperationalMineName(?string $name): bool
+    {
+        $normalized = $this->normalizeText($name);
+
+        return $normalized !== '' && ! in_array($normalized, ['SIN MINA', 'SIN_MINA', 'NO APLICA', 'N/A'], true);
     }
 
     private function classifyDeliveryState(?EppEntrega $delivery): string
@@ -853,7 +894,13 @@ class LogisticaDashboardService
 
     private function workerEppRows(Collection $workers, Collection $trackedCatalog, Collection $activeDeliveries, array $filters): Collection
     {
-        $rows = $workers->map(function (Personal $worker) use ($trackedCatalog, $activeDeliveries): array {
+        $rows = $workers->map(function (Personal $worker) use ($trackedCatalog, $activeDeliveries): ?array {
+            $primaryMine = $this->workerPrimaryOperationalMine($worker);
+
+            if ($primaryMine === '') {
+                return null;
+            }
+
             $deliveries = $activeDeliveries->where('personal_id', $worker->id);
             $items = [];
             $pendingCost = 0.0;
@@ -901,7 +948,7 @@ class LogisticaDashboardService
                 'personal_id' => $worker->id,
                 'trabajador' => $worker->nombre_completo ?: 'Sin nombre',
                 'documento' => $worker->dni ?: $worker->numero_documento ?: '-',
-                'mina' => $this->workerPrimaryMine($worker),
+                'mina' => $primaryMine,
                 'minas' => $this->workerMines($worker),
                 'cargo' => $worker->puesto ?: 'Por definir',
                 'items' => $items,
@@ -913,10 +960,11 @@ class LogisticaDashboardService
         });
 
         if ($filters['epp_estado'] === []) {
-            return $rows->values();
+            return $rows->filter()->values();
         }
 
         return $rows
+            ->filter()
             ->filter(function (array $row) use ($filters): bool {
                 $states = collect($row['items'] ?? [])->pluck('estado')->all();
 
@@ -982,6 +1030,10 @@ class LogisticaDashboardService
 
         foreach ($workerEppRows as $row) {
             $mine = (string) ($row['mina'] ?? 'Sin mina');
+            if (! $this->isOperationalMineName($mine)) {
+                continue;
+            }
+
             $matrix[$mine] ??= [
                 'mina' => $mine,
                 'items' => collect(self::EPP_ITEMS)->mapWithKeys(fn (string $label, string $key): array => [$key => 0])->all(),
@@ -1259,6 +1311,150 @@ class LogisticaDashboardService
             ->values();
     }
 
+    private function ceasedEppRows(array $filters): Collection
+    {
+        if (! $this->hasTable('personal') || ! $this->hasTable('epp_entregas')) {
+            return collect();
+        }
+
+        $query = Personal::query()
+            ->select(['id', 'nombre_completo', 'dni', 'numero_documento', 'puesto', 'estado', 'fecha_cese', 'cesado_at', 'motivo_cese'])
+            ->with([
+                'contratosLaborales' => fn ($contracts) => $contracts
+                    ->select(['id', 'personal_id', 'contrato_numero', 'estado', 'fecha_inicio', 'fecha_fin', 'motivo_cese', 'fecha_cese_controlado', 'motivo_cese_controlado'])
+                    ->whereIn('estado', [PersonalContrato::ESTADO_CESADO, PersonalContrato::ESTADO_NO_RENOVADO])
+                    ->orderByDesc('contrato_numero'),
+                'relacionesMina' => fn ($relation) => $relation
+                    ->where(function ($active): void {
+                        $active->where('activo', true)->orWhereNull('activo');
+                    })
+                    ->whereHas('mina', fn ($mine) => $mine->activeOperational())
+                    ->with(['mina' => fn ($mine) => $mine->activeOperational()->select('id', 'nombre')]),
+            ])
+            ->where(function ($where): void {
+                $where->where('estado', 'CESADO')
+                    ->orWhereNotNull('fecha_cese')
+                    ->orWhereNotNull('cesado_at');
+
+                if ($this->hasTable('personal_contratos')) {
+                    $where->orWhereHas('contratosLaborales', function ($contracts): void {
+                        $contracts->whereIn('estado', [PersonalContrato::ESTADO_CESADO, PersonalContrato::ESTADO_NO_RENOVADO]);
+                    });
+                }
+            });
+
+        $search = trim((string) ($filters['q'] ?? ''));
+        if ($search !== '') {
+            $query->where(function ($where) use ($search): void {
+                $where->where('nombre_completo', 'like', "%{$search}%")
+                    ->orWhere('dni', 'like', "%{$search}%")
+                    ->orWhere('numero_documento', 'like', "%{$search}%")
+                    ->orWhere('puesto', 'like', "%{$search}%");
+            });
+        }
+
+        $workers = $query->orderByDesc('fecha_cese')->orderBy('nombre_completo')->limit(250)->get();
+        if ($workers->isEmpty()) {
+            return collect();
+        }
+
+        $deliveries = EppEntrega::query()
+            ->with(['epp:id,codigo,nombre', 'registradoPor:id,email'])
+            ->whereIn('personal_id', $workers->pluck('id')->all())
+            ->orderByDesc('fecha_entrega')
+            ->orderByDesc('created_at')
+            ->get()
+            ->groupBy('personal_id');
+
+        return $workers
+            ->map(function (Personal $worker) use ($deliveries): ?array {
+                $items = $this->ceasedWorkerEppItems($deliveries->get($worker->id, collect()));
+                if ($items->isEmpty()) {
+                    return null;
+                }
+
+                $contract = $worker->contratosLaborales->sortByDesc('contrato_numero')->first();
+                $pending = $items->where('resuelto', false)->count();
+                $resolved = $items->where('resuelto', true)->count();
+                $fechaCese = $worker->fecha_cese?->format('d/m/Y')
+                    ?: ($contract?->fecha_cese_controlado?->format('d/m/Y')
+                        ?: ($contract?->fecha_fin?->format('d/m/Y') ?: ($worker->cesado_at?->format('d/m/Y') ?: '-')));
+
+                return [
+                    'personal_id' => (string) $worker->id,
+                    'trabajador' => (string) ($worker->nombre_completo ?: 'Sin nombre'),
+                    'documento' => (string) ($worker->dni ?: $worker->numero_documento ?: '-'),
+                    'puesto' => (string) ($worker->puesto ?: 'Por definir'),
+                    'mina' => $this->workerPrimaryMine($worker),
+                    'estado_laboral' => (string) ($worker->estado ?: 'CESADO'),
+                    'contrato_estado' => (string) ($contract?->estado ?: 'CESADO'),
+                    'fecha_cese' => $fechaCese,
+                    'motivo_cese' => (string) ($worker->motivo_cese ?: $contract?->motivo_cese_controlado ?: $contract?->motivo_cese ?: '-'),
+                    'pendientes' => $pending,
+                    'resueltos' => $resolved,
+                    'total' => $items->count(),
+                    'estado_logistico' => $pending > 0 ? 'PENDIENTE' : 'RESUELTO',
+                    'items' => $items->values()->all(),
+                ];
+            })
+            ->filter()
+            ->sortByDesc('pendientes')
+            ->values();
+    }
+
+    private function ceasedWorkerEppItems(Collection $deliveries): Collection
+    {
+        return $deliveries
+            ->groupBy(fn (EppEntrega $delivery): string => (string) ($delivery->epp_id ?: $delivery->id))
+            ->map(function (Collection $itemDeliveries): array {
+                /** @var EppEntrega $delivery */
+                $delivery = $itemDeliveries
+                    ->sortByDesc(fn (EppEntrega $row): string => ($row->fecha_entrega?->toDateString() ?: '') . ' ' . ($row->created_at?->toDateTimeString() ?: ''))
+                    ->first();
+                $resuelto = $this->isCeasedEppResolved((string) $delivery->estado);
+
+                return [
+                    'epp' => (string) ($delivery->epp?->nombre ?: 'EPP sin catalogo'),
+                    'codigo' => (string) ($delivery->epp?->codigo ?: '-'),
+                    'estado' => (string) $delivery->estado,
+                    'estado_label' => $this->eppDeliveryStateLabel((string) $delivery->estado),
+                    'resuelto' => $resuelto,
+                    'estado_resolucion' => $resuelto ? 'Resuelto' : 'Pendiente de entrega',
+                    'fecha_entrega' => $delivery->fecha_entrega?->format('d/m/Y') ?: '-',
+                    'fecha_cierre' => $delivery->devuelto_at?->format('d/m/Y') ?: '-',
+                    'cantidad' => (int) ($delivery->cantidad ?: 1),
+                    'responsable' => $delivery->registradoPor?->email ?: 'Sistema',
+                    'observacion' => (string) ($delivery->observacion ?: $delivery->motivo_cambio ?: ''),
+                ];
+            })
+            ->values()
+            ->sortBy([
+                ['resuelto', 'asc'],
+                ['epp', 'asc'],
+            ])
+            ->values();
+    }
+
+    private function isCeasedEppResolved(string $estado): bool
+    {
+        return in_array($estado, [
+            EppEntrega::ESTADO_DEVUELTO,
+            EppEntrega::ESTADO_USO_INCORRECTO,
+            EppEntrega::ESTADO_PERDIDA_OLVIDO,
+        ], true);
+    }
+
+    private function eppDeliveryStateLabel(string $estado): string
+    {
+        return match ($estado) {
+            EppEntrega::ESTADO_CAMBIADO => 'Cambio de EPP',
+            EppEntrega::ESTADO_USO_INCORRECTO => 'Uso incorrecto',
+            EppEntrega::ESTADO_PERDIDA_OLVIDO => 'Perdida / olvido',
+            EppEntrega::ESTADO_DEVUELTO => 'Devuelto por internamiento',
+            default => 'Entrega / nuevo',
+        };
+    }
+
     private function expiringDeliveries(Collection $activeDeliveries, bool $onlyNextThirtyDays = true): Collection
     {
         $today = now()->startOfDay();
@@ -1357,7 +1553,9 @@ class LogisticaDashboardService
         $mine = $delivery->personal ? $this->workerPrimaryMine($delivery->personal) : 'Sin mina';
         $movement = match ($delivery->estado) {
             EppEntrega::ESTADO_CAMBIADO => 'Cambio',
-            EppEntrega::ESTADO_DEVUELTO => 'Devolucion',
+            EppEntrega::ESTADO_USO_INCORRECTO => 'Uso incorrecto',
+            EppEntrega::ESTADO_PERDIDA_OLVIDO => 'Perdida / olvido',
+            EppEntrega::ESTADO_DEVUELTO => 'Devuelto por internamiento',
             default => $delivery->motivo_cambio ? 'Renovacion' : 'Entrega',
         };
 
@@ -1371,6 +1569,8 @@ class LogisticaDashboardService
             'epp_id' => (string) ($delivery->epp_id ?? ''),
             'epp' => $delivery->epp?->nombre ?: 'Sin EPP',
             'talla' => $this->deliverySize($delivery),
+            'color' => (string) ($delivery->color ?: ''),
+            'atributos' => $delivery->atributos_json ?: [],
             'cantidad' => (int) ($delivery->cantidad ?? 1),
             'fecha_entrega' => $delivery->fecha_entrega?->format('d/m/Y') ?: '-',
             'fecha_entrega_iso' => $delivery->fecha_entrega?->toDateString(),
@@ -1385,6 +1585,10 @@ class LogisticaDashboardService
 
     private function deliverySize(EppEntrega $delivery): string
     {
+        if (filled($delivery->talla)) {
+            return (string) $delivery->talla;
+        }
+
         if (! $delivery->personal || ! $delivery->epp) {
             return '-';
         }
@@ -1480,6 +1684,9 @@ class LogisticaDashboardService
                     'doc_proserge_path' => $transporte->doc_proserge_path ?: '',
                     'doc_mantenimiento_path' => $transporte->doc_mantenimiento_path ?: '',
                     'doc_checklist_path' => $transporte->doc_checklist_path ?: '',
+                    'documentos' => $this->hasColumn('rq_mina_actividad_transportes', 'documentos')
+                        ? $this->normalizeTransportDocuments($transporte->documentos)
+                        : [],
                 ];
             });
     }
@@ -1527,6 +1734,7 @@ class LogisticaDashboardService
                         'doc_proserge_path',
                         'doc_mantenimiento_path',
                         'doc_checklist_path',
+                        'documentos',
                     ]),
                     'fecha_evento' => now(),
                     'usuario_id' => $usuario->id,
@@ -1557,7 +1765,7 @@ class LogisticaDashboardService
             $origen = RQMinaActividadTransporte::ORIGEN_OTRO;
         }
 
-        return [
+        $data = [
             'origen' => $origen ?: null,
             'placas_asignadas' => trim((string) ($payload['placas_asignadas'] ?? '')) ?: null,
             'fecha_inicio' => $inicio,
@@ -1575,6 +1783,52 @@ class LogisticaDashboardService
             'doc_mantenimiento_path' => trim((string) ($payload['doc_mantenimiento_path'] ?? '')) ?: $transporte->getOriginal('doc_mantenimiento_path'),
             'doc_checklist_path' => trim((string) ($payload['doc_checklist_path'] ?? '')) ?: $transporte->getOriginal('doc_checklist_path'),
         ];
+
+        if ($this->hasColumn('rq_mina_actividad_transportes', 'documentos')) {
+            $data['documentos'] = $this->mergeTransportDocuments(
+                $this->normalizeTransportDocuments($transporte->documentos),
+                $payload['documentos_nuevos'] ?? []
+            );
+        }
+
+        return $data;
+    }
+
+    private function normalizeTransportDocuments(mixed $documents): array
+    {
+        if (is_string($documents)) {
+            $decoded = json_decode($documents, true);
+            $documents = is_array($decoded) ? $decoded : [];
+        }
+
+        if (! is_array($documents)) {
+            return [];
+        }
+
+        return collect($documents)
+            ->filter(fn ($document): bool => is_array($document) && trim((string) ($document['path'] ?? '')) !== '')
+            ->map(fn (array $document): array => [
+                'tipo' => trim((string) ($document['tipo'] ?? 'adicional')) ?: 'adicional',
+                'nombre' => trim((string) ($document['nombre'] ?? 'Documento')) ?: 'Documento',
+                'path' => trim((string) ($document['path'] ?? '')),
+                'original_name' => trim((string) ($document['original_name'] ?? '')),
+                'uploaded_at' => trim((string) ($document['uploaded_at'] ?? '')),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function mergeTransportDocuments(array $existing, mixed $newDocuments): array
+    {
+        $next = $existing;
+        foreach ($this->normalizeTransportDocuments($newDocuments) as $document) {
+            $next[] = $document;
+        }
+
+        return collect($next)
+            ->unique(fn (array $document): string => $document['path'])
+            ->values()
+            ->all();
     }
 
     private function normalizeDate(mixed $value): ?string
@@ -1641,16 +1895,90 @@ class LogisticaDashboardService
         };
     }
 
-    private function identityRows(Collection $catalog): Collection
+    private function identityRows(array $filters): Collection
     {
-        return $catalog->map(fn (EppRegistro $epp): array => [
+        $categoria = $filters['ident_categoria'] ?? 'EPP';
+
+        $allCatalog = $this->hasTable('epp_registro')
+            ? EppRegistro::query()
+                ->where('categoria', $categoria)
+                ->orderBy('nombre')
+                ->get()
+            : collect();
+
+        $rows = $allCatalog->toBase()->map(fn (EppRegistro $epp): array => [
+            'id' => (string) $epp->id,
             'nombre' => $epp->nombre,
             'codigo' => $epp->codigo ?: Str::slug($epp->nombre, '-'),
             'vida_util' => (int) ($epp->vida_util_dias ?? 0),
-            'talla' => $epp->requiere_talla ? collect($epp->tallas ?: [])->implode(', ') : 'No requiere',
-            'color' => $epp->requiere_color ? collect($epp->colores ?: [])->implode(', ') : 'No requiere',
+            'requiere_talla' => (bool) $epp->requiere_talla,
+            'talla_label' => $epp->requiere_talla ? collect($epp->tallas ?: [])->implode(', ') : 'No requiere',
+            'tallas' => $epp->tallas ?: [],
+            'requiere_color' => (bool) $epp->requiere_color,
+            'color_label' => $epp->requiere_color ? collect($epp->colores ?: [])->implode(', ') : 'No requiere',
+            'colores' => $epp->colores ?: [],
+            'categoria' => $epp->categoria ?: 'EPP',
+            'otros_atributos' => $epp->otros_atributos ?: [],
             'estado' => $epp->estado,
-        ])->values();
+            'readonly' => false,
+            'fuente' => 'ITEM',
+        ]);
+
+        if (! in_array($categoria, ['HERRAMIENTA', 'CONSUMIBLE'], true) || ! $this->hasTable('parada_herramienta_catalogos')) {
+            return $rows->values();
+        }
+
+        $registeredNames = $rows
+            ->pluck('nombre')
+            ->map(fn ($name): string => $this->normalizeText($name))
+            ->filter()
+            ->flip();
+
+        $toolCatalogQuery = ParadaHerramientaCatalogo::query();
+
+        if ($this->hasColumn('parada_herramienta_catalogos', 'categoria')) {
+            $toolCatalogQuery->where('categoria', $categoria);
+        }
+
+        if ($this->hasColumn('parada_herramienta_catalogos', 'activo')) {
+            $toolCatalogQuery->where('activo', true);
+        }
+
+        if ($this->hasColumn('parada_herramienta_catalogos', 'descripcion')) {
+            $toolCatalogQuery->orderBy('descripcion');
+        }
+
+        $toolCatalogRows = $toolCatalogQuery
+            ->get()
+            ->toBase()
+            ->reject(fn (ParadaHerramientaCatalogo $item): bool => $registeredNames->has($this->normalizeText($item->descripcion)))
+            ->map(fn (ParadaHerramientaCatalogo $item): array => [
+                'id' => 'herramienta-catalogo-' . $item->id,
+                'catalogo_id' => (string) $item->id,
+                'nombre' => $item->descripcion,
+                'codigo' => Str::of($item->descripcion)->ascii()->slug('_')->upper()->limit(60, '')->toString() ?: 'SIN_CODIGO',
+                'vida_util' => 0,
+                'requiere_talla' => false,
+                'talla_label' => 'No requiere',
+                'tallas' => [],
+                'requiere_color' => false,
+                'color_label' => 'No requiere',
+                'colores' => [],
+                'categoria' => $item->categoria,
+                'unidad' => $item->unidad ?: '',
+                'otros_atributos' => $item->unidad ? [[
+                    'nombre' => 'Unidad',
+                    'valores' => [$item->unidad],
+                ]] : [],
+                'estado' => 'ACTIVO',
+                'readonly' => true,
+                'fuente' => 'CATALOGO_PARADA',
+            ]);
+
+        return $rows
+            ->merge($toolCatalogRows)
+            ->sortBy('nombre')
+            ->values();
     }
 
     private function costRows(Collection $catalog): Collection
@@ -1728,6 +2056,15 @@ class LogisticaDashboardService
     {
         try {
             return Schema::hasTable($table);
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        try {
+            return Schema::hasColumn($table, $column);
         } catch (\Throwable) {
             return false;
         }

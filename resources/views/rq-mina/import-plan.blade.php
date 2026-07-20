@@ -14,15 +14,6 @@
 @endphp
 
 @section('content')
-<style>
-.rq-import-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
-.rq-import-meta { border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff; }
-.rq-import-meta span { display:block; font-size:11px; color:#64748b; text-transform:uppercase; font-weight:800; }
-.rq-import-meta strong { display:block; margin-top:4px; color:#0f172a; font-size:14px; }
-.rq-import-drop { border:1px dashed #cbd5e1; border-radius:12px; padding:18px; background:#f8fafc; }
-.rq-import-file { width:100%; border:1px solid #dbe4ef; background:#fff; border-radius:10px; padding:11px; }
-.rq-import-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; flex-wrap:wrap; }
-</style>
 
 <div class="page-header">
     <div class="page-header-top">

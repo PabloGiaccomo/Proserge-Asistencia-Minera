@@ -104,22 +104,83 @@ class LogisticaPageController extends WebPageController
             'recepcion_estado' => ['required', 'string', 'in:PENDIENTE,RECIBIDO,INCOMPLETO,NO_LLEGO,CON_OBSERVACION'],
             'recepcion_observacion' => ['nullable', 'string', 'max:2000'],
             'capacidad_camion' => ['nullable', 'string', 'max:50'],
-            'doc_vehiculo' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'doc_proserge' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'doc_mantenimiento' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'doc_checklist' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'doc_vehiculo' => ['nullable', 'array'],
+            'doc_vehiculo.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'doc_proserge' => ['nullable', 'array'],
+            'doc_proserge.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'doc_mantenimiento' => ['nullable', 'array'],
+            'doc_mantenimiento.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'doc_checklist' => ['nullable', 'array'],
+            'doc_checklist.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'documentos' => ['nullable', 'array'],
+            'documentos.*.nombre' => ['required_with:documentos.*.archivo', 'string', 'max:200'],
+            'documentos.*.archivo' => ['required_with:documentos.*.nombre', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
         ]);
 
         $data = $validated;
+        unset($data['doc_vehiculo'], $data['doc_proserge'], $data['doc_mantenimiento'], $data['doc_checklist'], $data['documentos']);
+        $directory = 'logistica/transportes/' . $id;
+        $uploadedDocs = [];
+        $documentTypes = [
+            'doc_vehiculo' => 'Documentacion del vehiculo',
+            'doc_proserge' => 'Documentacion interna Proserge',
+            'doc_mantenimiento' => 'Plan de mantenimiento',
+            'doc_checklist' => 'Checklist de enseres',
+        ];
 
-        foreach (['doc_vehiculo', 'doc_proserge', 'doc_mantenimiento', 'doc_checklist'] as $field) {
-            if ($request->hasFile($field)) {
-                $file = $request->file($field);
-                $directory = 'logistica/transportes/' . $id;
+        foreach ($documentTypes as $field => $label) {
+            $files = $request->file($field, []);
+            if (! is_array($files)) {
+                $files = [$files];
+            }
+
+            foreach ($files as $index => $file) {
+                if (! $file || ! $file->isValid()) {
+                    continue;
+                }
+
                 $filename = $field . '_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
                 $path = $file->storeAs($directory, $filename, 'local');
-                $data[$field . '_path'] = $path;
+
+                if ($index === 0) {
+                    $data[$field . '_path'] = $path;
+                }
+
+                $uploadedDocs[] = [
+                    'tipo' => $field,
+                    'nombre' => $label,
+                    'path' => $path,
+                    'original_name' => $file->getClientOriginalName(),
+                    'uploaded_at' => now()->toDateTimeString(),
+                ];
             }
+        }
+
+        // Procesar documentos dinámicos (múltiples archivos con nombre)
+        $additionalFiles = $request->file('documentos', []);
+        if (is_array($additionalFiles)) {
+            foreach ($additionalFiles as $index => $docFiles) {
+                $file = is_array($docFiles) ? ($docFiles['archivo'] ?? null) : $docFiles;
+                $nombre = trim((string) ($request->input('documentos.' . $index . '.nombre', '')));
+
+                if (! $file || ! $file->isValid() || $nombre === '') {
+                    continue;
+                }
+
+                $filename = 'doc_' . Str::slug($nombre) . '_' . Str::random(6) . '.' . $file->getClientOriginalExtension();
+                $path = $file->storeAs($directory, $filename, 'local');
+                $uploadedDocs[] = [
+                    'tipo' => 'adicional',
+                    'nombre' => $nombre,
+                    'path' => $path,
+                    'original_name' => $file->getClientOriginalName(),
+                    'uploaded_at' => now()->toDateTimeString(),
+                ];
+            }
+        }
+
+        if ($uploadedDocs !== []) {
+            $data['documentos_nuevos'] = $uploadedDocs;
         }
 
         $this->service->updateTransportRequirement($id, $data, $usuario);

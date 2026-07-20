@@ -217,25 +217,47 @@ class PersonalService
             $query->where('personal.contrato', $contractFilter);
         }
 
-        $mineFilter = trim((string) ($filters['mina'] ?? ''));
-        $mineIds = $mineFilter !== '' ? $this->resolveMineIds($mineFilter) : [];
-        $mineState = PersonalNormalizer::mineStatusFromInput($filters['mina_estado'] ?? '');
+        $mineFilters = $this->normalizeMineFilterValues($filters['minas'] ?? $filters['mina'] ?? []);
+        $mineStateFilters = $this->normalizeMineStateFilterValues($filters['mina_estados'] ?? $filters['mina_estado'] ?? []);
+        $mineIds = $this->resolveMineFilterIds($mineFilters);
 
-        if ($mineFilter !== '' || !empty($filters['mina_estado'])) {
-            if ($mineFilter !== '' && count($mineIds) === 0) {
+        if ($mineFilters !== [] || $mineStateFilters !== []) {
+            if ($mineFilters !== [] && count($mineIds) === 0) {
                 $query->whereRaw('1=0');
             } else {
-                $query->whereExists(function ($q) use ($mineIds, $mineState, $mineFilter): void {
+                $hasEstadoHabilitacion = Schema::hasColumn('personal_mina', 'estado_habilitacion');
+                $hasActivo = Schema::hasColumn('personal_mina', 'activo');
+
+                $query->whereExists(function ($q) use ($mineIds, $mineStateFilters, $hasEstadoHabilitacion, $hasActivo): void {
                     $q->selectRaw('1')
                         ->from('personal_mina as pm')
                         ->whereColumn('pm.personal_id', 'personal.id');
 
-                    if ($mineFilter !== '') {
+                    if ($mineIds !== []) {
                         $q->whereIn('pm.mina_id', $mineIds);
                     }
 
-                    if ($mineState !== '') {
-                        $q->where('pm.estado', $mineState);
+                    if ($mineStateFilters !== []) {
+                        $q->where(function ($stateQuery) use ($mineStateFilters, $hasEstadoHabilitacion): void {
+                            if ($hasEstadoHabilitacion) {
+                                $stateQuery->whereIn('pm.estado_habilitacion', $mineStateFilters)
+                                    ->orWhere(function ($legacyQuery) use ($mineStateFilters): void {
+                                        $legacyQuery->whereNull('pm.estado_habilitacion')
+                                            ->whereIn('pm.estado', $mineStateFilters);
+                                    });
+
+                                return;
+                            }
+
+                            $stateQuery->whereIn('pm.estado', $mineStateFilters);
+                        });
+                    }
+
+                    if ($hasActivo) {
+                        $q->where(function ($activeQuery): void {
+                            $activeQuery->where('pm.activo', true)
+                                ->orWhereNull('pm.activo');
+                        });
                     }
                 });
             }
@@ -995,6 +1017,45 @@ class PersonalService
                 }
             });
         }
+    }
+
+    private function normalizeMineFilterValues(mixed $values): array
+    {
+        return collect(is_array($values) ? $values : [$values])
+            ->map(fn ($value): string => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function normalizeMineStateFilterValues(mixed $values): array
+    {
+        return collect(is_array($values) ? $values : [$values])
+            ->map(function ($value): ?string {
+                $text = strtoupper(PersonalNormalizer::text($value));
+
+                return match ($text) {
+                    'HABILITADO' => 'HABILITADO',
+                    'EN_PROCESO', 'PROCESO' => 'EN_PROCESO',
+                    'NO_HABILITADO' => 'NO_HABILITADO',
+                    default => null,
+                };
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function resolveMineFilterIds(array $mineFilters): array
+    {
+        return collect($mineFilters)
+            ->flatMap(fn (string $filter): array => $this->resolveMineIds($filter))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function resolveMineIds(string $mineFilter): array

@@ -9,6 +9,7 @@
     <link rel="apple-touch-icon" href="{{ asset('img/LogoProserge.png') }}?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     @include('partials.vite-assets')
+    @stack('styles')
 </head>
 <body>
     <div class="app-layout with-sidebar">

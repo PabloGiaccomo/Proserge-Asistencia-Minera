@@ -125,16 +125,27 @@ class PersonalPageController extends WebPageController
         $this->runIndexMaintenance();
 
         $filters = $this->extractIndexFilters($request);
-        $trabajadores = PersonalIndexResource::collection(
-            $this->service->listForIndex($filters)
-        )->resolve();
+        $perPage = $this->resolvePerPage($request);
+        $paginator = $this->service->paginatedForIndex($filters, $perPage);
+        $trabajadores = PersonalIndexResource::collection($paginator->items())->resolve();
         $trabajadores = $this->filterByVisibleState($trabajadores, (string) ($filters['visible_estado'] ?? ''));
+        $currentPageCount = count($trabajadores);
+        $firstItem = $paginator->firstItem();
 
         $catalogs = $this->getLocationCatalogs();
 
         return view('personal.index', array_merge($catalogs, compact('trabajadores'), [
             'puestoOptions' => $this->puestoOptions(),
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
+            'paginationMeta' => [
+                'total' => $paginator->total(),
+                'currentPage' => $paginator->currentPage(),
+                'lastPage' => $paginator->lastPage(),
+                'perPage' => $paginator->perPage(),
+                'from' => $currentPageCount > 0 ? $firstItem : null,
+                'to' => $currentPageCount > 0 && $firstItem !== null ? $firstItem + $currentPageCount - 1 : null,
+                'serverSide' => true,
+            ],
         ]));
     }
 
@@ -181,9 +192,9 @@ class PersonalPageController extends WebPageController
 
     private function resolvePerPage(Request $request): int
     {
-        $perPage = (int) ($request->query('per_page', 10));
+        $perPage = (int) ($request->query('per_page', 25));
 
-        return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 10;
+        return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 25;
     }
 
     private function filterByVisibleState(array $trabajadores, string $visibleStateFilter): array

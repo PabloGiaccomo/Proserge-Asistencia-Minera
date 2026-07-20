@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\Usuario;
+use App\Modules\Epps\Services\EppService;
+use App\Modules\Personal\Resources\PersonalIndexResource;
+use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -374,6 +377,141 @@ class PersonalContratoExpiryDecisionTest extends TestCase
         } catch (ValidationException $exception) {
             $this->assertSame('Ya existe un contrato en preparacion para este trabajador. Revisalo antes de crear otro.', collect($exception->errors())->flatten()->first());
         }
+    }
+
+    public function test_vencimientos_muestra_renovacion_preparada_sin_archivo_firmado_y_deja_origen_resuelto_al_final(): void
+    {
+        Carbon::setTestNow('2026-06-06 08:00:00');
+        Storage::fake('local');
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['vencimientos' => ['ver', 'registrar', 'renovar']]));
+        $personal = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Renovacion Visible Sin Firma']);
+        $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true, ['puesto' => 'Mecanico']);
+
+        app(PersonalContratoService::class)->registerRenewalDecision($contract, [
+            'estado_decision_renovacion' => PersonalContrato::DECISION_RENOVAR,
+        ], $actor);
+
+        $renewal = app(PersonalContratoService::class)->prepareRenewalFromDecision($contract->fresh(), [
+            'fecha_inicio' => '2026-07-01',
+            'fecha_fin' => '2026-07-31',
+            'observacion_renovacion' => 'Preparada sin PDF firmado todavia.',
+        ], $actor);
+
+        $this->assertSame(PersonalContrato::ESTADO_PREPARACION, $renewal->estado);
+        $this->assertFalse($renewal->hasSignedFile());
+        $this->assertSame('ACTIVO', $personal->fresh()->estado);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts(['mes' => 6, 'anio' => 2026]);
+
+        $this->assertTrue($result->contains('id', $contract->id));
+        $this->assertTrue($result->contains('id', $renewal->id));
+        $this->assertSame(
+            [$renewal->id, $contract->id],
+            $result->whereIn('id', [$contract->id, $renewal->id])->pluck('id')->values()->all(),
+        );
+
+        $this->withSession($this->sessionFor($actor->id, ['vencimientos' => ['ver', 'registrar', 'renovar']]))
+            ->get(route('personal.contratos.expiring', ['mes' => 6, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Renovacion Visible Sin Firma')
+            ->assertSee('Contrato 01/07/2026 al 31/07/2026')
+            ->assertSee('Preparacion');
+    }
+
+    public function test_vencimiento_renovado_muestra_resuelto_y_se_ordena_despues_de_pendientes(): void
+    {
+        Carbon::setTestNow('2026-07-17 08:00:00');
+        Storage::fake('local');
+
+        $userId = $this->createUser(['vencimientos' => ['ver']]);
+        $renovado = $this->createPersonal('CESADO', ['nombre_completo' => 'Orden Renovado Resuelto']);
+        $origen = $this->insertContract($renovado, '2026-06-14', '2026-07-15', true, [
+            'estado' => PersonalContrato::ESTADO_CESADO,
+        ]);
+        $renovacion = $this->insertContract($renovado, '2026-07-16', '2026-07-31', false, [
+            'estado' => PersonalContrato::ESTADO_PREPARACION,
+            'origen_contrato_id' => $origen->id,
+        ]);
+
+        $pendiente = $this->createPersonal('ACTIVO', ['nombre_completo' => 'Orden Pendiente Contrato']);
+        $contratoPendiente = $this->insertContract($pendiente, '2026-01-01', '2026-07-21', true);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts(['mes' => 7, 'anio' => 2026]);
+
+        $this->assertSame(
+            [$renovacion->id, $contratoPendiente->id, $origen->id],
+            $result->whereIn('id', [$origen->id, $renovacion->id, $contratoPendiente->id])->pluck('id')->values()->all(),
+        );
+        $this->assertSame('FALTA_CONTRATO', $result->firstWhere('id', $origen->id)?->getAttribute('estado_laboral_visual'));
+        $this->assertSame('Falta contrato', $result->firstWhere('id', $origen->id)?->getAttribute('estado_laboral_visual_label'));
+        $this->assertSame('FALTA_CONTRATO', $result->firstWhere('id', $renovacion->id)?->getAttribute('estado_laboral_visual'));
+
+        $resourceWorker = $renovado->fresh()->load('contratosLaborales');
+        $detailRow = (new PersonalResource($resourceWorker))->resolve();
+        $indexRow = (new PersonalIndexResource($resourceWorker))->resolve();
+
+        $this->assertSame('FALTA_CONTRATO', $detailRow['estado']);
+        $this->assertSame('Falta contrato', $detailRow['estado_label']);
+        $this->assertSame('FALTA_CONTRATO', $indexRow['estado']);
+        $this->assertSame('Falta contrato', $indexRow['estado_label']);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.contratos.expiring', ['mes' => 7, 'anio' => 2026]))
+            ->assertOk()
+            ->assertSee('Orden Renovado Resuelto')
+            ->assertSee('Renovado')
+            ->assertSee('Resuelto hace 2 dias')
+            ->assertSee('Laboral: Falta contrato')
+            ->assertDontSee('Laboral: Cesado');
+    }
+
+    public function test_contrato_activo_vigente_se_muestra_activo_aunque_el_estado_interno_quede_pendiente(): void
+    {
+        Carbon::setTestNow('2026-07-17 08:00:00');
+        Storage::fake('local');
+
+        $personal = $this->createPersonal('FALTA_CONTRATO', [
+            'nombre_completo' => 'Contrato Activo Visual',
+            'pendiente_contrato_firmado' => true,
+        ]);
+        $origen = $this->insertContract($personal, '2025-11-19', '2026-05-31', true, [
+            'estado' => PersonalContrato::ESTADO_CERRADO,
+        ]);
+        $activo = $this->insertContract($personal, '2026-06-01', '2026-11-30', false, [
+            'estado' => PersonalContrato::ESTADO_ACTIVO,
+            'origen_contrato_id' => $origen->id,
+        ]);
+
+        $result = app(PersonalContratoService::class)->listExpiringContracts([
+            'trabajador' => 'Contrato Activo Visual',
+        ]);
+
+        $this->assertSame('ACTIVO', $result->firstWhere('id', $activo->id)?->getAttribute('estado_laboral_visual'));
+        $this->assertSame('Activo', $result->firstWhere('id', $activo->id)?->getAttribute('estado_laboral_visual_label'));
+
+        $resourceWorker = $personal->fresh()->load('contratosLaborales');
+        $detailRow = (new PersonalResource($resourceWorker))->resolve();
+        $indexRow = (new PersonalIndexResource($resourceWorker))->resolve();
+
+        $this->assertSame('ACTIVO', $detailRow['estado']);
+        $this->assertSame('Activo', $detailRow['estado_label']);
+        $this->assertSame('habilitado', $detailRow['situacion']);
+        $this->assertTrue($detailRow['pendiente_contrato_firmado']);
+        $this->assertFalse($detailRow['contrato_firmado']);
+        $this->assertSame('ACTIVO', $indexRow['estado']);
+        $this->assertSame('Activo', $indexRow['estado_label']);
+        $this->assertSame('habilitado', $indexRow['situacion']);
+        $this->assertTrue($indexRow['pendiente_contrato_firmado']);
+        $this->assertFalse($indexRow['contrato_firmado']);
+
+        $searchResult = collect(app(EppService::class)->searchPersonal('Contrato Activo Visual'));
+        $searchRow = $searchResult->firstWhere('id', $personal->id);
+
+        $this->assertNotNull($searchRow);
+        $this->assertSame('Activo', $searchRow['estado']);
+        $this->assertTrue($searchRow['pendiente_contrato_firmado']);
+        $this->assertFalse($searchRow['contrato_firmado']);
     }
 
     public function test_contrato_historico_aparece_en_su_mes_pero_no_acepta_decision_activa(): void

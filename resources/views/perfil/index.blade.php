@@ -160,38 +160,4 @@
     </div>
 </div>
 
-<style>
-.profile-avatar-large {
-    width: 100px;
-    height: 100px;
-    border-radius: 24px;
-    background: linear-gradient(135deg, #19D3C5 0%, #14b5a8 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 32px;
-    font-weight: 700;
-    color: white;
-}
-
-.info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.info-label {
-    font-size: 12px;
-    font-weight: 600;
-    color: #64748B;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.info-value {
-    font-size: 15px;
-    font-weight: 500;
-    color: #1E293B;
-}
-</style>
 @endsection

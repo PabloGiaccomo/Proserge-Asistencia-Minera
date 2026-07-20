@@ -43,15 +43,7 @@
 </div>
 
 @once
-    <style>
-        .puesto-autocomplete-error {
-            margin-top: 6px;
-            color: #dc2626;
-            font-size: 12px;
-            font-weight: 700;
-            line-height: 1.35;
-        }
-    </style>
+    
     <script>
     (function () {
         if (window.__prosergePuestoAutocomplete) return;

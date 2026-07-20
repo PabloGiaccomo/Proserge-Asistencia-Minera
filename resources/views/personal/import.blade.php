@@ -4,28 +4,7 @@
 
 @section('content')
 <div class="module-page">
-    <style>
-        .import-scroll-panel {
-            max-height: 520px;
-            overflow: auto;
-            padding-right: 6px;
-        }
-
-        .import-scroll-panel::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
-        }
-
-        .import-scroll-panel::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 999px;
-        }
-
-        .import-scroll-panel::-webkit-scrollbar-track {
-            background: #f8fafc;
-            border-radius: 999px;
-        }
-    </style>
+    
     <div class="page-header">
         <div class="page-header-top">
             <div>
@@ -76,13 +55,18 @@
             default => 'Master General',
         }) : null;
 
+        $filasLeidas = $importResult['filasLeidas'] ?? count($importResult['nuevosDetalle'] ?? []) + ($importResult['actualizados'] ?? 0) + ($importResult['omitidos'] ?? 0) + ($importResult['duplicados'] ?? 0);
+        $filasProcesadas = ($importResult['nuevos'] ?? 0) + ($importResult['actualizados'] ?? 0) + ($importResult['omitidos'] ?? 0) + ($importResult['duplicados'] ?? 0);
+
         $guideMetrics = $hasImportResult ? [
-            ['value' => $importResult['filasLeidas'] ?? null, 'label' => 'Filas leidas'],
+            ['value' => $filasLeidas, 'label' => 'Filas leidas'],
+            ['value' => $filasProcesadas, 'label' => 'Filas procesadas'],
+            ['value' => max(0, $filasLeidas - $filasProcesadas), 'label' => 'Filas sin procesar'],
             ['value' => $importResult['nuevos'] ?? 0, 'label' => 'Trabajadores nuevos'],
             ['value' => $importResult['actualizados'] ?? 0, 'label' => 'Trabajadores actualizados'],
             ['value' => $importResult['omitidos'] ?? 0, 'label' => 'Filas omitidas'],
         ] : [];
-        $guideMetrics = array_values(array_filter($guideMetrics, fn ($item) => $item['value'] !== null));
+        $guideMetrics = array_values(array_filter($guideMetrics, fn ($item) => $item['value'] !== null && $item['value'] >= 0));
 
         if ($importType === 'datos_personal') {
             $guideActions = [
@@ -135,26 +119,67 @@
             </div>
         </div>
 
-        @if(false && count($importSummaryLinesSession) > 0)
-            <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
-                <div class="card-body">
-                    <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">Resumen de cambios aplicados</div>
-                    <div style="display:flex; flex-direction:column; gap:8px;">
-                        @foreach($importSummaryLinesSession as $line)
-                            <div class="text-muted" style="line-height:1.6;">• {{ $line }}</div>
-                        @endforeach
-                    </div>
+    @if($hasImportResult)
+        @php
+            $totalNuevos = $importResult['nuevos'] ?? 0;
+            $totalActualizados = $importResult['actualizados'] ?? 0;
+            $totalOmitidos = $importResult['omitidos'] ?? 0;
+            $totalReact = $importResult['reactivados'] ?? 0;
+            $totalInact = $importResult['inactivados'] ?? 0;
+            $totalBloq = $importResult['activacionesBloqueadas'] ?? 0;
+        @endphp
+        <div id="importResults" style="scroll-margin-top:20px;">
+        <div class="card" style="margin-bottom:12px; border:1px solid #86efac; background:#f0fdf4;">
+            <div class="card-body">
+                <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:stretch;">
+                    @if($totalNuevos > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#166534; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalNuevos }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Nuevos</div>
+                        </div>
+                    @endif
+                    @if($totalActualizados > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#1e40af; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalActualizados }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Actualizados</div>
+                        </div>
+                    @endif
+                    @if($totalReact > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#854d0e; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalReact }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Reactivados</div>
+                        </div>
+                    @endif
+                    @if($totalInact > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#7f1d1d; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalInact }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Inactivados</div>
+                        </div>
+                    @endif
+                    @if($totalBloq > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#92400e; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalBloq }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Pendientes</div>
+                        </div>
+                    @endif
+                    @if($totalOmitidos > 0)
+                        <div style="flex:1; min-width:120px; padding:12px 16px; background:#64748b; color:white; border-radius:12px; text-align:center;">
+                            <div style="font-size:28px; font-weight:800;">{{ $totalOmitidos }}</div>
+                            <div style="font-size:13px; opacity:0.9;">Omitidos</div>
+                        </div>
+                    @endif
                 </div>
+            </div>
         </div>
     @endif
 
     @if($hasImportResult && count($importSummaryLinesSession) > 0)
-        <div class="card" style="margin-bottom:16px; border:1px solid #bfdbfe; background:#f8fbff;">
+        <div class="card" style="margin-bottom:16px; border:1px solid #86efac; background:#f0fdf4;">
             <div class="card-body">
-                <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">Resumen de cambios aplicados</div>
+                <div style="font-weight:700; color:#166534; margin-bottom:10px;">Resumen de cambios aplicados</div>
                 <div style="display:flex; flex-direction:column; gap:8px;">
                     @foreach($importSummaryLinesSession as $line)
-                        <div class="text-muted" style="line-height:1.6;">- {{ $line }}</div>
+                        <div style="line-height:1.6; color:#166534;">• {{ $line }}</div>
                     @endforeach
                 </div>
             </div>
@@ -240,8 +265,53 @@
                     @endif
                 </div>
 
-                <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores actualizados</h3>
-                @if(!empty($importResult['cambiosDetectados']))
+                <!-- Trabajadores nuevos en BD (siempre visible) -->
+                @php $nuevosCount = count($importResult['nuevosDetalle'] ?? []); @endphp
+                <div style="margin-top:20px; {{ $nuevosCount === 0 ? 'opacity:0.5;' : '' }}">
+                    <h3 style="margin:0 0 12px; font-size:16px; display:flex; align-items:center; gap:8px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="2.5"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                        Trabajadores nuevos en BD
+                        <span class="badge" style="background:#dcfce7; color:#166534; padding:2px 10px; border-radius:999px; font-size:12px;">{{ $importResult['nuevos'] ?? 0 }}</span>
+                    </h3>
+                    @if($nuevosCount > 0)
+                        <div class="table-responsive import-scroll-panel">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>DNI / Documento</th>
+                                        <th>Nombre</th>
+                                        <th>Puesto</th>
+                                        <th>Ocupación</th>
+                                        <th>Contrato</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($importResult['nuevosDetalle'] as $item)
+                                        <tr>
+                                            <td>{{ $item['dni'] ?? '-' }}</td>
+                                            <td>{{ $item['nombre'] ?? '-' }}</td>
+                                            <td>{{ $item['puesto'] ?? '-' }}</td>
+                                            <td>{{ $item['ocupacion'] ?? '-' }}</td>
+                                            <td>{{ $item['contrato'] ?? '-' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @else
+                        <p class="text-muted" style="margin:0; padding:8px 0;">No se crearon trabajadores nuevos en esta importación.</p>
+                    @endif
+                </div>
+
+                <!-- Trabajadores actualizados (siempre visible) -->
+                @php $cambiosCount = count($importResult['cambiosDetectados'] ?? []); @endphp
+                <div style="margin-top:20px; {{ $cambiosCount === 0 ? 'opacity:0.5;' : '' }}">
+                    <h3 style="margin:0 0 12px; font-size:16px; display:flex; align-items:center; gap:8px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1e40af" stroke-width="2.5"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                        Trabajadores actualizados
+                        <span class="badge" style="background:#dbeafe; color:#1e40af; padding:2px 10px; border-radius:999px; font-size:12px;">{{ $importResult['actualizados'] ?? 0 }}</span>
+                    </h3>
+                    @if(!empty($importResult['cambiosDetectados']))
                     @if(($importResult['cambiosDetectadosTotal'] ?? 0) > count($importResult['cambiosDetectados'] ?? []))
                         <div class="alert-item" style="margin-bottom:12px; align-items:flex-start; background:#fff7ed; border:1px solid #fdba74;">
                             <div class="alert-item-label" style="line-height:1.6; color:#9a3412;">
@@ -281,8 +351,9 @@
                         </table>
                     </div>
                 @else
-                    <p class="text-muted" style="margin:0;">No se detectaron cambios de datos sobre trabajadores existentes en esta importación.</p>
+                    <p class="text-muted" style="margin:0; padding:8px 0;">No se detectaron cambios de datos sobre trabajadores existentes en esta importación.</p>
                 @endif
+                </div>
 
                 @if(!empty($importResult['correosInvalidosDetalle']))
                     <div style="margin-top:20px;">
@@ -369,36 +440,6 @@
                     </div>
                 @endif
 
-                @if(!empty($importResult['nuevosDetalle']))
-                    <div style="margin-top:20px;">
-                        <h3 style="margin:0 0 12px; font-size:16px;">Trabajadores nuevos detectados</h3>
-                        <div class="table-responsive import-scroll-panel">
-                            <table class="data-table">
-                                <thead>
-<tr>
-                                        <th>DNI</th>
-                                        <th>Nombre</th>
-                                        <th>Puesto</th>
-                                        <th>Ocupación</th>
-                                        <th>Contrato</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach($importResult['nuevosDetalle'] as $item)
-                                        <tr>
-<td>{{ $item['dni'] ?? '-' }}</td>
-                                            <td>{{ $item['nombre'] ?? '-' }}</td>
-                                            <td>{{ $item['puesto'] ?? '-' }}</td>
-                                            <td>{{ $item['ocupacion'] ?? '-' }}</td>
-                                            <td>{{ $item['contrato'] ?? '-' }}</td>
-                                        </tr>
-                                    @endforeach
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                @endif
-
                 @if(!empty($importResult['reactivadosDetalle']) || !empty($importResult['inactivadosDetalle']))
                     <div class="grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-top:20px;">
                         @if(!empty($importResult['reactivadosDetalle']))
@@ -457,9 +498,10 @@
             </div>
         </div>
         @endif
+    </div>
     @endif
 
-    @if(false && $hasImportResult && count($importSummaryLinesSession) === 0)
+    @if($hasImportResult && count($importSummaryLinesSession) === 0)
         @php
             $importResultFallback = session('import_result');
             $summaryPartsFallback = [];
@@ -843,6 +885,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
         setLoadingState(true);
     });
+});
+
+// Auto-scroll a resultados despues de importacion exitosa
+document.addEventListener('DOMContentLoaded', function () {
+    var resultsAnchor = document.getElementById('importResults');
+    if (resultsAnchor) {
+        setTimeout(function () {
+            resultsAnchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
+    }
 });
 </script>
 @endpush

@@ -183,6 +183,7 @@ class RQProsergeService
             'rqMina:id,mina_id,destino_tipo,destino_id,destino_nombre,area,fecha_inicio,fecha_fin,estado,observaciones',
             'rqMina.detalle.rqMina:id,fecha_inicio,fecha_fin',
             'rqMina.detalle.asignaciones.personal:id,dni,nombre_completo,puesto',
+            'rqMina.detalle.asignaciones.personal.minas:id,nombre',
             'rqMina.detalle.cambios',
             'cambiosRqMina',
         ])->whereHas('rqMina', function ($rqMinaQuery) use ($recentPastLimit): void {
@@ -368,6 +369,7 @@ class RQProsergeService
                 'motivo' => $evaluacion['reason_message'],
                 'lineas' => $evaluacion['lineas'] ?? [],
                 'error_tecnico' => $evaluacion['technical_error'] ?? false,
+                'mina_estado' => $evaluacion['mina_estado'] ?? null,
             ];
         })->values()->all();
     }
@@ -421,6 +423,7 @@ class RQProsergeService
                 'motivo' => $evaluacion['reason_message'] ?? null,
                 'lineas' => $evaluacion['lineas'] ?? [],
                 'error_tecnico' => (bool) ($evaluacion['technical_error'] ?? false),
+                'mina_estado' => $evaluacion['mina_estado'] ?? null,
             ];
         })->values()->all();
     }

@@ -144,17 +144,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <style>
-        @page { size: letter portrait; margin: 0; }
-        html, body { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: #000; }
-        .page { position: relative; width: 612pt; height: 792pt; page-break-after: always; overflow: hidden; }
-        .page:last-child { page-break-after: auto; }
-        .page-bg { position: absolute; inset: 0; width: 612pt; height: 792pt; }
-        .field { position: absolute; z-index: 2; display: block; min-height: 10pt; line-height: 1.02; white-space: nowrap; overflow: hidden; text-overflow: clip; background: transparent; padding: 0; }
-        .multiline { white-space: normal; overflow: visible; }
-        .logo-overlay { position: absolute; z-index: 2; object-fit: contain; }
-        .signature-image { position: absolute; z-index: 2; object-fit: contain; }
-    </style>
+    
 </head>
 <body>
     <div class="page">

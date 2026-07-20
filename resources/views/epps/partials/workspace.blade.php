@@ -3,6 +3,8 @@
     $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'configurar');
     $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'editar');
     $canRegisterEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'registrar');
+    $canUpdateEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'actualizar');
+    $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
     $canManageEpps = $canConfigureEpps || $canEditEpps || $canRegisterEpps;
     $embedded = (bool) ($embedded ?? false);
     $eppFilterAction = $embedded ? url('/logistica') : route('epps.index');
@@ -14,39 +16,28 @@
     }
     $workerChipRemoveBase = $embedded ? url('/logistica') : route('epps.index');
     $workerChipRemoveUrl = $workerChipRemoveBase . (count($workerChipRemoveQuery) > 0 ? '?' . http_build_query($workerChipRemoveQuery) : '');
+    $eppInitialAttributes = [
+        'talla' => old('talla'),
+        'color' => old('color'),
+        'atributos' => old('atributos', []),
+    ];
 @endphp
 
 <div
     class="epp-screen {{ $embedded ? 'epp-screen-embedded' : '' }}"
     data-personal-search-url="{{ route('epps.personal.buscar') }}"
     data-last-delivery-url="{{ route('epps.entregas.ultima') }}"
-    @if($errors->any()) data-open-modal="{{ old('personal_id') || old('epp_id') ? 'eppDeliveryModal' : (old('catalog_edit_id') ? 'eppCatalogListModal' : 'eppCatalogModal') }}" @endif
+    @if(old('_epp_open_modal')) data-open-modal="{{ old('_epp_open_modal') }}"
+    @elseif($errors->any()) data-open-modal="{{ old('_epp_edit_modal') ?: (old('personal_id') || old('epp_id') ? 'eppDeliveryModal' : (old('catalog_edit_id') ? 'eppCatalogListModal' : 'eppCatalogModal')) }}" @endif
 >
-    <header class="epp-header">
-        <div>
-            <h1>{{ $embedded ? 'Entregas y cambios de EPP' : 'Logistica EPP' }}</h1>
-            <p>{{ $embedded ? 'Gestiona entregas, cambios, devoluciones y catalogo desde Logistica.' : 'Registra entregas, cambios y uso efectivo de EPP por trabajador.' }}</p>
-        </div>
-        @if($canManageEpps)
-            <div class="epp-actions" data-epp-actions>
-                <button type="button" class="epp-btn epp-btn-primary epp-actions-trigger" data-epp-actions-toggle>
-                    Acciones
-                    <span aria-hidden="true">v</span>
-                </button>
-                <div class="epp-actions-menu" data-epp-actions-menu hidden>
-                    @if($canConfigureEpps)
-                        <button type="button" data-epp-open-modal="eppCatalogModal">Agregar a catalogo</button>
-                    @endif
-                    @if($canEditEpps)
-                        <button type="button" data-epp-open-modal="eppCatalogListModal">Catalogo de EPP</button>
-                    @endif
-                    @if($canRegisterEpps)
-                        <button type="button" data-epp-open-modal="eppDeliveryModal">Registrar entrega</button>
-                    @endif
-                </div>
+    @unless($embedded)
+        <header class="epp-header">
+            <div>
+                <h1>Logistica EPP</h1>
+                <p>Registra entregas, cambios y uso efectivo de EPP por trabajador.</p>
             </div>
-        @endif
-    </header>
+        </header>
+    @endunless
 
     @if(session('success'))
         <div class="epp-alert epp-alert-success">{{ session('success') }}</div>
@@ -60,79 +51,91 @@
         </div>
     @endif
 
-    <section class="epp-panel">
+    <section class="epp-panel epp-filter-panel" data-epp-filter-panel>
         <div class="epp-panel-header">
             <div>
                 <h2>Seguimiento de EPP</h2>
                 <p>Filtra entregas activas, cambios o devoluciones registradas.</p>
             </div>
+            <button
+                type="button"
+                class="epp-filter-toggle"
+                data-epp-filter-toggle
+                aria-expanded="true"
+                aria-controls="eppFilterBody"
+                aria-label="Subir o bajar filtros"
+                title="Subir o bajar filtros">
+                <span aria-hidden="true"></span>
+            </button>
         </div>
-        <form method="GET" action="{{ $eppFilterAction }}" class="epp-filter-grid">
-            @if($embedded)
-                <input type="hidden" name="tab" value="entregas">
+        <div id="eppFilterBody" data-epp-filter-body>
+            <form method="GET" action="{{ $eppFilterAction }}" class="epp-filter-grid">
+                @if($embedded)
+                    <input type="hidden" name="tab" value="entregas">
+                @endif
+                <input type="hidden" name="per_page" value="{{ $filters['per_page'] ?? 10 }}">
+                <label>
+                    Buscar
+                    <input type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="Trabajador, DNI, puesto o EPP">
+                </label>
+                <label>
+                    Estado
+                    <select name="estado">
+                        <option value="">Todos</option>
+                        @foreach($estadosEntrega as $estadoEntrega)
+                            <option value="{{ $estadoEntrega }}" @selected(($filters['estado'] ?? '') === $estadoEntrega)>{{ ucwords(strtolower($estadoEntrega)) }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <label>
+                    Mina
+                    <select name="mina_id">
+                        <option value="">Todas las minas</option>
+                        @foreach($minas ?? [] as $mina)
+                            <option value="{{ $mina->id }}" @selected(($filters['mina_id'] ?? '') === $mina->id)>{{ $mina->nombre }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <label>
+                    EPP / item
+                    <select name="epp_id">
+                        <option value="">Todos los EPP</option>
+                        @foreach($catalogo ?? [] as $epp)
+                            <option value="{{ $epp->id }}" @selected(($filters['epp_id'] ?? '') === $epp->id)>{{ $epp->nombre }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <label>
+                    Tipo de movimiento
+                    <select name="tipo_movimiento">
+                        <option value="">Todos</option>
+                        @foreach($tiposMovimiento ?? [] as $value => $label)
+                            <option value="{{ $value }}" @selected(($filters['tipo_movimiento'] ?? '') === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <label>
+                    Fecha desde
+                    <input type="date" name="fecha_desde" value="{{ $filters['fecha_desde'] ?? '' }}">
+                </label>
+                <label>
+                    Fecha hasta
+                    <input type="date" name="fecha_hasta" value="{{ $filters['fecha_hasta'] ?? '' }}">
+                </label>
+                <div class="epp-filter-actions">
+                    <button type="submit" class="epp-btn epp-btn-primary">Filtrar</button>
+                    <a href="{{ $eppResetUrl }}" class="epp-btn epp-btn-light">Limpiar</a>
+                </div>
+            </form>
+            @if($workerFilterChip)
+                <div class="epp-active-filters" aria-label="Filtros activos">
+                    <span class="epp-filter-chip">
+                        <span>Trabajador: <strong>{{ $workerFilterChip['label'] }}</strong></span>
+                        <a href="{{ $workerChipRemoveUrl }}" aria-label="Quitar filtro de trabajador">X</a>
+                    </span>
+                </div>
             @endif
-            <input type="hidden" name="per_page" value="{{ $filters['per_page'] ?? 10 }}">
-            <label>
-                Buscar
-                <input type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="Trabajador, DNI, puesto o EPP">
-            </label>
-            <label>
-                Estado
-                <select name="estado">
-                    <option value="">Todos</option>
-                    @foreach($estadosEntrega as $estadoEntrega)
-                        <option value="{{ $estadoEntrega }}" @selected(($filters['estado'] ?? '') === $estadoEntrega)>{{ ucwords(strtolower($estadoEntrega)) }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>
-                Mina
-                <select name="mina_id">
-                    <option value="">Todas las minas</option>
-                    @foreach($minas ?? [] as $mina)
-                        <option value="{{ $mina->id }}" @selected(($filters['mina_id'] ?? '') === $mina->id)>{{ $mina->nombre }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>
-                EPP / item
-                <select name="epp_id">
-                    <option value="">Todos los EPP</option>
-                    @foreach($catalogo ?? [] as $epp)
-                        <option value="{{ $epp->id }}" @selected(($filters['epp_id'] ?? '') === $epp->id)>{{ $epp->nombre }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>
-                Tipo de movimiento
-                <select name="tipo_movimiento">
-                    <option value="">Todos</option>
-                    @foreach($tiposMovimiento ?? [] as $value => $label)
-                        <option value="{{ $value }}" @selected(($filters['tipo_movimiento'] ?? '') === $value)>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>
-                Fecha desde
-                <input type="date" name="fecha_desde" value="{{ $filters['fecha_desde'] ?? '' }}">
-            </label>
-            <label>
-                Fecha hasta
-                <input type="date" name="fecha_hasta" value="{{ $filters['fecha_hasta'] ?? '' }}">
-            </label>
-            <div class="epp-filter-actions">
-                <button type="submit" class="epp-btn epp-btn-primary">Filtrar</button>
-                <a href="{{ $eppResetUrl }}" class="epp-btn epp-btn-light">Limpiar</a>
-            </div>
-        </form>
-        @if($workerFilterChip)
-            <div class="epp-active-filters" aria-label="Filtros activos">
-                <span class="epp-filter-chip">
-                    <span>Trabajador: <strong>{{ $workerFilterChip['label'] }}</strong></span>
-                    <a href="{{ $workerChipRemoveUrl }}" aria-label="Quitar filtro de trabajador">X</a>
-                </span>
-            </div>
-        @endif
+        </div>
     </section>
 
     @if(false && $canManageEpps)
@@ -168,7 +171,7 @@
                 @forelse($catalogo->take(8) as $epp)
                     <div class="epp-catalog-item">
                         <strong>{{ $epp->nombre }}</strong>
-                        <span>{{ $epp->codigo }} Â· {{ $epp->vida_util_dias }} dias</span>
+                        <span>{{ $epp->codigo }} · {{ $epp->vida_util_dias }} dias</span>
                     </div>
                 @empty
                     <p class="epp-muted">Aun no hay EPP registrados.</p>
@@ -196,7 +199,7 @@
                     <select name="epp_id" required>
                         <option value="">Seleccionar EPP</option>
                         @foreach($eppsActivos as $epp)
-                            <option value="{{ $epp->id }}" @selected(old('epp_id') === $epp->id)>{{ $epp->nombre }} Â· {{ $epp->vida_util_dias }} dias</option>
+                            <option value="{{ $epp->id }}" @selected(old('epp_id') === $epp->id)>{{ $epp->nombre }} · {{ $epp->vida_util_dias }} dias</option>
                         @endforeach
                     </select>
                 </label>
@@ -228,7 +231,14 @@
                 <h2>Entregas y cambios</h2>
                 <p>El uso efectivo se calcula con las paradas donde el trabajador estuvo asignado.</p>
             </div>
-            <span class="epp-count">{{ $entregasTotal }} registros</span>
+            <div class="epp-panel-header-actions">
+                <span class="epp-count">{{ $entregasTotal }} registros</span>
+                @if($canRegisterEpps)
+                    <button type="button" class="epp-btn epp-btn-primary epp-list-action" data-epp-open-modal="eppDeliveryModal">
+                        + Registrar entrega
+                    </button>
+                @endif
+            </div>
         </div>
 
         <div class="epp-table-wrap">
@@ -252,15 +262,39 @@
                             $personal = $item['personal'];
                             $epp = $item['epp'];
                             $isActive = $entrega->estado === \App\Models\EppEntrega::ESTADO_ENTREGADO;
+                            $editableEpps = collect($eppsActivos ?? []);
+                            if ($epp && ! $editableEpps->contains('id', $epp->id)) {
+                                $editableEpps = $editableEpps->push($epp);
+                            }
+                            $editableEpps = $editableEpps->sortBy('nombre')->values();
+                            $deliveryAttributes = collect([
+                                filled($item['talla'] ?? '') ? 'Talla: '.$item['talla'] : null,
+                                filled($item['color'] ?? '') ? 'Color: '.$item['color'] : null,
+                            ])
+                                ->merge(collect($item['atributos'] ?? [])->map(function ($attribute) {
+                                    $name = trim((string) data_get($attribute, 'nombre', ''));
+                                    $value = trim((string) data_get($attribute, 'valor', ''));
+
+                                    return $name !== '' && $value !== '' ? $name.': '.$value : null;
+                                }))
+                                ->filter()
+                                ->values();
                         @endphp
                         <tr>
                             <td>
                                 <strong>{{ $personal?->nombre_completo ?? 'Trabajador no encontrado' }}</strong>
-                                <span>{{ $item['documento'] }} Â· {{ $personal?->puesto ?: 'Sin puesto' }}</span>
+                                <span>{{ $item['documento'] }} · {{ $personal?->puesto ?: 'Sin puesto' }}</span>
                             </td>
                             <td>
                                 <strong>{{ $epp?->nombre ?? 'EPP no encontrado' }}</strong>
-                                <span>{{ $epp?->codigo ?? '-' }} Â· {{ $item['vida_dias'] }} dias de vida</span>
+                                @if($deliveryAttributes->isNotEmpty())
+                                    <div class="epp-delivery-attribute-list">
+                                        @foreach($deliveryAttributes as $attribute)
+                                            <small>- {{ $attribute }}</small>
+                                        @endforeach
+                                    </div>
+                                @endif
+                                <span>{{ $epp?->codigo ?? '-' }} · {{ $item['vida_dias'] }} dias de vida</span>
                             </td>
                             <td>
                                 <strong>{{ optional($entrega->fecha_entrega)->format('d/m/Y') }}</strong>
@@ -286,7 +320,7 @@
                                         @foreach($item['periodos_uso'] as $periodo)
                                             <div>
                                                 <strong>{{ $periodo['parada'] }}</strong>
-                                                <span>{{ \Carbon\Carbon::parse($periodo['desde'])->format('d/m/Y') }} al {{ \Carbon\Carbon::parse($periodo['hasta'])->format('d/m/Y') }} Â· {{ $periodo['dias'] }} dias</span>
+                                                <span>{{ \Carbon\Carbon::parse($periodo['desde'])->format('d/m/Y') }} al {{ \Carbon\Carbon::parse($periodo['hasta'])->format('d/m/Y') }} · {{ $periodo['dias'] }} dias</span>
                                             </div>
                                         @endforeach
                                     </details>
@@ -306,67 +340,205 @@
                                     <small>{{ $entrega->motivo_cambio }}</small>
                                 @endif
                             </td>
-                            <td>
-                                @if($canRegisterEpps && $isActive)
-                                    <button type="button" class="epp-btn epp-btn-light epp-row-action-button" data-epp-open-modal="eppCloseModal{{ $entrega->id }}">
-                                        Registrar movimiento
-                                    </button>
+                            <td class="epp-actions-cell">
+                                <div class="epp-row-actions">
+                                    @if($canRegisterEpps && $isActive)
+                                        <button type="button" class="epp-btn epp-btn-sm epp-btn-outline" data-epp-open-modal="eppCloseModal{{ $entrega->id }}" title="Registrar devolucion o cambio">
+                                            Cerrar
+                                        </button>
 
-                                    <div id="eppCloseModal{{ $entrega->id }}" class="epp-modal" hidden>
-                                        <div class="epp-modal-card epp-modal-card-compact" role="dialog" aria-modal="true" aria-labelledby="eppCloseTitle{{ $entrega->id }}">
-                                            <div class="epp-modal-header">
-                                                <div>
-                                                    <h2 id="eppCloseTitle{{ $entrega->id }}">Registrar movimiento</h2>
-                                                    <p>Indica si el EPP fue devuelto o cambiado.</p>
-                                                </div>
-                                                <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
-                                            </div>
-                                            <div class="epp-modal-body">
-                                                <div class="epp-movement-summary">
-                                                    <span>
-                                                        <strong>Trabajador</strong>
-                                                        {{ $personal?->nombre_completo ?? 'Trabajador no encontrado' }}
-                                                    </span>
-                                                    <span>
-                                                        <strong>EPP</strong>
-                                                        {{ $epp?->nombre ?? 'EPP no encontrado' }}
-                                                    </span>
-                                                    <span>
-                                                        <strong>Entrega</strong>
-                                                        {{ optional($entrega->fecha_entrega)->format('d/m/Y') ?: '-' }}
-                                                    </span>
-                                                </div>
-                                                <form method="POST" action="{{ route('epps.entregas.close', $entrega->id) }}" class="epp-close-form epp-close-form-modal">
-                                                    @csrf
-                                                    <div class="epp-close-grid">
-                                                        <label class="epp-close-field">
-                                                            <span>Movimiento</span>
-                                                            <select name="estado" required>
-                                                                <option value="DEVUELTO">Entrego EPP</option>
-                                                                <option value="CAMBIADO">Cambio de EPP</option>
-                                                            </select>
-                                                        </label>
-                                                        <label class="epp-close-field">
-                                                            <span>Fecha</span>
-                                                            <input type="date" name="devuelto_at" value="{{ now()->toDateString() }}" required>
-                                                        </label>
+                                        <div id="eppCloseModal{{ $entrega->id }}" class="epp-modal" hidden>
+                                            <div class="epp-modal-card epp-modal-card-compact" role="dialog" aria-modal="true" aria-labelledby="eppCloseTitle{{ $entrega->id }}">
+                                                <div class="epp-modal-header">
+                                                    <div>
+                                                        <h2 id="eppCloseTitle{{ $entrega->id }}">Registrar movimiento</h2>
+                                                        <p>Indica si el EPP fue devuelto o cambiado.</p>
                                                     </div>
-                                                    <label class="epp-close-field">
-                                                        <span>Motivo</span>
-                                                        <input type="text" name="motivo_cambio" placeholder="Motivo de cambio o entrega">
-                                                    </label>
-                                                    <label class="epp-close-field">
-                                                        <span>Observacion</span>
-                                                        <textarea name="observacion" rows="3" placeholder="Descripcion opcional"></textarea>
-                                                    </label>
-                                                    <button type="submit" class="epp-btn epp-btn-primary epp-close-submit">Guardar movimiento</button>
-                                                </form>
+                                                    <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
+                                                </div>
+                                                <div class="epp-modal-body">
+                                                    <div class="epp-movement-summary">
+                                                        <span>
+                                                            <strong>Trabajador</strong>
+                                                            {{ $personal?->nombre_completo ?? 'Trabajador no encontrado' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>EPP</strong>
+                                                            {{ $epp?->nombre ?? 'EPP no encontrado' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>Entrega</strong>
+                                                            {{ optional($entrega->fecha_entrega)->format('d/m/Y') ?: '-' }}
+                                                        </span>
+                                                    </div>
+                                                    <form method="POST" action="{{ route('epps.entregas.close', $entrega->id) }}" class="epp-close-form epp-close-form-modal">
+                                                        @csrf
+                                                        <div class="epp-close-grid">
+                                                            <label class="epp-close-field">
+                                                                <span>Movimiento</span>
+                                                                <select name="estado" required>
+                                                                    <option value="DEVUELTO">Devuelto por internamiento</option>
+                                                                    <option value="CAMBIADO">Cambio de EPP</option>
+                                                                    <option value="USO_INCORRECTO">Uso incorrecto</option>
+                                                                    <option value="PERDIDA_OLVIDO">Perdida / olvido</option>
+                                                                </select>
+                                                            </label>
+                                                            <label class="epp-close-field">
+                                                                <span>Fecha</span>
+                                                                <input type="date" name="devuelto_at" value="{{ now()->toDateString() }}" required>
+                                                            </label>
+                                                        </div>
+                                                        <label class="epp-close-field">
+                                                            <span>Motivo</span>
+                                                            <input type="text" name="motivo_cambio" placeholder="Motivo de cambio, uso incorrecto, perdida u olvido">
+                                                        </label>
+                                                        <label class="epp-close-field">
+                                                            <span>Observacion</span>
+                                                            <textarea name="observacion" rows="3" placeholder="Descripcion opcional"></textarea>
+                                                        </label>
+                                                        <button type="submit" class="epp-btn epp-btn-primary epp-close-submit">Guardar movimiento</button>
+                                                    </form>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                @else
-                                    <span class="epp-no-action">Sin accion pendiente</span>
-                                @endif
+                                    @endif
+
+                                    @if($canUpdateEpps)
+                                        <button type="button" class="epp-btn epp-btn-sm epp-btn-ghost" data-epp-open-modal="eppEditModal{{ $entrega->id }}" title="Editar datos de la entrega">
+                                            Editar
+                                        </button>
+
+                                        <div id="eppEditModal{{ $entrega->id }}" class="epp-modal" hidden>
+                                            <div class="epp-modal-card epp-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="eppEditTitle{{ $entrega->id }}">
+                                                <div class="epp-modal-header">
+                                                    <div>
+                                                        <h2 id="eppEditTitle{{ $entrega->id }}">Editar entrega</h2>
+                                                        <p>Corrige el item, fechas o cantidad cuando el registro fue creado con datos equivocados.</p>
+                                                    </div>
+                                                    <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
+                                                </div>
+                                                <div class="epp-modal-body">
+                                                    <div class="epp-movement-summary">
+                                                        <span>
+                                                            <strong>Trabajador</strong>
+                                                            {{ $personal?->nombre_completo ?? 'Trabajador no encontrado' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>EPP</strong>
+                                                            {{ $epp?->nombre ?? 'EPP no encontrado' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>Estado actual</strong>
+                                                            {{ ucwords(strtolower($entrega->estado)) }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>Entrega</strong>
+                                                            {{ optional($entrega->fecha_entrega)->format('d/m/Y') ?: '-' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>Vencimiento</strong>
+                                                            {{ optional($entrega->fecha_vencimiento_calendario)->format('d/m/Y') ?: '-' }}
+                                                        </span>
+                                                        <span>
+                                                            <strong>Cantidad</strong>
+                                                            {{ $entrega->cantidad }}
+                                                        </span>
+                                                    </div>
+                                                    <div class="epp-edit-notice">
+                                                        Para registrar devolucion, cambio, uso incorrecto o perdida, usa el boton <strong>Cerrar</strong>. Esta ventana solo corrige datos de la entrega.
+                                                    </div>
+                                                    <form method="POST" action="{{ route('epps.entregas.update', $entrega->id) }}" class="epp-edit-form">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="_epp_edit_modal" value="eppEditModal{{ $entrega->id }}">
+                                                        <label class="epp-edit-field epp-field-wide">
+                                                            <span>EPP entregado</span>
+                                                            <select name="epp_id">
+                                                                @foreach($editableEpps as $editableEpp)
+                                                                    <option
+                                                                        value="{{ $editableEpp->id }}"
+                                                                        @selected(old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('epp_id', $entrega->epp_id) === $editableEpp->id : $entrega->epp_id === $editableEpp->id)
+                                                                    >
+                                                                        {{ $editableEpp->nombre }} - {{ $editableEpp->codigo ?: 'Sin codigo' }} - {{ $editableEpp->vida_util_dias ?: 0 }} dias
+                                                                    </option>
+                                                                @endforeach
+                                                            </select>
+                                                        </label>
+                                                        <div class="epp-edit-grid">
+                                                            <label class="epp-edit-field">
+                                                                <span>Fecha de entrega</span>
+                                                                <input type="date" name="fecha_entrega" value="{{ old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('fecha_entrega', optional($entrega->fecha_entrega)->format('Y-m-d')) : optional($entrega->fecha_entrega)->format('Y-m-d') }}">
+                                                            </label>
+                                                            <label class="epp-edit-field">
+                                                                <span>Vencimiento por calendario</span>
+                                                                <input type="date" name="fecha_vencimiento_calendario" value="{{ old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('fecha_vencimiento_calendario', optional($entrega->fecha_vencimiento_calendario)->format('Y-m-d')) : optional($entrega->fecha_vencimiento_calendario)->format('Y-m-d') }}">
+                                                            </label>
+                                                            <label class="epp-edit-field">
+                                                                <span>Cantidad</span>
+                                                                <input type="number" name="cantidad" min="1" max="1000" value="{{ old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('cantidad', $entrega->cantidad) : $entrega->cantidad }}">
+                                                            </label>
+                                                            <label class="epp-edit-field">
+                                                                <span>Motivo de correccion</span>
+                                                                <input type="text" name="motivo_cambio" maxlength="120" value="{{ old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('motivo_cambio', $entrega->motivo_cambio) : $entrega->motivo_cambio }}" placeholder="Ej. item registrado por error">
+                                                            </label>
+                                                        </div>
+                                                        <label class="epp-edit-field epp-field-wide">
+                                                            <span>Observacion</span>
+                                                            <textarea name="observacion" rows="3" placeholder="Detalle opcional">{{ old('_epp_edit_modal') === 'eppEditModal'.$entrega->id ? old('observacion', $entrega->observacion) : $entrega->observacion }}</textarea>
+                                                        </label>
+                                                        <div class="epp-edit-actions">
+                                                            <button type="button" class="epp-btn epp-btn-light" data-epp-close-modal>Cancelar</button>
+                                                            <button type="submit" class="epp-btn epp-btn-primary">Guardar cambios</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endif
+
+                                    @if($canDeleteEpps)
+                                        <button type="button" class="epp-btn epp-btn-sm epp-btn-danger-ghost" data-epp-open-modal="eppDeleteModal{{ $entrega->id }}" title="Eliminar entrega">
+                                            Eliminar
+                                        </button>
+
+                                        <div id="eppDeleteModal{{ $entrega->id }}" class="epp-modal" hidden>
+                                            <div class="epp-modal-card epp-modal-card-compact" role="dialog" aria-modal="true" aria-labelledby="eppDeleteTitle{{ $entrega->id }}">
+                                                <div class="epp-modal-header">
+                                                    <div>
+                                                        <h2 id="eppDeleteTitle{{ $entrega->id }}" class="epp-delete-title">Eliminar entrega</h2>
+                                                        <p>Esta accion no se puede deshacer.</p>
+                                                    </div>
+                                                    <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
+                                                </div>
+                                                <div class="epp-modal-body">
+                                                    <div class="epp-delete-warning">
+                                                        <span class="epp-delete-icon">⚠️</span>
+                                                        <div>
+                                                            <strong>¿Eliminar esta entrega?</strong>
+                                                            <p>
+                                                                {{ $personal?->nombre_completo ?? 'Trabajador no encontrado' }} -
+                                                                {{ $epp?->nombre ?? 'EPP no encontrado' }} -
+                                                                {{ optional($entrega->fecha_entrega)->format('d/m/Y') ?: 'sin fecha' }}
+                                                            </p>
+                                                            <p class="epp-delete-hint">Se eliminara permanentemente el registro de entrega. Esta operacion no se puede revertir.</p>
+                                                        </div>
+                                                    </div>
+                                                    <form method="POST" action="{{ route('epps.entregas.destroy', $entrega->id) }}" class="epp-delete-form">
+                                                        @csrf
+                                                        <div class="epp-delete-actions">
+                                                            <button type="button" class="epp-btn epp-btn-light" data-epp-close-modal>Cancelar</button>
+                                                            <button type="submit" class="epp-btn epp-btn-danger">Si, eliminar</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endif
+
+                                    @if(!$canRegisterEpps && !$canUpdateEpps && !$canDeleteEpps)
+                                        <span class="epp-no-action">Sin accion</span>
+                                    @endif
+                                </div>
                             </td>
                         </tr>
                     @empty
@@ -447,9 +619,9 @@
                 {{--
                 <nav class="epp-pagination-pages" aria-label="Paginacion de entregas de EPP">
                     @if($entregas->onFirstPage())
-                        <span class="epp-page-link is-disabled" aria-hidden="true">â€¹</span>
+                        <span class="epp-page-link is-disabled" aria-hidden="true">‹</span>
                     @else
-                        <a class="epp-page-link" href="{{ $entregas->previousPageUrl() }}" aria-label="Pagina anterior">â€¹</a>
+                        <a class="epp-page-link" href="{{ $entregas->previousPageUrl() }}" aria-label="Pagina anterior">‹</a>
                     @endif
 
                     @foreach($paginationPages as $page)
@@ -467,9 +639,9 @@
                     @endforeach
 
                     @if($entregas->hasMorePages())
-                        <a class="epp-page-link" href="{{ $entregas->nextPageUrl() }}" aria-label="Pagina siguiente">â€º</a>
+                        <a class="epp-page-link" href="{{ $entregas->nextPageUrl() }}" aria-label="Pagina siguiente">›</a>
                     @else
-                        <span class="epp-page-link is-disabled" aria-hidden="true">â€º</span>
+                        <span class="epp-page-link is-disabled" aria-hidden="true">›</span>
                     @endif
                 </nav>
                 --}}
@@ -662,6 +834,19 @@
     @endif
 
     @if($canRegisterEpps)
+        @php
+            $eppDeliveryOptions = collect($eppsActivos ?? [])->mapWithKeys(function ($epp) {
+                return [
+                    (string) $epp->id => [
+                        'requiere_talla' => (bool) $epp->requiere_talla,
+                        'tallas' => array_values(array_filter((array) ($epp->tallas ?? []))),
+                        'requiere_color' => (bool) $epp->requiere_color,
+                        'colores' => array_values(array_filter((array) ($epp->colores ?? []))),
+                        'otros_atributos' => array_values(array_filter((array) ($epp->otros_atributos ?? []))),
+                    ],
+                ];
+            })->all();
+        @endphp
         <div id="eppDeliveryModal" class="epp-modal" hidden>
             <div class="epp-modal-card epp-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="eppDeliveryTitle">
                 <div class="epp-modal-header">
@@ -672,16 +857,25 @@
                     <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
                 </div>
                 <div class="epp-modal-body">
-                    <form method="POST" action="{{ route('epps.entregas.store') }}" class="epp-delivery-form">
+                    <form method="POST" action="{{ route('epps.entregas.store') }}" class="epp-delivery-form epp-delivery-modal-form {{ old('_epp_replaces_entrega_id') ? 'is-change-replacement' : '' }}">
                         @csrf
+                        @if(old('_epp_replaces_entrega_id'))
+                            <input type="hidden" name="_epp_replaces_entrega_id" value="{{ old('_epp_replaces_entrega_id') }}">
+                            <input type="hidden" name="_epp_replacement_fecha" value="{{ old('_epp_replacement_fecha') }}">
+                            <input type="hidden" name="_epp_replacement_motivo" value="{{ old('_epp_replacement_motivo') }}">
+                            <input type="hidden" name="_epp_replacement_observacion" value="{{ old('_epp_replacement_observacion') }}">
+                            <div class="epp-change-pending-note epp-delivery-field-wide">
+                                Esta entrega confirmara el cambio de EPP. Si no la guardas, la entrega anterior seguira abierta.
+                            </div>
+                        @endif
                         <input type="hidden" name="personal_id" id="eppPersonalId" value="{{ old('personal_id') }}">
-                        <label class="epp-autocomplete">
-                            Trabajador
+                        <label class="epp-delivery-field epp-delivery-field-wide epp-autocomplete">
+                            <span>Trabajador</span>
                             <input type="search" id="eppPersonalSearch" autocomplete="off" placeholder="Buscar por nombre, DNI o puesto" value="{{ old('personal_label') }}">
                             <div class="epp-autocomplete-results" id="eppPersonalResults" hidden></div>
                         </label>
-                        <label>
-                            EPP
+                        <label class="epp-delivery-field">
+                            <span>EPP</span>
                             <select name="epp_id" id="eppSelect" required>
                                 <option value="">Seleccionar EPP</option>
                                 @foreach($eppsActivos as $epp)
@@ -689,12 +883,13 @@
                                 @endforeach
                             </select>
                         </label>
-                        <label>
-                            Cantidad
+                        <div class="epp-delivery-attributes" id="eppDeliveryAttributes" hidden></div>
+                        <label class="epp-delivery-field">
+                            <span>Cantidad</span>
                             <input type="number" name="cantidad" min="1" value="{{ old('cantidad', 1) }}" required>
                         </label>
-                        <label>
-                            Fecha de entrega
+                        <label class="epp-delivery-field">
+                            <span>Fecha de entrega</span>
                             <input type="date" name="fecha_entrega" value="{{ old('fecha_entrega', now()->toDateString()) }}" required>
                         </label>
                         <aside class="epp-mini-kardex" id="eppLastDeliveryCard" aria-live="polite">
@@ -737,8 +932,8 @@
                                 <p class="epp-mini-kardex-note" data-epp-last-note hidden></p>
                             </div>
                         </aside>
-                        <label class="epp-field-wide">
-                            Observacion
+                        <label class="epp-delivery-field epp-delivery-field-wide">
+                            <span>Observacion</span>
                             <textarea name="observacion" rows="3" placeholder="Detalle opcional de entrega, talla, condicion o cambio">{{ old('observacion') }}</textarea>
                         </label>
                         <button type="submit" class="epp-btn epp-btn-primary epp-form-submit">Registrar entrega</button>
@@ -752,16 +947,36 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const screen = document.querySelector('.epp-screen');
+    const modalRoot = screen || document;
     const input = document.getElementById('eppPersonalSearch');
     const hidden = document.getElementById('eppPersonalId');
     const results = document.getElementById('eppPersonalResults');
     const eppSelect = document.getElementById('eppSelect');
+    const eppDeliveryAttributes = document.getElementById('eppDeliveryAttributes');
+    const eppAttributeConfig = @json($eppDeliveryOptions ?? []);
+    const eppInitialAttributes = @json($eppInitialAttributes);
     const kardex = document.getElementById('eppLastDeliveryCard');
     const lastDeliveryUrl = screen?.dataset.lastDeliveryUrl || '';
+    const filterPanel = screen?.querySelector('[data-epp-filter-panel]');
+    const filterToggle = filterPanel?.querySelector('[data-epp-filter-toggle]');
+    const filterBody = filterPanel?.querySelector('[data-epp-filter-body]');
 
-    const actions = document.querySelector('[data-epp-actions]');
-    const actionsToggle = document.querySelector('[data-epp-actions-toggle]');
-    const actionsMenu = document.querySelector('[data-epp-actions-menu]');
+    if (filterPanel && filterToggle && filterBody) {
+        const storageKey = 'proserge:epp-filter-collapsed';
+        const setFilterCollapsed = (collapsed) => {
+            filterPanel.classList.toggle('is-filter-collapsed', collapsed);
+            filterBody.hidden = collapsed;
+            filterToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        };
+
+        setFilterCollapsed(window.localStorage?.getItem(storageKey) === '1');
+
+        filterToggle.addEventListener('click', () => {
+            const collapsed = !filterPanel.classList.contains('is-filter-collapsed');
+            setFilterCollapsed(collapsed);
+            window.localStorage?.setItem(storageKey, collapsed ? '1' : '0');
+        });
+    }
 
     const openEppModal = (id) => {
         const modal = document.getElementById(id);
@@ -769,7 +984,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+
         modal.hidden = false;
+        modal.classList.add('is-open');
+        document.body.classList.add('epp-modal-open');
         document.body.style.overflow = 'hidden';
         modal.querySelector('input, select, textarea, button')?.focus({ preventScroll: true });
     };
@@ -780,30 +1001,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         modal.hidden = true;
-        document.body.style.overflow = '';
+        modal.classList.remove('is-open');
+
+        if (!document.querySelector('.epp-modal:not([hidden])')) {
+            document.body.style.overflow = '';
+            document.body.classList.remove('epp-modal-open');
+        }
     };
 
-    actionsToggle?.addEventListener('click', (event) => {
-        event.stopPropagation();
-        actionsMenu.hidden = !actionsMenu.hidden;
-    });
-
-    document.querySelectorAll('[data-epp-open-modal]').forEach((button) => {
-        button.addEventListener('click', () => {
-            actionsMenu && (actionsMenu.hidden = true);
+    modalRoot.querySelectorAll('[data-epp-open-modal]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
             openEppModal(button.dataset.eppOpenModal);
         });
     });
 
-    document.querySelectorAll('.epp-modal').forEach((modal) => {
+    modalRoot.querySelectorAll('.epp-modal').forEach((modal) => {
         modal.addEventListener('click', (event) => {
             if (event.target === modal || event.target.closest('[data-epp-close-modal]')) {
+                event.preventDefault();
                 closeEppModal(modal);
             }
         });
     });
 
-    document.querySelectorAll('[data-epp-toggle-target]').forEach((checkbox) => {
+    modalRoot.querySelectorAll('[data-epp-toggle-target]').forEach((checkbox) => {
         const target = document.getElementById(checkbox.dataset.eppToggleTarget);
         const syncTarget = () => {
             if (!target) {
@@ -817,7 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncTarget();
     });
 
-    document.querySelectorAll('[data-epp-code-source]').forEach((source) => {
+    modalRoot.querySelectorAll('[data-epp-code-source]').forEach((source) => {
         const preview = source.closest('label')?.querySelector('[data-epp-code-preview]');
         const makeCode = (value) => {
             const normalized = String(value || '')
@@ -840,15 +1062,8 @@ document.addEventListener('DOMContentLoaded', () => {
         syncCodePreview();
     });
 
-    document.addEventListener('click', (event) => {
-        if (actions && !actions.contains(event.target)) {
-            actionsMenu && (actionsMenu.hidden = true);
-        }
-    });
-
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            actionsMenu && (actionsMenu.hidden = true);
             document.querySelectorAll('.epp-modal:not([hidden])').forEach(closeEppModal);
         }
     });
@@ -871,6 +1086,86 @@ document.addEventListener('DOMContentLoaded', () => {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 
+    const optionList = (options) => (Array.isArray(options) ? options : [])
+        .map((option) => String(option || '').trim())
+        .filter((option) => option !== '');
+
+    const normalizedOption = (value) => String(value || '').trim().toUpperCase();
+
+    const selectedAttributeValue = (name, index) => {
+        const attributes = Array.isArray(eppInitialAttributes.atributos) ? eppInitialAttributes.atributos : [];
+        const configuredName = normalizedOption(name);
+        const found = attributes.find((attribute) => {
+            const postedName = normalizedOption(attribute?.nombre);
+
+            return postedName === configuredName || String(attribute?.index ?? '') === String(index);
+        });
+
+        return String(found?.valor || '').trim();
+    };
+
+    const renderDeliveryAttributes = () => {
+        if (!eppDeliveryAttributes || !eppSelect) {
+            return;
+        }
+
+        const config = eppAttributeConfig[eppSelect.value] || {};
+        const fields = [];
+        const tallas = optionList(config.tallas);
+        const colores = optionList(config.colores);
+        const atributos = Array.isArray(config.otros_atributos) ? config.otros_atributos : [];
+
+        if (config.requiere_talla && tallas.length > 0) {
+            const selectedTalla = normalizedOption(eppInitialAttributes.talla);
+            fields.push(`
+                <label class="epp-delivery-field">
+                    <span>Talla</span>
+                    <select name="talla" required>
+                        <option value="">Seleccionar talla</option>
+                        ${tallas.map((talla) => `<option value="${escapeHtml(talla)}" ${normalizedOption(talla) === selectedTalla ? 'selected' : ''}>${escapeHtml(talla)}</option>`).join('')}
+                    </select>
+                </label>
+            `);
+        }
+
+        if (config.requiere_color && colores.length > 0) {
+            const selectedColor = normalizedOption(eppInitialAttributes.color);
+            fields.push(`
+                <label class="epp-delivery-field">
+                    <span>Color</span>
+                    <select name="color" required>
+                        <option value="">Seleccionar color</option>
+                        ${colores.map((color) => `<option value="${escapeHtml(color)}" ${normalizedOption(color) === selectedColor ? 'selected' : ''}>${escapeHtml(color)}</option>`).join('')}
+                    </select>
+                </label>
+            `);
+        }
+
+        atributos.forEach((atributo, index) => {
+            const nombre = String(atributo?.nombre || '').trim();
+            const valores = optionList(atributo?.valores);
+            if (nombre === '' || valores.length === 0) {
+                return;
+            }
+
+            const selectedValue = normalizedOption(selectedAttributeValue(nombre, index));
+            fields.push(`
+                <label class="epp-delivery-field">
+                    <span>${escapeHtml(nombre)}</span>
+                    <input type="hidden" name="atributos[${index}][index]" value="${index}">
+                    <input type="hidden" name="atributos[${index}][nombre]" value="${escapeHtml(nombre)}">
+                    <select name="atributos[${index}][valor]" required>
+                        <option value="">Seleccionar ${escapeHtml(nombre.toLowerCase())}</option>
+                        ${valores.map((value) => `<option value="${escapeHtml(value)}" ${normalizedOption(value) === selectedValue ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}
+                    </select>
+                </label>
+            `);
+        });
+
+        eppDeliveryAttributes.innerHTML = fields.join('');
+        eppDeliveryAttributes.hidden = fields.length === 0;
+    };
+
     const kardexContent = kardex?.querySelector('[data-epp-last-content]');
     const kardexMessage = kardex?.querySelector('[data-epp-last-message]');
     const kardexStatus = kardex?.querySelector('[data-epp-last-status]');
@@ -892,6 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         kardex.dataset.state = 'empty';
+        delete kardex.dataset.status;
         if (kardexStatus) {
             kardexStatus.textContent = 'Sin historial';
         }
@@ -920,6 +1216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         kardex.dataset.state = 'loading';
+        delete kardex.dataset.status;
         if (kardexStatus) {
             kardexStatus.textContent = 'Consultando';
         }
@@ -938,8 +1235,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         kardex.dataset.state = 'ready';
+        kardex.dataset.status = String(data.estado || '').toUpperCase();
         if (kardexStatus) {
-            kardexStatus.textContent = data.estado || 'Registrado';
+            kardexStatus.textContent = data.estado_label || data.estado || 'Registrado';
         }
         if (kardexMessage) {
             kardexMessage.textContent = `${data.epp || 'EPP'} - ${data.codigo || 'Sin codigo'}`;
@@ -1041,7 +1339,7 @@ document.addEventListener('DOMContentLoaded', () => {
             results.innerHTML = items.map(item => `
                 <button type="button" data-id="${escapeHtml(item.id)}" data-label="${escapeHtml(item.label)}">
                     <strong>${escapeHtml(item.nombre)}</strong>
-                    <span>${escapeHtml(item.documento)} Â· ${escapeHtml(item.puesto)} Â· ${escapeHtml(item.estado)}</span>
+                    <span>${escapeHtml(item.documento)} · ${escapeHtml(item.puesto)} · ${escapeHtml(item.estado)}</span>
                 </button>
             `).join('');
             results.hidden = false;
@@ -1060,13 +1358,18 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshLastDelivery();
     });
 
-    eppSelect?.addEventListener('change', refreshLastDelivery);
+    eppSelect?.addEventListener('change', () => {
+        renderDeliveryAttributes();
+        refreshLastDelivery();
+    });
 
     document.addEventListener('click', (event) => {
         if (!event.target.closest('.epp-autocomplete')) {
             closeResults();
         }
     });
+
+    renderDeliveryAttributes();
 
     if (hidden.value && eppSelect?.value) {
         refreshLastDelivery();

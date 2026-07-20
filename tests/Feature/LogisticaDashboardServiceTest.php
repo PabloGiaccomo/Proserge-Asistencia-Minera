@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\EppEntrega;
 use App\Models\Personal;
+use App\Models\PersonalContrato;
 use App\Models\PersonalMina;
 use App\Models\RQMinaActividadTransporte;
 use App\Models\Usuario;
@@ -69,6 +70,52 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame(4, $row['dias_uso_efectivo']);
         $this->assertSame(30, $row['vida_dias']);
         $this->assertSame('4 / 30 dias', $row['uso_efectivo']);
+    }
+
+    public function test_cesados_por_entregar_muestra_epp_pendiente_y_resuelto(): void
+    {
+        $worker = $this->createPersonal('CESADO', 'TRABAJADOR CESADO LOGISTICA');
+        $worker->forceFill([
+            'fecha_cese' => '2026-07-15',
+            'motivo_cese' => 'Fin de contrato',
+        ])->save();
+
+        DB::table('personal_contratos')->insert([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $worker->id,
+            'contrato_numero' => 1,
+            'estado' => PersonalContrato::ESTADO_CESADO,
+            'fecha_inicio' => '2026-01-01',
+            'fecha_fin' => '2026-07-15',
+            'motivo_cese' => 'Fin de contrato',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $pendingEpp = $this->createEpp('CASCO CESADO PENDIENTE');
+        $resolvedEpp = $this->createEpp('CHALECO CESADO RESUELTO');
+
+        $this->createDelivery($worker, $pendingEpp, '2026-06-01', '2026-07-01', EppEntrega::ESTADO_ENTREGADO);
+        $this->createDelivery($worker, $resolvedEpp, '2026-06-05', '2026-07-05', EppEntrega::ESTADO_DEVUELTO);
+
+        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'cesados']);
+        $row = collect($data['ceasedRows'])->firstWhere('trabajador', 'TRABAJADOR CESADO LOGISTICA');
+
+        $this->assertNotNull($row);
+        $this->assertSame('PENDIENTE', $row['estado_logistico']);
+        $this->assertSame(1, $row['pendientes']);
+        $this->assertSame(1, $row['resueltos']);
+        $this->assertSame(1, $data['ceasedSummary']['trabajadores']);
+        $this->assertSame(1, $data['ceasedSummary']['pendientes']);
+        $this->assertSame(1, $data['ceasedSummary']['resueltos']);
+
+        $pendingItem = collect($row['items'])->firstWhere('epp', 'CASCO CESADO PENDIENTE');
+        $resolvedItem = collect($row['items'])->firstWhere('epp', 'CHALECO CESADO RESUELTO');
+
+        $this->assertFalse($pendingItem['resuelto']);
+        $this->assertSame('Pendiente de entrega', $pendingItem['estado_resolucion']);
+        $this->assertTrue($resolvedItem['resuelto']);
+        $this->assertSame('Resuelto', $resolvedItem['estado_resolucion']);
     }
 
     public function test_logistica_actualiza_requerimiento_de_transporte_de_rq_mina(): void
@@ -149,6 +196,99 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame(1, $vigentes['metrics']['expiring_epp']);
     }
 
+    public function test_dashboard_excluye_talleres_oficinas_y_sin_mina_del_heatmap(): void
+    {
+        $suffix = Str::upper(Str::random(6));
+        $realMineName = 'MINA LOGISTICA ' . $suffix;
+        $workshopName = 'TALLER LOGISTICA ' . $suffix;
+        $officeName = 'OFICINA LOGISTICA ' . $suffix;
+
+        $realMineId = $this->createMine($realMineName);
+        $workshopMineId = $this->createMine($workshopName);
+        $officeMineId = $this->createMine($officeName);
+        $placeholderMineId = $this->createMine('Sin mina');
+
+        DB::table('talleres')->insert([
+            'id' => (string) Str::uuid(),
+            'nombre' => $workshopName,
+            'ubicacion' => 'Operacion',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('oficinas')->insert([
+            'id' => (string) Str::uuid(),
+            'nombre' => $officeName,
+            'ubicacion' => 'Administracion',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->attachMine($this->createPersonal('ACTIVO', 'TRABAJADOR MINA REAL'), $realMineId, PersonalMina::ESTADO_HABILITADO);
+        $this->attachMine($this->createPersonal('ACTIVO', 'TRABAJADOR TALLER'), $workshopMineId, PersonalMina::ESTADO_HABILITADO);
+        $this->attachMine($this->createPersonal('ACTIVO', 'TRABAJADOR OFICINA'), $officeMineId, PersonalMina::ESTADO_HABILITADO);
+        $this->attachMine($this->createPersonal('ACTIVO', 'TRABAJADOR SIN MINA'), $placeholderMineId, PersonalMina::ESTADO_HABILITADO);
+
+        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'dashboard']);
+        $optionNames = collect($data['options']['minas'])->pluck('nombre');
+        $heatmapMines = collect($data['missingHeatmap'])->pluck('mina');
+
+        $this->assertTrue($optionNames->contains($realMineName));
+        $this->assertFalse($optionNames->contains($workshopName));
+        $this->assertFalse($optionNames->contains($officeName));
+        $this->assertFalse($optionNames->contains('Sin mina'));
+        $this->assertTrue($heatmapMines->contains($realMineName));
+        $this->assertFalse($heatmapMines->contains($workshopName));
+        $this->assertFalse($heatmapMines->contains($officeName));
+        $this->assertFalse($heatmapMines->contains('Sin mina'));
+    }
+
+    public function test_identificacion_de_herramientas_incluye_catalogo_aprendido_de_paradas(): void
+    {
+        $catalogId = (string) Str::uuid();
+
+        DB::table('parada_herramienta_catalogos')->insert([
+            'id' => $catalogId,
+            'categoria' => 'HERRAMIENTA',
+            'descripcion' => 'ADAPTADOR DE DADO DE IMPACTO',
+            'descripcion_normalizada' => 'ADAPTADOR DE DADO DE IMPACTO',
+            'unidad' => 'UND',
+            'unidad_normalizada' => 'UND',
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('epp_registro')->insert([
+            'id' => (string) Str::uuid(),
+            'codigo' => 'LLAVE_MIXTA',
+            'nombre' => 'LLAVE MIXTA',
+            'categoria' => 'HERRAMIENTA',
+            'stock' => 0,
+            'vida_util_dias' => 1,
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $rows = app(LogisticaDashboardService::class)->pageData([
+            'tab' => 'identificacion',
+            'ident_categoria' => 'HERRAMIENTA',
+        ])['identityRows'];
+
+        $learned = collect($rows)->firstWhere('nombre', 'ADAPTADOR DE DADO DE IMPACTO');
+        $registered = collect($rows)->firstWhere('nombre', 'LLAVE MIXTA');
+
+        $this->assertNotNull($learned);
+        $this->assertTrue($learned['readonly']);
+        $this->assertSame('CATALOGO_PARADA', $learned['fuente']);
+        $this->assertSame([['nombre' => 'Unidad', 'valores' => ['UND']]], $learned['otros_atributos']);
+        $this->assertNotNull($registered);
+        $this->assertFalse($registered['readonly']);
+    }
+
     private function createPersonal(string $state, string $name): Personal
     {
         return Personal::query()->create([
@@ -223,7 +363,7 @@ class LogisticaDashboardServiceTest extends TestCase
         ]);
     }
 
-    private function createDelivery(Personal $personal, string $eppId, string $deliveryDate, string $expirationDate): void
+    private function createDelivery(Personal $personal, string $eppId, string $deliveryDate, string $expirationDate, string $estado = EppEntrega::ESTADO_ENTREGADO): void
     {
         DB::table('epp_entregas')->insert([
             'id' => (string) Str::uuid(),
@@ -233,7 +373,9 @@ class LogisticaDashboardServiceTest extends TestCase
             'fecha_entrega' => $deliveryDate,
             'fecha_vencimiento_calendario' => $expirationDate,
             'vida_util_dias_snapshot' => 30,
-            'estado' => EppEntrega::ESTADO_ENTREGADO,
+            'estado' => $estado,
+            'motivo_cambio' => $estado === EppEntrega::ESTADO_DEVUELTO ? 'Devuelto por internamiento' : null,
+            'devuelto_at' => $estado === EppEntrega::ESTADO_DEVUELTO ? $expirationDate : null,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

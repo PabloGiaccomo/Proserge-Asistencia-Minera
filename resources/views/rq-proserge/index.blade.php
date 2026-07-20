@@ -237,6 +237,63 @@
     </section>
 </div>
 
+<style>
+.rq-mine-status-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: max-content;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+.rq-mine-status-flag.is-enabled {
+    background: #dcfce7;
+    color: #166534;
+}
+.rq-mine-status-flag.is-process {
+    background: #fef3c7;
+    color: #92400e;
+}
+.rq-mine-status-flag.is-not-enabled {
+    background: #fee2e2;
+    color: #991b1b;
+}
+.availability-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.availability-title-row .availability-title {
+    margin-bottom: 0;
+}
+.worker-result-mine {
+    display: flex;
+    justify-content: flex-end;
+}
+.worker-result {
+    grid-template-columns: minmax(220px, 1.4fr) minmax(160px, 1fr) auto auto;
+}
+.asignacion-status {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+@media (max-width: 700px) {
+    .asignacion-item {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .asignacion-status {
+        margin-left: 0;
+    }
+}
+</style>
+
 <script>
 (function () {
     const screen = document.getElementById('rrhhScreen');
@@ -267,6 +324,14 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    function mineStatusFlag(status) {
+        if (!status || !status.label) {
+            return '';
+        }
+
+        return `<span class="rq-mine-status-flag ${escapeHtml(status.class || '')}">${escapeHtml(status.label)}</span>`;
     }
 
     function getSelectedItem() {
@@ -361,10 +426,14 @@
         const lines = Array.isArray(disponibilidad?.lineas) ? disponibilidad.lineas : [];
         const title = pendiente ? 'Pendiente de validar' : (disponible ? 'Disponible' : 'No disponible');
         const className = pendiente ? 'is-neutral' : (disponible ? 'is-ok' : 'is-bad');
+        const mineStatus = mineStatusFlag(disponibilidad?.mina_estado || null);
 
         return `
             <div class="availability-box ${className}">
-                <div class="availability-title">${title}</div>
+                <div class="availability-title-row">
+                    <div class="availability-title">${title}</div>
+                    ${mineStatus}
+                </div>
                 <div class="availability-lines">
                     ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
                 </div>
@@ -390,6 +459,7 @@
             lineas: lines,
             motivo: item.motivo || '',
             codigo: item.motivo_codigo || null,
+            mina_estado: item.mina_estado || null,
         };
     }
 
@@ -571,6 +641,7 @@
                     <span>${escapeHtml(row.comentario || '-')}</span>
                     <small>${escapeHtml(row.fecha_inicio || '-')} a ${escapeHtml(row.fecha_fin || '-')}</small>
                 </div>
+                <div class="asignacion-status">${mineStatusFlag(row.mina_estado || null)}</div>
                 ${canAssignRqProserge ? `<button
                     type="button"
                     class="btn-unassign btn-unassign-small js-rq-unassign"
@@ -775,6 +846,7 @@
             const disponibilidad = resultAvailability(item);
             const motivo = disponibilidad.lineas[0] || item.motivo || 'Disponible para asignar en este rango.';
             const statusText = item.disponible ? 'Disponible' : 'No disponible';
+            const mineStatus = mineStatusFlag(item.mina_estado || null);
 
             return `
                 <button
@@ -792,6 +864,7 @@
                     </span>
                     <span class="worker-result-detail">${escapeHtml(puesto)}</span>
                     <span class="worker-result-status ${item.disponible ? 'is-ok' : 'is-bad'}">${escapeHtml(statusText)}</span>
+                    <span class="worker-result-mine">${mineStatus}</span>
                     <span class="worker-result-reason">${escapeHtml(motivo)}</span>
                 </button>
             `;

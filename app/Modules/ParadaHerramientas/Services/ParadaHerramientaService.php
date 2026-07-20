@@ -80,7 +80,7 @@ class ParadaHerramientaService
             ->orderBy('fecha_fin', 'asc')
             ->orderBy('area', 'asc')
             ->get()
-            ->map(fn (RQMina $rq): array => $this->toListRow($rq));
+            ->map(fn (RQMina $rq): array => $this->toListRow($rq, $usuario));
     }
 
     public function deadlineAlerts(iterable $items, int $limit = 5): array
@@ -242,10 +242,18 @@ class ParadaHerramientaService
     {
         $lista = $this->ensureLista($rq, $usuario);
 
+        if (strtoupper((string) $lista->estado) === 'ENVIADO') {
+            return [
+                'ok' => true,
+                'lista' => $lista->fresh(['grupos.items', 'rqMina.mina']),
+                'message' => 'La lista ya fue enviada anteriormente.',
+            ];
+        }
+
         if (!$this->canEditLista($usuario, $rq, $lista)) {
             return [
                 'ok' => false,
-                'message' => 'La lista no puede enviarse porque vencio el plazo o ya fue enviada.',
+                'message' => 'La lista no puede enviarse porque vencio el plazo de envio.',
             ];
         }
 
@@ -427,7 +435,7 @@ class ParadaHerramientaService
         ];
     }
 
-    private function toListRow(RQMina $rq): array
+    private function toListRow(RQMina $rq, ?Usuario $usuario = null): array
     {
         $fechaInicio = Carbon::parse($rq->fecha_inicio);
         $fechaFin = $rq->fecha_fin ? Carbon::parse($rq->fecha_fin) : null;
@@ -437,7 +445,7 @@ class ParadaHerramientaService
         $today = now()->startOfDay();
         $estadoLista = $lista?->estado ?? 'PENDIENTE';
         $limiteEnvioVencido = $dias < 0;
-        $puedeCompletarRequerimiento = !$limiteEnvioVencido && strtoupper((string) $estadoLista) !== 'ENVIADO';
+        $puedeCompletarRequerimiento = !$limiteEnvioVencido;
 
         return [
             'rq_mina_id' => (string) $rq->id,
@@ -457,6 +465,7 @@ class ParadaHerramientaService
             'enviado_at' => $lista?->enviado_at?->format('Y-m-d H:i:s'),
             'grupos_count' => $lista?->grupos?->count() ?? $rq->gruposTrabajo->count(),
             'puede_completar_requerimiento' => $puedeCompletarRequerimiento,
+            'puede_actualizar_pedido' => $usuario ? $this->canUpdatePedido($usuario) : false,
         ];
     }
 
@@ -630,7 +639,7 @@ class ParadaHerramientaService
             return false;
         }
 
-        return strtoupper((string) $lista->estado) !== 'ENVIADO';
+        return true;
     }
 
     public function updatePedido(Usuario $usuario, RQMina $rq, array $payload): array
@@ -807,13 +816,9 @@ class ParadaHerramientaService
 
         $rows = [];
         foreach ($spreadsheet->getWorksheetIterator() as $index => $sheet) {
-            $category = match ((int) $index) {
-                0 => self::CATEGORY_TOOL,
-                1 => self::CATEGORY_CONSUMABLE,
-                default => null,
-            };
+            $category = $this->detectCatalogSheetCategory($sheet, (int) $index);
 
-            if (!$category) {
+            if ($category === null) {
                 continue;
             }
 
@@ -1162,6 +1167,61 @@ class ParadaHerramientaService
         }
 
         return $rows;
+    }
+
+    private function detectCatalogSheetCategory(Worksheet $sheet, int $index): ?string
+    {
+        $title = $this->normalizeSearchText($sheet->getTitle());
+
+        if (str_contains($title, 'HRRT') || str_contains($title, 'HERRAMIENT')) {
+            return self::CATEGORY_TOOL;
+        }
+
+        if (str_contains($title, 'CONSM') || str_contains($title, 'CONSUM')) {
+            return self::CATEGORY_CONSUMABLE;
+        }
+
+        $highestRow = min((int) $sheet->getHighestDataRow(), 20);
+        $highestColumn = min(Coordinate::columnIndexFromString($sheet->getHighestDataColumn()), 30);
+        $topText = [];
+
+        for ($row = 1; $row <= $highestRow; $row++) {
+            for ($column = 1; $column <= $highestColumn; $column++) {
+                $value = $this->normalizeSearchText($this->cellValue($sheet, $column, $row));
+                if ($value !== '') {
+                    $topText[] = $value;
+                }
+            }
+        }
+
+        $joined = implode(' ', $topText);
+
+        if (str_contains($joined, 'CONSUMIBLE')) {
+            return self::CATEGORY_CONSUMABLE;
+        }
+
+        if (str_contains($joined, 'HERRAMIENT') || str_contains($joined, 'UTILAJE') || str_contains($joined, 'MAQUINAS')) {
+            return self::CATEGORY_TOOL;
+        }
+
+        if ($index === 0) {
+            return self::CATEGORY_TOOL;
+        }
+
+        if ($index === 1) {
+            return self::CATEGORY_CONSUMABLE;
+        }
+
+        $headerRow = $this->findCatalogHeaderRow($sheet);
+        if (!$headerRow) {
+            return null;
+        }
+
+        $columns = $this->resolveCatalogColumns($sheet, $headerRow, self::CATEGORY_CONSUMABLE);
+
+        return !empty($columns['descripcion']) && !empty($columns['unidad'])
+            ? self::CATEGORY_CONSUMABLE
+            : null;
     }
 
     private function findCatalogHeaderRow(Worksheet $sheet): ?int

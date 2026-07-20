@@ -12,14 +12,6 @@
         : 'Contrato sin periodo';
 @endphp
 
-<style>
-.contract-data-page { display: grid; gap: 16px; }
-.contract-data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.contract-data-wide { grid-column: 1 / -1; }
-.contract-data-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
-.contract-data-note { margin: 0; color: #64748b; line-height: 1.45; }
-</style>
-
 <div class="module-page contract-data-page">
     <div class="page-header">
         <div class="page-header-top">

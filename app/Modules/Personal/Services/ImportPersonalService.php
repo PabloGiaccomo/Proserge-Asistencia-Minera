@@ -539,6 +539,7 @@ if (count($stats['nuevosDetalle']) < self::MAX_CHANGE_DETAILS) {
 
             $stats['bloquesProcesados'] = count(array_chunk($dataRows, self::IMPORT_BATCH_SIZE));
             $stats['tamanoBloque'] = self::IMPORT_BATCH_SIZE;
+            $stats['filasLeidas'] = count($dataRows);
 
             return $stats;
         })();

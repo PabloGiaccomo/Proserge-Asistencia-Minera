@@ -13,6 +13,46 @@ class CatalogoMinaDeleteTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_listado_de_minas_oculta_talleres_oficinas_y_marcadores_accidentales(): void
+    {
+        $userId = $this->createUser(['catalogos' => ['ver'], 'minas' => ['ver']]);
+        $suffix = Str::upper(Str::random(6));
+        $realMine = 'MINA OPERATIVA ' . $suffix;
+        $workshopName = 'TALLER OPERATIVO ' . $suffix;
+        $officeName = 'OFICINA OPERATIVA ' . $suffix;
+
+        $this->createMine($realMine);
+        $this->createMine($workshopName);
+        $this->createMine($officeName);
+        $this->createMine('Sin mina');
+
+        DB::table('talleres')->insert([
+            'id' => (string) Str::uuid(),
+            'nombre' => $workshopName,
+            'ubicacion' => 'Operacion',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('oficinas')->insert([
+            'id' => (string) Str::uuid(),
+            'nombre' => $officeName,
+            'ubicacion' => 'Administracion',
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('catalogos.minas.index'))
+            ->assertOk()
+            ->assertSee($realMine)
+            ->assertDontSee($workshopName)
+            ->assertDontSee($officeName)
+            ->assertDontSee('Sin mina');
+    }
+
     public function test_usuario_con_permiso_ve_boton_eliminar_mina(): void
     {
         $userId = $this->createUser(['catalogos' => ['ver'], 'minas' => ['ver', 'eliminar']]);
@@ -275,14 +315,15 @@ class CatalogoMinaDeleteTest extends TestCase
         return $userId;
     }
 
-    private function createMine(): string
+    private function createMine(?string $name = null): string
     {
         $mineId = (string) Str::uuid();
+        $name ??= 'MINA DELETE ' . Str::upper(Str::random(6));
 
         DB::table('minas')->insert([
             'id' => $mineId,
-            'nombre' => 'MINA DELETE ' . Str::upper(Str::random(6)),
-            'unidad_minera' => 'UM DELETE',
+            'nombre' => $name,
+            'unidad_minera' => $name,
             'ubicacion' => 'Operacion',
             'estado' => 'ACTIVO',
             'created_at' => now(),

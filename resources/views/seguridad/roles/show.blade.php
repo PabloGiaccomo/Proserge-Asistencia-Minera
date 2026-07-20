@@ -7,29 +7,6 @@
     $rolePermissions = session('user.permissions', []);
     $canEditRolePermissions = \App\Support\Rbac\PermissionMatrix::allowsDirectAny($rolePermissions, 'roles', ['editar', 'actualizar']);
 @endphp
-<style>
-.permission-screen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.permission-screen-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
-.permission-screen-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.permission-screen-title { margin: 0; color: #0f172a; font-size: 14px; font-weight: 700; }
-.permission-screen-key { margin-top: 2px; color: #64748b; font-size: 11px; }
-.permission-screen-count { flex: 0 0 auto; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; padding: 4px 8px; }
-.permission-action-list { display: grid; gap: 8px; }
-.permission-action-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; color: #334155; font-size: 13px; font-weight: 600; }
-.permission-action-state.is-enabled { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
-.permission-action-badge { flex: 0 0 auto; border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; padding: 3px 8px; }
-.permission-action-state.is-enabled .permission-action-badge { background: #dcfce7; color: #166534; }
-.permission-action-empty { padding: 8px 0; color: #64748b; font-size: 12px; }
-.notification-type-list { display: grid; gap: 10px; }
-.notification-type-item { display: grid; gap: 8px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; }
-.notification-type-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.notification-type-title { display: block; color: #0f172a; font-size: 13px; font-weight: 700; }
-.notification-type-code { display: block; margin-top: 2px; color: #64748b; font-size: 11px; }
-.notification-type-meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.notification-type-pill { border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; padding: 3px 8px; }
-.notification-type-pill.is-active { background: #dcfce7; color: #166534; }
-.notification-type-pill.is-inactive { background: #fee2e2; color: #991b1b; }
-</style>
 
 <div class="module-page">
     <div class="page-header">

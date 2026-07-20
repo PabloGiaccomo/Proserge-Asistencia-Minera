@@ -103,6 +103,30 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         $response->assertSee('Exportar PDF');
     }
 
+    public function test_review_shows_bcp_account_and_cci_when_sensitive_permission_is_enabled(): void
+    {
+        $fichaId = $this->createFicha('77889900', [
+            'banco' => ' bcp ',
+            'banco_otro' => '',
+            'numero_cuenta' => '1234567890123',
+            'cci' => '00212345678901234567',
+        ]);
+        $session = $this->sessionForPermissions([
+            'personal' => ['ver', 'ver_ficha', 'ver_datos_sensibles'],
+        ]);
+
+        $response = $this
+            ->withSession($session)
+            ->get(route('personal.fichas.review', $fichaId));
+
+        $response->assertOk();
+        $response->assertSee('Datos bancarios');
+        $response->assertSee('Numero de cuenta');
+        $response->assertSee('1234567890123');
+        $response->assertSee('CCI');
+        $response->assertSee('00212345678901234567');
+    }
+
     public function test_ficha_pdf_is_forbidden_without_sensitive_permission(): void
     {
         $fichaId = $this->createFicha('11223344');
@@ -151,11 +175,11 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         ];
     }
 
-    private function createFicha(string $documentNumber = '12345678'): string
+    private function createFicha(string $documentNumber = '12345678', array $overrides = []): string
     {
         $personalId = (string) Str::uuid();
         $fichaId = (string) Str::uuid();
-        $data = [
+        $data = array_replace([
             ...PersonalFichaCatalog::emptyData(),
             'nombres' => 'Trabajador',
             'apellido_paterno' => 'Ficha',
@@ -175,7 +199,7 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
             'empleador_domicilio_fiscal' => 'Domicilio fiscal sensible prueba',
             'remuneracion' => '17000',
             'sistema_pensionario' => 'ONP',
-        ];
+        ], $overrides);
 
         DB::table('personal')->insert([
             'id' => $personalId,

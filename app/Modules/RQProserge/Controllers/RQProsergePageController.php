@@ -3,6 +3,7 @@
 namespace App\Modules\RQProserge\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\PersonalMina;
 use App\Models\RQProserge;
 use App\Models\RQMinaDetalleCambio;
 use App\Modules\Notificaciones\Services\NotificationService;
@@ -198,6 +199,7 @@ class RQProsergePageController extends WebPageController
             'rqMina:id,mina_id,destino_tipo,destino_id,destino_nombre,area,fecha_inicio,fecha_fin,estado,observaciones',
             'rqMina.detalle.rqMina:id,fecha_inicio,fecha_fin',
             'rqMina.detalle.asignaciones.personal:id,dni,nombre_completo,puesto',
+            'rqMina.detalle.asignaciones.personal.minas:id,nombre',
             'rqMina.detalle.cambios',
             'cambiosRqMina',
         ];
@@ -211,7 +213,7 @@ class RQProsergePageController extends WebPageController
         $detalles = $rqMina?->detalle ?? collect();
         $cambios = $rq->cambiosRqMina ?? collect();
 
-        $puestos = $detalles->map(function ($detalle): array {
+        $puestos = $detalles->map(function ($detalle) use ($rq): array {
             $asignaciones = $detalle->asignaciones ?? collect();
             $requeridos = (int) ($detalle->cantidad_total ?: $detalle->cantidad);
             $personalAsignado = $asignaciones->map(fn ($asignacion): array => [
@@ -223,6 +225,7 @@ class RQProsergePageController extends WebPageController
                 'fecha_fin' => $this->formatDate($asignacion->fecha_fin),
                 'fecha_inicio_iso' => $this->formatIsoDate($asignacion->fecha_inicio),
                 'fecha_fin_iso' => $this->formatIsoDate($asignacion->fecha_fin),
+                'mina_estado' => $this->mineStatusForPersonal($asignacion->personal, (string) $rq->mina_id),
             ])->values()->all();
 
             $cambios = ($detalle->cambios ?? collect())
@@ -307,6 +310,32 @@ class RQProsergePageController extends WebPageController
         }
 
         return $date ? (string) $date : '-';
+    }
+
+    private function mineStatusForPersonal($personal, string $minaId): array
+    {
+        $mine = collect($personal?->minas ?? [])
+            ->first(fn ($mina): bool => (string) $mina->id === $minaId);
+
+        $state = strtoupper((string) ($mine?->pivot?->estado_habilitacion ?: $mine?->pivot?->estado ?: PersonalMina::ESTADO_NO_HABILITADO));
+
+        return match ($state) {
+            PersonalMina::ESTADO_HABILITADO => [
+                'estado' => PersonalMina::ESTADO_HABILITADO,
+                'label' => 'Habilitado en mina',
+                'class' => 'is-enabled',
+            ],
+            PersonalMina::ESTADO_EN_PROCESO => [
+                'estado' => PersonalMina::ESTADO_EN_PROCESO,
+                'label' => 'En proceso en mina',
+                'class' => 'is-process',
+            ],
+            default => [
+                'estado' => PersonalMina::ESTADO_NO_HABILITADO,
+                'label' => 'No habilitado en mina',
+                'class' => 'is-not-enabled',
+            ],
+        };
     }
 
     private function formatIsoDate(mixed $date): string

@@ -242,22 +242,6 @@
     </div>
 </div>
 
-<style>
-.role-accesses { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-top: 10px; }
-.role-accesses-title { margin: 0 0 10px; font-size: 15px; font-weight: 700; color: #0f172a; }
-.role-access-block { margin-top: 12px; }
-.role-pick-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.role-chip-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.role-chip { border: 1px solid #0d9488; background: #ccfbf1; color: #0f766e; border-radius: 999px; padding: 6px 11px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-.role-chip-selected-cargo { border-color: #8b5cf6; background: #ede9fe; color: #5b21b6; }
-.role-chip-remove { font-size: 13px; line-height: 1; opacity: .85; }
-.role-chip-empty { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
-@media (max-width: 768px) {
-    .role-accesses { padding: 12px; }
-    .role-pick-row { grid-template-columns: 1fr; }
-}
-</style>
-
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('[data-role-manager]').forEach(function (manager) {

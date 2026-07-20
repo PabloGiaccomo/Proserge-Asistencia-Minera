@@ -56,6 +56,7 @@ class WebPermissionMiddlewareTest extends TestCase
         }
 
         $this->assertArrayNotHasKey('personal_vencimientos', $modules);
+        $this->assertArrayNotHasKey('epps', $modules);
     }
 
     public function test_canonical_permissions_keep_legacy_module_access(): void
@@ -72,6 +73,15 @@ class WebPermissionMiddlewareTest extends TestCase
         ]);
         $this->assertTrue(PermissionMatrix::allows($canonicalLogistica, 'epps', 'ver'));
         $this->assertTrue(PermissionMatrix::allows($canonicalLogistica, 'herramientas', 'actualizar'));
+
+        $logisticaEntregas = PermissionCatalog::matrixFromSelections([
+            'logistica' => ['ver', 'ver_logistica_entregas'],
+        ]);
+        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'ver'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'registrar'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'editar'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'actualizar'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'eliminar'));
 
         $legacyVencimientos = PermissionCatalog::matrixFromSelections([
             'personal_vencimientos' => ['ver'],
@@ -156,6 +166,26 @@ class WebPermissionMiddlewareTest extends TestCase
                 ],
             ])
             ->getJson('/__test/web-permission-logistica-direct')
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+    }
+
+    public function test_logistica_entregas_permission_allows_epp_action_routes(): void
+    {
+        Route::post('/__test/web-permission-epp-register', fn () => response()->json(['ok' => true]))
+            ->middleware(['web', 'web.permission:epps,registrar']);
+
+        $permissions = PermissionCatalog::matrixFromSelections([
+            'logistica' => ['ver', 'ver_logistica_entregas'],
+        ]);
+
+        $this
+            ->withSession([
+                'user' => [
+                    'permissions' => $permissions,
+                ],
+            ])
+            ->postJson('/__test/web-permission-epp-register')
             ->assertOk()
             ->assertJsonPath('ok', true);
     }
@@ -416,6 +446,10 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertSee('data-view-toggle', false)
             ->assertSee('data-action-toggle', false)
             ->assertSee('name="permisos[inicio][ver]"', false)
+            ->assertSee('Ver entregas y cambios de EPP')
+            ->assertSee('name="permisos[logistica][ver_logistica_kardex]"', false)
+            ->assertDontSee('name="permisos[epps][ver]"', false)
+            ->assertDontSee('<h3 class="permission-screen-title">EPPs</h3>', false)
             ->assertSee('Guardar permisos');
     }
 

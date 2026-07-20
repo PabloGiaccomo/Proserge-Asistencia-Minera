@@ -112,6 +112,7 @@ Route::middleware('web.auth')->group(function (): void {
     
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.index');
+    Route::get('/personal/api/list', [PersonalPageController::class, 'apiList'])->middleware('web.permission:personal,ver')->name('personal.api.list');
     Route::get('/personal/exportar', [PersonalPageController::class, 'exportForm'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.form');
     Route::post('/personal/exportar', [PersonalPageController::class, 'exportDownload'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.download');
     Route::get('/personal/exportar/personal', [PersonalPageController::class, 'exportWorkers'])->middleware('web.permission:personal,exportar_excel|exportar')->name('personal.export.workers');
@@ -238,10 +239,19 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
     Route::get('/epps/personal/buscar', [EppPageController::class, 'buscarPersonal'])->middleware('web.permission:epps,ver')->name('epps.personal.buscar');
     Route::get('/epps/entregas/ultima', [EppPageController::class, 'ultimaEntrega'])->middleware('web.permission:epps,ver')->name('epps.entregas.ultima');
+    Route::get('/epps/kardex', [EppPageController::class, 'kardexPersonal'])->middleware('web.permission:epps,ver')->name('epps.kardex.show');
+    Route::get('/epps/kardex/descargar', [EppPageController::class, 'descargarKardex'])->middleware('web.permission:epps,ver')->name('epps.kardex.download');
     Route::post('/epps/catalogo', [EppPageController::class, 'storeCatalog'])->middleware('web.permission:epps,configurar')->name('epps.catalogo.store');
     Route::put('/epps/catalogo/{id}', [EppPageController::class, 'updateCatalog'])->middleware('web.permission:epps,editar')->name('epps.catalogo.update');
+    Route::post('/epps/catalogo/{id}/eliminar', [EppPageController::class, 'destroyCatalog'])->middleware('web.permission:epps,eliminar')->name('epps.catalogo.destroy');
+    Route::post('/logistica/catalogo-parada', [EppPageController::class, 'storeToolCatalog'])->middleware('web.permission:epps,configurar')->name('logistica.catalogo-parada.store');
+    Route::post('/logistica/catalogo-parada/importar', [EppPageController::class, 'importToolCatalog'])->middleware('web.permission:epps,configurar')->name('logistica.catalogo-parada.importar');
+    Route::put('/logistica/catalogo-parada/{id}', [EppPageController::class, 'updateToolCatalog'])->middleware('web.permission:epps,editar')->name('logistica.catalogo-parada.update');
+    Route::post('/logistica/catalogo-parada/{id}/eliminar', [EppPageController::class, 'destroyToolCatalog'])->middleware('web.permission:epps,eliminar')->name('logistica.catalogo-parada.destroy');
     Route::post('/epps/entregas', [EppPageController::class, 'storeEntrega'])->middleware('web.permission:epps,registrar')->name('epps.entregas.store');
     Route::post('/epps/entregas/{id}/cerrar', [EppPageController::class, 'closeEntrega'])->middleware('web.permission:epps,registrar')->name('epps.entregas.close');
+    Route::put('/epps/entregas/{id}', [EppPageController::class, 'updateEntrega'])->middleware('web.permission:epps,actualizar')->name('epps.entregas.update');
+    Route::post('/epps/entregas/{id}/eliminar', [EppPageController::class, 'destroyEntrega'])->middleware('web.permission:epps,eliminar')->name('epps.entregas.destroy');
 
     // RQ Mina
     Route::get('/rq-mina', [RQMinaPageController::class, 'index'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.index');

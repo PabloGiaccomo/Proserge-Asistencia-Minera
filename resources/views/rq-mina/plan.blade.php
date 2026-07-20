@@ -14,27 +14,6 @@
 @endphp
 
 @section('content')
-<style>
-.rqm-summary-card .card-body { padding:10px 16px; }
-.rqm-summary-line { display:flex; align-items:center; gap:10px; overflow-x:auto; white-space:nowrap; }
-.rqm-summary-item { display:inline-flex; align-items:center; gap:6px; min-width:max-content; padding-right:10px; border-right:1px solid #e2e8f0; }
-.rqm-summary-item:last-child { border-right:0; padding-right:0; }
-.rqm-summary-item.is-observation { min-width:0; }
-.rqm-meta-label { font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:.35px; font-weight:700; }
-.rqm-meta-value { font-size:13px; color:#0f172a; font-weight:700; }
-.rqm-summary-item.is-observation .rqm-meta-value { display:inline-block; max-width:520px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; font-weight:600; }
-.rq-plan-draft-alert { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid #bae6fd; background:#f0f9ff; color:#075985; border-radius:12px; padding:12px 14px; margin-bottom:16px; font-size:13px; }
-.rq-plan-draft-alert[hidden] { display:none; }
-.rq-plan-draft-alert strong { display:block; color:#0f172a; margin-bottom:2px; }
-.rq-plan-draft-alert button { border:1px solid #7dd3fc; background:#fff; color:#075985; border-radius:8px; padding:8px 10px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; }
-.rq-plan-draft-alert button:hover { background:#e0f2fe; }
-@media (max-width:720px) {
-    .rqm-summary-line { align-items:flex-start; }
-    .rqm-summary-item.is-observation .rqm-meta-value { max-width:280px; }
-    .rq-plan-draft-alert { flex-direction:column; align-items:flex-start; }
-    .rq-plan-draft-alert button { width:100%; }
-}
-</style>
 
 <div class="page-header">
     <div class="page-header-top">

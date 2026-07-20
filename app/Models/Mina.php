@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Mina extends Model
 {
@@ -23,6 +25,31 @@ class Mina extends Model
         'color',
         'estado',
     ];
+
+    public function scopeOperationalCatalog(Builder $query): Builder
+    {
+        $query->whereRaw("UPPER(TRIM(minas.nombre)) NOT IN (?, ?, ?, ?)", [
+            'SIN MINA',
+            'SIN_MINA',
+            'NO APLICA',
+            'N/A',
+        ]);
+
+        foreach (['oficinas' => 'o', 'talleres' => 't'] as $table => $alias) {
+            $query->whereNotExists(function ($sub) use ($table, $alias): void {
+                $sub->select(DB::raw(1))
+                    ->from("{$table} as {$alias}")
+                    ->whereRaw("LOWER(TRIM({$alias}.nombre)) = LOWER(TRIM(minas.nombre))");
+            });
+        }
+
+        return $query;
+    }
+
+    public function scopeActiveOperational(Builder $query): Builder
+    {
+        return $query->operationalCatalog()->where('estado', 'ACTIVO');
+    }
 
     public function personal(): BelongsToMany
     {

@@ -18,43 +18,12 @@
     $currentRoleEstado = $canChangeRoleStatus
         ? strtoupper((string) old('estado', $storedRoleEstado))
         : $storedRoleEstado;
+    $logisticsTabActions = array_values(\App\Support\Rbac\PermissionCatalog::logisticsTabActions());
 @endphp
 
 @if($errors->any())
     <div class="alert alert-error" style="margin-bottom:16px;">{{ $errors->first() }}</div>
 @endif
-
-<style>
-.notification-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #334155; }
-.permission-screen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.permission-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.permission-toolbar-search { flex: 1 1 320px; max-width: 520px; }
-.permission-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.permission-screen-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
-.permission-screen-card.is-hidden { display: none; }
-.permission-screen-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.permission-screen-title { margin: 0; color: #0f172a; font-size: 14px; font-weight: 700; }
-.permission-screen-key { margin-top: 2px; color: #64748b; font-size: 11px; }
-.permission-screen-count { flex: 0 0 auto; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; padding: 4px 8px; }
-.permission-action-list { display: grid; gap: 8px; }
-.permission-action-caption { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
-.permission-action-toggle { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; color: #334155; font-size: 13px; font-weight: 600; }
-.permission-action-toggle.is-module-view { border-color: #99f6e4; background: #ecfeff; color: #0f766e; font-weight: 700; }
-.permission-action-toggle.is-disabled { color: #94a3b8; background: #f1f5f9; }
-.permission-action-toggle input { margin: 0; }
-.permission-action-toggle input:disabled { cursor: not-allowed; }
-.permission-action-empty { padding: 8px 0; color: #64748b; font-size: 12px; }
-.permission-empty-search { margin-top: 12px; padding: 14px; border: 1px dashed #cbd5e1; border-radius: 12px; color: #64748b; text-align: center; font-size: 13px; }
-.notification-type-list { display: grid; gap: 10px; }
-.notification-type-item { display: grid; gap: 8px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; }
-.notification-type-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.notification-type-title { display: block; color: #0f172a; font-size: 13px; font-weight: 700; }
-.notification-type-code { display: block; margin-top: 2px; color: #64748b; font-size: 11px; }
-.notification-type-meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.notification-type-pill { border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; padding: 3px 8px; }
-.notification-type-pill.is-active { background: #dcfce7; color: #166534; }
-.notification-type-pill.is-inactive { background: #fee2e2; color: #991b1b; }
-</style>
 
 <form method="POST" action="{{ $actionUrl }}">
     @csrf
@@ -139,6 +108,9 @@
                                 <div class="permission-action-caption">Acciones</div>
                                 @forelse($extraActions as $action)
                                     <label class="permission-action-toggle">
+                                        @if($module === 'logistica' && in_array($action, $logisticsTabActions, true))
+                                            <input type="hidden" name="permisos[{{ $module }}][{{ $action }}]" value="0">
+                                        @endif
                                         <input type="checkbox" name="permisos[{{ $module }}][{{ $action }}]" value="1" data-action-toggle {{ old("permisos.$module.$action", $permissions[$module][$action] ?? false) ? 'checked' : '' }}>
                                         <span>{{ \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</span>
                                     </label>

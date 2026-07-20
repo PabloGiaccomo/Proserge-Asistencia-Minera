@@ -2,36 +2,93 @@
 <style>
 .rq-personal-search-panel {
     position: fixed;
-    z-index: 10000;
+    z-index: 1200;
     display: none;
-    width: 320px;
     max-height: 280px;
-    overflow: auto;
-    border: 1px solid #dbe4ef;
-    border-radius: 10px;
-    background: #fff;
-    box-shadow: 0 14px 36px rgba(15, 23, 42, .16);
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid #dbeafe;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
 }
-.rq-personal-search-panel.is-open { display: block; }
+
+.rq-personal-search-panel.is-open {
+    display: grid;
+    gap: 4px;
+}
+
 .rq-personal-search-row {
+    display: grid;
+    gap: 3px;
     width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    padding: 10px 12px;
     border: 0;
-    border-bottom: 1px solid #f1f5f9;
-    background: #fff;
-    padding: 10px 11px;
+    border-radius: 9px;
+    background: transparent;
+    color: #0f172a;
     text-align: left;
     cursor: pointer;
 }
-.rq-personal-search-row:hover { background: #f8fafc; }
-.rq-personal-search-row strong { color: #0f172a; font-size: 12px; line-height: 1.25; }
-.rq-personal-search-row span { color: #64748b; font-size: 11px; line-height: 1.25; }
+
+.rq-personal-search-row:hover,
+.rq-personal-search-row:focus {
+    outline: none;
+    background: #ecfeff;
+}
+
+.rq-personal-search-row strong {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.rq-personal-search-row span,
 .rq-personal-search-empty {
-    padding: 10px 11px;
-    color: #64748b;
     font-size: 12px;
+    color: #64748b;
+}
+
+.rq-personal-search-empty {
+    padding: 10px 12px;
+}
+
+.rq-personal-selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 7px 9px;
+    border: 1px solid #99f6e4;
+    border-radius: 9px;
+    background: #f0fdfa;
+    color: #0f766e;
+    font-size: 12px;
+}
+
+.rq-personal-selected span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.rq-personal-selected strong {
+    color: #115e59;
+}
+
+.rq-personal-selected small {
+    color: #64748b;
+    font-size: 11px;
+}
+
+.rq-personal-selected button {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
 }
 </style>
 
@@ -100,6 +157,41 @@ window.RQMinaPersonalAutocompleteConfig = {
         return [person.dni, person.puesto].filter(Boolean).join(' | ') || 'Sin datos adicionales';
     }
 
+    function ensureSelection(input) {
+        const next = input.nextElementSibling;
+        if (next && next.hasAttribute('data-rq-personal-selected')) {
+            return next;
+        }
+
+        const selection = document.createElement('div');
+        selection.className = 'rq-personal-selected';
+        selection.setAttribute('data-rq-personal-selected', '1');
+        input.insertAdjacentElement('afterend', selection);
+        return selection;
+    }
+
+    function clearSelection(input) {
+        input.dataset.rqPersonalId = '';
+        input.dataset.rqPersonalSelectedName = '';
+        input.dataset.rqPersonalSelectedMeta = '';
+
+        const next = input.nextElementSibling;
+        if (next && next.hasAttribute('data-rq-personal-selected')) {
+            next.remove();
+        }
+    }
+
+    function renderSelection(input, person) {
+        const selection = ensureSelection(input);
+        const name = person.nombre || input.value || '';
+        const meta = personMeta(person);
+
+        input.dataset.rqPersonalSelectedName = name;
+        input.dataset.rqPersonalSelectedMeta = meta;
+        selection.innerHTML = '<span><strong>Seleccionado: ' + escapeHtml(name) + '</strong><small>' + escapeHtml(meta) + '</small></span>' +
+            '<button type="button" data-rq-personal-clear>Quitar</button>';
+    }
+
     function renderPanel(input, items) {
         const panel = ensurePanel();
         state.activeItems = Array.isArray(items) ? items : [];
@@ -151,7 +243,7 @@ window.RQMinaPersonalAutocompleteConfig = {
     function applyPerson(input, person) {
         input.value = person.nombre || '';
         input.dataset.rqPersonalId = person.id || '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        renderSelection(input, person);
         input.dispatchEvent(new Event('change', { bubbles: true }));
         closePanel();
         input.focus();
@@ -178,7 +270,7 @@ window.RQMinaPersonalAutocompleteConfig = {
         });
 
         input.addEventListener('input', function() {
-            input.dataset.rqPersonalId = '';
+            clearSelection(input);
             scheduleSearch(input);
         });
 
@@ -211,6 +303,20 @@ window.RQMinaPersonalAutocompleteConfig = {
             return;
         }
         closePanel();
+    });
+
+    document.addEventListener('click', function(event) {
+        const button = event.target.closest('[data-rq-personal-clear]');
+        if (!button) return;
+
+        const selection = button.closest('[data-rq-personal-selected]');
+        const input = selection ? selection.previousElementSibling : null;
+        if (!input || !input.matches('[data-rq-personal-search]')) return;
+
+        input.value = '';
+        clearSelection(input);
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.focus();
     });
 
     window.RQMinaPersonalAutocomplete = {

@@ -7,6 +7,32 @@
     $canViewSensitiveFichaData = (bool) ($canViewSensitiveFichaData ?? false);
     $canExportSensitiveFichaPdf = (bool) ($canExportSensitiveFichaPdf ?? false);
     $sensitiveFichaSections = ['Datos bancarios', 'Sistema pensionario'];
+    $normalizeFichaOption = static function (?string $value): string {
+        $normalized = \Illuminate\Support\Str::of((string) $value)
+            ->trim()
+            ->ascii()
+            ->upper()
+            ->toString();
+
+        return $normalized;
+    };
+    $bankTypeForDisplay = static function (?string $value) use ($normalizeFichaOption): string {
+        $normalized = $normalizeFichaOption($value);
+
+        if ($normalized === 'BCP' || str_contains($normalized, 'BANCO DE CREDITO')) {
+            return 'BCP';
+        }
+
+        if ($normalized === 'INTERBANK' || str_contains($normalized, 'INTERBANK')) {
+            return 'Interbank';
+        }
+
+        if (in_array($normalized, ['OTRO', 'OTRA'], true)) {
+            return 'Otro';
+        }
+
+        return $normalized === '' ? '' : 'Otro';
+    };
 @endphp
 <div class="module-page ficha-workspace">
     <div class="page-header">
@@ -68,7 +94,7 @@
                                 $type = $field['type'] ?? 'text';
                                 $paisNacimientoActual = $currentFieldValue('pais_nacimiento') ?: 'Peru';
                                 $domicilioPaisActual = $currentFieldValue('domicilio_tipo') ?: 'Peru';
-                                $bancoActual = $currentFieldValue('banco');
+                                $bancoActual = $bankTypeForDisplay($currentFieldValue('banco'));
                                 $conditionalHidden = match ($key) {
                                     'estado_civil_otro' => $currentFieldValue('estado_civil') !== 'Otro',
                                     'nacionalidad_otra' => $currentFieldValue('nacionalidad') !== 'Otra',

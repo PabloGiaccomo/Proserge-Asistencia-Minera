@@ -192,23 +192,6 @@
 </div>
 @endsection
 
-@push('styles')
-<style>
-    /* Dashboard-specific overrides */
-    .kpi-mini {
-        display: inline-flex;
-        flex-direction: column;
-        padding: 8px 12px;
-        background: var(--bg-hover);
-        border-radius: var(--radius-md);
-        margin-right: 8px;
-        margin-bottom: 8px;
-    }
-    .kpi-mini .v { font-size: 18px; font-weight: 700; color: var(--text-primary); }
-    .kpi-mini .l { font-size: 11px; color: var(--text-muted); }
-</style>
-@endpush
-
 @push('scripts')
 <script>
     const base = '/api/v1/dashboard';

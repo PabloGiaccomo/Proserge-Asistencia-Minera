@@ -56,6 +56,7 @@ class RQMinaActividadTransporte extends Model
         'doc_proserge_path',
         'doc_mantenimiento_path',
         'doc_checklist_path',
+        'documentos',
         'orden',
     ];
 
@@ -64,6 +65,7 @@ class RQMinaActividadTransporte extends Model
         'fecha_fin' => 'date',
         'recepcion_fecha' => 'date',
         'dias_uso' => 'integer',
+        'documentos' => 'array',
         'orden' => 'integer',
         'capacidad_camion' => 'string',
     ];
