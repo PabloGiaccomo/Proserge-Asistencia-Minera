@@ -6,8 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\RQProserge;
 use App\Models\Usuario;
 use App\Modules\RQProserge\Requests\AssignPersonalRequest;
+use App\Modules\RQProserge\Requests\ReplaceRQProsergeAssignmentRequest;
+use App\Modules\RQProserge\Requests\RetireRQProsergeAssignmentRequest;
 use App\Modules\RQProserge\Requests\StoreRQProsergeRequest;
 use App\Modules\RQProserge\Requests\UnassignPersonalRequest;
+use App\Modules\RQProserge\Requests\UpdateRQProsergeAssignmentRequest;
 use App\Modules\RQProserge\Requests\UpdateRQProsergeRequest;
 use App\Modules\RQProserge\Resources\RQProsergeResource;
 use App\Modules\RQProserge\Services\RQProsergeService;
@@ -210,6 +213,102 @@ class RQProsergeController extends Controller
             data: RQProsergeResource::make($result['rq'])->resolve(),
             message: 'Personal desasignado correctamente',
             code: 'RQ_PROSERGE_UNASSIGN_OK',
+        );
+    }
+
+    public function actualizarAsignacion(UpdateRQProsergeAssignmentRequest $request, string $id, string $detalleId)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])->find($id);
+
+        if (!$rq) {
+            return ApiResponse::error(message: 'RQ Proserge no encontrado', code: 'RQ_PROSERGE_NOT_FOUND', status: 404);
+        }
+
+        $result = $this->service->updateAssignment($usuario, $rq, $detalleId, $request->validated());
+
+        if (($result['ok'] ?? false) === false) {
+            $code = (string) ($result['code'] ?? 'RQ_PROSERGE_ASSIGNMENT_UPDATE_FAILED');
+
+            return ApiResponse::error(
+                message: (string) ($result['message'] ?? 'No se pudo actualizar la asignacion'),
+                code: $code,
+                status: str_contains($code, 'FORBIDDEN') ? 403 : 422,
+            );
+        }
+
+        return ApiResponse::success(
+            data: RQProsergeResource::make($result['rq'])->resolve(),
+            message: 'Asignacion actualizada correctamente',
+            code: 'RQ_PROSERGE_ASSIGNMENT_UPDATE_OK',
+        );
+    }
+
+    public function retirar(RetireRQProsergeAssignmentRequest $request, string $id, string $detalleId)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])->find($id);
+
+        if (!$rq) {
+            return ApiResponse::error(message: 'RQ Proserge no encontrado', code: 'RQ_PROSERGE_NOT_FOUND', status: 404);
+        }
+
+        $result = $this->service->retireAssignment($usuario, $rq, $detalleId, (string) $request->validated()['motivo']);
+
+        if (($result['ok'] ?? false) === false) {
+            $code = (string) ($result['code'] ?? 'RQ_PROSERGE_RETIRE_FAILED');
+
+            return ApiResponse::error(
+                message: (string) ($result['message'] ?? 'No se pudo retirar la asignacion'),
+                code: $code,
+                status: str_contains($code, 'FORBIDDEN') ? 403 : 422,
+            );
+        }
+
+        return ApiResponse::success(
+            data: RQProsergeResource::make($result['rq'])->resolve(),
+            message: 'Asignacion retirada correctamente',
+            code: 'RQ_PROSERGE_RETIRE_OK',
+        );
+    }
+
+    public function reemplazar(ReplaceRQProsergeAssignmentRequest $request, string $id, string $detalleId)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $rq = RQProserge::query()->with(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle'])->find($id);
+
+        if (!$rq) {
+            return ApiResponse::error(message: 'RQ Proserge no encontrado', code: 'RQ_PROSERGE_NOT_FOUND', status: 404);
+        }
+
+        try {
+            $result = $this->service->replaceAssignment($usuario, $rq, $detalleId, $request->validated());
+        } catch (Throwable $e) {
+            return ApiResponse::error(
+                message: 'Error tecnico al reemplazar personal',
+                code: 'RQ_PROSERGE_REPLACE_TECHNICAL_ERROR',
+                detail: ['exception' => $e->getMessage()],
+                status: 500,
+            );
+        }
+
+        if (($result['ok'] ?? false) === false) {
+            $code = (string) ($result['code'] ?? 'RQ_PROSERGE_REPLACE_FAILED');
+
+            return ApiResponse::error(
+                message: (string) ($result['message'] ?? 'No se pudo reemplazar la asignacion'),
+                code: $code,
+                status: str_contains($code, 'FORBIDDEN') ? 403 : 422,
+            );
+        }
+
+        return ApiResponse::success(
+            data: RQProsergeResource::make($result['rq'])->resolve(),
+            message: 'Asignacion reemplazada correctamente',
+            code: 'RQ_PROSERGE_REPLACE_OK',
         );
     }
 

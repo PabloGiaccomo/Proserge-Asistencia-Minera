@@ -7551,6 +7551,41 @@ textarea.expiry-field {
 .rq-plan-draft-alert strong { display:block; color:#0f172a; margin-bottom:2px; }
 .rq-plan-draft-alert button { border:1px solid #7dd3fc; background:#fff; color:#075985; border-radius:8px; padding:8px 10px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; }
 .rq-plan-draft-alert button:hover { background:#e0f2fe; }
+.rq-plan-manager { margin-bottom:16px; }
+.rq-plan-manager-header { align-items:flex-start; gap:14px; }
+.rq-plan-manager-header p { margin:4px 0 0; color:#64748b; font-size:13px; }
+.rq-plan-manager-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.rq-plan-selector-row { display:grid; grid-template-columns:160px minmax(0,1fr); gap:12px; align-items:center; margin-bottom:14px; }
+.rq-plan-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin-bottom:14px; }
+.rq-plan-card { display:flex; flex-direction:column; gap:4px; border:1px solid #dbe4ef; border-radius:12px; background:#fff; padding:12px; color:#0f172a; text-decoration:none; transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
+.rq-plan-card:hover { border-color:#14b8a6; box-shadow:0 8px 20px rgba(15,23,42,.08); transform:translateY(-1px); }
+.rq-plan-card.is-active { border-color:#14b8a6; background:#f0fdfa; }
+.rq-plan-card.is-archived { background:#f8fafc; color:#64748b; }
+.rq-plan-card-code, .rq-plan-status { display:inline-flex; width:max-content; align-items:center; border-radius:999px; padding:4px 9px; font-size:11px; font-weight:800; }
+.rq-plan-card-code { background:#e0f2fe; color:#075985; }
+.rq-plan-status { background:#ecfeff; color:#0f766e; }
+.rq-plan-card.is-archived .rq-plan-status { background:#e2e8f0; color:#475569; }
+.rq-plan-card strong { font-size:14px; line-height:1.35; }
+.rq-plan-card small { color:#64748b; font-size:12px; }
+.rq-plan-selected-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; padding:12px; }
+.rq-plan-selected-summary span { display:block; color:#64748b; font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+.rq-plan-selected-summary strong { display:block; margin-top:3px; color:#0f172a; font-size:13px; }
+.rq-plan-observations { margin:10px 0 0; color:#475569; font-size:13px; }
+.rq-plan-archived-alert { margin-top:12px; }
+.rq-plan-editor.is-readonly { background:#f8fafc; }
+.rq-plan-editor.is-readonly .rq-plan-input, .rq-plan-editor.is-readonly .rq-plan-textarea, .rq-plan-editor.is-readonly .rq-plan-select { background:#f1f5f9; color:#475569; }
+.rq-plan-modal[hidden] { display:none; }
+.rq-plan-modal { position:fixed; inset:0; z-index:140; display:grid; place-items:center; padding:20px; }
+.rq-plan-modal-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.45); }
+.rq-plan-modal-card { position:relative; width:min(760px,100%); max-height:calc(100vh - 40px); overflow:auto; border-radius:16px; background:#fff; box-shadow:0 24px 60px rgba(15,23,42,.24); padding:20px; }
+.rq-plan-modal-card-small { width:min(520px,100%); }
+.rq-plan-modal-card h3 { margin:0 0 14px; color:#0f172a; font-size:18px; }
+.rq-plan-modal-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.rq-plan-modal-grid label { display:flex; flex-direction:column; gap:6px; color:#334155; font-size:12px; font-weight:800; }
+.rq-plan-modal-grid .span-2 { grid-column:1 / -1; }
+.rq-plan-modal-note { margin:0 0 12px; border:1px solid #bae6fd; border-radius:10px; background:#f0f9ff; color:#075985; padding:10px 12px; font-size:13px; }
+.rq-plan-modal-error { margin-top:12px; border:1px solid #fecaca; border-radius:10px; background:#fef2f2; color:#b91c1c; padding:10px 12px; font-size:13px; font-weight:700; }
+.rq-plan-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 
 @media (max-width: 1024px) {
     .crear-grupo-layout { grid-template-columns: 1fr; }
@@ -7569,6 +7604,8 @@ textarea.expiry-field {
     .rqm-summary-item.is-observation .rqm-meta-value { max-width:280px; }
     .rq-plan-draft-alert { flex-direction:column; align-items:flex-start; }
     .rq-plan-draft-alert button { width:100%; }
+    .rq-plan-manager-header, .rq-plan-manager-actions, .rq-plan-modal-actions { flex-direction:column; align-items:stretch; }
+    .rq-plan-selector-row, .rq-plan-modal-grid { grid-template-columns:1fr; }
 }
 
 /* ================================================================

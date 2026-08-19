@@ -22,6 +22,7 @@ trait UsesAuthenticatedUser
         $user->id = $sessionUser['id'] ?? '00000000-0000-0000-0000-000000000001';
         $user->email = $sessionUser['email'] ?? '';
         $user->name = $sessionUser['name'] ?? 'Usuario';
+        $user->personal_id = $sessionUser['personal_id'] ?? null;
         
         $user->setRelation('rol', (object) [
             'id' => 1,

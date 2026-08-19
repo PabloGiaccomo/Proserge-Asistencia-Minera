@@ -69,6 +69,21 @@ CREATE TABLE IF NOT EXISTS usuarios (
   CONSTRAINT fk_usuarios_personal FOREIGN KEY (personal_id) REFERENCES personal(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS usuario_roles (
+  id CHAR(36) NOT NULL,
+  usuario_id CHAR(36) NOT NULL,
+  rol_id CHAR(36) NOT NULL,
+  tipo VARCHAR(20) NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY usuario_roles_usuario_id_rol_id_unique (usuario_id, rol_id),
+  KEY usuario_roles_usuario_id_tipo_index (usuario_id, tipo),
+  KEY usuario_roles_rol_id_index (rol_id),
+  CONSTRAINT usuario_roles_usuario_id_foreign FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  CONSTRAINT usuario_roles_rol_id_foreign FOREIGN KEY (rol_id) REFERENCES roles(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS personal_contrato_datos (
   id CHAR(36) NOT NULL,
   personal_id CHAR(36) NOT NULL,
@@ -170,13 +185,22 @@ CREATE TABLE IF NOT EXISTS personal_mina (
   personal_id CHAR(36) NOT NULL,
   mina_id CHAR(36) NOT NULL,
   estado VARCHAR(30) NOT NULL DEFAULT 'EN_PROCESO',
+  estado_habilitacion VARCHAR(40) NULL,
+  fecha_asignacion DATE NULL,
+  fecha_inicio_proceso DATE NULL,
+  fecha_habilitacion DATE NULL,
+  observacion TEXT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  usuario_actualizacion_id CHAR(36) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_personal_mina (personal_id, mina_id),
   KEY idx_personal_mina_estado (estado),
+  KEY idx_personal_mina_activo (activo),
   CONSTRAINT fk_personal_mina_personal FOREIGN KEY (personal_id) REFERENCES personal(id) ON DELETE CASCADE,
-  CONSTRAINT fk_personal_mina_mina FOREIGN KEY (mina_id) REFERENCES minas(id) ON DELETE CASCADE
+  CONSTRAINT fk_personal_mina_mina FOREIGN KEY (mina_id) REFERENCES minas(id) ON DELETE CASCADE,
+  CONSTRAINT fk_personal_mina_usuario_actualizacion FOREIGN KEY (usuario_actualizacion_id) REFERENCES usuarios(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS rq_mina (
@@ -207,6 +231,7 @@ CREATE TABLE IF NOT EXISTS rq_mina_detalle (
   cantidad_backup INT NOT NULL DEFAULT 0,
   cantidad_total INT NOT NULL DEFAULT 0,
   cantidad_atendida INT NOT NULL DEFAULT 0,
+  compartible_man_power TINYINT(1) NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -283,7 +308,7 @@ CREATE TABLE IF NOT EXISTS rq_mina_detalle_cambios (
 CREATE TABLE IF NOT EXISTS grupo_trabajo (
   id CHAR(36) NOT NULL,
   fecha DATE NOT NULL,
-  supervisor_id CHAR(36) NOT NULL,
+  supervisor_id CHAR(36) NULL,
   mina VARCHAR(191) NULL,
   rq_mina_id CHAR(36) NULL,
   rq_proserge_id CHAR(36) NULL,
@@ -508,11 +533,37 @@ CREATE TABLE IF NOT EXISTS epp_registro (
   tallas JSON NULL,
   requiere_color TINYINT(1) NOT NULL DEFAULT 0,
   colores JSON NULL,
+  otros_atributos JSON NULL,
   estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVO',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_epp_codigo (codigo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS epp_entregas (
+  id CHAR(36) NOT NULL,
+  personal_id CHAR(36) NOT NULL,
+  epp_id CHAR(36) NOT NULL,
+  cantidad INT UNSIGNED NOT NULL DEFAULT 1,
+  talla VARCHAR(80) NULL,
+  color VARCHAR(120) NULL,
+  atributos_json JSON NULL,
+  fecha_entrega DATE NOT NULL,
+  fecha_vencimiento_calendario DATE NULL,
+  vida_util_dias_snapshot INT UNSIGNED NOT NULL DEFAULT 0,
+  estado VARCHAR(30) NOT NULL DEFAULT 'ENTREGADO',
+  motivo_cambio VARCHAR(120) NULL,
+  observacion TEXT NULL,
+  devuelto_at DATE NULL,
+  registrado_por_usuario_id CHAR(36) NULL,
+  cerrado_por_usuario_id CHAR(36) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_epp_entregas_personal_estado (personal_id, estado),
+  KEY idx_epp_entregas_epp_estado (epp_id, estado),
+  KEY idx_epp_entregas_fecha_entrega (fecha_entrega)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS notification_types (

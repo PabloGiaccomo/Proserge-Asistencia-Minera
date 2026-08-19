@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Usuario;
+use App\Modules\RQProserge\Services\RQProsergeCoverageService;
 use App\Modules\RQProserge\Services\RQProsergeService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -380,8 +381,417 @@ class RQProsergeApiTest extends TestCase
 
         $response->assertOk()->assertJsonPath('code', 'RQ_PROSERGE_UNASSIGN_OK');
 
-        $this->assertDatabaseMissing('rq_proserge_detalle', ['id' => $asignacionId]);
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'id' => $asignacionId,
+            'estado' => 'RETIRADO',
+            'motivo_retiro' => 'Desasignado desde flujo legacy.',
+        ]);
         $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 0]);
+    }
+
+    public function test_asignacion_titular_regular_captura_trazabilidad_y_cubre_titular(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'No confiar en JS',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('code', 'RQ_PROSERGE_ASSIGN_OK');
+
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'rq_proserge_id' => $rqProsergeId,
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'puesto_asignado_snapshot' => 'Tecnico',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+            'estado_habilitacion_snapshot' => 'HABILITADO',
+            'asignado_por_id' => $rrhhId,
+        ]);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 1]);
+        $this->assertNotNull(DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('asignado_at'));
+        $this->assertNotNull(DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('disponibilidad_snapshot'));
+    }
+
+    public function test_adicional_cubre_respaldo_y_suma_atendida(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+
+        $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'ADICIONAL',
+        ])->assertOk();
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(1, $metrics['adicionales_titulares']);
+        $this->assertSame(0, $metrics['titular_efectivo']);
+        $this->assertSame(1, $metrics['respaldo_efectivo']);
+        $this->assertSame(1, $metrics['adicionales_como_respaldo']);
+        $this->assertSame(1, $metrics['cantidad_atendida']);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 1]);
+    }
+
+    public function test_titular_excedente_se_guarda_como_adicional(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $titularId = $this->crearPersonal($minaId);
+        $extraId = $this->crearPersonal($minaId);
+
+        $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $titularId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+        ])->assertOk();
+
+        $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $extraId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+        ])->assertOk();
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(1, $metrics['titular_efectivo']);
+        $this->assertSame(1, $metrics['respaldo_efectivo']);
+        $this->assertSame(1, $metrics['adicionales_titulares']);
+        $this->assertSame(2, $metrics['cantidad_atendida']);
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'personal_id' => $extraId,
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'ADICIONAL',
+        ]);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 2]);
+    }
+
+    public function test_titulares_y_adicional_completan_total_con_backup(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 5,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 6,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalIds = collect(range(1, 6))->map(fn () => $this->crearPersonal($minaId))->values();
+
+        foreach ($personalIds as $personalId) {
+            $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+                'rq_mina_detalle_id' => $rqMinaDetalleId,
+                'personal_id' => $personalId,
+                'puesto_asignado' => 'Tecnico',
+                'fecha_inicio' => '2026-05-01',
+                'fecha_fin' => '2026-05-03',
+                'posicion_asignacion' => 'TITULAR',
+                'tipo_asignacion' => 'REGULAR',
+            ])->assertOk();
+        }
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(5, $metrics['titular_efectivo']);
+        $this->assertSame(1, $metrics['respaldo_efectivo']);
+        $this->assertSame(1, $metrics['adicionales_titulares']);
+        $this->assertSame(1, $metrics['adicionales_como_respaldo']);
+        $this->assertSame(6, $metrics['cantidad_atendida']);
+        $this->assertSame(RQProsergeCoverageService::ESTADO_COMPLETADO, $metrics['estado_cobertura']);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 6]);
+    }
+
+    public function test_no_permite_asignar_si_el_puesto_ya_llego_al_total_requerido(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalIds = collect(range(1, 3))->map(fn () => $this->crearPersonal($minaId))->values();
+
+        foreach ($personalIds->take(2) as $personalId) {
+            $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+                'rq_mina_detalle_id' => $rqMinaDetalleId,
+                'personal_id' => $personalId,
+                'puesto_asignado' => 'Tecnico',
+                'fecha_inicio' => '2026-05-01',
+                'fecha_fin' => '2026-05-03',
+                'posicion_asignacion' => 'TITULAR',
+                'tipo_asignacion' => 'REGULAR',
+            ])->assertOk();
+        }
+
+        $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalIds->last(),
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'RQ_PROSERGE_ASSIGNMENT_LIMIT_REACHED');
+
+        $this->assertSame(2, DB::table('rq_proserge_detalle')
+            ->where('rq_mina_detalle_id', $rqMinaDetalleId)
+            ->where('estado', 'ASIGNADO')
+            ->count());
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 2]);
+    }
+
+    public function test_suplente_regular_cubre_respaldo_y_no_titular(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+
+        $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+            'rq_mina_detalle_id' => $rqMinaDetalleId,
+            'personal_id' => $personalId,
+            'puesto_asignado' => 'Tecnico',
+            'fecha_inicio' => '2026-05-01',
+            'fecha_fin' => '2026-05-03',
+            'posicion_asignacion' => 'SUPLENTE',
+            'tipo_asignacion' => 'REGULAR',
+        ])->assertOk();
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(0, $metrics['titular_efectivo']);
+        $this->assertSame(1, $metrics['respaldo_efectivo']);
+        $this->assertSame(1, $metrics['brecha_titular']);
+        $this->assertSame(0, $metrics['brecha_respaldo']);
+        $this->assertSame(1, $metrics['cantidad_atendida']);
+    }
+
+    public function test_suplente_excedente_se_guarda_como_adicional(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $suplenteId = $this->crearPersonal($minaId);
+        $extraId = $this->crearPersonal($minaId);
+
+        foreach ([$suplenteId, $extraId] as $personalId) {
+            $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignar', [
+                'rq_mina_detalle_id' => $rqMinaDetalleId,
+                'personal_id' => $personalId,
+                'puesto_asignado' => 'Tecnico',
+                'fecha_inicio' => '2026-05-01',
+                'fecha_fin' => '2026-05-03',
+                'posicion_asignacion' => 'SUPLENTE',
+                'tipo_asignacion' => 'REGULAR',
+            ])->assertOk();
+        }
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(1, $metrics['respaldo_efectivo']);
+        $this->assertSame(1, $metrics['adicionales_suplentes']);
+        $this->assertSame(1, $metrics['cantidad_atendida']);
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'personal_id' => $extraId,
+            'posicion_asignacion' => 'SUPLENTE',
+            'tipo_asignacion' => 'ADICIONAL',
+        ]);
+    }
+
+    public function test_registro_historico_sin_clasificar_conserva_cobertura_temporal(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        $personalId = $this->crearPersonal($minaId);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $this->crearAsignacionProserge($rqProsergeId, $rqMinaDetalleId, $personalId, '2026-05-01', '2026-05-03');
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+
+        $this->assertSame(1, $metrics['sin_clasificar']);
+        $this->assertSame(1, $metrics['titular_efectivo']);
+        $this->assertSame(0, $metrics['respaldo_efectivo']);
+        $this->assertTrue($metrics['requiere_clasificacion']);
+        $this->assertNull(DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('posicion_asignacion'));
+        $this->assertNull(DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('tipo_asignacion'));
+    }
+
+    public function test_reclasificar_suplente_a_titular_recalcula_brecha(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 1,
+            'cantidad_total' => 2,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+        $asignacionId = $this->crearAsignacionProserge($rqProsergeId, $rqMinaDetalleId, $personalId, '2026-05-01', '2026-05-03', 'SUPLENTE', 'REGULAR');
+
+        $response = $this->withToken($token)->patchJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignaciones/'.$asignacionId, [
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+        ]);
+
+        $response->assertOk()->assertJsonPath('code', 'RQ_PROSERGE_ASSIGNMENT_UPDATE_OK');
+
+        $metrics = app(RQProsergeCoverageService::class)->calculateForDetalle(
+            \App\Models\RQMinaDetalle::query()->with('asignaciones')->findOrFail($rqMinaDetalleId)
+        );
+        $this->assertSame(1, $metrics['titular_efectivo']);
+        $this->assertSame(0, $metrics['respaldo_efectivo']);
+        $this->assertSame(0, $metrics['brecha_titular']);
+        $this->assertSame(1, $metrics['brecha_respaldo']);
+    }
+
+    public function test_retirar_exige_motivo_y_deja_de_contar(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 0,
+            'cantidad_total' => 1,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalId = $this->crearPersonal($minaId);
+        $asignacionId = $this->crearAsignacionProserge($rqProsergeId, $rqMinaDetalleId, $personalId, '2026-05-01', '2026-05-03', 'TITULAR', 'REGULAR');
+
+        $this->withToken($token)
+            ->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignaciones/'.$asignacionId.'/retirar', [])
+            ->assertStatus(422);
+
+        $this->withToken($token)
+            ->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignaciones/'.$asignacionId.'/retirar', ['motivo' => 'Cambio operativo'])
+            ->assertOk()
+            ->assertJsonPath('code', 'RQ_PROSERGE_RETIRE_OK');
+
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'id' => $asignacionId,
+            'estado' => 'RETIRADO',
+            'motivo_retiro' => 'Cambio operativo',
+        ]);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 0]);
+    }
+
+    public function test_reemplazo_marca_anterior_y_nueva_asignacion_cuenta(): void
+    {
+        [$minaId, $rqProsergeId, $rqMinaDetalleId] = $this->crearEscenarioBase(true);
+        DB::table('rq_mina_detalle')->where('id', $rqMinaDetalleId)->update([
+            'cantidad' => 1,
+            'cantidad_backup' => 0,
+            'cantidad_total' => 1,
+        ]);
+        $rrhhId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($rrhhId, $minaId);
+        $token = $this->crearToken($rrhhId);
+        $personalOriginalId = $this->crearPersonal($minaId);
+        $personalReemplazoId = $this->crearPersonal($minaId);
+        $asignacionId = $this->crearAsignacionProserge($rqProsergeId, $rqMinaDetalleId, $personalOriginalId, '2026-05-01', '2026-05-03', 'TITULAR', 'REGULAR');
+
+        $response = $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqProsergeId.'/asignaciones/'.$asignacionId.'/reemplazar', [
+            'personal_id' => $personalReemplazoId,
+            'motivo' => 'Reemplazo por disponibilidad operativa',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('code', 'RQ_PROSERGE_REPLACE_OK');
+
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'id' => $asignacionId,
+            'estado' => 'REEMPLAZADO',
+            'motivo_retiro' => 'Reemplazo por disponibilidad operativa',
+        ]);
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'rq_proserge_id' => $rqProsergeId,
+            'personal_id' => $personalReemplazoId,
+            'reemplaza_a_id' => $asignacionId,
+            'posicion_asignacion' => 'TITULAR',
+            'tipo_asignacion' => 'REGULAR',
+            'estado' => 'ASIGNADO',
+        ]);
+        $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 1]);
     }
 
     public function test_no_asigna_personal_si_la_parada_ya_finalizo(): void
@@ -727,7 +1137,10 @@ class RQProsergeApiTest extends TestCase
         string $rqMinaDetalleId,
         string $personalId,
         string $fechaInicio,
-        string $fechaFin
+        string $fechaFin,
+        ?string $posicionAsignacion = null,
+        ?string $tipoAsignacion = null,
+        string $estado = 'ASIGNADO'
     ): string {
         $id = (string) Str::uuid();
 
@@ -739,7 +1152,9 @@ class RQProsergeApiTest extends TestCase
             'puesto_asignado' => 'Tecnico',
             'fecha_inicio' => $fechaInicio,
             'fecha_fin' => $fechaFin,
-            'estado' => 'ASIGNADO',
+            'posicion_asignacion' => $posicionAsignacion,
+            'tipo_asignacion' => $tipoAsignacion,
+            'estado' => $estado,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

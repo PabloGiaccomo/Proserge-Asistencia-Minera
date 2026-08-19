@@ -15,6 +15,7 @@ use App\Modules\Evaluaciones\Controllers\EvaluacionSupervisorController;
 use App\Modules\ManPower\Controllers\ManPowerController;
 use App\Modules\RQMina\Controllers\RQMinaController;
 use App\Modules\RQProserge\Controllers\RQProsergeController;
+use App\Modules\Transporte\Controllers\TransporteController;
 use App\Modules\Personal\Controllers\PersonalController;
 use App\Modules\Seguridad\Controllers\PermisoController;
 use App\Modules\Seguridad\Controllers\RolController;
@@ -53,18 +54,40 @@ Route::prefix('v1')->group(function (): void {
         Route::put('/rq-proserge/{id}', [RQProsergeController::class, 'update']);
         Route::post('/rq-proserge/{id}/asignar', [RQProsergeController::class, 'asignar']);
         Route::post('/rq-proserge/{id}/desasignar', [RQProsergeController::class, 'desasignar']);
+        Route::patch('/rq-proserge/{id}/asignaciones/{detalleId}', [RQProsergeController::class, 'actualizarAsignacion']);
+        Route::post('/rq-proserge/{id}/asignaciones/{detalleId}/retirar', [RQProsergeController::class, 'retirar']);
+        Route::post('/rq-proserge/{id}/asignaciones/{detalleId}/reemplazar', [RQProsergeController::class, 'reemplazar']);
         Route::get('/rq-proserge/{id}/disponibles', [RQProsergeController::class, 'disponibles']);
 
+        Route::get('/man-power/contexto', [ManPowerController::class, 'contexto']);
         Route::get('/man-power/paradas', [ManPowerController::class, 'paradas']);
         Route::get('/man-power/paradas/{rqMinaId}', [ManPowerController::class, 'paradaDetalle']);
         Route::post('/man-power/grupos', [ManPowerController::class, 'storeGrupo']);
         Route::put('/man-power/grupos/{id}', [ManPowerController::class, 'updateGrupo']);
         Route::post('/man-power/grupos/{id}/agregar-personal', [ManPowerController::class, 'agregarPersonal']);
         Route::post('/man-power/grupos/{id}/quitar-personal', [ManPowerController::class, 'quitarPersonal']);
+        Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/retirar', [ManPowerController::class, 'retirarPersonal']);
+        Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/reubicar', [ManPowerController::class, 'reubicarPersonal']);
+        Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/responsable', [ManPowerController::class, 'asignarResponsable']);
+        Route::post('/man-power/grupos/copiar-dia', [ManPowerController::class, 'copiarGruposDia']);
+        Route::post('/man-power/grupos/{id}/copiar', [ManPowerController::class, 'copiarGrupo']);
         Route::get('/man-power/grupos/{id}', [ManPowerController::class, 'showGrupo']);
 
+        Route::get('/transporte/planificacion', [TransporteController::class, 'planificacion']);
+        Route::post('/transporte/servicios', [TransporteController::class, 'store']);
+        Route::patch('/transporte/servicios/{servicio}', [TransporteController::class, 'update']);
+        Route::post('/transporte/servicios/{servicio}/alcances', [TransporteController::class, 'alcances']);
+        Route::post('/transporte/servicios/{servicio}/pasajeros', [TransporteController::class, 'pasajeros']);
+        Route::post('/transporte/servicios/{servicio}/pasajeros/{pasajero}/retirar', [TransporteController::class, 'retirarPasajero']);
+        Route::post('/transporte/servicios/{servicio}/pasajeros/{pasajero}/reubicar', [TransporteController::class, 'reubicarPasajero']);
+        Route::post('/transporte/servicios/{servicio}/copiar', [TransporteController::class, 'copiar']);
+        Route::post('/transporte/servicios/{servicio}/estado', [TransporteController::class, 'estado']);
+
         Route::get('/asistencia/grupos', [AsistenciaController::class, 'grupos']);
+        Route::get('/asistencia/ejecucion', [AsistenciaController::class, 'ejecucion']);
         Route::get('/asistencia/grupos/{grupoId}', [AsistenciaController::class, 'showGrupo']);
+        Route::post('/asistencia/grupos/{grupoId}/sincronizar-padron', [AsistenciaController::class, 'sincronizarPadron']);
+        Route::post('/asistencia/grupos/{grupoId}/integrantes/{detalleId}/actividad-principal', [AsistenciaController::class, 'asignarActividad']);
         Route::post('/asistencia/grupos/{grupoId}/marcar', [AsistenciaController::class, 'marcar']);
         Route::post('/asistencia/grupos/{grupoId}/marcar-masivo', [AsistenciaController::class, 'marcarMasivo']);
         Route::post('/asistencia/grupos/{grupoId}/cerrar', [AsistenciaController::class, 'cerrar']);

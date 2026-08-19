@@ -13,6 +13,7 @@ use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\RQMinaDetalle;
 use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaFieldOption;
+use App\Models\RQMinaPlan;
 use App\Models\RQProsergeDetalle;
 use App\Models\Taller;
 use App\Models\Usuario;
@@ -31,6 +32,7 @@ class RQMinaService
     public function __construct(
         private readonly RQMinaPolicy $policy,
         private readonly RQProsergeService $rqProsergeService,
+        private readonly RQMinaPlanService $planService,
     ) {
     }
 
@@ -44,6 +46,8 @@ class RQMinaService
             'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
             'detalle',
             'transportes:id,rq_mina_id,transporte,cantidad',
+            'planes.grupos.actividades.turnos',
+            'planes.grupos.transportes',
             'actividadGrupos.actividades.turnos',
             'actividadGrupos.transportes',
         ]);
@@ -149,7 +153,7 @@ class RQMinaService
     public function findForUser(Usuario $usuario, string $id): ?RQMina
     {
         $rqMina = RQMina::query()
-            ->with(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes'])
+            ->with($this->rqMinaLoadRelations())
             ->find($id);
 
         if (!$rqMina) {
@@ -217,6 +221,7 @@ class RQMinaService
                 $rqMina->transportes()->insert($transportRows);
             }
 
+            $this->planService->ensureDefaultPlan($rqMina, $usuario);
             $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario);
             $this->rememberFieldOptions($usuario, $payload);
 
@@ -236,17 +241,7 @@ class RQMinaService
                 'supervisor_pets_id' => (string) ($rqMina->supervisor_pets_id ?? ''),
             ]);
 
-            return $rqMina->load([
-                'mina:id,nombre',
-                'creador:id,email,personal_id',
-                'creador.personal:id,nombre_completo',
-                'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
-                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
-                'detalle',
-                'transportes',
-                'actividadGrupos.actividades.turnos',
-                'actividadGrupos.transportes',
-            ]);
+            return $rqMina->load($this->rqMinaLoadRelations());
         });
     }
 
@@ -307,7 +302,7 @@ class RQMinaService
                 $rqMina->transportes()->insert($transportRows);
             }
 
-            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario);
+            $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario, $payload['plan_id'] ?? null);
             $this->rememberFieldOptions($usuario, $payload);
 
             Log::info('rqmina.detail_persisted', [
@@ -330,17 +325,7 @@ class RQMinaService
                 $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
             }
 
-            return $rqMina->load([
-                'mina:id,nombre',
-                'creador:id,email,personal_id',
-                'creador.personal:id,nombre_completo',
-                'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
-                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
-                'detalle',
-                'transportes',
-                'actividadGrupos.actividades.turnos',
-                'actividadGrupos.transportes',
-            ]);
+            return $rqMina->load($this->rqMinaLoadRelations());
         });
     }
 
@@ -392,17 +377,7 @@ class RQMinaService
                 $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
             }
 
-            return $rqMina->load([
-                'mina:id,nombre',
-                'creador:id,email,personal_id',
-                'creador.personal:id,nombre_completo',
-                'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
-                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
-                'detalle',
-                'transportes',
-                'actividadGrupos.actividades.turnos',
-                'actividadGrupos.transportes',
-            ]);
+            return $rqMina->load($this->rqMinaLoadRelations());
         });
     }
 
@@ -420,21 +395,21 @@ class RQMinaService
 
         $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
 
-        return $rqMina->load(['mina:id,nombre', 'creador:id,email,personal_id', 'creador.personal:id,nombre_completo', 'supervisor:id,dni,nombre_completo,puesto,es_supervisor', 'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor', 'detalle', 'transportes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes']);
+        return $rqMina->load($this->rqMinaLoadRelations());
     }
 
-    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null): ?RQMina
+    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null, ?string $planId = null): ?RQMina
     {
         if (!$this->policy->update($usuario, $rqMina)) {
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo, $detallePayload): RQMina {
+        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo, $detallePayload, $planId): RQMina {
             if ($detallePayload !== null) {
                 $this->replaceDetalle($rqMina, $detallePayload, $usuario);
             }
 
-            $this->replacePlanOperativo($rqMina, $planOperativo, $usuario);
+            $this->replacePlanOperativo($rqMina, $planOperativo, $usuario, $planId);
             $this->rememberFieldOptions($usuario, [
                 'detalle' => $detallePayload ?? [],
                 'plan_operativo' => $planOperativo,
@@ -444,18 +419,25 @@ class RQMinaService
                 $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
             }
 
-            return $rqMina->fresh([
-                'mina:id,nombre',
-                'creador:id,email,personal_id',
-                'creador.personal:id,nombre_completo',
-                'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
-                'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
-                'detalle',
-                'transportes',
-                'actividadGrupos.actividades.turnos',
-                'actividadGrupos.transportes',
-            ]);
+            return $rqMina->fresh($this->rqMinaLoadRelations());
         });
+    }
+
+    private function rqMinaLoadRelations(): array
+    {
+        return [
+            'mina:id,nombre',
+            'creador:id,email,personal_id',
+            'creador.personal:id,nombre_completo',
+            'supervisor:id,dni,nombre_completo,puesto,es_supervisor',
+            'supervisorPets:id,dni,nombre_completo,puesto,es_supervisor',
+            'detalle',
+            'transportes',
+            'planes.grupos.actividades.turnos',
+            'planes.grupos.transportes',
+            'actividadGrupos.actividades.turnos',
+            'actividadGrupos.transportes',
+        ];
     }
 
     private function rememberFieldOptions(?Usuario $usuario, array $payload): void
@@ -1234,19 +1216,21 @@ class RQMinaService
         ];
     }
 
-    private function replacePlanOperativo(RQMina $rqMina, mixed $groups, ?Usuario $usuario = null): void
+    private function replacePlanOperativo(RQMina $rqMina, mixed $groups, ?Usuario $usuario = null, ?string $planId = null): void
     {
-        $previousTransportes = $this->snapshotActividadTransportes($rqMina);
+        $plan = $this->planService->resolvePlanForLegacyPayload($rqMina, $planId, $usuario);
+        $previousTransportes = $this->snapshotActividadTransportes($rqMina, $plan);
         $normalized = $this->normalizePlanOperativo($groups);
 
         $this->recordTransportPlanChanges($rqMina, $previousTransportes, $normalized, $usuario);
 
-        $rqMina->actividadGrupos()->delete();
+        $this->deletePlanGroups($rqMina, $plan);
 
         foreach ($normalized as $groupIndex => $group) {
             $grupo = RQMinaActividadGrupo::query()->create([
                 'id' => (string) Str::uuid(),
                 'rq_mina_id' => (string) $rqMina->id,
+                'rq_mina_plan_id' => (string) $plan->id,
                 'area_operativa' => $group['area_operativa'],
                 'modulo' => $group['modulo'],
                 'nombre' => $group['nombre'],
@@ -1308,9 +1292,17 @@ class RQMinaService
                     'id' => (string) Str::uuid(),
                     'grupo_id' => (string) $grupo->id,
                     'actividad_id' => $actividadId,
+                    'rq_mina_plan_id' => (string) $plan->id,
                     'alcance' => $transporte['alcance'],
                     'unidad_carga' => $transporte['unidad_carga'],
+                    'fecha' => $transporte['fecha'],
+                    'turno' => $transporte['turno'],
+                    'tipo_transporte' => $transporte['tipo_transporte'],
+                    'capacidad_requerida' => $transporte['capacidad_requerida'],
+                    'cantidad_unidades_requeridas' => $transporte['cantidad_unidades_requeridas'],
                     'origen' => $transporte['origen'],
+                    'origen_snapshot' => $transporte['origen_snapshot'],
+                    'destino_snapshot' => $transporte['destino_snapshot'],
                     'unidades_transporte' => $transporte['unidades_transporte'],
                     'placas_asignadas' => $transporte['placas_asignadas'],
                     'fecha_inicio' => $transporte['fecha_inicio'],
@@ -1318,6 +1310,7 @@ class RQMinaService
                     'dias_uso' => $transporte['dias_uso'],
                     'estado_logistico' => $transporte['estado_logistico'],
                     'indicaciones' => $transporte['indicaciones'],
+                    'observaciones' => $transporte['observaciones'],
                     'comentario_cambio' => $transporte['comentario_cambio'],
                     'incidencia_operativa' => $transporte['incidencia_operativa'],
                     'recepcion_fecha' => $transporte['recepcion_fecha'],
@@ -1333,6 +1326,28 @@ class RQMinaService
                 $grupo->transportes()->insert($transporteRows);
             }
         }
+    }
+
+    private function deletePlanGroups(RQMina $rqMina, RQMinaPlan $plan): void
+    {
+        $query = RQMinaActividadGrupo::query()
+            ->where('rq_mina_id', (string) $rqMina->id)
+            ->where('rq_mina_plan_id', (string) $plan->id);
+
+        if ($this->isDefaultPlan($plan)) {
+            $query->orWhere(function ($legacyQuery) use ($rqMina): void {
+                $legacyQuery
+                    ->where('rq_mina_id', (string) $rqMina->id)
+                    ->whereNull('rq_mina_plan_id');
+            });
+        }
+
+        $query->delete();
+    }
+
+    private function isDefaultPlan(RQMinaPlan $plan): bool
+    {
+        return (string) $plan->codigo === RQMinaPlan::CODIGO_DEFAULT && (int) $plan->version === 1;
     }
 
     private function normalizePlanOperativo(mixed $groups): array
@@ -1473,12 +1488,19 @@ class RQMinaService
                 'actividad_key' => trim((string) ($item['actividad_key'] ?? '')),
                 'alcance' => trim((string) ($item['alcance'] ?? '')),
                 'unidad_carga' => trim((string) ($item['unidad_carga'] ?? '')),
+                'fecha' => $this->normalizeDateValue($item['fecha'] ?? null),
+                'turno' => $this->normalizeTransportTurno($item['turno'] ?? null),
+                'tipo_transporte' => $this->normalizeTransportTipo($item['tipo_transporte'] ?? $item['tipo'] ?? null),
+                'capacidad_requerida' => $this->normalizePositiveInteger($item['capacidad_requerida'] ?? null),
+                'cantidad_unidades_requeridas' => $this->normalizePositiveInteger($item['cantidad_unidades_requeridas'] ?? null),
                 'origen' => $this->normalizeTransportEnum(
                     $item['origen'] ?? null,
                     RQMinaActividadTransporte::origenes(),
                     RQMinaActividadTransporte::ORIGEN_EMPRESA,
                     true
                 ),
+                'origen_snapshot' => trim((string) ($item['origen_snapshot'] ?? '')),
+                'destino_snapshot' => trim((string) ($item['destino_snapshot'] ?? '')),
                 'unidades_transporte' => trim((string) ($item['unidades_transporte'] ?? '')),
                 'placas_asignadas' => trim((string) ($item['placas_asignadas'] ?? '')),
                 'fecha_inicio' => $fechaInicio,
@@ -1490,6 +1512,7 @@ class RQMinaService
                     RQMinaActividadTransporte::ESTADO_REQUERIDO
                 ),
                 'indicaciones' => trim((string) ($item['indicaciones'] ?? '')),
+                'observaciones' => trim((string) ($item['observaciones'] ?? '')),
                 'comentario_cambio' => trim((string) ($item['comentario_cambio'] ?? '')),
                 'incidencia_operativa' => trim((string) ($item['incidencia_operativa'] ?? '')),
                 'recepcion_fecha' => $recepcionFecha,
@@ -1515,7 +1538,10 @@ class RQMinaService
                 'unidad_carga',
                 'unidades_transporte',
                 'placas_asignadas',
+                'origen_snapshot',
+                'destino_snapshot',
                 'indicaciones',
+                'observaciones',
                 'comentario_cambio',
                 'incidencia_operativa',
                 'recepcion_observacion',
@@ -1527,6 +1553,29 @@ class RQMinaService
         }
 
         return $normalized;
+    }
+
+    private function normalizeTransportTurno(mixed $value): ?string
+    {
+        $text = strtoupper(trim((string) $value));
+
+        return match ($text) {
+            'A', 'DIA', 'DÍA' => 'A',
+            'B', 'NOCHE' => 'B',
+            default => null,
+        };
+    }
+
+    private function normalizeTransportTipo(mixed $value): ?string
+    {
+        $text = strtoupper(trim((string) $value));
+
+        return in_array($text, ['PERSONAL', 'CARGA'], true) ? $text : null;
+    }
+
+    private function normalizePositiveInteger(mixed $value): ?int
+    {
+        return is_numeric($value) ? max(0, (int) $value) : null;
     }
 
     private function normalizeTransportEnum(mixed $value, array $allowed, string $default, bool $nullable = false): ?string
@@ -1578,12 +1627,27 @@ class RQMinaService
         return null;
     }
 
-    private function snapshotActividadTransportes(RQMina $rqMina): array
+    private function snapshotActividadTransportes(RQMina $rqMina, ?RQMinaPlan $plan = null): array
     {
-        $rqMina->loadMissing('actividadGrupos.transportes');
+        $query = RQMinaActividadGrupo::query()
+            ->where('rq_mina_id', (string) $rqMina->id)
+            ->with('transportes')
+            ->orderBy('orden');
+
+        if ($plan) {
+            $query->where(function ($inner) use ($plan): void {
+                $inner->where('rq_mina_plan_id', (string) $plan->id);
+
+                if ($this->isDefaultPlan($plan)) {
+                    $inner->orWhereNull('rq_mina_plan_id');
+                }
+            });
+        }
+
+        $groups = $query->get();
         $snapshots = [];
 
-        foreach ($rqMina->actividadGrupos as $groupIndex => $group) {
+        foreach ($groups as $groupIndex => $group) {
             foreach ($group->transportes as $transportIndex => $transport) {
                 $snapshot = [
                     'key' => $this->transportPlanKey([
@@ -1806,7 +1870,11 @@ class RQMinaService
             return ['success' => false, 'message' => 'Solicitud no encontrada'];
         }
         
-        $updated = $this->update($usuario, $rqMina, $payload);
+        try {
+            $updated = $this->update($usuario, $rqMina, $payload);
+        } catch (\InvalidArgumentException $exception) {
+            return ['success' => false, 'message' => $exception->getMessage()];
+        }
         
         if (!$updated) {
             return ['success' => false, 'message' => 'No tienes permiso para actualizar esta solicitud'];

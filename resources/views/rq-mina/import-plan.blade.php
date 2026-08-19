@@ -11,6 +11,8 @@
     $semanaLabel = $semanaInicio
         ? ($semanaFin && $semanaFin !== $semanaInicio ? 'Semana '.$semanaInicio.' - '.$semanaFin.' / '.$anioSemana : 'Semana '.$semanaInicio.' / '.$anioSemana)
         : '-';
+    $selectedPlan = $item['selected_plan'] ?? null;
+    $selectedPlanId = (string) ($item['selected_plan_id'] ?? ($selectedPlan['id'] ?? ''));
 @endphp
 
 @section('content')
@@ -22,7 +24,7 @@
             <p class="page-subtitle">{{ $item['lugar'] ?? '-' }} | {{ $semanaLabel }}</p>
         </div>
         <div class="page-actions">
-            <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">Volver</a>
+            <a href="{{ route('rq-mina.plan', ['id' => $item['id'], 'plan_id' => $selectedPlanId]) }}" class="btn btn-outline">Volver</a>
         </div>
     </div>
 </div>
@@ -44,6 +46,10 @@
         <span>Fechas</span>
         <strong>{{ $item['fecha_inicio'] ?? '-' }} al {{ $item['fecha_fin'] ?? '-' }}</strong>
     </div>
+    <div class="rq-import-meta">
+        <span>Plan destino</span>
+        <strong>{{ $selectedPlan['codigo'] ?? '-' }} - {{ $selectedPlan['nombre'] ?? '-' }}</strong>
+    </div>
 </div>
 
 <div class="card">
@@ -56,7 +62,7 @@
             <input id="plan_operativo_excel" class="rq-import-file" type="file" accept=".xlsx,.xls,.csv" disabled>
         </div>
         <div class="rq-import-actions">
-            <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">Cancelar</a>
+            <a href="{{ route('rq-mina.plan', ['id' => $item['id'], 'plan_id' => $selectedPlanId]) }}" class="btn btn-outline">Cancelar</a>
             <button type="button" class="btn btn-primary" disabled>Importar</button>
         </div>
     </div>

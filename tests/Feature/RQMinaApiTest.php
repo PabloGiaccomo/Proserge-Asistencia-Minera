@@ -250,6 +250,25 @@ class RQMinaApiTest extends TestCase
             'area_operativa' => 'C1',
             'modulo' => 'Seca',
         ]);
+        $rqMinaId = $response->json('data.id');
+        $planId = $response->json('data.plan_inicial_id');
+
+        $this->assertNotEmpty($planId);
+        $this->assertDatabaseHas('rq_mina_planes', [
+            'id' => $planId,
+            'rq_mina_id' => $rqMinaId,
+            'codigo' => 'PLAN-001',
+            'nombre' => 'Plan operativo inicial',
+            'version' => 1,
+            'fecha_inicio' => '2026-04-13',
+            'fecha_fin' => '2026-04-19',
+            'estado' => 'BORRADOR',
+        ]);
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', [
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => $planId,
+            'area_operativa' => 'C1',
+        ]);
         $this->assertDatabaseHas('rq_mina_actividades', [
             'sait' => 'SAIT-100',
             'sector' => 'Chancado',
@@ -280,6 +299,251 @@ class RQMinaApiTest extends TestCase
             'tipo' => 'REGISTRO_REQUERIMIENTO',
             'estado_nuevo' => 'ASIGNADO',
         ]);
+    }
+
+    public function test_actualizar_payload_legacy_no_duplica_plan_inicial(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $payload = [
+            'mina_id' => $minaId,
+            'area' => 'Parada Planta',
+            'fecha_inicio' => '2026-04-13',
+            'fecha_fin' => '2026-04-19',
+            'plan_operativo' => [
+                [
+                    'area_operativa' => 'C1',
+                    'modulo' => 'Seca',
+                    'nombre' => 'Grupo Inicial',
+                    'actividades' => [
+                        ['sait' => 'SAIT-100', 'turnos' => [['fecha' => '2026-04-13', 'turno_a' => 'X']]],
+                    ],
+                ],
+            ],
+        ];
+
+        $created = $this->withToken($token)->postJson('/api/v1/rq-mina', $payload)->assertStatus(201);
+        $rqMinaId = $created->json('data.id');
+        $planId = $created->json('data.plan_inicial_id');
+
+        $payload['plan_operativo'][0]['nombre'] = 'Grupo Actualizado';
+        $this->withToken($token)->putJson('/api/v1/rq-mina/'.$rqMinaId, $payload)->assertOk();
+
+        $this->assertSame(1, DB::table('rq_mina_planes')->where('rq_mina_id', $rqMinaId)->count());
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', [
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => $planId,
+            'nombre' => 'Grupo Actualizado',
+        ]);
+        $this->assertDatabaseMissing('rq_mina_actividad_grupos', [
+            'rq_mina_id' => $rqMinaId,
+            'nombre' => 'Grupo Inicial',
+        ]);
+    }
+
+    public function test_no_permite_utilizar_plan_de_otra_parada(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $rqA = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Parada A',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'detalle' => [['puesto' => 'Tecnico', 'cantidad' => 1]],
+        ])->assertStatus(201);
+
+        $rqB = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Parada B',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'detalle' => [['puesto' => 'Tecnico', 'cantidad' => 1]],
+        ])->assertStatus(201);
+
+        $this->withToken($token)->putJson('/api/v1/rq-mina/'.$rqA->json('data.id'), [
+            'mina_id' => $minaId,
+            'area' => 'Parada A',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-14',
+            'plan_id' => $rqB->json('data.plan_inicial_id'),
+            'plan_operativo' => [
+                ['nombre' => 'No debe guardar', 'actividades' => [['sait' => 'SAIT-X']]],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'RQ_MINA_PLAN_INVALID');
+    }
+
+    public function test_ensure_default_plan_es_idempotente_y_valida_rango(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $rqMinaId = $this->createRQMina($minaId, $usuarioId, 'BORRADOR', '2026-04-10', '2026-04-20');
+        $rqMina = \App\Models\RQMina::query()->findOrFail($rqMinaId);
+        $service = app(\App\Modules\RQMina\Services\RQMinaPlanService::class);
+
+        $first = $service->ensureDefaultPlan($rqMina);
+        $second = $service->ensureDefaultPlan($rqMina);
+
+        $this->assertSame((string) $first->id, (string) $second->id);
+        $this->assertSame(1, DB::table('rq_mina_planes')->where('rq_mina_id', $rqMinaId)->count());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->validatePlanRange($rqMina, '2026-04-09', '2026-04-20');
+    }
+
+    public function test_plan_no_puede_terminar_fuera_de_parada_ni_invertir_fechas(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $rqMinaId = $this->createRQMina($minaId, $usuarioId, 'BORRADOR', '2026-04-10', '2026-04-20');
+        $rqMina = \App\Models\RQMina::query()->findOrFail($rqMinaId);
+        $service = app(\App\Modules\RQMina\Services\RQMinaPlanService::class);
+
+        try {
+            $service->validatePlanRange($rqMina, '2026-04-12', '2026-04-21');
+            $this->fail('El plan no debio aceptar fecha fin posterior a la parada.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('terminar despues', $exception->getMessage());
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->validatePlanRange($rqMina, '2026-04-15', '2026-04-14');
+    }
+
+    public function test_reemplazar_plan_uno_no_elimina_grupos_de_otro_plan(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+
+        $created = $this->withToken($token)->postJson('/api/v1/rq-mina', [
+            'mina_id' => $minaId,
+            'area' => 'Parada multi plan',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-20',
+            'plan_operativo' => [
+                ['nombre' => 'Plan 1 Grupo', 'actividades' => [['sait' => 'SAIT-1']]],
+            ],
+        ])->assertStatus(201);
+
+        $rqMinaId = $created->json('data.id');
+        $planDosId = (string) Str::uuid();
+        $grupoPlanDosId = (string) Str::uuid();
+
+        DB::table('rq_mina_planes')->insert([
+            'id' => $planDosId,
+            'rq_mina_id' => $rqMinaId,
+            'codigo' => 'PLAN-002',
+            'nombre' => 'Plan alterno',
+            'version' => 1,
+            'fecha_inicio' => '2026-04-15',
+            'fecha_fin' => '2026-04-20',
+            'estado' => 'BORRADOR',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $grupoPlanDosId,
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => $planDosId,
+            'nombre' => 'Grupo del plan dos',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withToken($token)->putJson('/api/v1/rq-mina/'.$rqMinaId, [
+            'mina_id' => $minaId,
+            'area' => 'Parada multi plan',
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-20',
+            'plan_operativo' => [
+                ['nombre' => 'Plan 1 reemplazado', 'actividades' => [['sait' => 'SAIT-1B']]],
+            ],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', [
+            'id' => $grupoPlanDosId,
+            'rq_mina_plan_id' => $planDosId,
+            'nombre' => 'Grupo del plan dos',
+        ]);
+    }
+
+    public function test_grupos_legacy_sin_plan_siguen_en_respuesta_legacy(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $token = $this->createToken($usuarioId);
+        $rqMinaId = $this->createRQMina($minaId, $usuarioId, 'BORRADOR');
+
+        DB::table('rq_mina_planes')->insert([
+            'id' => (string) Str::uuid(),
+            'rq_mina_id' => $rqMinaId,
+            'codigo' => 'PLAN-001',
+            'nombre' => 'Plan operativo inicial',
+            'version' => 1,
+            'fecha_inicio' => '2026-04-10',
+            'fecha_fin' => '2026-04-12',
+            'estado' => 'BORRADOR',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => (string) Str::uuid(),
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => null,
+            'nombre' => 'Grupo legacy',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withToken($token)
+            ->getJson('/api/v1/rq-mina/'.$rqMinaId)
+            ->assertOk()
+            ->assertJsonPath('data.plan_operativo.0.nombre', 'Grupo legacy')
+            ->assertJsonPath('data.plans.0.grupos.0.nombre', 'Grupo legacy');
+    }
+
+    public function test_comando_backfill_planes_es_idempotente_y_respeta_dry_run(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->userRoleId);
+        $rqMinaId = $this->createRQMina($minaId, $usuarioId, 'BORRADOR');
+        $grupoId = (string) Str::uuid();
+
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $grupoId,
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => null,
+            'nombre' => 'Grupo sin plan',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->artisan('rq-mina:backfill-planes --dry-run')->assertSuccessful();
+        $this->assertDatabaseMissing('rq_mina_planes', ['rq_mina_id' => $rqMinaId]);
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', ['id' => $grupoId, 'rq_mina_plan_id' => null]);
+
+        $this->artisan('rq-mina:backfill-planes')->assertSuccessful();
+        $planId = DB::table('rq_mina_planes')->where('rq_mina_id', $rqMinaId)->value('id');
+
+        $this->assertNotEmpty($planId);
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', ['id' => $grupoId, 'rq_mina_plan_id' => $planId]);
+
+        $this->artisan('rq-mina:backfill-planes')->assertSuccessful();
+        $this->assertSame(1, DB::table('rq_mina_planes')->where('rq_mina_id', $rqMinaId)->count());
+        $this->assertDatabaseHas('rq_mina_actividad_grupos', ['id' => $grupoId, 'rq_mina_plan_id' => $planId]);
     }
 
     public function test_opciones_de_campos_rq_mina_se_guardan_y_eliminan(): void

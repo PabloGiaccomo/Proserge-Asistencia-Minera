@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Modules\Seguridad\Services\RoleManagementService;
 use App\Modules\Notificaciones\Services\NotificationInboxService;
 use App\Models\NotificationUserSetting;
 use App\Support\Rbac\PermissionMatrix;
@@ -37,12 +36,6 @@ class AppServiceProvider extends ServiceProvider
 
         if (app()->runningInConsole()) {
             return;
-        }
-
-        try {
-            app(RoleManagementService::class)->ensureBaseRoles();
-        } catch (Throwable) {
-            // No bloquear toda la app si la base de datos aun no esta disponible.
         }
 
         View::composer('partials.header', function ($view): void {

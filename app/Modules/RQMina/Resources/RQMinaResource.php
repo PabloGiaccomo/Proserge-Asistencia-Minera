@@ -71,55 +71,93 @@ class RQMinaResource extends JsonResource
                     'cantidad' => (int) $item->cantidad,
                 ])->values()->all();
             }),
-            'plan_operativo' => $this->whenLoaded('actividadGrupos', function (): array {
-                return $this->actividadGrupos->map(fn ($group): array => [
-                    'id' => $group->id,
-                    'area_operativa' => $group->area_operativa,
-                    'modulo' => $group->modulo,
-                    'nombre' => $group->nombre,
-                    'observaciones' => $group->observaciones,
-                    'actividades' => $group->actividades->map(fn ($activity): array => [
-                        'id' => $activity->id,
-                        'sait' => $activity->sait,
-                        'sector' => $activity->sector,
-                        'area' => $activity->area,
-                        'ait_trabajo' => $activity->ait_trabajo,
-                        'detalle_trabajos_relevantes' => $activity->detalle_trabajos_relevantes,
-                        'supervisor_campo_dia' => $activity->supervisor_campo_dia,
-                        'supervisor_campo_noche' => $activity->supervisor_campo_noche,
-                        'supervisor_seguridad_dia' => $activity->supervisor_seguridad_dia,
-                        'supervisor_seguridad_noche' => $activity->supervisor_seguridad_noche,
-                        'turnos' => $activity->turnos->map(fn ($turno): array => [
-                            'fecha' => optional($turno->fecha)->toDateString(),
-                            'dia_label' => $turno->dia_label,
-                            'turno_a' => $turno->turno_a,
-                            'real_turno_a' => $turno->real_turno_a,
-                            'turno_b' => $turno->turno_b,
-                            'real_turno_b' => $turno->real_turno_b ?? $turno->real,
-                            'real' => $turno->real_turno_b ?? $turno->real,
-                        ])->values()->all(),
-                    ])->values()->all(),
-                    'transportes' => $group->transportes->map(fn ($transport): array => [
-                        'id' => $transport->id,
-                        'actividad_id' => $transport->actividad_id,
-                        'alcance' => $transport->alcance,
-                        'unidad_carga' => $transport->unidad_carga,
-                        'origen' => $transport->origen,
-                        'unidades_transporte' => $transport->unidades_transporte,
-                        'placas_asignadas' => $transport->placas_asignadas,
-                        'fecha_inicio' => optional($transport->fecha_inicio)->toDateString(),
-                        'fecha_fin' => optional($transport->fecha_fin)->toDateString(),
-                        'dias_uso' => $transport->dias_uso,
-                        'estado_logistico' => $transport->estado_logistico,
-                        'indicaciones' => $transport->indicaciones,
-                        'comentario_cambio' => $transport->comentario_cambio,
-                        'incidencia_operativa' => $transport->incidencia_operativa,
-                        'recepcion_fecha' => optional($transport->recepcion_fecha)->toDateString(),
-                        'recepcion_estado' => $transport->recepcion_estado,
-                        'recepcion_observacion' => $transport->recepcion_observacion,
-                    ])->values()->all(),
+            'plan_inicial_id' => $this->whenLoaded('planes', fn (): ?string => $this->planes
+                ->first(fn ($plan): bool => (string) $plan->codigo === 'PLAN-001' && (int) $plan->version === 1)
+                ?->id),
+            'plans' => $this->whenLoaded('planes', function (): array {
+                return $this->planes->map(fn ($plan): array => [
+                    'id' => $plan->id,
+                    'codigo' => $plan->codigo,
+                    'nombre' => $plan->nombre,
+                    'version' => (int) $plan->version,
+                    'fecha_inicio' => optional($plan->fecha_inicio)->toDateString(),
+                    'fecha_fin' => optional($plan->fecha_fin)->toDateString(),
+                    'semana_referencia' => $plan->semana_referencia,
+                    'estado' => $plan->estado,
+                    'observaciones' => $plan->observaciones,
+                    'grupos' => $this->groupsForPlan($plan)->map(fn ($group): array => $this->planGroupToArray($group))->values()->all(),
                 ])->values()->all();
             }),
+            'plan_operativo' => $this->whenLoaded('actividadGrupos', function (): array {
+                return $this->actividadGrupos->map(fn ($group): array => $this->planGroupToArray($group))->values()->all();
+            }),
         ];
+    }
+
+    private function planGroupToArray($group): array
+    {
+        return [
+            'id' => $group->id,
+            'rq_mina_plan_id' => $group->rq_mina_plan_id,
+            'area_operativa' => $group->area_operativa,
+            'modulo' => $group->modulo,
+            'nombre' => $group->nombre,
+            'observaciones' => $group->observaciones,
+            'actividades' => $group->actividades->map(fn ($activity): array => [
+                'id' => $activity->id,
+                'sait' => $activity->sait,
+                'sector' => $activity->sector,
+                'area' => $activity->area,
+                'ait_trabajo' => $activity->ait_trabajo,
+                'detalle_trabajos_relevantes' => $activity->detalle_trabajos_relevantes,
+                'supervisor_campo_dia' => $activity->supervisor_campo_dia,
+                'supervisor_campo_noche' => $activity->supervisor_campo_noche,
+                'supervisor_seguridad_dia' => $activity->supervisor_seguridad_dia,
+                'supervisor_seguridad_noche' => $activity->supervisor_seguridad_noche,
+                'turnos' => $activity->turnos->map(fn ($turno): array => [
+                    'fecha' => optional($turno->fecha)->toDateString(),
+                    'dia_label' => $turno->dia_label,
+                    'turno_a' => $turno->turno_a,
+                    'real_turno_a' => $turno->real_turno_a,
+                    'turno_b' => $turno->turno_b,
+                    'real_turno_b' => $turno->real_turno_b ?? $turno->real,
+                    'real' => $turno->real_turno_b ?? $turno->real,
+                ])->values()->all(),
+            ])->values()->all(),
+            'transportes' => $group->transportes->map(fn ($transport): array => [
+                'id' => $transport->id,
+                'actividad_id' => $transport->actividad_id,
+                'alcance' => $transport->alcance,
+                'unidad_carga' => $transport->unidad_carga,
+                'origen' => $transport->origen,
+                'unidades_transporte' => $transport->unidades_transporte,
+                'placas_asignadas' => $transport->placas_asignadas,
+                'fecha_inicio' => optional($transport->fecha_inicio)->toDateString(),
+                'fecha_fin' => optional($transport->fecha_fin)->toDateString(),
+                'dias_uso' => $transport->dias_uso,
+                'estado_logistico' => $transport->estado_logistico,
+                'indicaciones' => $transport->indicaciones,
+                'comentario_cambio' => $transport->comentario_cambio,
+                'incidencia_operativa' => $transport->incidencia_operativa,
+                'recepcion_fecha' => optional($transport->recepcion_fecha)->toDateString(),
+                'recepcion_estado' => $transport->recepcion_estado,
+                'recepcion_observacion' => $transport->recepcion_observacion,
+            ])->values()->all(),
+        ];
+    }
+
+    private function groupsForPlan($plan)
+    {
+        $groups = $plan->grupos;
+
+        if ((string) $plan->codigo !== 'PLAN-001' || (int) $plan->version !== 1 || !$this->relationLoaded('actividadGrupos')) {
+            return $groups;
+        }
+
+        return $groups
+            ->concat($this->actividadGrupos->filter(fn ($group): bool => empty($group->rq_mina_plan_id)))
+            ->unique('id')
+            ->sortBy('orden')
+            ->values();
     }
 }

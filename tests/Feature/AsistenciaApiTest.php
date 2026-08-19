@@ -25,6 +25,7 @@ class AsistenciaApiTest extends TestCase
             'nombre' => 'PLANNER',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
                 'asistencias' => ['ver', 'actualizar', 'registrar', 'cerrar', 'reabrir'],
+                'man_power' => ['ver', 'editar', 'asignar'],
             ])),
             'estado' => 'ACTIVO',
         ]);
@@ -90,6 +91,71 @@ class AsistenciaApiTest extends TestCase
         ]);
     }
 
+    public function test_marcado_exacto_por_distribucion_conserva_trazabilidad(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $detalleGrupoId = DB::table('grupo_trabajo_detalle')
+            ->where('grupo_trabajo_id', $grupoId)
+            ->where('personal_id', $trabajadorId)
+            ->value('id');
+
+        $response = $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'grupo_trabajo_detalle_id' => $detalleGrupoId,
+            'estado' => 'TARDANZA',
+            'hora_marcado' => '06:55',
+            'observaciones' => 'Ingreso con retraso comunicado',
+        ]);
+
+        $response->assertOk()->assertJsonPath('code', 'ASISTENCIA_MARCAR_OK');
+
+        $this->assertDatabaseHas('asistencia_detalle', [
+            'grupo_trabajo_detalle_id' => $detalleGrupoId,
+            'trabajador_id' => $trabajadorId,
+            'estado' => 'TARDANZA',
+            'origen_registro' => 'MANUAL',
+        ]);
+
+        $this->assertDatabaseHas('parada_ejecucion_resumen', [
+            'rq_mina_id' => DB::table('grupo_trabajo')->where('id', $grupoId)->value('rq_mina_id'),
+            'turno' => 'DIA',
+            'presentes' => 1,
+            'tardanzas' => 1,
+        ]);
+    }
+
+    public function test_marcado_exacto_por_asistencia_detalle_id(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'PRESENTE',
+        ])->assertOk();
+
+        $asistenciaDetalleId = DB::table('asistencia_detalle')
+            ->where('trabajador_id', $trabajadorId)
+            ->value('id');
+
+        $response = $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'asistencia_detalle_id' => $asistenciaDetalleId,
+            'estado' => 'AUSENTE',
+            'observaciones' => 'Correccion operativa',
+        ]);
+
+        $response->assertOk()->assertJsonPath('code', 'ASISTENCIA_MARCAR_OK');
+
+        $this->assertDatabaseHas('asistencia_detalle', [
+            'id' => $asistenciaDetalleId,
+            'estado' => 'AUSENTE',
+        ]);
+    }
+
     public function test_marcado_masivo_funciona(): void
     {
         [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
@@ -129,6 +195,123 @@ class AsistenciaApiTest extends TestCase
             'trabajador_id' => $ausente,
             'motivo' => 'INASISTENCIA_ASISTENCIA',
         ]);
+    }
+
+    public function test_justificado_y_no_corresponde_no_generan_falta(): void
+    {
+        [$minaId, $grupoId, $supervisorId, $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'JUSTIFICADO',
+            'motivo_estado' => 'Descanso medico comunicado',
+        ])->assertOk();
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $supervisorId,
+            'estado' => 'NO_CORRESPONDE',
+            'motivo_estado' => 'Reubicado antes de inicio efectivo',
+        ])->assertOk();
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/cerrar', [])->assertOk();
+
+        $this->assertDatabaseMissing('faltas', [
+            'trabajador_id' => $trabajadorId,
+            'motivo' => 'INASISTENCIA_ASISTENCIA',
+            'estado' => 'ACTIVA',
+        ]);
+        $this->assertDatabaseMissing('faltas', [
+            'trabajador_id' => $supervisorId,
+            'motivo' => 'INASISTENCIA_ASISTENCIA',
+            'estado' => 'ACTIVA',
+        ]);
+    }
+
+    public function test_justificado_exige_motivo(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $response = $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'JUSTIFICADO',
+        ]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'ASISTENCIA_MOTIVE_REQUIRED');
+    }
+
+    public function test_execution_asigna_actividad_principal_y_recalcula_resumen_por_actividad(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $rqMinaId = DB::table('grupo_trabajo')->where('id', $grupoId)->value('rq_mina_id');
+        $actividadId = $this->crearActividadOperativa($rqMinaId, $grupoId);
+        $detalleGrupoId = DB::table('grupo_trabajo_detalle')
+            ->where('grupo_trabajo_id', $grupoId)
+            ->where('personal_id', $trabajadorId)
+            ->value('id');
+
+        $response = $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/integrantes/'.$detalleGrupoId.'/actividad-principal', [
+            'rq_mina_actividad_id' => $actividadId,
+            'observacion' => 'Asignacion operativa principal',
+        ]);
+
+        $response->assertOk()->assertJsonPath('code', 'ASISTENCIA_ACTIVIDAD_PRINCIPAL_OK');
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'grupo_trabajo_detalle_id' => $detalleGrupoId,
+            'estado' => 'PRESENTE',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('grupo_trabajo_detalle_actividades', [
+            'grupo_trabajo_detalle_id' => $detalleGrupoId,
+            'rq_mina_actividad_id' => $actividadId,
+            'es_principal' => 1,
+        ]);
+
+        $this->assertDatabaseHas('parada_ejecucion_resumen', [
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_actividad_id' => $actividadId,
+            'presentes' => 1,
+        ]);
+    }
+
+    public function test_backfill_y_recalculo_dry_run_funcionan_sin_modificar(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'PRESENTE',
+        ])->assertOk();
+
+        $detalleId = DB::table('asistencia_detalle')
+            ->where('trabajador_id', $trabajadorId)
+            ->value('id');
+
+        DB::table('asistencia_detalle')->where('id', $detalleId)->update([
+            'grupo_trabajo_detalle_id' => null,
+            'rq_proserge_detalle_id' => null,
+            'origen_registro' => null,
+        ]);
+
+        $this->artisan('asistencia:backfill-distribuciones --dry-run')->assertExitCode(0);
+        $this->assertDatabaseHas('asistencia_detalle', [
+            'id' => $detalleId,
+            'grupo_trabajo_detalle_id' => null,
+        ]);
+
+        $this->artisan('parada:recalcular-ejecucion --dry-run')->assertExitCode(0);
     }
 
     public function test_no_permite_cerrar_dos_veces(): void
@@ -308,6 +491,62 @@ class AsistenciaApiTest extends TestCase
         ]);
 
         return $id;
+    }
+
+    private function crearActividadOperativa(string $rqMinaId, string $grupoTrabajoId): string
+    {
+        $grupoOperativoId = (string) Str::uuid();
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $grupoOperativoId,
+            'rq_mina_id' => $rqMinaId,
+            'nombre' => 'Grupo operativo',
+            'area_operativa' => 'Area',
+            'modulo' => 'Modulo',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $actividadId = (string) Str::uuid();
+        DB::table('rq_mina_actividades')->insert([
+            'id' => $actividadId,
+            'grupo_id' => $grupoOperativoId,
+            'sait' => 'SAIT-1',
+            'area' => 'Area',
+            'sector' => 'Sector',
+            'ait_trabajo' => 'Actividad principal',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('grupo_trabajo')->where('id', $grupoTrabajoId)->update([
+            'rq_mina_actividad_grupo_id' => $grupoOperativoId,
+            'cantidad_planificada_snapshot' => 1,
+        ]);
+
+        DB::table('grupo_trabajo_actividades')->insert([
+            'id' => (string) Str::uuid(),
+            'grupo_trabajo_id' => $grupoTrabajoId,
+            'rq_mina_actividad_id' => $actividadId,
+            'cantidad_planificada_snapshot' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_mina_actividad_turnos')->insert([
+            'id' => (string) Str::uuid(),
+            'actividad_id' => $actividadId,
+            'fecha' => '2026-07-01',
+            'dia_label' => 'MARTES',
+            'turno_a' => '1',
+            'turno_b' => '0',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $actividadId;
     }
 
     private function crearUsuario(): string

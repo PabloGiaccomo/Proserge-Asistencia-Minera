@@ -12,6 +12,7 @@ use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Personal\Services\PersonalService;
+use App\Modules\RQMina\Services\RQMinaPlanService;
 use App\Modules\RQMina\Services\RQMinaService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -27,6 +28,7 @@ class RQMinaPageController extends WebPageController
 {
     public function __construct(
         private readonly RQMinaService $service,
+        private readonly RQMinaPlanService $planService,
         private readonly NotificationService $notificationService,
         private readonly PersonalService $personalService,
     ) {
@@ -293,7 +295,19 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
+        try {
+            $selectedPlan = $this->planService->resolveSelectedPlan($rqMina, $request->query('plan_id'), $usuario);
+        } catch (\InvalidArgumentException $exception) {
+            return redirect()
+                ->route('rq-mina.plan', $id)
+                ->with('error', $exception->getMessage());
+        }
+
         $item = $this->toViewItem($rqMina);
+        $item['plan_inicial_id'] = $this->defaultPlanId($rqMina);
+        $item['selected_plan'] = $this->planService->planToArray($selectedPlan);
+        $item['selected_plan_id'] = (string) $selectedPlan->id;
+        $item['plan_operativo'] = $this->planOperativoToArray($this->groupsForSelectedPlan($rqMina, $selectedPlan));
 
         return view('rq-mina.plan', compact('item'));
     }
@@ -307,7 +321,17 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
+        try {
+            $selectedPlan = $this->planService->resolveSelectedPlan($rqMina, $request->query('plan_id'), $usuario);
+        } catch (\InvalidArgumentException $exception) {
+            return redirect()
+                ->route('rq-mina.plan', $id)
+                ->with('error', $exception->getMessage());
+        }
+
         $item = $this->toViewItem($rqMina);
+        $item['selected_plan'] = $this->planService->planToArray($selectedPlan);
+        $item['selected_plan_id'] = (string) $selectedPlan->id;
 
         return view('rq-mina.import-plan', compact('item'));
     }
@@ -323,14 +347,20 @@ class RQMinaPageController extends WebPageController
 
         $planOperativo = $this->normalizePlanOperativoFromRequest($request);
         $detalle = $this->normalizeDetalleFromRequest($request);
-        $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo, $detalle);
+        try {
+            $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo, $detalle, $request->input('plan_id'));
+        } catch (\InvalidArgumentException $exception) {
+            return back()->with('error', $exception->getMessage())->withInput();
+        }
 
         if (!$updated) {
             return back()->with('error', 'No tienes permiso para actualizar el plan operativo.')->withInput();
         }
 
+        $selectedPlanId = trim((string) $request->input('plan_id', ''));
+
         return redirect()
-            ->route('rq-mina.show', $id)
+            ->route('rq-mina.plan', ['id' => $id, 'plan_id' => $selectedPlanId ?: null])
             ->with('success', 'Pedido de personal y plan operativo semanal actualizados correctamente.')
             ->with('clear_rq_mina_plan_draft', $id);
     }
@@ -664,6 +694,8 @@ class RQMinaPageController extends WebPageController
             'detalle' => $this->collectionToArrayRows($rq->detalle ?? []),
             'transporte' => $this->collectionToArrayRows($rq->transportes ?? []),
             'plan_operativo' => $this->planOperativoToArray($rq->actividadGrupos ?? []),
+            'plan_inicial_id' => $this->defaultPlanId($rq),
+            'plans' => $this->planesToArray($rq),
             'observaciones' => $rq->observaciones,
             'personal_parada' => $rq->personal_parada,
         ];
@@ -729,6 +761,7 @@ class RQMinaPageController extends WebPageController
             'observaciones' => $request->input('observaciones'),
             'supervisor_id' => $supervisorId !== '' ? $supervisorId : null,
             'supervisor_pets_id' => $supervisorPetsId !== '' ? $supervisorPetsId : null,
+            'plan_id' => trim((string) $request->input('plan_id', '')) ?: null,
             'detalle' => $normalizedDetalle,
             'transporte' => $normalizedTransporte,
             'plan_operativo' => $planOperativo,
@@ -905,6 +938,7 @@ class RQMinaPageController extends WebPageController
         return $groups
             ->map(fn ($group): array => [
                 'id' => (string) ($group->id ?? ''),
+                'rq_mina_plan_id' => (string) ($group->rq_mina_plan_id ?? ''),
                 'area_operativa' => (string) ($group->area_operativa ?? ''),
                 'modulo' => (string) ($group->modulo ?? ''),
                 'nombre' => (string) ($group->nombre ?? ''),
@@ -954,6 +988,61 @@ class RQMinaPageController extends WebPageController
             ])
             ->values()
             ->all();
+    }
+
+    private function planesToArray(RQMina $rq): array
+    {
+        if (!$rq->relationLoaded('planes')) {
+            return [];
+        }
+
+        return $rq->planes
+            ->map(fn ($plan): array => [
+                'id' => (string) $plan->id,
+                'codigo' => (string) $plan->codigo,
+                'nombre' => (string) $plan->nombre,
+                'version' => (int) $plan->version,
+                'fecha_inicio' => $plan->fecha_inicio?->toDateString(),
+                'fecha_fin' => $plan->fecha_fin?->toDateString(),
+                'semana_referencia' => (string) ($plan->semana_referencia ?? ''),
+                'estado' => (string) $plan->estado,
+                'observaciones' => (string) ($plan->observaciones ?? ''),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function defaultPlanId(RQMina $rq): ?string
+    {
+        if (!$rq->relationLoaded('planes')) {
+            return null;
+        }
+
+        return $rq->planes
+            ->first(fn ($plan): bool => $this->planService->isDefaultPlan($plan))
+            ?->id;
+    }
+
+    private function groupsForSelectedPlan(RQMina $rq, \App\Models\RQMinaPlan $selectedPlan): EloquentCollection
+    {
+        $selectedPlan->loadMissing(['grupos.actividades.turnos', 'grupos.transportes']);
+        $groups = $selectedPlan->grupos ?? new EloquentCollection();
+
+        if (!$this->planService->isDefaultPlan($selectedPlan) || !$rq->relationLoaded('actividadGrupos')) {
+            return new EloquentCollection($groups->values()->all());
+        }
+
+        $legacyGroups = $rq->actividadGrupos
+            ->filter(fn ($group): bool => empty($group->rq_mina_plan_id));
+
+        return new EloquentCollection(
+            $groups
+                ->concat($legacyGroups)
+                ->unique('id')
+                ->sortBy('orden')
+                ->values()
+                ->all()
+        );
     }
 
     private function normalizePlanOperativoFromRequest(Request $request): array

@@ -14,6 +14,10 @@ class UpdateGrupoTrabajoRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'rq_mina_plan_id' => ['nullable', 'string', 'size:36', 'exists:rq_mina_planes,id'],
+            'rq_mina_actividad_grupo_id' => ['nullable', 'string', 'size:36', 'exists:rq_mina_actividad_grupos,id'],
+            'actividad_ids' => ['nullable', 'array'],
+            'actividad_ids.*' => ['string', 'size:36', 'exists:rq_mina_actividades,id'],
             'fecha' => ['required', 'date'],
             'turno' => ['required', 'string', 'in:DIA,NOCHE'],
             'supervisor_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
@@ -25,7 +29,13 @@ class UpdateGrupoTrabajoRequest extends FormRequest
             'destino_tipo' => ['required', 'string', 'in:MINA,TALLER,OFICINA'],
             'destino_id' => ['required', 'string', 'size:36'],
             'observaciones' => ['nullable', 'string'],
-            'estado' => ['nullable', 'string', 'max:20'],
+            'observacion_planificacion' => ['nullable', 'string'],
+            'justificacion_brecha' => ['nullable', 'string'],
+            'estado' => ['nullable', 'string', 'in:BORRADOR,PROGRAMADO,CERRADO,CANCELADO'],
+            'rq_proserge_detalle_ids' => ['nullable', 'array'],
+            'rq_proserge_detalle_ids.*' => ['string', 'size:36', 'exists:rq_proserge_detalle,id'],
+            'personal_ids' => ['nullable', 'array'],
+            'personal_ids.*' => ['string', 'size:36', 'exists:personal,id'],
         ];
     }
 }

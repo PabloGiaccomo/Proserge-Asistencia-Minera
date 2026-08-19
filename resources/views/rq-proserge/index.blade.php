@@ -237,6 +237,48 @@
     </section>
 </div>
 
+<div class="rq-modal-backdrop hidden" id="rqActionModal" aria-hidden="true">
+    <div class="rq-modal-panel" role="dialog" aria-modal="true" aria-labelledby="rqActionModalTitle">
+        <div class="rq-modal-head">
+            <div>
+                <h3 id="rqActionModalTitle">Actualizar asignacion</h3>
+                <p id="rqActionModalText">Completa los datos para registrar el cambio.</p>
+            </div>
+            <button type="button" class="rq-modal-close" data-rq-modal-close aria-label="Cerrar">X</button>
+        </div>
+        <div class="rq-modal-body">
+            <div class="rq-modal-message" id="rqActionModalMessage"></div>
+
+            <div class="rq-modal-section" data-rq-modal-section="edit">
+                <div class="field-group">
+                    <label for="rqModalComment">Comentario</label>
+                    <textarea id="rqModalComment" rows="3" placeholder="Comentario de la asignacion"></textarea>
+                </div>
+            </div>
+
+            <div class="rq-modal-section" data-rq-modal-section="replace">
+                <div class="field-group">
+                    <label for="rqModalWorkerSearch">Trabajador reemplazante</label>
+                    <input id="rqModalWorkerSearch" type="search" autocomplete="off" placeholder="Buscar por nombre, DNI o puesto">
+                    <input id="rqModalWorkerId" type="hidden">
+                    <div class="rq-modal-results" id="rqModalWorkerResults"></div>
+                </div>
+            </div>
+
+            <div class="rq-modal-section" data-rq-modal-section="motivo">
+                <div class="field-group">
+                    <label for="rqModalReason" id="rqModalReasonLabel">Motivo</label>
+                    <textarea id="rqModalReason" rows="4" placeholder="Describe el motivo"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="rq-modal-footer">
+            <button type="button" class="rq-modal-cancel" data-rq-modal-close>Cancelar</button>
+            <button type="button" class="rq-modal-submit" id="rqActionModalSubmit">Guardar</button>
+        </div>
+    </div>
+</div>
+
 <style>
 .rq-mine-status-flag {
     display: inline-flex;
@@ -257,6 +299,67 @@
 .rq-mine-status-flag.is-process {
     background: #fef3c7;
     color: #92400e;
+}
+.rq-coverage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+    margin: 12px 0;
+}
+.rq-coverage-pill {
+    border: 1px solid #dbe6f3;
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    color: #10233f;
+}
+.rq-coverage-pill span {
+    display: block;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.rq-assignment-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+.rq-assignment-badge {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: #e8f8f6;
+    color: #0f766e;
+    font-size: 11px;
+    font-weight: 800;
+}
+.rq-assignment-badge.is-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+.rq-assignment-badge.is-muted {
+    background: #e2e8f0;
+    color: #475569;
+}
+.rq-assignment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+}
+.rq-assignment-actions button {
+    border: 1px solid #c9d8ea;
+    border-radius: 8px;
+    background: #fff;
+    color: #10233f;
+    font-weight: 800;
+    padding: 7px 9px;
+}
+.rq-assignment-actions button.is-danger {
+    border-color: #fecaca;
+    color: #b91c1c;
 }
 .rq-mine-status-flag.is-not-enabled {
     background: #fee2e2;
@@ -283,6 +386,167 @@
     flex: 0 0 auto;
     margin-left: auto;
 }
+.rq-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(7, 18, 38, .42);
+}
+.rq-modal-backdrop.hidden {
+    display: none;
+}
+.rq-modal-panel {
+    width: min(560px, 100%);
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    border: 1px solid #d9e5f3;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(7, 18, 38, .24);
+    color: #10233f;
+}
+.rq-modal-head,
+.rq-modal-footer {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #e5edf6;
+}
+.rq-modal-footer {
+    justify-content: flex-end;
+    border-top: 1px solid #e5edf6;
+    border-bottom: 0;
+}
+.rq-modal-head h3 {
+    margin: 0;
+    color: #071b3a;
+    font-size: 20px;
+    font-weight: 900;
+}
+.rq-modal-head p {
+    margin: 4px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+.rq-modal-close {
+    width: 38px;
+    height: 38px;
+    border: 1px solid #d7e2ef;
+    border-radius: 50%;
+    background: #fff;
+    color: #10233f;
+    font-weight: 900;
+    cursor: pointer;
+}
+.rq-modal-body {
+    display: grid;
+    gap: 14px;
+    padding: 18px 20px;
+}
+.rq-modal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.rq-modal-section {
+    display: grid;
+    gap: 12px;
+}
+.rq-modal-section.is-hidden {
+    display: none;
+}
+.rq-modal-panel input,
+.rq-modal-panel select,
+.rq-modal-panel textarea {
+    width: 100%;
+    border: 1px solid #cddbef;
+    border-radius: 12px;
+    padding: 11px 13px;
+    color: #10233f;
+    background: #fff;
+    font: inherit;
+}
+.rq-modal-panel textarea {
+    resize: vertical;
+}
+.rq-modal-panel input:focus,
+.rq-modal-panel select:focus,
+.rq-modal-panel textarea:focus {
+    outline: none;
+    border-color: #18c7b5;
+    box-shadow: 0 0 0 3px rgba(24, 199, 181, .14);
+}
+.rq-modal-submit,
+.rq-modal-cancel {
+    border-radius: 12px;
+    padding: 11px 16px;
+    font-weight: 900;
+    cursor: pointer;
+}
+.rq-modal-submit {
+    border: 1px solid #18c7b5;
+    background: #18c7b5;
+    color: #fff;
+    box-shadow: 0 8px 18px rgba(24, 199, 181, .24);
+}
+.rq-modal-submit:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+.rq-modal-cancel {
+    border: 1px solid #cddbef;
+    background: #fff;
+    color: #10233f;
+}
+.rq-modal-message:not(:empty) {
+    border: 1px solid #fecaca;
+    border-radius: 12px;
+    background: #fff1f2;
+    color: #b91c1c;
+    padding: 11px 13px;
+    font-weight: 800;
+}
+.rq-modal-results {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    max-height: 250px;
+    overflow: auto;
+}
+.rq-modal-worker {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    width: 100%;
+    border: 1px solid #d9e5f3;
+    border-radius: 12px;
+    background: #f8fbff;
+    padding: 10px 12px;
+    text-align: left;
+    color: #10233f;
+    cursor: pointer;
+}
+.rq-modal-worker strong,
+.rq-modal-worker small {
+    display: block;
+}
+.rq-modal-worker small {
+    color: #64748b;
+    margin-top: 2px;
+}
+.rq-modal-worker .worker-result-status {
+    align-self: center;
+}
+.rq-modal-worker.is-unavailable {
+    opacity: .68;
+    cursor: not-allowed;
+}
 @media (max-width: 700px) {
     .asignacion-item {
         align-items: flex-start;
@@ -290,6 +554,9 @@
     }
     .asignacion-status {
         margin-left: 0;
+    }
+    .rq-modal-grid {
+        grid-template-columns: 1fr;
     }
 }
 </style>
@@ -308,10 +575,23 @@
     const detailContainer = document.getElementById('rqDetailContent');
     const emptyState = document.getElementById('rqEmptyState');
     const workerSearchTimers = new WeakMap();
+    const actionModal = document.getElementById('rqActionModal');
+    const actionModalTitle = document.getElementById('rqActionModalTitle');
+    const actionModalText = document.getElementById('rqActionModalText');
+    const actionModalMessage = document.getElementById('rqActionModalMessage');
+    const actionModalSubmit = document.getElementById('rqActionModalSubmit');
+    const modalComment = document.getElementById('rqModalComment');
+    const modalReason = document.getElementById('rqModalReason');
+    const modalReasonLabel = document.getElementById('rqModalReasonLabel');
+    const modalWorkerSearch = document.getElementById('rqModalWorkerSearch');
+    const modalWorkerId = document.getElementById('rqModalWorkerId');
+    const modalWorkerResults = document.getElementById('rqModalWorkerResults');
 
     let selectedId = null;
     let query = '';
     let assignedPersonnelQuery = '';
+    let actionModalContext = null;
+    let replacementSearchTimer = null;
 
     function normalize(text) {
         return String(text || '').toLowerCase();
@@ -354,6 +634,13 @@
 
     function isAvailable(puesto) {
         return puesto?.disponibilidad?.tipo === 'disponible';
+    }
+
+    function isPuestoComplete(puesto) {
+        const required = Number(puesto?.requeridos || 0);
+        const assigned = Number(puesto?.asignados || 0);
+
+        return required <= 0 || assigned >= required || String(puesto?.estado_cobertura || '').toUpperCase() === 'COMPLETADO';
     }
 
     function getFilteredItems() {
@@ -481,9 +768,10 @@
             return;
         }
 
-        assignButton.disabled = !available;
-        assignButton.classList.toggle('disabled', !available);
-        card.dataset.workerAvailable = available ? '1' : '0';
+        const canAssign = Boolean(available) && card?.dataset.capacityFull !== '1';
+        assignButton.disabled = !canAssign;
+        assignButton.classList.toggle('disabled', !canAssign);
+        card.dataset.workerAvailable = canAssign ? '1' : '0';
     }
 
     function updateAvailabilityBox(card, disponibilidad) {
@@ -505,10 +793,17 @@
         updateAvailabilityBox(card, pendingAvailability(message));
     }
 
+    function activeAssignedRows(rows) {
+        return (Array.isArray(rows) ? rows : []).filter((row) => {
+            const status = String(row.estado || 'ASIGNADO').toUpperCase();
+            return status === 'ASIGNADO';
+        });
+    }
+
     function matchesSearchInPuesto(puesto, personnelQuery) {
         if (!personnelQuery) return true;
 
-        const assignedRows = Array.isArray(puesto.personal_asignado) ? puesto.personal_asignado : [];
+        const assignedRows = activeAssignedRows(puesto.personal_asignado);
         if (assignedRows.some((row) => normalize(row.nombre).includes(personnelQuery))) {
             return true;
         }
@@ -524,8 +819,8 @@
         const disableAssign = !isAvailable(puesto);
         const trabajador = puesto.trabajador || '';
         const comentario = puesto.comentario || '';
-        const asignaciones = Array.isArray(puesto.asignaciones) ? puesto.asignaciones : [];
-        const personalAsignado = Array.isArray(puesto.personal_asignado) ? puesto.personal_asignado : [];
+        const personalAsignado = activeAssignedRows(puesto.personal_asignado);
+        const asignaciones = personalAsignado.map((row) => `${row.nombre || '-'} - ${row.comentario || '-'}`.trim());
         const cambios = Array.isArray(puesto.cambios) ? puesto.cambios : [];
         const cambiosHtml = cambios.length > 0
             ? `<div class="rq-change-box">${cambios.map((cambio) => `<p>${cambio.mensaje || 'Cambio pendiente de RQ Mina'}</p>`).join('')}</div>`
@@ -559,7 +854,7 @@
                                             <td>${row.fecha_fin || '-'}</td>
                                         </tr>
                                     `).join('')
-                                    : '<tr><td colspan="4" class="table-empty">Sin personal registrado para este puesto.</td></tr>'}
+                                    : '<tr><td colspan="4" class="table-empty">Sin asignaciones activas para este puesto.</td></tr>'}
                             </tbody>
                         </table>
                     </div>
@@ -612,7 +907,7 @@
                 <div class="asignaciones-zone">
                     ${asignaciones.length > 0
                         ? asignaciones.map((item) => `<div class="asignacion-item">${item}</div>`).join('')
-                        : '<div class="asignacion-empty">Sin asignaciones aun</div>'}
+                        : '<div class="asignacion-empty">Sin asignaciones activas aun</div>'}
                 </div>
             </div>
         `;
@@ -629,34 +924,57 @@
         }
     }
 
-    function assignedRowsHtml(item, personalAsignado) {
-        if (!personalAsignado.length) {
-            return '<div class="asignacion-empty">Sin asignaciones aun</div>';
+    function assignmentBadges(row) {
+        const badges = [];
+        if (row.tipo_asignacion === 'ADICIONAL') {
+            badges.push('<span class="rq-assignment-badge">Adicional</span>');
+        }
+        if (row.estado && row.estado !== 'ASIGNADO') {
+            badges.push(`<span class="rq-assignment-badge is-muted">${escapeHtml(row.estado)}</span>`);
+        }
+        if (row.cuenta_como_titular) {
+            badges.push('<span class="rq-assignment-badge">Cubre titular</span>');
         }
 
-        return personalAsignado.map((row) => `
+        return badges.length ? `<div class="rq-assignment-badges">${badges.join('')}</div>` : '';
+    }
+
+    function assignedRowsHtml(item, personalAsignado) {
+        const activeRows = activeAssignedRows(personalAsignado);
+
+        if (!activeRows.length) {
+            return '<div class="asignacion-empty">Sin asignaciones activas aun</div>';
+        }
+
+        return activeRows.map((row) => `
             <div class="asignacion-item">
                 <div class="asignacion-main">
                     <strong>${escapeHtml(row.nombre || '-')}</strong>
                     <span>${escapeHtml(row.comentario || '-')}</span>
                     <small>${escapeHtml(row.fecha_inicio || '-')} a ${escapeHtml(row.fecha_fin || '-')}</small>
+                    ${assignmentBadges(row)}
+                    ${row.motivo_retiro ? `<small>Motivo retiro: ${escapeHtml(row.motivo_retiro)}</small>` : ''}
                 </div>
                 <div class="asignacion-status">${mineStatusFlag(row.mina_estado || null)}</div>
-                ${canAssignRqProserge ? `<button
-                    type="button"
-                    class="btn-unassign btn-unassign-small js-rq-unassign"
-                    data-rq-id="${escapeHtml(item.id)}"
-                    data-assignment-id="${escapeHtml(row.id || '')}"
-                    ${row.id ? '' : 'disabled'}
-                >Desasignar</button>` : ''}
+                ${canAssignRqProserge && row.estado === 'ASIGNADO' ? `<div class="rq-assignment-actions">
+                    <button type="button" class="js-rq-edit-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}" data-position="${escapeHtml(row.posicion_asignacion || 'TITULAR')}" data-type="${escapeHtml(row.tipo_asignacion || 'REGULAR')}" data-comment="${escapeHtml(row.comentario || '')}">Editar</button>
+                    <button type="button" class="js-rq-replace-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}" data-position="${escapeHtml(row.posicion_asignacion || 'TITULAR')}" data-type="${escapeHtml(row.tipo_asignacion || 'REGULAR')}" data-date-start="${escapeHtml(row.fecha_inicio_iso || item.fecha_inicio_iso || '')}" data-date-end="${escapeHtml(row.fecha_fin_iso || item.fecha_fin_iso || '')}" data-comment="${escapeHtml(row.comentario || '')}">Reemplazar</button>
+                    <button type="button" class="is-danger js-rq-retire-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}">Retirar</button>
+                </div>` : ''}
             </div>
         `).join('');
     }
 
     function puestoCardEditable(puesto, isClosed, item) {
-        const disableAssign = !isAvailable(puesto);
+        const capacityFull = isPuestoComplete(puesto);
+        const disableAssign = capacityFull || !isAvailable(puesto);
         const comentario = puesto.comentario || '';
-        const personalAsignado = Array.isArray(puesto.personal_asignado) ? puesto.personal_asignado : [];
+        const personalAsignado = activeAssignedRows(puesto.personal_asignado);
+        const suggestedPosition = puesto.clasificacion_sugerida?.posicion || 'TITULAR';
+        const suggestedType = puesto.clasificacion_sugerida?.tipo || 'REGULAR';
+        const disponibilidad = capacityFull
+            ? pendingAvailability('Este puesto ya esta completo. Retira o reemplaza una asignacion antes de agregar otra.')
+            : puesto.disponibilidad;
         const cambios = Array.isArray(puesto.cambios) ? puesto.cambios : [];
         const cambiosHtml = cambios.length > 0
             ? `<div class="rq-change-box">${cambios.map((cambio) => `<p>${escapeHtml(cambio.mensaje || 'Cambio pendiente de RQ Mina')}</p>`).join('')}</div>`
@@ -690,7 +1008,7 @@
                                             <td>${escapeHtml(row.fecha_fin || '-')}</td>
                                         </tr>
                                     `).join('')
-                                    : '<tr><td colspan="4" class="table-empty">Sin personal registrado para este puesto.</td></tr>'}
+                                    : '<tr><td colspan="4" class="table-empty">Sin asignaciones activas para este puesto.</td></tr>'}
                             </tbody>
                         </table>
                     </div>
@@ -699,7 +1017,7 @@
         }
 
         return `
-            <div class="puesto-card" data-puesto-id="${escapeHtml(puesto.id || '')}" data-worker-available="${disableAssign ? '0' : '1'}">
+            <div class="puesto-card" data-puesto-id="${escapeHtml(puesto.id || '')}" data-worker-available="${disableAssign ? '0' : '1'}" data-capacity-full="${capacityFull ? '1' : '0'}" data-assignment-position="${escapeHtml(suggestedPosition)}" data-assignment-type="${escapeHtml(suggestedType)}">
                 <div class="puesto-head">
                     <h4>${escapeHtml(puesto.nombre)}</h4>
                     <span class="puesto-counter">${escapeHtml(puesto.asignados || 0)}/${escapeHtml(puesto.requeridos || 0)}</span>
@@ -715,17 +1033,24 @@
                         autocomplete="off"
                         data-rq-id="${escapeHtml(item.id)}"
                         data-detalle-id="${escapeHtml(puesto.id || '')}"
+                        ${capacityFull ? 'disabled' : ''}
                     >
                     <input type="hidden" class="js-rq-worker-id">
                     <div class="worker-search-results" data-worker-results></div>
                 </div>` : ''}
 
+                <div class="rq-coverage-grid">
+                    <div class="rq-coverage-pill"><span>Titulares</span>${escapeHtml(puesto.titulares_asignados || 0)} / ${escapeHtml(puesto.titulares_requeridos || 0)}</div>
+                    <div class="rq-coverage-pill"><span>Adicionales</span>${escapeHtml(puesto.adicionales || 0)}</div>
+                    <div class="rq-coverage-pill"><span>Estado</span>${escapeHtml(puesto.estado_cobertura || 'PENDIENTE')}</div>
+                </div>
+
                 <div class="puesto-grid">
                     <div class="field-group">
                         <label>Comentario</label>
-                        <textarea class="js-rq-comment" rows="2" placeholder="Comentario">${escapeHtml(comentario)}</textarea>
+                        <textarea class="js-rq-comment" rows="2" placeholder="Comentario" ${capacityFull ? 'readonly' : ''}>${escapeHtml(comentario)}</textarea>
                     </div>
-                    ${availabilityBox(puesto.disponibilidad)}
+                    ${availabilityBox(disponibilidad)}
                 </div>
 
                 ${canAssignRqProserge ? `<div class="puesto-actions-row">
@@ -921,14 +1246,14 @@
         }
     }
 
-    async function postForm(url, payload) {
+    async function requestForm(url, payload, method = 'POST') {
         const formData = new FormData();
         Object.entries(payload).forEach(([key, value]) => {
             formData.append(key, value ?? '');
         });
 
         const response = await fetch(url, {
-            method: 'POST',
+            method,
             headers: {
                 Accept: 'application/json',
                 'X-CSRF-TOKEN': csrfToken,
@@ -942,6 +1267,232 @@
         }
 
         return data;
+    }
+
+    async function postForm(url, payload) {
+        return requestForm(url, payload, 'POST');
+    }
+
+    function modalSection(name, visible) {
+        actionModal?.querySelectorAll(`[data-rq-modal-section="${name}"]`).forEach((section) => {
+            section.classList.toggle('is-hidden', !visible);
+        });
+    }
+
+    function setModalMessage(message = '') {
+        if (actionModalMessage) {
+            actionModalMessage.textContent = message;
+        }
+    }
+
+    function closeActionModal() {
+        actionModal?.classList.add('hidden');
+        actionModal?.setAttribute('aria-hidden', 'true');
+        actionModalContext = null;
+        setModalMessage('');
+        if (actionModalSubmit) {
+            actionModalSubmit.disabled = false;
+            actionModalSubmit.textContent = 'Guardar';
+        }
+    }
+
+    function openActionModal(mode, button, card) {
+        actionModalContext = {
+            mode,
+            card,
+            rqId: button.dataset.rqId || '',
+            assignmentId: button.dataset.assignmentId || '',
+            dateStart: button.dataset.dateStart || '',
+            dateEnd: button.dataset.dateEnd || '',
+            position: button.dataset.position || 'TITULAR',
+            type: button.dataset.type || 'REGULAR',
+            comment: button.dataset.comment || '',
+        };
+
+        setModalMessage('');
+        modalSection('edit', mode === 'edit');
+        modalSection('replace', mode === 'replace');
+        modalSection('motivo', mode === 'retire' || mode === 'replace');
+
+        if (mode === 'edit') {
+            actionModalTitle.textContent = 'Editar comentario';
+            actionModalText.textContent = 'Actualiza la nota visible de esta asignacion.';
+            actionModalSubmit.textContent = 'Guardar cambios';
+            modalComment.value = button.dataset.comment || '';
+        }
+
+        if (mode === 'retire') {
+            actionModalTitle.textContent = 'Retirar asignacion';
+            actionModalText.textContent = 'Registra el motivo para retirar al trabajador sin perder trazabilidad.';
+            actionModalSubmit.textContent = 'Retirar';
+            modalReasonLabel.textContent = 'Motivo del retiro';
+            modalReason.value = '';
+        }
+
+        if (mode === 'replace') {
+            actionModalTitle.textContent = 'Reemplazar trabajador';
+            actionModalText.textContent = 'Busca el reemplazante y registra el motivo del cambio.';
+            actionModalSubmit.textContent = 'Guardar reemplazo';
+            modalReasonLabel.textContent = 'Motivo del reemplazo';
+            modalWorkerSearch.value = '';
+            modalWorkerId.value = '';
+            modalWorkerResults.innerHTML = '';
+            modalReason.value = '';
+        }
+
+        actionModal?.classList.remove('hidden');
+        actionModal?.setAttribute('aria-hidden', 'false');
+        window.setTimeout(() => {
+            if (mode === 'replace') {
+                modalWorkerSearch?.focus();
+            } else if (mode === 'retire') {
+                modalReason?.focus();
+            } else {
+                modalComment?.focus();
+            }
+        }, 0);
+    }
+
+    async function searchReplacementWorkers() {
+        if (!actionModalContext || actionModalContext.mode !== 'replace') {
+            return;
+        }
+
+        const queryValue = modalWorkerSearch.value.trim();
+        modalWorkerId.value = '';
+
+        if (queryValue.length < 2) {
+            modalWorkerResults.innerHTML = '';
+            return;
+        }
+
+        if (!actionModalContext.dateStart || !actionModalContext.dateEnd) {
+            modalWorkerResults.innerHTML = '<div class="worker-search-empty is-error">No se encontro el rango de fechas de la asignacion.</div>';
+            return;
+        }
+
+        const params = new URLSearchParams({
+            rq_id: actionModalContext.rqId,
+            q: queryValue,
+            fecha_inicio: actionModalContext.dateStart,
+            fecha_fin: actionModalContext.dateEnd,
+        });
+
+        modalWorkerResults.innerHTML = '<div class="worker-search-empty">Buscando trabajador...</div>';
+
+        try {
+            const response = await fetch(`${workerSearchUrl}?${params.toString()}`, {
+                headers: { Accept: 'application/json' },
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                modalWorkerResults.innerHTML = `<div class="worker-search-empty is-error">${escapeHtml(data.error || 'No se pudo buscar personal.')}</div>`;
+                return;
+            }
+
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (items.length === 0) {
+                modalWorkerResults.innerHTML = '<div class="worker-search-empty">No se encontro personal con ese texto.</div>';
+                return;
+            }
+
+            modalWorkerResults.innerHTML = items.map((item) => {
+                const name = item.nombre_completo || '-';
+                const document = item.documento || '';
+                const label = `${name}${document ? ' - ' + document : ''}`;
+                const statusText = item.disponible ? 'Disponible' : 'No disponible';
+                const motivo = Array.isArray(item.lineas) && item.lineas.length ? item.lineas[0] : (item.motivo || '');
+
+                return `
+                    <button
+                        type="button"
+                        class="rq-modal-worker ${item.disponible ? '' : 'is-unavailable'}"
+                        data-rq-replace-worker
+                        data-personal-id="${escapeHtml(item.personal_id)}"
+                        data-label="${escapeHtml(label)}"
+                        ${item.disponible ? '' : 'disabled'}
+                    >
+                        <span>
+                            <strong>${escapeHtml(name)}</strong>
+                            <small>${document ? 'DNI ' + escapeHtml(document) + ' - ' : ''}${escapeHtml(item.puesto || 'Puesto no registrado')}</small>
+                            ${motivo ? `<small>${escapeHtml(motivo)}</small>` : ''}
+                        </span>
+                        <span class="worker-result-status ${item.disponible ? 'is-ok' : 'is-bad'}">${escapeHtml(statusText)}</span>
+                    </button>
+                `;
+            }).join('');
+        } catch (error) {
+            modalWorkerResults.innerHTML = '<div class="worker-search-empty is-error">No se pudo completar la busqueda.</div>';
+        }
+    }
+
+    async function submitActionModal() {
+        if (!actionModalContext) {
+            return;
+        }
+
+        const context = actionModalContext;
+        const card = context.card;
+        setModalMessage('');
+        actionModalSubmit.disabled = true;
+        actionModalSubmit.textContent = 'Guardando...';
+
+        try {
+            let data;
+
+            if (context.mode === 'edit') {
+                data = await requestForm(`/rq-proserge/${encodeURIComponent(context.rqId)}/asignaciones/${encodeURIComponent(context.assignmentId)}`, {
+                    posicion_asignacion: context.position || 'TITULAR',
+                    tipo_asignacion: context.type || 'REGULAR',
+                    comentario: modalComment.value || '',
+                }, 'PATCH');
+            }
+
+            if (context.mode === 'retire') {
+                const motivo = modalReason.value.trim();
+                if (!motivo) {
+                    throw new Error('El motivo de retiro es obligatorio.');
+                }
+
+                data = await postForm(`/rq-proserge/${encodeURIComponent(context.rqId)}/asignaciones/${encodeURIComponent(context.assignmentId)}/retirar`, {
+                    motivo,
+                });
+            }
+
+            if (context.mode === 'replace') {
+                const personalId = modalWorkerId.value || '';
+                const motivo = modalReason.value.trim();
+
+                if (!personalId || !motivo) {
+                    throw new Error('Selecciona el trabajador reemplazante e indica el motivo.');
+                }
+
+                data = await postForm(`/rq-proserge/${encodeURIComponent(context.rqId)}/asignaciones/${encodeURIComponent(context.assignmentId)}/reemplazar`, {
+                    personal_id: personalId,
+                    motivo,
+                    comentario: context.comment || '',
+                    fecha_inicio: context.dateStart || '',
+                    fecha_fin: context.dateEnd || '',
+                    posicion_asignacion: context.position || 'TITULAR',
+                    tipo_asignacion: context.type || 'REGULAR',
+                });
+            }
+
+            replaceRqItem(data.item);
+            closeActionModal();
+            renderList();
+            renderDetail(getSelectedItem());
+        } catch (error) {
+            actionModalSubmit.disabled = false;
+            actionModalSubmit.textContent = context.mode === 'retire'
+                ? 'Retirar'
+                : (context.mode === 'replace' ? 'Guardar reemplazo' : 'Guardar cambios');
+            setModalMessage(error.message || 'No se pudo guardar el cambio.');
+            if (card) {
+                setCardMessage(card, error.message || 'No se pudo guardar el cambio.', 'error');
+            }
+        }
     }
 
     detailContainer.addEventListener('input', (event) => {
@@ -968,6 +1519,10 @@
         const workerInput = card?.querySelector('.js-rq-worker-search');
         const results = card?.querySelector('[data-worker-results]');
 
+        if (card?.dataset.capacityFull === '1') {
+            return;
+        }
+
         resetWorkerSelection(card, 'Las fechas cambiaron. Vuelve a seleccionar al trabajador para validar disponibilidad.');
 
         if (results) {
@@ -982,6 +1537,10 @@
         const workerOption = event.target.closest('[data-worker-result]');
         if (workerOption) {
             const card = workerOption.closest('.puesto-card');
+            if (card?.dataset.capacityFull === '1') {
+                setCardMessage(card, 'Este puesto ya esta completo. Retira o reemplaza una asignacion antes de agregar otra.', 'error');
+                return;
+            }
             card.querySelector('.js-rq-worker-id').value = workerOption.dataset.personalId || '';
             card.querySelector('.js-rq-worker-search').value = workerOption.dataset.label || '';
             card.querySelector('[data-worker-results]').innerHTML = '';
@@ -1002,6 +1561,13 @@
             const fechaInicio = card.querySelector('.js-rq-date-start')?.value || '';
             const fechaFin = card.querySelector('.js-rq-date-end')?.value || '';
             const comentario = card.querySelector('.js-rq-comment')?.value || '';
+            const posicion = card.dataset.assignmentPosition || 'TITULAR';
+            const tipoAsignacion = card.dataset.assignmentType || 'REGULAR';
+
+            if (card.dataset.capacityFull === '1') {
+                setCardMessage(card, 'Este puesto ya esta completo. Retira o reemplaza una asignacion antes de agregar otra.', 'error');
+                return;
+            }
 
             if (!personalId) {
                 setCardMessage(card, 'Selecciona un trabajador de la lista antes de asignar.', 'error');
@@ -1029,6 +1595,8 @@
                     puesto_asignado: assignButton.dataset.puesto,
                     fecha_inicio: fechaInicio,
                     fecha_fin: fechaFin,
+                    posicion_asignacion: posicion,
+                    tipo_asignacion: tipoAsignacion,
                     comentario: comentario,
                 });
                 replaceRqItem(data.item);
@@ -1039,6 +1607,27 @@
                 assignButton.textContent = 'Asignar';
                 setCardMessage(card, error.message, 'error');
             }
+            return;
+        }
+
+        const editAssignmentButton = event.target.closest('.js-rq-edit-assignment');
+        if (editAssignmentButton) {
+            const card = editAssignmentButton.closest('.puesto-card');
+            openActionModal('edit', editAssignmentButton, card);
+            return;
+        }
+
+        const retireAssignmentButton = event.target.closest('.js-rq-retire-assignment');
+        if (retireAssignmentButton) {
+            const card = retireAssignmentButton.closest('.puesto-card');
+            openActionModal('retire', retireAssignmentButton, card);
+            return;
+        }
+
+        const replaceAssignmentButton = event.target.closest('.js-rq-replace-assignment');
+        if (replaceAssignmentButton) {
+            const card = replaceAssignmentButton.closest('.puesto-card');
+            openActionModal('replace', replaceAssignmentButton, card);
             return;
         }
 
@@ -1061,6 +1650,34 @@
                 unassignButton.textContent = 'Desasignar';
                 setCardMessage(card, error.message, 'error');
             }
+        }
+    });
+
+    actionModal?.addEventListener('click', (event) => {
+        if (event.target === actionModal || event.target.closest('[data-rq-modal-close]')) {
+            closeActionModal();
+            return;
+        }
+
+        const workerButton = event.target.closest('[data-rq-replace-worker]');
+        if (workerButton) {
+            modalWorkerId.value = workerButton.dataset.personalId || '';
+            modalWorkerSearch.value = workerButton.dataset.label || '';
+            modalWorkerResults.innerHTML = '';
+            setModalMessage('');
+        }
+    });
+
+    modalWorkerSearch?.addEventListener('input', () => {
+        window.clearTimeout(replacementSearchTimer);
+        replacementSearchTimer = window.setTimeout(searchReplacementWorkers, 280);
+    });
+
+    actionModalSubmit?.addEventListener('click', submitActionModal);
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && actionModal && !actionModal.classList.contains('hidden')) {
+            closeActionModal();
         }
     });
 

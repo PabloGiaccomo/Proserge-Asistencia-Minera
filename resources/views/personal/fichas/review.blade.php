@@ -83,6 +83,9 @@
                 @if(!$canViewSensitiveFichaData && in_array($section['title'] ?? '', $sensitiveFichaSections, true))
                     @continue
                 @endif
+                @php
+                    $isSensitiveFichaSection = in_array($section['title'] ?? '', $sensitiveFichaSections, true);
+                @endphp
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">{{ $section['title'] }}</h3>
@@ -109,6 +112,9 @@
                                     'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $currentFieldValue('quinta_empleador_principal') !== 'Otra empresa',
                                     default => false,
                                 };
+                                if ($canViewSensitiveFichaData && $isSensitiveFichaSection) {
+                                    $conditionalHidden = false;
+                                }
                                 if ($type === 'hidden' || $conditionalHidden) {
                                     continue;
                                 }

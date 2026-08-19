@@ -7,9 +7,35 @@
     $fieldValue = fn (string $key): string => (string) old('fields.' . $key, $data[$key] ?? '');
     $firmaActual = (string) old('firma_base64', $firmaBase64 ?? '');
     $huellaArchivo = $archivos->firstWhere('tipo', 'huella');
+    $canViewSensitiveFichaData = (bool) ($canViewSensitiveFichaData ?? true);
+    $sensitiveFichaSections = ['Datos bancarios', 'Sistema pensionario'];
     $downloadRoute = fn ($archivo) => isset($ingreso) && $archivo
         ? route('personal.ingresos.archivos.download', [$ingreso->id, $archivo->id])
         : '#';
+    $normalizeFichaOption = static function (?string $value): string {
+        return \Illuminate\Support\Str::of((string) $value)
+            ->trim()
+            ->ascii()
+            ->upper()
+            ->toString();
+    };
+    $bankTypeForDisplay = static function (?string $value) use ($normalizeFichaOption): string {
+        $normalized = $normalizeFichaOption($value);
+
+        if ($normalized === 'BCP' || str_contains($normalized, 'BANCO DE CREDITO')) {
+            return 'BCP';
+        }
+
+        if ($normalized === 'INTERBANK') {
+            return 'Interbank';
+        }
+
+        if (in_array($normalized, ['OTRO', 'OTRA'], true)) {
+            return 'Otro';
+        }
+
+        return $normalized === '' ? '' : 'Otro';
+    };
     $ubigeoFields = [
         'departamento_nacimiento',
         'provincia_nacimiento',
@@ -25,7 +51,19 @@
 @endonce
 
 <div class="ingreso-form-stack">
+    @if(!$canViewSensitiveFichaData)
+        <div class="ficha-alert ficha-alert-warning">
+            Los datos bancarios, pensionarios, firma y huella estan ocultos para este rol.
+        </div>
+    @endif
+
     @foreach($sections as $section)
+        @if(!$canViewSensitiveFichaData && in_array($section['title'] ?? '', $sensitiveFichaSections, true))
+            @continue
+        @endif
+        @php
+            $isSensitiveFichaSection = in_array($section['title'] ?? '', $sensitiveFichaSections, true);
+        @endphp
         <section class="ficha-section">
             <div class="ficha-section-header">
                 <h2 class="ficha-section-title">{{ $section['title'] }}</h2>
@@ -45,7 +83,7 @@
                         }
                         $paisNacimientoActual = $fieldValue('pais_nacimiento') ?: 'Peru';
                         $domicilioPaisActual = $fieldValue('domicilio_tipo') ?: 'Peru';
-                        $bancoActual = $fieldValue('banco');
+                        $bancoActual = $bankTypeForDisplay($fieldValue('banco'));
                         $sistemaPensionarioActual = $fieldValue('sistema_pensionario');
                         $quintaEmpleadorActual = $fieldValue('quinta_empleador_principal');
                         $isConditionallyRequired = match ($key) {
@@ -76,6 +114,9 @@
                             'quinta_otra_empresa', 'quinta_otra_empresa_ruc' => $quintaEmpleadorActual !== 'Otra empresa',
                             default => false,
                         };
+                        if ($readonly && $canViewSensitiveFichaData && $isSensitiveFichaSection) {
+                            $conditionalHidden = false;
+                        }
                         $isRequired = $isRequired || $isConditionallyRequired;
                         $fieldDisabled = $conditionalHidden;
                     @endphp
@@ -317,71 +358,74 @@
         </div>
     </section>
 
-    <section class="ficha-section">
-        <div class="ficha-section-header">
-            <h2 class="ficha-section-title">Firma digital</h2>
-        </div>
-        <div class="ficha-card-body">
-            @if($readonly)
-                @if($firmaActual)
-                    <img class="ficha-preview-image" src="{{ $firmaActual }}" alt="Firma digital">
+    @if($canViewSensitiveFichaData)
+        <section class="ficha-section">
+            <div class="ficha-section-header">
+                <h2 class="ficha-section-title">Firma digital</h2>
+            </div>
+            <div class="ficha-card-body">
+                @if($readonly)
+                    @if($firmaActual)
+                        <img class="ficha-preview-image" src="{{ $firmaActual }}" alt="Firma digital">
+                    @else
+                        <div class="ficha-input ingreso-readonly">Sin firma registrada</div>
+                    @endif
                 @else
-                    <div class="ficha-input ingreso-readonly">Sin firma registrada</div>
+                    <div class="public-signature-help">
+                        <strong>Firma dentro del recuadro.</strong>
+                        <ul>
+                            <li>Dibuja tu firma completa con el dedo o mouse.</li>
+                            <li>No pongas solo la huella o iniciales sueltas en este espacio.</li>
+                            <li>Si te equivocas, limpia la firma y vuelve a firmar.</li>
+                        </ul>
+                    </div>
+                    <div class="signature-pad-wrap">
+                        <canvas class="signature-pad" data-signature-pad></canvas>
+                        <input type="hidden" name="firma_base64" value="{{ $firmaActual }}" data-signature-input>
+                        <div class="ficha-actions-bar" style="justify-content:flex-start;">
+                            <button type="button" class="btn btn-outline btn-sm" data-clear-signature>Limpiar firma</button>
+                        </div>
+                        @error('firma_base64') <span class="ficha-error">{{ $message }}</span> @enderror
+                    </div>
                 @endif
-            @else
+            </div>
+        </section>
+
+        <section class="ficha-section">
+            <div class="ficha-section-header">
+                <h2 class="ficha-section-title">Huella digital</h2>
+            </div>
+            <div class="ficha-card-body">
                 <div class="public-signature-help">
-                    <strong>Firma dentro del recuadro.</strong>
+                    <strong>La huella debe verse marcada en papel.</strong>
                     <ul>
-                        <li>Dibuja tu firma completa con el dedo o mouse.</li>
-                        <li>No pongas solo la huella o iniciales sueltas en este espacio.</li>
-                        <li>Si te equivocas, limpia la firma y vuelve a firmar.</li>
+                        <li>Marca tu dedo con tinta y coloca la huella en una hoja blanca.</li>
+                        <li>Toma una foto clara, con buena luz y enfocada.</li>
+                        <li>No subas una foto del dedo; debe verse la huella impresa en el papel.</li>
                     </ul>
                 </div>
-                <div class="signature-pad-wrap">
-                    <canvas class="signature-pad" data-signature-pad></canvas>
-                    <input type="hidden" name="firma_base64" value="{{ $firmaActual }}" data-signature-input>
-                    <div class="ficha-actions-bar" style="justify-content:flex-start;">
-                        <button type="button" class="btn btn-outline btn-sm" data-clear-signature>Limpiar firma</button>
+                @if($huellaArchivo && isset($ingreso))
+                    <div class="ingreso-file-row">
+                        <span>{{ $huellaArchivo->nombre_original ?: 'Huella cargada' }}</span>
+                        <a class="btn btn-outline btn-sm" href="{{ $downloadRoute($huellaArchivo) }}">Descargar</a>
                     </div>
-                    @error('firma_base64') <span class="ficha-error">{{ $message }}</span> @enderror
-                </div>
-            @endif
-        </div>
-    </section>
-
-    <section class="ficha-section">
-        <div class="ficha-section-header">
-            <h2 class="ficha-section-title">Huella digital</h2>
-        </div>
-        <div class="ficha-card-body">
-            <div class="public-signature-help">
-                <strong>La huella debe verse marcada en papel.</strong>
-                <ul>
-                    <li>Marca tu dedo con tinta y coloca la huella en una hoja blanca.</li>
-                    <li>Toma una foto clara, con buena luz y enfocada.</li>
-                    <li>No subas una foto del dedo; debe verse la huella impresa en el papel.</li>
-                </ul>
+                @endif
+                @if(!$readonly)
+                    <input class="ficha-input" type="file" name="huella" accept="image/*" capture="environment" {{ $formMode === 'public' && !$huellaArchivo ? 'required' : '' }}>
+                    @error('huella') <span class="ficha-error">{{ $message }}</span> @enderror
+                @elseif(!$huellaArchivo)
+                    <div class="ficha-input ingreso-readonly">Sin huella registrada</div>
+                @endif
             </div>
-            @if($huellaArchivo && isset($ingreso))
-                <div class="ingreso-file-row">
-                    <span>{{ $huellaArchivo->nombre_original ?: 'Huella cargada' }}</span>
-                    <a class="btn btn-outline btn-sm" href="{{ $downloadRoute($huellaArchivo) }}">Descargar</a>
-                </div>
-            @endif
-            @if(!$readonly)
-                <input class="ficha-input" type="file" name="huella" accept="image/*" capture="environment" {{ $formMode === 'public' && !$huellaArchivo ? 'required' : '' }}>
-                @error('huella') <span class="ficha-error">{{ $message }}</span> @enderror
-            @elseif(!$huellaArchivo)
-                <div class="ficha-input ingreso-readonly">Sin huella registrada</div>
-            @endif
-        </div>
-    </section>
+        </section>
+    @endif
 </div>
 
-@once
-    @push('scripts')
-        @include('personal.fichas.partials.conditional-fields-script')
-        <script>
+@if(!$readonly)
+    @once
+        @push('scripts')
+            @include('personal.fichas.partials.conditional-fields-script')
+            <script>
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('[data-uppercase="1"]').forEach(function (input) {
                 input.addEventListener('input', function () {
@@ -507,6 +551,7 @@
                 });
             });
         });
-        </script>
-    @endpush
-@endonce
+            </script>
+        @endpush
+    @endonce
+@endif

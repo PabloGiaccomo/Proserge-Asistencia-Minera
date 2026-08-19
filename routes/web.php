@@ -21,7 +21,10 @@ use App\Modules\ManPower\Controllers\ManPowerPageController;
 use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
 use App\Modules\Epps\Controllers\EppPageController;
 use App\Modules\Logistica\Controllers\LogisticaPageController;
+use App\Modules\Transporte\Controllers\TransportePageController;
 use App\Modules\RQMina\Controllers\RQMinaPageController;
+use App\Modules\RQMina\Controllers\ParadaDashboardController;
+use App\Modules\RQMina\Controllers\RQMinaPlanController;
 use App\Modules\RQProserge\Controllers\RQProsergePageController;
 use App\Modules\Asistencia\Controllers\AsistenciaPageController;
 use App\Modules\Faltas\Controllers\FaltasPageController;
@@ -130,14 +133,14 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/{id}/contrato-firmado', [PersonalContratoDatoController::class, 'signedContract'])->middleware('web.permission:personal,subir_contrato_firmado')->name('personal.contrato-datos.signed');
     Route::get('/personal/{id}/regularizar-antiguo', [PersonalPageController::class, 'regularizeAntiguo'])->middleware('web.permission:personal,actualizar')->name('personal.antiguo.regularize');
     Route::post('/personal/{id}/regularizar-antiguo', [PersonalPageController::class, 'updateRegularizacionAntiguo'])->middleware('web.permission:personal,actualizar')->name('personal.antiguo.regularize.update');
-    Route::get('/personal/fichas/temporales', [PersonalIngresoController::class, 'index'])->middleware('web.permission:personal,ver_ingresos')->name('personal.fichas.temporales');
-    Route::get('/personal/ingresos/{id}', [PersonalIngresoController::class, 'show'])->middleware('web.permission:personal,ver')->name('personal.ingresos.show');
-    Route::get('/personal/ingresos/{id}/editar', [PersonalIngresoController::class, 'edit'])->middleware('web.permission:personal,editar')->name('personal.ingresos.edit');
-    Route::get('/personal/ingresos/{id}/archivos/{archivoId}', [PersonalIngresoController::class, 'downloadArchivo'])->middleware('web.permission:personal,ver')->name('personal.ingresos.archivos.download');
-    Route::put('/personal/ingresos/{id}', [PersonalIngresoController::class, 'update'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.update');
-    Route::post('/personal/ingresos/{id}/agregar', [PersonalIngresoController::class, 'accept'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.accept');
-    Route::post('/personal/ingresos/{id}/contrato-no-firmado', [PersonalIngresoController::class, 'contractNotSigned'])->middleware('web.permission:personal,actualizar')->name('personal.ingresos.contract-not-signed');
-    Route::delete('/personal/ingresos/{id}', [PersonalIngresoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.ingresos.destroy');
+    Route::get('/personal/fichas/temporales', [PersonalIngresoController::class, 'index'])->middleware('web.permission:personal_ingresos,ver')->name('personal.fichas.temporales');
+    Route::get('/personal/ingresos/{id}', [PersonalIngresoController::class, 'show'])->middleware('web.permission:personal_ingresos,ver')->name('personal.ingresos.show');
+    Route::get('/personal/ingresos/{id}/editar', [PersonalIngresoController::class, 'edit'])->middleware('web.permission:personal_ingresos,editar')->name('personal.ingresos.edit');
+    Route::get('/personal/ingresos/{id}/archivos/{archivoId}', [PersonalIngresoController::class, 'downloadArchivo'])->middleware('web.permission:personal_ingresos,ver')->name('personal.ingresos.archivos.download');
+    Route::put('/personal/ingresos/{id}', [PersonalIngresoController::class, 'update'])->middleware('web.permission:personal_ingresos,actualizar')->name('personal.ingresos.update');
+    Route::post('/personal/ingresos/{id}/agregar', [PersonalIngresoController::class, 'accept'])->middleware('web.permission:personal_ingresos,aprobar')->name('personal.ingresos.accept');
+    Route::post('/personal/ingresos/{id}/contrato-no-firmado', [PersonalIngresoController::class, 'contractNotSigned'])->middleware('web.permission:personal_ingresos,aprobar')->name('personal.ingresos.contract-not-signed');
+    Route::delete('/personal/ingresos/{id}', [PersonalIngresoController::class, 'destroy'])->middleware('web.permission:personal_ingresos,eliminar')->name('personal.ingresos.destroy');
     Route::get('/personal/fichas/activar-link/buscar', [PersonalFichaController::class, 'searchActivateLinkWorkers'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link.search');
     Route::post('/personal/fichas/activar-link', [PersonalFichaController::class, 'activateLinkForWorker'])->middleware('web.permission:personal,editar')->name('personal.fichas.activate-link');
     Route::post('/personal/fichas/correo-envio', [PersonalFichaController::class, 'updateEmailTemplate'])->middleware('web.permission:personal,editar')->name('personal.fichas.email-template.update');
@@ -210,6 +213,9 @@ Route::middleware('web.auth')->group(function (): void {
     // Mi Asistencia
     Route::get('/mi-asistencia', [MiAsistenciaPageController::class, 'index'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.index');
     Route::get('/mi-asistencia/{id}', [MiAsistenciaPageController::class, 'show'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.show');
+    Route::post('/mi-asistencia/{id}/marcar', [MiAsistenciaPageController::class, 'marcar'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar');
+    Route::post('/mi-asistencia/{id}/marcar-todos', [MiAsistenciaPageController::class, 'marcarTodos'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar-todos');
+    Route::post('/mi-asistencia/{id}/cerrar', [MiAsistenciaPageController::class, 'cerrar'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.cerrar');
     
     // Man Power
     Route::get('/man-power', [ManPowerPageController::class, 'index'])->middleware('web.permission:man_power,ver')->name('man-power.index');
@@ -222,6 +228,14 @@ Route::middleware('web.auth')->group(function (): void {
     // Herramientas por parada
     Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:logistica,ver')->name('logistica.index');
     Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:logistica,actualizar')->name('logistica.transportes.update');
+
+    Route::get('/transporte/planificacion', [TransportePageController::class, 'index'])->middleware('web.permission:transportes,ver')->name('transporte.planificacion');
+    Route::post('/transporte/servicios', [TransportePageController::class, 'store'])->middleware('web.permission:transportes,crear')->name('transporte.servicios.store');
+    Route::patch('/transporte/servicios/{servicio}', [TransportePageController::class, 'update'])->middleware('web.permission:transportes,editar|actualizar')->name('transporte.servicios.update');
+    Route::post('/transporte/servicios/{servicio}/pasajeros', [TransportePageController::class, 'pasajeros'])->middleware('web.permission:transportes,entregar|actualizar')->name('transporte.servicios.pasajeros');
+    Route::post('/transporte/servicios/{servicio}/pasajeros/{pasajero}/retirar', [TransportePageController::class, 'retirarPasajero'])->middleware('web.permission:transportes,recepcionar|actualizar')->name('transporte.servicios.pasajeros.retirar');
+    Route::post('/transporte/servicios/{servicio}/copiar', [TransportePageController::class, 'copiar'])->middleware('web.permission:transportes,crear')->name('transporte.servicios.copiar');
+    Route::post('/transporte/servicios/{servicio}/estado', [TransportePageController::class, 'estado'])->middleware('web.permission:transportes,actualizar|entregar|recepcionar')->name('transporte.servicios.estado');
 
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
     Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,importar')->name('herramientas-parada.catalogo.importar');
@@ -263,6 +277,11 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/rq-mina/{id}/edit', [RQMinaPageController::class, 'edit'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.edit');
     Route::get('/rq-mina/{id}/plan/importar', [RQMinaPageController::class, 'importarPlan'])->middleware('web.permission:rq_mina,importar')->name('rq-mina.plan.importar');
     Route::get('/rq-mina/{id}/plan', [RQMinaPageController::class, 'plan'])->middleware('web.permission:rq_mina,editar')->name('rq-mina.plan');
+    Route::get('/rq-mina/{rqMina}/dashboard', [ParadaDashboardController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.dashboard');
+    Route::get('/rq-mina/{rqMina}/dashboard/data', [ParadaDashboardController::class, 'data'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.dashboard.data');
+    Route::post('/rq-mina/{rqMina}/dashboard/recalcular', [ParadaDashboardController::class, 'recalculate'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.dashboard.recalculate');
+    Route::get('/rq-mina/{rqMina}/dashboard/exportar-excel', [ParadaDashboardController::class, 'export'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.dashboard.export');
+    Route::get('/rq-mina/{rqMina}/dashboard/imprimir', [ParadaDashboardController::class, 'print'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.dashboard.print');
     Route::get('/rq-mina/{id}', [RQMinaPageController::class, 'show'])->middleware('web.permission:rq_mina,ver')->name('rq-mina.show');
 
     // RQ Proserge
@@ -365,6 +384,10 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/rq-mina', [RQMinaPageController::class, 'store'])->middleware('web.permission:rq_mina,crear')->name('rq-mina.store');
     Route::put('/rq-mina/{id}', [RQMinaPageController::class, 'update'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.update');
     Route::put('/rq-mina/{id}/plan', [RQMinaPageController::class, 'updatePlan'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.plan.update');
+    Route::post('/rq-mina/{rqMinaId}/planes', [RQMinaPlanController::class, 'store'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.planes.store');
+    Route::put('/rq-mina/{rqMinaId}/planes/{planId}', [RQMinaPlanController::class, 'update'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.planes.update');
+    Route::post('/rq-mina/{rqMinaId}/planes/{planId}/duplicar', [RQMinaPlanController::class, 'duplicate'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.planes.duplicate');
+    Route::post('/rq-mina/{rqMinaId}/planes/{planId}/archivar', [RQMinaPlanController::class, 'archive'])->middleware('web.permission:rq_mina,actualizar')->name('rq-mina.planes.archive');
     Route::post('/rq-mina/{id}/enviar', [RQMinaPageController::class, 'enviar'])->middleware('web.permission:rq_mina,enviar')->name('rq-mina.enviar');
     Route::post('/rq-mina/{id}/eliminar', [RQMinaPageController::class, 'destroy'])->middleware('web.permission:rq_mina,eliminar')->name('rq-mina.destroy');
 
@@ -372,10 +395,20 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/rq-proserge/{id}', [RQProsergePageController::class, 'update'])->middleware('web.permission:rq_proserge,actualizar')->name('rq-proserge.update');
     Route::post('/rq-proserge/{id}/asignar', [RQProsergePageController::class, 'asignar'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.asignar');
     Route::post('/rq-proserge/{id}/desasignar', [RQProsergePageController::class, 'desasignar'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.desasignar');
+    Route::patch('/rq-proserge/{id}/asignaciones/{detalleId}', [RQProsergePageController::class, 'actualizarAsignacion'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.asignaciones.update');
+    Route::post('/rq-proserge/{id}/asignaciones/{detalleId}/retirar', [RQProsergePageController::class, 'retirarAsignacion'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.asignaciones.retirar');
+    Route::post('/rq-proserge/{id}/asignaciones/{detalleId}/reemplazar', [RQProsergePageController::class, 'reemplazarAsignacion'])->middleware('web.permission:rq_proserge,asignar')->name('rq-proserge.asignaciones.reemplazar');
 
     Route::post('/man-power/grupos', [ManPowerPageController::class, 'storeGrupo'])->middleware('web.permission:man_power,crear')->name('man-power.guardar-grupo');
     Route::put('/man-power/grupos/{id}', [ManPowerPageController::class, 'updateGrupo'])->middleware('web.permission:man_power,actualizar')->name('man-power.actualizar-grupo');
+    Route::post('/man-power/grupos/{id}/agregar-personal', [ManPowerPageController::class, 'agregarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.agregar-personal');
     Route::post('/man-power/grupos/{id}/quitar-personal', [ManPowerPageController::class, 'quitarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.quitar-personal');
+    Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/retirar', [ManPowerPageController::class, 'retirarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.retirar-personal');
+    Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/reubicar', [ManPowerPageController::class, 'reubicarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.reubicar-personal');
+    Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/responsable', [ManPowerPageController::class, 'asignarResponsable'])->middleware('web.permission:man_power,asignar')->name('man-power.asignar-responsable');
+    Route::post('/man-power/grupos/copiar-dia', [ManPowerPageController::class, 'copiarGruposDia'])->middleware('web.permission:man_power,duplicar')->name('man-power.copiar-grupos-dia');
+    Route::post('/man-power/grupos/{id}/copiar', [ManPowerPageController::class, 'copiarGrupo'])->middleware('web.permission:man_power,duplicar')->name('man-power.copiar-grupo');
+    Route::post('/man-power/cargos/{detalleId}/compartir', [ManPowerPageController::class, 'updateCargoSharing'])->middleware('web.permission:man_power,actualizar')->name('man-power.cargos.compartir');
 
     Route::post('/asistencia/grupos/{grupoId}/marcar', [AsistenciaPageController::class, 'marcarPost'])->middleware('web.permission:asistencias,registrar')->name('asistencia.marcar-post');
     Route::post('/asistencia/grupos/{grupoId}/marcar-masivo', [AsistenciaPageController::class, 'marcarMasivoPost'])->middleware('web.permission:asistencias,registrar')->name('asistencia.marcar-masivo-post');

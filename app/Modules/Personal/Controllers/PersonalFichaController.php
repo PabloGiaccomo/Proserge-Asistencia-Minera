@@ -116,7 +116,7 @@ class PersonalFichaController extends WebPageController
             ->with(['personal', 'familiares', 'link', 'archivos', 'documentoEstados'])
             ->findOrFail($id);
         $permissions = session('user.permissions', []);
-        $canViewSensitiveFichaData = PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles');
+        $canViewSensitiveFichaData = $this->canViewSensitiveFichaData($permissions);
         $canExportSensitiveFichaPdf = $canViewSensitiveFichaData
             && PermissionMatrix::allowsDirect($permissions, 'personal', 'exportar');
 
@@ -203,7 +203,7 @@ class PersonalFichaController extends WebPageController
     public function pdf(string $id): Response
     {
         abort_unless(
-            PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'ver_datos_sensibles')
+            $this->canViewSensitiveFichaData(session('user.permissions', []))
                 && PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'exportar'),
             403
         );
@@ -256,6 +256,14 @@ class PersonalFichaController extends WebPageController
         abort_unless(Storage::disk('local')->exists($archivo->path), 404);
 
         return Storage::disk('local')->download($archivo->path, $archivo->nombre_original ?: basename($archivo->path));
+    }
+
+    private function canViewSensitiveFichaData(?array $permissions = null): bool
+    {
+        $permissions ??= session('user.permissions', []);
+
+        return PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles')
+            || PermissionMatrix::allowsDirect($permissions, 'personal_ingresos', 'ver_datos_sensibles');
     }
 
     public function extendTemporal(Request $request, string $id): JsonResponse|RedirectResponse

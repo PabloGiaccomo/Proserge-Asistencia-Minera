@@ -2,7 +2,9 @@
 
 namespace App\Modules\RQProserge\Requests;
 
+use App\Models\RQProsergeDetalle;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class AssignPersonalRequest extends FormRequest
 {
@@ -19,6 +21,8 @@ class AssignPersonalRequest extends FormRequest
             'puesto_asignado' => ['required', 'string', 'max:191'],
             'fecha_inicio' => ['required', 'date'],
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
+            'posicion_asignacion' => ['nullable', 'string', Rule::in([RQProsergeDetalle::POSICION_TITULAR, RQProsergeDetalle::POSICION_SUPLENTE])],
+            'tipo_asignacion' => ['nullable', 'string', Rule::in([RQProsergeDetalle::TIPO_REGULAR, RQProsergeDetalle::TIPO_ADICIONAL])],
             'comentario' => ['nullable', 'string'],
             'ultimo_turno_referencia' => ['nullable', 'string', 'max:10'],
         ];

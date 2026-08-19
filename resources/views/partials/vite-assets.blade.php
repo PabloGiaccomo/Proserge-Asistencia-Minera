@@ -61,13 +61,13 @@
     $fallbackCssVersion = is_file($fallbackCssPath) ? filemtime($fallbackCssPath) : null;
 @endphp
 
-@if(! $hotAvailable && $cssFiles->isEmpty() && $fallbackCssVersion)
-    <link rel="stylesheet" href="{{ url('/proserge-app.css') }}?v={{ $fallbackCssVersion }}">
-@endif
-
 @if($hotAvailable)
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 @else
+    @if($fallbackCssVersion)
+        <link rel="stylesheet" href="{{ url('/proserge-app.css') }}?v={{ $fallbackCssVersion }}">
+    @endif
+
     @foreach($cssFiles as $cssFile)
         <link rel="stylesheet" href="{{ asset('build/'.$cssFile) }}">
     @endforeach

@@ -73,6 +73,16 @@ class RQMina extends Model
         return $this->hasMany(RQMinaActividadGrupo::class, 'rq_mina_id')->orderBy('orden');
     }
 
+    public function planes(): HasMany
+    {
+        return $this->hasMany(RQMinaPlan::class, 'rq_mina_id')->orderBy('version')->orderBy('codigo');
+    }
+
+    public function plans(): HasMany
+    {
+        return $this->planes();
+    }
+
     public function rqProserge(): HasMany
     {
         return $this->hasMany(RQProserge::class, 'rq_mina_id');
@@ -86,6 +96,11 @@ class RQMina extends Model
     public function gruposTrabajo(): HasMany
     {
         return $this->hasMany(GrupoTrabajo::class, 'rq_mina_id');
+    }
+
+    public function serviciosTransporte(): HasMany
+    {
+        return $this->hasMany(TransporteServicio::class, 'rq_mina_id');
     }
 
     public function listaHerramientas(): HasOne

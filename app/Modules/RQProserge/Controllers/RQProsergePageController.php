@@ -7,11 +7,13 @@ use App\Models\PersonalMina;
 use App\Models\RQProserge;
 use App\Models\RQMinaDetalleCambio;
 use App\Modules\Notificaciones\Services\NotificationService;
+use App\Modules\RQProserge\Services\RQProsergeCoverageService;
 use App\Modules\RQProserge\Services\RQProsergeService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Throwable;
 
@@ -20,6 +22,7 @@ class RQProsergePageController extends WebPageController
     public function __construct(
         private readonly NotificationService $notificationService,
         private readonly RQProsergeService $service,
+        private readonly RQProsergeCoverageService $coverageService,
     ) {
     }
 
@@ -136,6 +139,8 @@ class RQProsergePageController extends WebPageController
             'puesto_asignado' => ['required', 'string', 'max:191'],
             'fecha_inicio' => ['required', 'date'],
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
+            'posicion_asignacion' => ['required', 'string', Rule::in(['TITULAR', 'SUPLENTE'])],
+            'tipo_asignacion' => ['required', 'string', Rule::in(['REGULAR', 'ADICIONAL'])],
             'comentario' => ['nullable', 'string', 'max:2000'],
             'ultimo_turno_referencia' => ['nullable', 'string', 'max:10'],
         ]);
@@ -160,6 +165,102 @@ class RQProsergePageController extends WebPageController
 
         return response()->json([
             'message' => 'Personal asignado correctamente.',
+            'item' => $this->toViewItem($result['rq']->loadMissing($this->viewRelations())),
+        ]);
+    }
+
+    public function actualizarAsignacion(Request $request, string $id, string $detalleId): JsonResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $payload = $request->validate([
+            'posicion_asignacion' => ['required', 'string', Rule::in(['TITULAR', 'SUPLENTE'])],
+            'tipo_asignacion' => ['required', 'string', Rule::in(['REGULAR', 'ADICIONAL'])],
+            'fecha_inicio' => ['nullable', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'comentario' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $rq = $this->service->findForUser($usuario, $id);
+        if (!$rq) {
+            return response()->json(['error' => 'RQ Proserge no encontrado o sin acceso.'], 404);
+        }
+
+        $result = $this->service->updateAssignment($usuario, $rq, $detalleId, $payload);
+
+        if (($result['ok'] ?? false) === false) {
+            return response()->json([
+                'error' => (string) ($result['message'] ?? 'No se pudo actualizar la asignacion.'),
+                'code' => (string) ($result['code'] ?? 'RQ_PROSERGE_ASSIGNMENT_UPDATE_FAILED'),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Asignacion actualizada correctamente.',
+            'item' => $this->toViewItem($result['rq']->loadMissing($this->viewRelations())),
+        ]);
+    }
+
+    public function retirarAsignacion(Request $request, string $id, string $detalleId): JsonResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $payload = $request->validate([
+            'motivo' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $rq = $this->service->findForUser($usuario, $id);
+        if (!$rq) {
+            return response()->json(['error' => 'RQ Proserge no encontrado o sin acceso.'], 404);
+        }
+
+        $result = $this->service->retireAssignment($usuario, $rq, $detalleId, (string) $payload['motivo']);
+
+        if (($result['ok'] ?? false) === false) {
+            return response()->json([
+                'error' => (string) ($result['message'] ?? 'No se pudo retirar la asignacion.'),
+                'code' => (string) ($result['code'] ?? 'RQ_PROSERGE_RETIRE_FAILED'),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Asignacion retirada correctamente.',
+            'item' => $this->toViewItem($result['rq']->loadMissing($this->viewRelations())),
+        ]);
+    }
+
+    public function reemplazarAsignacion(Request $request, string $id, string $detalleId): JsonResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $payload = $request->validate([
+            'personal_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
+            'fecha_inicio' => ['nullable', 'date'],
+            'fecha_fin' => ['nullable', 'date', 'after_or_equal:fecha_inicio'],
+            'posicion_asignacion' => ['nullable', 'string', Rule::in(['TITULAR', 'SUPLENTE'])],
+            'tipo_asignacion' => ['nullable', 'string', Rule::in(['REGULAR', 'ADICIONAL'])],
+            'comentario' => ['nullable', 'string', 'max:2000'],
+            'ultimo_turno_referencia' => ['nullable', 'string', 'max:10'],
+            'motivo' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $rq = $this->service->findForUser($usuario, $id);
+        if (!$rq) {
+            return response()->json(['error' => 'RQ Proserge no encontrado o sin acceso.'], 404);
+        }
+
+        try {
+            $result = $this->service->replaceAssignment($usuario, $rq, $detalleId, $payload);
+        } catch (Throwable $e) {
+            return response()->json(['error' => 'Error tecnico al reemplazar personal.', 'detail' => $e->getMessage()], 500);
+        }
+
+        if (($result['ok'] ?? false) === false) {
+            return response()->json([
+                'error' => (string) ($result['message'] ?? 'No se pudo reemplazar la asignacion.'),
+                'code' => (string) ($result['code'] ?? 'RQ_PROSERGE_REPLACE_FAILED'),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Asignacion reemplazada correctamente.',
             'item' => $this->toViewItem($result['rq']->loadMissing($this->viewRelations())),
         ]);
     }
@@ -200,6 +301,8 @@ class RQProsergePageController extends WebPageController
             'rqMina.detalle.rqMina:id,fecha_inicio,fecha_fin',
             'rqMina.detalle.asignaciones.personal:id,dni,nombre_completo,puesto',
             'rqMina.detalle.asignaciones.personal.minas:id,nombre',
+            'rqMina.detalle.asignaciones.asignadoPor:id,email',
+            'rqMina.detalle.asignaciones.retiradoPor:id,email',
             'rqMina.detalle.cambios',
             'cambiosRqMina',
         ];
@@ -213,19 +316,35 @@ class RQProsergePageController extends WebPageController
         $detalles = $rqMina?->detalle ?? collect();
         $cambios = $rq->cambiosRqMina ?? collect();
 
-        $puestos = $detalles->map(function ($detalle) use ($rq): array {
+        $coverageByDetail = $this->coverageService->calculateForRq($rq)['detalles'] ?? [];
+
+        $puestos = $detalles->map(function ($detalle) use ($rq, $coverageByDetail): array {
             $asignaciones = $detalle->asignaciones ?? collect();
-            $requeridos = (int) ($detalle->cantidad_total ?: $detalle->cantidad);
+            $metrics = $coverageByDetail[(string) $detalle->id] ?? $this->coverageService->calculateForDetalle($detalle);
+            $requeridos = (int) ($metrics['total_objetivo'] ?? ($detalle->cantidad_total ?: $detalle->cantidad));
             $personalAsignado = $asignaciones->map(fn ($asignacion): array => [
                 'id' => $asignacion->id,
                 'personal_id' => $asignacion->personal_id,
                 'nombre' => trim(($asignacion->personal?->nombre_completo ?? '-') . ($asignacion->personal?->dni ? ' (' . $asignacion->personal->dni . ')' : '')),
-                'comentario' => $asignacion->comentario ?: $asignacion->puesto_asignado,
+                'comentario' => $asignacion->comentario ?: $asignacion->puesto_asignado_snapshot ?: $asignacion->puesto_asignado,
                 'fecha_inicio' => $this->formatDate($asignacion->fecha_inicio),
                 'fecha_fin' => $this->formatDate($asignacion->fecha_fin),
                 'fecha_inicio_iso' => $this->formatIsoDate($asignacion->fecha_inicio),
                 'fecha_fin_iso' => $this->formatIsoDate($asignacion->fecha_fin),
-                'mina_estado' => $this->mineStatusForPersonal($asignacion->personal, (string) $rq->mina_id),
+                'posicion_asignacion' => $asignacion->posicion_asignacion,
+                'tipo_asignacion' => $asignacion->tipo_asignacion,
+                'estado' => $asignacion->estado,
+                'estado_habilitacion_snapshot' => $asignacion->estado_habilitacion_snapshot,
+                'es_sin_clasificar' => $asignacion->isSinClasificar(),
+                'cuenta_como_titular' => $asignacion->cuentaComoTitular(),
+                'cuenta_como_respaldo' => $asignacion->cuentaComoRespaldo(),
+                'asignado_por' => $asignacion->asignadoPor?->email,
+                'asignado_at' => $asignacion->asignado_at?->format('d/m/Y H:i'),
+                'retirado_por' => $asignacion->retiradoPor?->email,
+                'retirado_at' => $asignacion->retirado_at?->format('d/m/Y H:i'),
+                'motivo_retiro' => $asignacion->motivo_retiro,
+                'reemplaza_a_id' => $asignacion->reemplaza_a_id,
+                'mina_estado' => $this->mineStatusForAssignment($asignacion, (string) $rq->mina_id),
             ])->values()->all();
 
             $cambios = ($detalle->cambios ?? collect())
@@ -242,7 +361,21 @@ class RQProsergePageController extends WebPageController
                 'id' => $detalle->id,
                 'nombre' => $detalle->puesto,
                 'requeridos' => $requeridos,
-                'asignados' => $asignaciones->count(),
+                'asignados' => (int) ($metrics['cantidad_atendida'] ?? 0),
+                'titulares_requeridos' => (int) ($metrics['titular_objetivo'] ?? 0),
+                'respaldo_requerido' => (int) ($metrics['respaldo_objetivo'] ?? 0),
+                'titulares_asignados' => (int) ($metrics['titular_efectivo'] ?? 0),
+                'suplentes_asignados' => (int) ($metrics['respaldo_efectivo'] ?? 0),
+                'adicionales' => (int) ($metrics['adicionales_total'] ?? 0),
+                'sin_clasificar' => (int) ($metrics['sin_clasificar'] ?? 0),
+                'brecha_titular' => (int) ($metrics['brecha_titular'] ?? 0),
+                'brecha_respaldo' => (int) ($metrics['brecha_respaldo'] ?? 0),
+                'estado_cobertura' => (string) ($metrics['estado_cobertura'] ?? 'PENDIENTE'),
+                'requiere_clasificacion' => (bool) ($metrics['requiere_clasificacion'] ?? false),
+                'clasificacion_sugerida' => [
+                    'posicion' => 'TITULAR',
+                    'tipo' => ((int) ($metrics['brecha_titular'] ?? 0)) > 0 ? 'REGULAR' : 'ADICIONAL',
+                ],
                 'trabajador' => '',
                 'comentario' => '',
                 'disponibilidad' => [
@@ -264,6 +397,7 @@ class RQProsergePageController extends WebPageController
 
         $solicitado = $puestos->sum(fn (array $puesto): int => (int) ($puesto['requeridos'] ?? 0));
         $atendido = $puestos->sum(fn (array $puesto): int => (int) ($puesto['asignados'] ?? 0));
+        $coverage = $this->coverageService->calculateForRq($rq);
         $paradaFinalizada = $this->rqMinaFinalizada($rqMina?->fecha_fin);
 
         return [
@@ -287,6 +421,8 @@ class RQProsergePageController extends WebPageController
             'atendido' => $atendido,
             'personal_solicitado' => $solicitado,
             'personal_asignado' => $atendido,
+            'cobertura_resumen' => $coverage['global'] ?? [],
+            'requiere_clasificacion' => (bool) data_get($coverage, 'global.requiere_clasificacion', false),
             'puestos' => $puestos->all(),
             'cambios_pendientes' => $cambios->where('estado', RQMinaDetalleCambio::ESTADO_PENDIENTE)->count(),
             'cambios' => $cambios
@@ -336,6 +472,33 @@ class RQProsergePageController extends WebPageController
                 'class' => 'is-not-enabled',
             ],
         };
+    }
+
+    private function mineStatusForAssignment($asignacion, string $minaId): array
+    {
+        $snapshot = strtoupper((string) ($asignacion->estado_habilitacion_snapshot ?? ''));
+
+        if ($snapshot !== '') {
+            return match ($snapshot) {
+                PersonalMina::ESTADO_HABILITADO => [
+                    'estado' => PersonalMina::ESTADO_HABILITADO,
+                    'label' => 'Habilitado al asignar',
+                    'class' => 'is-enabled',
+                ],
+                PersonalMina::ESTADO_EN_PROCESO => [
+                    'estado' => PersonalMina::ESTADO_EN_PROCESO,
+                    'label' => 'En proceso al asignar',
+                    'class' => 'is-process',
+                ],
+                default => [
+                    'estado' => PersonalMina::ESTADO_NO_HABILITADO,
+                    'label' => 'No habilitado al asignar',
+                    'class' => 'is-not-enabled',
+                ],
+            };
+        }
+
+        return $this->mineStatusForPersonal($asignacion->personal, $minaId);
     }
 
     private function formatIsoDate(mixed $date): string

@@ -6,7 +6,9 @@ use App\Models\AsistenciaDetalle;
 use App\Models\AsistenciaEncabezado;
 use App\Models\Falta;
 use App\Models\GrupoTrabajo;
+use App\Models\GrupoTrabajoDetalle;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class AsistenciaCierreService
@@ -39,13 +41,17 @@ class AsistenciaCierreService
             foreach ($ausentes as $item) {
                 $trabajadorId = (string) $item->trabajador_id;
                 $exists = Falta::query()
-                    ->where('asistencia_detalle_id', $item->id)
-                    ->where('motivo', 'INASISTENCIA_ASISTENCIA')
-                    ->orWhere(function ($q) use ($trabajadorId, $encabezado): void {
-                        $q->where('trabajador_id', $trabajadorId)
-                            ->where('fecha', $encabezado->fecha->toDateString())
-                            ->where('motivo', 'INASISTENCIA_ASISTENCIA');
+                    ->where(function ($q) use ($item, $trabajadorId, $encabezado): void {
+                        $q->where(function ($detailQuery) use ($item): void {
+                            $detailQuery->where('asistencia_detalle_id', $item->id)
+                                ->where('motivo', 'INASISTENCIA_ASISTENCIA');
+                        })->orWhere(function ($legacyQuery) use ($trabajadorId, $encabezado): void {
+                            $legacyQuery->where('trabajador_id', $trabajadorId)
+                                ->where('fecha', $encabezado->fecha->toDateString())
+                                ->where('motivo', 'INASISTENCIA_ASISTENCIA');
+                        });
                     })
+                    ->where('estado', 'ACTIVA')
                     ->exists();
 
                 if ($exists) {
@@ -82,53 +88,71 @@ class AsistenciaCierreService
             ];
         }
 
-        $missingMembers = DB::table('grupo_trabajo_detalle as gtd')
-            ->leftJoin('asistencia_detalle as ad', function ($join) use ($encabezado): void {
-                $join->on('ad.trabajador_id', '=', 'gtd.personal_id')
-                    ->where('ad.asistencia_id', '=', $encabezado->id);
-            })
-            ->where('gtd.grupo_trabajo_id', $grupo->id)
-            ->whereNull('ad.id')
-            ->count();
+        DB::transaction(function () use ($grupo, $encabezado): void {
+            $encabezado->fill(['estado' => 'REGISTRADO']);
+            $encabezado->save();
 
-        if ($missingMembers === 0) {
-            return [
-                'ok' => false,
-                'code' => 'ASISTENCIA_REOPEN_NOT_REQUIRED',
-                'message' => 'No hay nuevos integrantes para reabrir asistencia',
-            ];
-        }
+            Falta::query()
+                ->where('asistencia_encabezado_id', $encabezado->id)
+                ->where('motivo', 'INASISTENCIA_ASISTENCIA')
+                ->where('estado', 'ACTIVA')
+                ->update([
+                    'estado' => 'ANULADA',
+                    'motivo_anulacion' => 'Reapertura de asistencia',
+                    'anulado_at' => now(),
+                    'updated_at' => now(),
+                ]);
 
-        $encabezado->fill(['estado' => 'REGISTRADO']);
-        $encabezado->save();
+            $this->ensureDetalleCompleto($grupo, $encabezado);
+        });
 
         return ['ok' => true];
     }
 
     private function ensureDetalleCompleto(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): void
     {
-        $integrantes = DB::table('grupo_trabajo_detalle')
+        $integrantes = GrupoTrabajoDetalle::query()
+            ->with(['personal'])
             ->where('grupo_trabajo_id', $grupo->id)
-            ->pluck('personal_id');
+            ->get()
+            ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva());
 
-        foreach ($integrantes as $personalId) {
+        foreach ($integrantes as $integrante) {
             $exists = AsistenciaDetalle::query()
                 ->where('asistencia_id', $encabezado->id)
-                ->where('trabajador_id', $personalId)
+                ->when(
+                    Schema::hasColumn('asistencia_detalle', 'grupo_trabajo_detalle_id'),
+                    fn ($query) => $query->where('grupo_trabajo_detalle_id', $integrante->id),
+                    fn ($query) => $query->where('trabajador_id', $integrante->personal_id),
+                )
                 ->exists();
 
             if ($exists) {
                 continue;
             }
 
-            AsistenciaDetalle::query()->create([
+            AsistenciaDetalle::query()->create($this->filterColumns('asistencia_detalle', [
                 'id' => (string) Str::uuid(),
                 'asistencia_id' => $encabezado->id,
-                'trabajador_id' => $personalId,
+                'grupo_trabajo_detalle_id' => $integrante->id,
+                'rq_proserge_detalle_id' => $integrante->rq_proserge_detalle_id,
+                'trabajador_id' => $integrante->personal_id,
+                'puesto_snapshot' => $integrante->puesto_asignado_snapshot ?: $integrante->personal?->puesto,
+                'posicion_asignacion_snapshot' => $integrante->posicion_asignacion_snapshot,
+                'tipo_asignacion_snapshot' => $integrante->tipo_asignacion_snapshot,
+                'estado_distribucion_snapshot' => $integrante->estado_distribucion ?: GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO,
                 'hora_marcado' => '00:00:00',
-                'estado' => 'AUSENTE',
+                'estado' => AsistenciaDetalle::ESTADO_AUSENTE,
                 'observaciones' => 'Marcado automatico al cierre',
-            ]);
+                'origen_registro' => 'SISTEMA',
+            ]));
         }
+    }
+
+    private function filterColumns(string $table, array $data): array
+    {
+        return collect($data)
+            ->filter(fn ($value, string $column): bool => Schema::hasColumn($table, $column))
+            ->all();
     }
 }

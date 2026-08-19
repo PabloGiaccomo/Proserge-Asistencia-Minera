@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\PersonalFicha;
+use App\Models\PersonalIngreso;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
@@ -103,6 +104,28 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         $response->assertSee('Exportar PDF');
     }
 
+    public function test_review_accepts_sensitive_permission_from_personal_ingresos(): void
+    {
+        $fichaId = $this->createFicha('87651234');
+        $session = $this->sessionForPermissions([
+            'personal' => ['ver', 'ver_ficha'],
+            'personal_ingresos' => ['ver', 'ver_datos_sensibles'],
+        ]);
+
+        $response = $this
+            ->withSession($session)
+            ->get(route('personal.fichas.review', $fichaId));
+
+        $response->assertOk();
+        $response->assertSee('Datos bancarios');
+        $response->assertSee('Sistema pensionario');
+        $response->assertSee('Firma y huella');
+        $response->assertSee('BANCO SENSIBLE PRUEBA');
+        $response->assertSee('01122200020049472278');
+        $response->assertSee('17000');
+        $response->assertDontSee('Exportar PDF');
+    }
+
     public function test_review_shows_bcp_account_and_cci_when_sensitive_permission_is_enabled(): void
     {
         $fichaId = $this->createFicha('77889900', [
@@ -125,6 +148,31 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         $response->assertSee('1234567890123');
         $response->assertSee('CCI');
         $response->assertSee('00212345678901234567');
+    }
+
+    public function test_ingreso_review_shows_bcp_account_and_cci_with_sensitive_permission(): void
+    {
+        $ingresoId = $this->createIngreso('76764482', [
+            'banco' => ' bcp ',
+            'banco_otro' => '',
+            'numero_cuenta' => '9876543210011',
+            'cci' => '00298765432100112233',
+        ]);
+        $session = $this->sessionForPermissions([
+            'personal_ingresos' => ['ver', 'ver_datos_sensibles'],
+        ]);
+
+        $response = $this
+            ->withSession($session)
+            ->get(route('personal.ingresos.show', $ingresoId));
+
+        $response->assertOk();
+        $response->assertSee('Datos bancarios');
+        $response->assertSee('Banco');
+        $response->assertSee('Numero de cuenta');
+        $response->assertSee('9876543210011');
+        $response->assertSee('CCI');
+        $response->assertSee('00298765432100112233');
     }
 
     public function test_ficha_pdf_is_forbidden_without_sensitive_permission(): void
@@ -236,5 +284,42 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         ]);
 
         return $fichaId;
+    }
+
+    private function createIngreso(string $documentNumber = '12345678', array $overrides = []): string
+    {
+        $ingresoId = (string) Str::uuid();
+        $data = array_replace([
+            ...PersonalFichaCatalog::emptyData(),
+            'nombres' => 'Javier Francisco',
+            'apellido_paterno' => 'Hinojosa',
+            'apellido_materno' => 'Aiquipa',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $documentNumber,
+            'telefono' => '967049572',
+            'correo' => 'javier_hinojosa@test.local',
+            'puesto' => 'Supervisor de operaciones',
+            'contrato' => 'FIJO',
+            'banco' => 'BCP',
+            'banco_otro' => '',
+            'numero_cuenta' => '001122334455',
+            'cci' => '01122200020049472278',
+            'sistema_pensionario' => 'ONP',
+        ], $overrides);
+
+        DB::table('personal_ingresos')->insert([
+            'id' => $ingresoId,
+            'estado' => PersonalIngreso::ESTADO_RECIBIDA,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $documentNumber,
+            'datos_json' => json_encode($data),
+            'familiares_json' => json_encode([]),
+            'firma_base64' => 'data:image/png;base64,signature',
+            'submitted_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $ingresoId;
     }
 }

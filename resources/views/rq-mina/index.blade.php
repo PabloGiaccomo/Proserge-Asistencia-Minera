@@ -27,9 +27,88 @@ $calcTotal = static function (array $detalle): int {
     return (int) array_sum(array_column($detalle, 'cantidad'));
 };
 
+$calcBackup = static function (array $detalle): int {
+    return (int) array_sum(array_column($detalle, 'cantidad_backup'));
+};
+
+$calcTotalSolicitado = static function (array $detalle): int {
+    $total = (int) array_sum(array_column($detalle, 'cantidad_total'));
+
+    return $total > 0 ? $total : (int) array_sum(array_map(
+        static fn (array $linea): int => (int) ($linea['cantidad'] ?? 0) + (int) ($linea['cantidad_backup'] ?? 0),
+        $detalle
+    ));
+};
+
 $calcTransporteTotal = static function (array $transporte): int {
     return (int) array_sum(array_column($transporte, 'cantidad'));
 };
+
+$visibleItems = collect($items);
+$totalRegistros = (int) ($pg['total'] ?? count($items));
+$rqMetrics = [
+    [
+        'label' => 'Total de paradas',
+        'value' => $totalRegistros,
+        'hint' => 'Segun filtros',
+    ],
+    [
+        'label' => 'Borradores visibles',
+        'value' => $visibleItems->filter(fn (array $rq): bool => strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR')->count(),
+        'hint' => 'Pagina actual',
+    ],
+    [
+        'label' => 'Enviadas visibles',
+        'value' => $visibleItems->filter(fn (array $rq): bool => strtoupper((string) ($rq['estado'] ?? '')) === 'ENVIADO')->count(),
+        'hint' => 'Pagina actual',
+    ],
+    [
+        'label' => 'Con plan operativo',
+        'value' => $visibleItems->filter(fn (array $rq): bool => count($rq['plan_operativo'] ?? []) > 0 || count($rq['plans'] ?? []) > 0)->count(),
+        'hint' => 'Pagina actual',
+    ],
+    [
+        'label' => 'Sin plan operativo',
+        'value' => $visibleItems->filter(fn (array $rq): bool => count($rq['plan_operativo'] ?? []) === 0 && count($rq['plans'] ?? []) === 0)->count(),
+        'hint' => 'Pagina actual',
+    ],
+    [
+        'label' => 'Con transporte',
+        'value' => $visibleItems->filter(fn (array $rq): bool => $calcTransporteTotal($rq['transporte'] ?? []) > 0)->count(),
+        'hint' => 'Pagina actual',
+    ],
+];
+
+$hasActiveFilters = collect($activeFilters)->filter(fn ($value): bool => trim((string) $value) !== '')->isNotEmpty();
+
+$filterChipUrl = static function (string $key) use ($baseUrl, $baseQuery): string {
+    $query = $baseQuery;
+    unset($query[$key], $query['page']);
+    $query['page'] = 1;
+
+    return $baseUrl . '?' . http_build_query(array_filter($query, fn ($value) => $value !== null && $value !== ''));
+};
+
+$filterChips = [];
+if (!empty($activeFilters['q'])) {
+    $filterChips[] = ['label' => 'Buscar: '.$activeFilters['q'], 'url' => $filterChipUrl('q')];
+}
+if (!empty($activeFilters['mina_id'])) {
+    $minaLabel = collect($minaOptions)->firstWhere('id', $activeFilters['mina_id'])['nombre'] ?? $activeFilters['mina_id'];
+    $filterChips[] = ['label' => 'Mina: '.$minaLabel, 'url' => $filterChipUrl('mina_id')];
+}
+if (!empty($activeFilters['estado'])) {
+    $filterChips[] = ['label' => 'Estado: '.ucfirst((string) $activeFilters['estado']), 'url' => $filterChipUrl('estado')];
+}
+if (!empty($activeFilters['created_by_usuario_id'])) {
+    $creatorLabel = collect($creadores)->firstWhere('id', $activeFilters['created_by_usuario_id'])['nombre'] ?? $activeFilters['created_by_usuario_id'];
+    $filterChips[] = ['label' => 'Creador: '.$creatorLabel, 'url' => $filterChipUrl('created_by_usuario_id')];
+}
+foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inicio hasta', 'fecha_fin_desde' => 'Fin desde', 'fecha_fin_hasta' => 'Fin hasta'] as $filterKey => $filterLabel) {
+    if (!empty($activeFilters[$filterKey])) {
+        $filterChips[] = ['label' => $filterLabel.': '.$activeFilters[$filterKey], 'url' => $filterChipUrl($filterKey)];
+    }
+}
 @endphp
 
 @section('content')
@@ -37,7 +116,7 @@ $calcTransporteTotal = static function (array $transporte): int {
     <div class="page-header-custom">
         <div>
             <h1 class="page-title">RQ Mina</h1>
-            <p class="page-subtitle">Requerimientos de personal de mina</p>
+            <p class="page-subtitle">Requerimientos de personal y planificacion de paradas.</p>
         </div>
         @if($canCreateRq)
             <a href="{{ route('rq-mina.create') }}" class="btn-nuevoRQ">
@@ -92,7 +171,7 @@ $calcTransporteTotal = static function (array $transporte): int {
                                 id="rqMinaSearch"
                                 class="filter-input"
                                 value="{{ $activeFilters['q'] ?? '' }}"
-                                placeholder="Buscar por lugar, área, creador o estado..."
+                                placeholder="Buscar por lugar, parada, área, creador o estado..."
                                 autocomplete="off"
                             >
                         </div>
@@ -175,8 +254,29 @@ $calcTransporteTotal = static function (array $transporte): int {
                     </div>
                 </div>
             </div>
+
+            @if(!empty($filterChips))
+                <div class="rq-filter-chips" aria-label="Filtros activos">
+                    @foreach($filterChips as $chip)
+                        <a href="{{ $chip['url'] }}" class="rq-filter-chip">
+                            <span>{{ $chip['label'] }}</span>
+                            <span aria-hidden="true">&times;</span>
+                        </a>
+                    @endforeach
+                </div>
+            @endif
         </form>
     </div>
+
+    <section class="rq-metrics" aria-label="Indicadores rapidos de RQ Mina">
+        @foreach($rqMetrics as $metric)
+            <div class="rq-metric">
+                <span class="rq-metric-label">{{ $metric['label'] }}</span>
+                <strong>{{ number_format((int) $metric['value']) }}</strong>
+                <small>{{ $metric['hint'] }}</small>
+            </div>
+        @endforeach
+    </section>
 
     <div class="card">
         <div class="card-header-list">
@@ -191,146 +291,176 @@ $calcTransporteTotal = static function (array $transporte): int {
 
         @if(empty($items))
             <div class="empty-state">
-                <h3>Sin resultados para los filtros aplicados</h3>
-                <p>Ajusta los filtros o usa Limpiar para ver nuevamente todo el listado.</p>
+                @if($hasActiveFilters)
+                    <h3>No encontramos resultados</h3>
+                    <p>Prueba cambiando o limpiando los filtros seleccionados.</p>
+                    <a href="{{ route('rq-mina.index') }}" class="btn-row btn-row-outline empty-state-action">Limpiar filtros</a>
+                @else
+                    <h3>No hay paradas registradas</h3>
+                    <p>Registra una nueva parada para comenzar el requerimiento de personal y el plan operativo.</p>
+                    @if($canCreateRq)
+                        <a href="{{ route('rq-mina.create') }}" class="btn-row btn-send empty-state-action">Nueva parada</a>
+                    @endif
+                @endif
             </div>
         @else
-            <div class="table-wrap">
-                <table class="rq-table">
-                    <thead>
-                        <tr>
-                            <th>Lugar</th>
-                            <th>Área</th>
-                            <th>Fechas</th>
-                            <th>Creador</th>
-                            <th>Supervisor</th>
-                            <th>Plan</th>
-                            <th>Puestos</th>
-                            <th>Total</th>
-                            <th>Transporte</th>
-                            <th>Estado</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach($items as $rq)
-                            @php
-                                $detalle = $rq['detalle'] ?? [];
-                                $planOperativo = $rq['plan_operativo'] ?? [];
-                                $planGrupos = count($planOperativo);
-                                $planActividades = collect($planOperativo)->sum(fn ($g) => count($g['actividades'] ?? []));
-                                $transporteDetalle = $rq['transporte'] ?? [];
-                                $transporteTotal = $calcTransporteTotal($transporteDetalle);
-                                $transporteResumen = collect($transporteDetalle)
-                                    ->map(static function (array $linea): ?string {
-                                        $nombre = trim((string) ($linea['transporte'] ?? ''));
-                                        $cantidad = (int) ($linea['cantidad'] ?? 0);
+            <div class="rq-card-list">
+                @foreach($items as $rq)
+                    @php
+                        $detalle = $rq['detalle'] ?? [];
+                        $planOperativo = $rq['plan_operativo'] ?? [];
+                        $plans = $rq['plans'] ?? [];
+                        $planGrupos = count($planOperativo);
+                        $planActividades = collect($planOperativo)->sum(fn ($g) => count($g['actividades'] ?? []));
+                        $planCount = count($plans);
+                        $planArchivado = collect($plans)->contains(fn (array $plan): bool => strtoupper((string) ($plan['estado'] ?? '')) === 'ARCHIVADO');
+                        $transporteDetalle = $rq['transporte'] ?? [];
+                        $transporteTotal = $calcTransporteTotal($transporteDetalle);
+                        $transporteResumen = collect($transporteDetalle)
+                            ->map(static function (array $linea): ?string {
+                                $nombre = trim((string) ($linea['transporte'] ?? ''));
+                                $cantidad = (int) ($linea['cantidad'] ?? 0);
 
-                                        return $nombre !== '' && $cantidad > 0 ? $cantidad.' x '.$nombre : null;
-                                    })
-                                    ->filter()
-                                    ->values();
-                                $transportePrincipal = $transporteResumen->first();
-                                $transporteRestantes = max(0, $transporteResumen->count() - 1);
-                                $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
-                                $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
-                                $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
-                                $fechaInicioFmt = $fechaInicioRaw !== ''
-                                    ? \Carbon\Carbon::parse($fechaInicioRaw)->locale('es')->translatedFormat('d M Y')
-                                    : '-';
-                                $fechaFinFmt = $fechaFinRaw !== ''
-                                    ? \Carbon\Carbon::parse($fechaFinRaw)->locale('es')->translatedFormat('d M Y')
-                                    : '-';
-                                $semanaInicio = $fechaInicioRaw !== ''
-                                    ? \Carbon\Carbon::parse($fechaInicioRaw)->isoWeek()
-                                    : null;
-                                $semanaFin = $fechaFinRaw !== ''
-                                    ? \Carbon\Carbon::parse($fechaFinRaw)->isoWeek()
-                                    : null;
-                                $semanaLabel = $semanaInicio
-                                    ? ($semanaFin && $semanaFin !== $semanaInicio ? 'Sem. '.$semanaInicio.'-'.$semanaFin : 'Sem. '.$semanaInicio)
-                                    : '-';
-                            @endphp
-                            <tr>
-                                <td data-label="Lugar">{{ $rq['lugar'] ?? $rq['mina'] ?? '-' }}</td>
-                                <td data-label="Área">{{ $rq['area'] ?? '-' }}</td>
-                                <td data-label="Fechas">
-                                    <div class="inline-flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-[180px]">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mt-0.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                                            <line x1="16" y1="2" x2="16" y2="6"></line>
-                                            <line x1="8" y1="2" x2="8" y2="6"></line>
-                                            <line x1="3" y1="10" x2="21" y2="10"></line>
-                                        </svg>
-                                        <div class="leading-tight">
-                                            <div class="rq-week-badge">{{ $semanaLabel }}</div>
-                                            <div class="text-[11px] uppercase tracking-wide text-slate-500">Inicio <span class="font-semibold text-slate-700">{{ $fechaInicioFmt }}</span></div>
-                                            <div class="text-[11px] uppercase tracking-wide text-slate-500 mt-1">Fin <span class="font-semibold text-slate-700">{{ $fechaFinFmt }}</span></div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td data-label="Creador">{{ $rq['creador'] ?? '-' }}</td>
-                                <td data-label="Supervisor">{{ $rq['supervisor']['nombre'] ?? '-' }}</td>
-                                <td data-label="Plan">
-                                    @if($planGrupos > 0)
-                                        <div class="transport-cell">
-                                            <span class="transport-total">{{ $planGrupos }} grupo(s)</span>
-                                            <span class="transport-summary">{{ $planActividades }} actividad(es)</span>
-                                        </div>
+                                return $nombre !== '' && $cantidad > 0 ? $cantidad.' x '.$nombre : null;
+                            })
+                            ->filter()
+                            ->values();
+                        $transporteResumenTexto = $transporteResumen->take(3)->implode(' / ');
+                        $transporteRestantes = max(0, $transporteResumen->count() - 3);
+                        $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
+                        $estadoCss = strtolower(str_replace([' ', '_'], '-', (string) ($rq['estado'] ?? 'borrador')));
+                        $estadoLabel = ucfirst(strtolower(str_replace('_', ' ', (string) ($rq['estado'] ?? 'borrador'))));
+                        $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
+                        $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
+                        $fechaInicioFmt = $fechaInicioRaw !== ''
+                            ? strtoupper(\Carbon\Carbon::parse($fechaInicioRaw)->locale('es')->translatedFormat('d M Y'))
+                            : '-';
+                        $fechaFinFmt = $fechaFinRaw !== ''
+                            ? strtoupper(\Carbon\Carbon::parse($fechaFinRaw)->locale('es')->translatedFormat('d M Y'))
+                            : '-';
+                        $semanaInicio = $fechaInicioRaw !== ''
+                            ? \Carbon\Carbon::parse($fechaInicioRaw)->isoWeek()
+                            : null;
+                        $semanaFin = $fechaFinRaw !== ''
+                            ? \Carbon\Carbon::parse($fechaFinRaw)->isoWeek()
+                            : null;
+                        $semanaLabel = $semanaInicio
+                            ? ($semanaFin && $semanaFin !== $semanaInicio ? 'Sem. '.$semanaInicio.'-'.$semanaFin : 'Sem. '.$semanaInicio)
+                            : '-';
+                        $destinoNombre = $rq['lugar'] ?? $rq['destino_nombre'] ?? $rq['mina'] ?? '-';
+                        $tituloParada = trim((string) $destinoNombre.' - '.(string) ($rq['area'] ?? ''));
+                        $totalTitular = $calcTotal($detalle);
+                        $totalBackup = $calcBackup($detalle);
+                        $totalSolicitado = $calcTotalSolicitado($detalle);
+                        $menuId = 'rq-actions-'.$rq['id'];
+                        $hasOverflowActions = $canDuplicateRq || ($isBorrador && $canSendRq) || $canDeleteRq;
+                    @endphp
+
+                    <article class="rq-card" aria-labelledby="rq-title-{{ $rq['id'] }}">
+                        <div class="rq-card-topline">
+                            <div class="rq-card-badges">
+                                <span class="estado-badge {{ $estadoCss }}">{{ $estadoLabel }}</span>
+                                <span class="rq-location">{{ $destinoNombre }}</span>
+                                @if($planArchivado)
+                                    <span class="rq-soft-badge">Plan archivado</span>
+                                @endif
+                            </div>
+                            <span class="rq-week-badge">{{ $semanaLabel }}</span>
+                        </div>
+
+                        <div class="rq-card-main">
+                            <div class="rq-card-identity">
+                                <h3 id="rq-title-{{ $rq['id'] }}">{{ $tituloParada !== '-' ? $tituloParada : 'Parada sin nombre' }}</h3>
+                                <p>{{ $rq['area'] ?? 'Area no definida' }}</p>
+                                <div class="rq-date-range" aria-label="Rango de fechas">
+                                    <span>Inicio {{ $fechaInicioFmt }}</span>
+                                    <span>Fin {{ $fechaFinFmt }}</span>
+                                </div>
+                            </div>
+
+                            <div class="rq-card-summaries">
+                                <div class="rq-summary {{ $planGrupos > 0 || $planCount > 0 ? '' : 'is-warning' }}">
+                                    <span>Plan operativo</span>
+                                    @if($planGrupos > 0 || $planCount > 0)
+                                        <strong>{{ max(1, $planCount) }} plan · {{ $planGrupos }} grupo(s)</strong>
+                                        <small>{{ $planActividades }} actividad(es)</small>
                                     @else
-                                        <span class="transport-empty">Sin plan</span>
+                                        <strong>Sin plan operativo</strong>
+                                        <small>Esta parada todavia no tiene un plan operativo.</small>
                                     @endif
-                                </td>
-                                <td data-label="Puestos">{{ $calcPuestos($detalle) }}</td>
-                                <td data-label="Total">{{ $calcTotal($detalle) }}</td>
-                                <td data-label="Transporte">
+                                </div>
+
+                                <div class="rq-summary">
+                                    <span>Personal solicitado</span>
+                                    <strong>{{ $calcPuestos($detalle) }} cargo(s) · {{ $totalSolicitado }} persona(s)</strong>
+                                    <small>{{ $totalTitular }} titular(es){{ $totalBackup > 0 ? ' · '.$totalBackup.' backup' : '' }}</small>
+                                </div>
+
+                                <div class="rq-summary {{ $transporteTotal > 0 ? '' : 'is-muted' }}">
+                                    <span>Transporte</span>
                                     @if($transporteTotal > 0)
-                                        <div class="transport-cell">
-                                            <span class="transport-total">{{ $transporteTotal }} unidad(es)</span>
-                                            <span class="transport-summary">
-                                                {{ $transportePrincipal }}
-                                                @if($transporteRestantes > 0)
-                                                    + {{ $transporteRestantes }} mas
-                                                @endif
-                                            </span>
-                                        </div>
+                                        <strong>{{ $transporteTotal }} unidad(es)</strong>
+                                        <small>{{ $transporteResumenTexto }}{{ $transporteRestantes > 0 ? ' + '.$transporteRestantes.' mas' : '' }}</small>
                                     @else
-                                        <span class="transport-empty">Sin transporte</span>
+                                        <strong>Sin transporte</strong>
+                                        <small>Transporte no planificado.</small>
                                     @endif
-                                </td>
-                                <td data-label="Estado">
-                                    <span class="estado-badge {{ $rq['estado'] ?? 'borrador' }}">{{ ucfirst($rq['estado'] ?? 'borrador') }}</span>
-                                </td>
-                                <td data-label="Acciones">
-                                    <div class="row-actions">
-                                        <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
-                                        <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-row-outline">Plan</a>
-                                        @if($canEditRq)
-                                            <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
-                                        @endif
-                                        @if($canDuplicateRq)
-                                            <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="btn-row btn-copy">Copiar</a>
-                                        @endif
+                                </div>
+                            </div>
+                        </div>
 
-                                        @if($isBorrador && $canSendRq)
-                                            <form method="POST" action="{{ route('rq-mina.enviar', $rq['id']) }}" onsubmit="return confirm('¿Enviar este RQ?');">
-                                                @csrf
-                                                <button type="submit" class="btn-row btn-send">Enviar</button>
-                                            </form>
-                                        @endif
+                        <div class="rq-card-footer">
+                            <div class="rq-responsibles">
+                                <span><strong>Creado por:</strong> {{ $rq['creador'] ?? '-' }}</span>
+                                <span><strong>Supervisor:</strong> {{ $rq['supervisor']['nombre'] ?? 'Supervisor pendiente' }}</span>
+                            </div>
 
-                                        @if($canDeleteRq)
-                                            <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar definitivamente este RQ Mina? Se borraran su RQ Proserge, Man Power, herramientas, asistencia, supervisores y registros operativos relacionados. No se borraran trabajadores, minas ni catalogos maestros. Esta accion no se puede deshacer.');">
-                                                @csrf
-                                                <button type="submit" class="btn-row btn-danger">Eliminar</button>
-                                            </form>
-                                        @endif
+                            <div class="row-actions">
+                                @if($canEditRq)
+                                    <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-send">Abrir plan</a>
+                                @endif
+                                <a href="{{ route('rq-mina.dashboard', $rq['id']) }}" class="btn-row btn-row-outline">Dashboard</a>
+                                <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
+                                @if($canEditRq)
+                                    <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
+                                @endif
+
+                                @if($hasOverflowActions)
+                                    <div class="rq-actions-menu">
+                                        <button
+                                            type="button"
+                                            class="btn-row btn-row-outline rq-actions-toggle"
+                                            data-rq-actions-toggle
+                                            aria-expanded="false"
+                                            aria-controls="{{ $menuId }}"
+                                        >
+                                            Mas
+                                        </button>
+                                        <div class="rq-actions-dropdown" id="{{ $menuId }}" data-rq-actions-menu hidden>
+                                            @if($canDuplicateRq)
+                                                <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="rq-actions-item">Copiar</a>
+                                            @endif
+
+                                            @if($isBorrador && $canSendRq)
+                                                <form method="POST" action="{{ route('rq-mina.enviar', $rq['id']) }}" onsubmit="return confirm('¿Enviar este RQ?');">
+                                                    @csrf
+                                                    <button type="submit" class="rq-actions-item">Enviar</button>
+                                                </form>
+                                            @endif
+
+                                            @if($canDeleteRq)
+                                                <form method="POST" action="{{ route('rq-mina.destroy', $rq['id']) }}" onsubmit="return confirm('¿Eliminar definitivamente este RQ Mina? Se borraran su RQ Proserge, Man Power, herramientas, asistencia, supervisores y registros operativos relacionados. No se borraran trabajadores, minas ni catalogos maestros. Esta accion no se puede deshacer.');">
+                                                    @csrf
+                                                    <button type="submit" class="rq-actions-item is-danger">Eliminar</button>
+                                                </form>
+                                            @endif
+                                        </div>
                                     </div>
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                                @endif
+                            </div>
+                        </div>
+                    </article>
+                @endforeach
             </div>
             @php
                 $totalPages = (int) ($pg['total_pages'] ?? 1);
@@ -772,11 +902,58 @@ function initializeRQMinaAutoFilters() {
     });
 }
 
+function initializeRQMinaActionMenus() {
+    const toggles = document.querySelectorAll('[data-rq-actions-toggle]');
+    const closeMenus = () => {
+        document.querySelectorAll('[data-rq-actions-menu]').forEach((menu) => {
+            menu.hidden = true;
+        });
+        toggles.forEach((toggle) => {
+            toggle.setAttribute('aria-expanded', 'false');
+        });
+    };
+
+    toggles.forEach((toggle) => {
+        toggle.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const menuId = toggle.getAttribute('aria-controls');
+            const menu = menuId ? document.getElementById(menuId) : null;
+            if (!menu) return;
+
+            const willOpen = menu.hidden;
+            closeMenus();
+            menu.hidden = !willOpen;
+            toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+
+            if (willOpen) {
+                const firstAction = menu.querySelector('a, button');
+                if (firstAction) {
+                    firstAction.focus({ preventScroll: true });
+                }
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-rq-actions-menu]').forEach((menu) => {
+        menu.addEventListener('click', () => {
+            closeMenus();
+        });
+    });
+
+    document.addEventListener('click', closeMenus);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeMenus();
+        }
+    });
+}
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalRQ(); });
 document.getElementById('modalRQ').addEventListener('click', e => { if (e.target.id === 'modalRQ') closeModalRQ(); });
 
 document.addEventListener('DOMContentLoaded', function () {
     initializeRQMinaAutoFilters();
+    initializeRQMinaActionMenus();
 
     if (window.ProsergeUI) {
         window.ProsergeUI.initCollapsiblePanel({

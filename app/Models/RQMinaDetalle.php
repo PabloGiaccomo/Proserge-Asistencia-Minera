@@ -22,6 +22,7 @@ class RQMinaDetalle extends Model
         'cantidad_backup',
         'cantidad_total',
         'cantidad_atendida',
+        'compartible_man_power',
     ];
 
     protected $casts = [
@@ -29,6 +30,7 @@ class RQMinaDetalle extends Model
         'cantidad_backup' => 'integer',
         'cantidad_total' => 'integer',
         'cantidad_atendida' => 'integer',
+        'compartible_man_power' => 'boolean',
     ];
 
     public function rqMina(): BelongsTo

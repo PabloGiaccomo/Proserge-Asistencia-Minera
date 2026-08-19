@@ -28,6 +28,17 @@ class AsistenciaPolicy
 
     public function manageGrupo(Usuario $usuario, GrupoTrabajo $grupo): bool
     {
+        if ($this->isResponsibleFor($usuario, $grupo)
+            && PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver')) {
+            return true;
+        }
+
+        if ($this->canViewAllAttendances($usuario)) {
+            $minaId = (string) optional($grupo->rqMina)->mina_id;
+
+            return $minaId !== '' && $this->canAccessMina($usuario, $minaId);
+        }
+
         if (!$this->manage($usuario)) {
             return false;
         }
@@ -35,6 +46,40 @@ class AsistenciaPolicy
         $minaId = (string) optional($grupo->rqMina)->mina_id;
 
         return $minaId !== '' && $this->canAccessMina($usuario, $minaId);
+    }
+
+    public function canViewAllAttendances(Usuario $usuario): bool
+    {
+        return $this->isPrivileged($usuario)
+            || PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver_todas_asistencias');
+    }
+
+    public function canRegisterGrupo(Usuario $usuario, GrupoTrabajo $grupo): bool
+    {
+        if ($this->isResponsibleFor($usuario, $grupo)
+            && PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver')) {
+            return true;
+        }
+
+        return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar')
+            && $this->manageGrupo($usuario, $grupo);
+    }
+
+    public function canCloseGrupo(Usuario $usuario, GrupoTrabajo $grupo): bool
+    {
+        if ($this->isResponsibleFor($usuario, $grupo)
+            && PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver')) {
+            return true;
+        }
+
+        return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'cerrar')
+            && $this->manageGrupo($usuario, $grupo);
+    }
+
+    public function isResponsibleFor(Usuario $usuario, GrupoTrabajo $grupo): bool
+    {
+        return filled($usuario->personal_id)
+            && (string) $usuario->personal_id === (string) $grupo->supervisor_id;
     }
 
     private function isPrivileged(Usuario $usuario): bool

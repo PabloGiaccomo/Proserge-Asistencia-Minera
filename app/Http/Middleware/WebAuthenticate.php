@@ -56,6 +56,7 @@ class WebAuthenticate
                 'id' => $usuario->id,
                 'email' => $usuario->email,
                 'name' => $usuario->personal?->nombre_completo ?? $usuario->email,
+                'personal_id' => $usuario->personal_id,
                 'rol' => $usuario->rol?->nombre ?? 'Usuario',
                 'roles' => $roles->map(fn ($rol) => $rol->nombre)->values()->all(),
                 'permissions' => PermissionMatrix::normalizeForRoles($roles->all()),

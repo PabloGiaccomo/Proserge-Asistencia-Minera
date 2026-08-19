@@ -141,7 +141,15 @@ class RQMinaController extends Controller
             );
         }
 
-        $updated = $this->service->update($usuario, $rqMina, $request->validated());
+        try {
+            $updated = $this->service->update($usuario, $rqMina, $request->validated());
+        } catch (\InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                message: $exception->getMessage(),
+                code: 'RQ_MINA_PLAN_INVALID',
+                status: 422,
+            );
+        }
 
         if (!$updated) {
             $validated = $request->validated();

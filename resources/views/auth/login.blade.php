@@ -179,10 +179,17 @@
             border: 1px solid #fecaca;
             color: #dc2626;
         }
+
+        .alert-warning {
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            color: #92400e;
+        }
         
-        .alert-error svg {
+        .alert svg {
             width: 18px;
             height: 18px;
+            flex: 0 0 auto;
         }
         
         .footer-text {
@@ -216,6 +223,16 @@
                         <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                     {{ session('error') }}
+                </div>
+            @endif
+
+            @if(session('session_expired'))
+                <div class="alert alert-warning">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                    {{ session('session_expired') }}
                 </div>
             @endif
             

@@ -7,6 +7,7 @@ use App\Models\RQProsergeDetalle;
 use App\Models\RQMina;
 use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaDetalle;
+use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
@@ -30,6 +31,7 @@ class RQProsergeService
         private readonly RQProsergePolicy $policy,
         private readonly DisponibilidadPersonalService $disponibilidadService,
         private readonly OperationalNotificationService $operationalNotifications,
+        private readonly RQProsergeCoverageService $coverageService,
     ) {
     }
 
@@ -240,12 +242,15 @@ class RQProsergeService
             );
         }
 
-        $disponibilidad = $this->disponibilidadService->evaluar(
-            personalId: $payload['personal_id'],
-            minaId: $rq->mina_id,
-            fechaInicio: $payload['fecha_inicio'],
-            fechaFin: $payload['fecha_fin'],
-        );
+        $posicion = $this->normalizeAssignmentPosition($payload['posicion_asignacion'] ?? null);
+        $tipo = $this->normalizeAssignmentType($payload['tipo_asignacion'] ?? null);
+
+        $personal = Personal::query()->select(['id', 'puesto'])->find($payload['personal_id']);
+        if (!$personal) {
+            return $this->businessError('PERSONAL_NOT_FOUND', 'Personal no existe');
+        }
+
+        $disponibilidad = $this->evaluateAvailabilityForAssignment($rq, $payload);
 
         if (($disponibilidad['technical_error'] ?? false) === true) {
             throw new RuntimeException($disponibilidad['reason_message'] ?? 'Error tecnico');
@@ -258,40 +263,70 @@ class RQProsergeService
             );
         }
 
-        $alreadyAssigned = RQProsergeDetalle::query()
-            ->where('rq_proserge_id', $rq->id)
-            ->where('rq_mina_detalle_id', $payload['rq_mina_detalle_id'])
-            ->where('personal_id', $payload['personal_id'])
-            ->whereDate('fecha_inicio', '<=', $payload['fecha_fin'])
-            ->whereDate('fecha_fin', '>=', $payload['fecha_inicio'])
-            ->exists();
+        return DB::transaction(function () use ($rq, $payload, $usuario, $rqMinaDetalle, $personal, $posicion, $tipo): array {
+            RQProserge::query()->where('id', $rq->id)->lockForUpdate()->first();
+            $lockedRqMinaDetalle = RQMinaDetalle::query()
+                ->where('id', $rqMinaDetalle->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if ($alreadyAssigned) {
-            return $this->businessError('RQ_PROSERGE_DUPLICATE_ASSIGNMENT', 'Personal ya asignado en este rango dentro del RQ');
-        }
+            if ($this->assignmentLimitReached($lockedRqMinaDetalle)) {
+                return $this->businessError(
+                    'RQ_PROSERGE_ASSIGNMENT_LIMIT_REACHED',
+                    'Este puesto ya esta completo. Retira o reemplaza una asignacion antes de agregar otra.'
+                );
+            }
 
-        DB::transaction(function () use ($rq, $payload, $usuario): void {
+            $finalTipo = $this->assignmentTypeForCapacity($lockedRqMinaDetalle, $posicion, $tipo);
+
+            if ($this->hasOverlappingActiveAssignmentInsideRq($rq->id, $payload['personal_id'], $payload['fecha_inicio'], $payload['fecha_fin'])) {
+                return $this->businessError('RQ_PROSERGE_DUPLICATE_ASSIGNMENT', 'Personal ya asignado en este rango dentro del RQ');
+            }
+
+            $disponibilidad = $this->evaluateAvailabilityForAssignment($rq, $payload);
+            if (($disponibilidad['technical_error'] ?? false) === true) {
+                throw new RuntimeException($disponibilidad['reason_message'] ?? 'Error tecnico');
+            }
+            if (($disponibilidad['available'] ?? false) === false) {
+                return $this->businessError(
+                    (string) ($disponibilidad['reason_code'] ?? 'PERSONAL_UNAVAILABLE'),
+                    (string) ($disponibilidad['reason_message'] ?? 'Personal no disponible')
+                );
+            }
+
+            $puestoSnapshot = (string) ($personal->puesto ?: $rqMinaDetalle->puesto);
+
             RQProsergeDetalle::query()->create([
                 'id' => (string) Str::uuid(),
                 'rq_proserge_id' => $rq->id,
                 'rq_mina_detalle_id' => $payload['rq_mina_detalle_id'],
                 'personal_id' => $payload['personal_id'],
-                'puesto_asignado' => $payload['puesto_asignado'],
+                'puesto_asignado' => $puestoSnapshot,
+                'puesto_asignado_snapshot' => $puestoSnapshot,
                 'fecha_inicio' => $payload['fecha_inicio'],
                 'fecha_fin' => $payload['fecha_fin'],
                 'comentario' => $payload['comentario'] ?? null,
                 'ultimo_turno_referencia' => $payload['ultimo_turno_referencia'] ?? null,
-                'estado' => 'ASIGNADO',
+                'posicion_asignacion' => $posicion,
+                'tipo_asignacion' => $finalTipo,
+                'estado_habilitacion_snapshot' => $disponibilidad['mina_estado']['estado'] ?? null,
+                'disponibilidad_snapshot' => $this->safeAvailabilitySnapshot($disponibilidad),
+                'asignado_por_id' => $usuario->id,
+                'asignado_at' => now(),
+                'estado' => RQProsergeDetalle::ESTADO_ASIGNADO,
             ]);
 
             $this->recalculateCantidadAtendida($payload['rq_mina_detalle_id']);
             $this->recalculateEstado($rq, $usuario);
-        });
 
-        return [
-            'ok' => true,
-            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
-        ];
+            return [
+                'ok' => true,
+                'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
+                'coverage' => $this->coverageService->calculateForRq($rq->fresh()),
+                'posicion_asignacion' => $posicion,
+                'tipo_asignacion' => $finalTipo,
+            ];
+        });
     }
 
     public function unassignPersonal(Usuario $usuario, RQProserge $rq, string $rqProsergeDetalleId): array
@@ -316,7 +351,12 @@ class RQProsergeService
         $rqMinaDetalleId = $detalle->rq_mina_detalle_id;
 
         DB::transaction(function () use ($detalle, $rqMinaDetalleId, $rq, $usuario): void {
-            $detalle->delete();
+            $detalle->forceFill([
+                'estado' => RQProsergeDetalle::ESTADO_RETIRADO,
+                'retirado_por_id' => $usuario->id,
+                'retirado_at' => now(),
+                'motivo_retiro' => $detalle->motivo_retiro ?: 'Desasignado desde flujo legacy.',
+            ])->save();
             $this->recalculateCantidadAtendida($rqMinaDetalleId);
             $this->recalculateEstado($rq, $usuario);
         });
@@ -325,6 +365,246 @@ class RQProsergeService
             'ok' => true,
             'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
         ];
+    }
+
+    public function updateAssignment(Usuario $usuario, RQProserge $rq, string $assignmentId, array $payload): array
+    {
+        if (!$this->policy->assign($usuario, $rq) && !$this->policy->update($usuario, $rq)) {
+            return $this->businessError('RQ_PROSERGE_ASSIGNMENT_UPDATE_FORBIDDEN', 'No autorizado para modificar esta asignacion');
+        }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return $blocked;
+        }
+
+        return DB::transaction(function () use ($usuario, $rq, $assignmentId, $payload): array {
+            $assignment = RQProsergeDetalle::query()
+                ->where('id', $assignmentId)
+                ->where('rq_proserge_id', $rq->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$assignment) {
+                return $this->businessError('RQ_PROSERGE_DETALLE_NOT_FOUND', 'Asignacion no encontrada en el RQ Proserge');
+            }
+
+            if (!$assignment->isActiva()) {
+                return $this->businessError('RQ_PROSERGE_ASSIGNMENT_INACTIVE', 'No se puede modificar una asignacion retirada o reemplazada');
+            }
+
+            $fechaInicio = (string) ($payload['fecha_inicio'] ?? $assignment->fecha_inicio?->toDateString());
+            $fechaFin = (string) ($payload['fecha_fin'] ?? $assignment->fecha_fin?->toDateString());
+
+            if (!$this->assignmentFitsRqMinaDates($rq, $fechaInicio, $fechaFin)) {
+                return $this->businessError('RQ_PROSERGE_ASSIGNMENT_DATE_OUT_OF_RANGE', 'Las fechas de asignacion deben estar dentro de las fechas de la parada');
+            }
+
+            if ($this->hasOverlappingActiveAssignmentInsideRq($rq->id, $assignment->personal_id, $fechaInicio, $fechaFin, $assignment->id)) {
+                return $this->businessError('RQ_PROSERGE_DUPLICATE_ASSIGNMENT', 'Personal ya asignado en este rango dentro del RQ');
+            }
+
+            $disponibilidad = $this->disponibilidadService->evaluar(
+                personalId: (string) $assignment->personal_id,
+                minaId: (string) $rq->mina_id,
+                fechaInicio: $fechaInicio,
+                fechaFin: $fechaFin,
+                excludeAsignacionId: (string) $assignment->id,
+            );
+
+            if (($disponibilidad['technical_error'] ?? false) === true) {
+                throw new RuntimeException($disponibilidad['reason_message'] ?? 'Error tecnico');
+            }
+            if (($disponibilidad['available'] ?? false) === false) {
+                return $this->businessError(
+                    (string) ($disponibilidad['reason_code'] ?? 'PERSONAL_UNAVAILABLE'),
+                    (string) ($disponibilidad['reason_message'] ?? 'Personal no disponible')
+                );
+            }
+
+            $posicion = $this->normalizeAssignmentPosition($payload['posicion_asignacion'] ?? $assignment->posicion_asignacion);
+            $tipo = $this->assignmentTypeForCapacity(
+                RQMinaDetalle::query()->where('id', $assignment->rq_mina_detalle_id)->lockForUpdate()->firstOrFail(),
+                $posicion,
+                $this->normalizeAssignmentType($payload['tipo_asignacion'] ?? $assignment->tipo_asignacion),
+                (string) $assignment->id,
+            );
+
+            $assignment->forceFill([
+                'posicion_asignacion' => $posicion,
+                'tipo_asignacion' => $tipo,
+                'comentario' => $payload['comentario'] ?? $assignment->comentario,
+                'fecha_inicio' => $fechaInicio,
+                'fecha_fin' => $fechaFin,
+                'estado_habilitacion_snapshot' => $disponibilidad['mina_estado']['estado'] ?? $assignment->estado_habilitacion_snapshot,
+                'disponibilidad_snapshot' => $this->safeAvailabilitySnapshot($disponibilidad),
+                'actualizado_por_id' => $usuario->id,
+            ])->save();
+
+            $this->recalculateCantidadAtendida((string) $assignment->rq_mina_detalle_id);
+            $this->recalculateEstado($rq, $usuario);
+
+            return [
+                'ok' => true,
+                'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
+                'coverage' => $this->coverageService->calculateForRq($rq->fresh()),
+            ];
+        });
+    }
+
+    public function retireAssignment(Usuario $usuario, RQProserge $rq, string $assignmentId, string $motivo): array
+    {
+        if (!$this->policy->unassign($usuario, $rq)) {
+            return $this->businessError('RQ_PROSERGE_UNASSIGN_FORBIDDEN', 'No autorizado para retirar personal en este RQ Proserge');
+        }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return $blocked;
+        }
+
+        return DB::transaction(function () use ($usuario, $rq, $assignmentId, $motivo): array {
+            $assignment = RQProsergeDetalle::query()
+                ->where('id', $assignmentId)
+                ->where('rq_proserge_id', $rq->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$assignment) {
+                return $this->businessError('RQ_PROSERGE_DETALLE_NOT_FOUND', 'Asignacion no encontrada en el RQ Proserge');
+            }
+
+            if (!$assignment->isActiva()) {
+                return $this->businessError('RQ_PROSERGE_ASSIGNMENT_INACTIVE', 'La asignacion ya no esta activa');
+            }
+
+            $assignment->forceFill([
+                'estado' => RQProsergeDetalle::ESTADO_RETIRADO,
+                'retirado_por_id' => $usuario->id,
+                'retirado_at' => now(),
+                'motivo_retiro' => $motivo,
+            ])->save();
+
+            $this->recalculateCantidadAtendida((string) $assignment->rq_mina_detalle_id);
+            $this->recalculateEstado($rq, $usuario);
+
+            return [
+                'ok' => true,
+                'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
+                'coverage' => $this->coverageService->calculateForRq($rq->fresh()),
+            ];
+        });
+    }
+
+    public function replaceAssignment(Usuario $usuario, RQProserge $rq, string $assignmentId, array $payload): array
+    {
+        if (!$this->policy->assign($usuario, $rq)) {
+            return $this->businessError('RQ_PROSERGE_REPLACE_FORBIDDEN', 'No autorizado para reemplazar personal en este RQ Proserge');
+        }
+
+        if ($blocked = $this->finishedParadaModificationError($rq)) {
+            return $blocked;
+        }
+
+        return DB::transaction(function () use ($usuario, $rq, $assignmentId, $payload): array {
+            $original = RQProsergeDetalle::query()
+                ->where('id', $assignmentId)
+                ->where('rq_proserge_id', $rq->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$original) {
+                return $this->businessError('RQ_PROSERGE_DETALLE_NOT_FOUND', 'Asignacion no encontrada en el RQ Proserge');
+            }
+
+            if (!$original->isActiva()) {
+                return $this->businessError('RQ_PROSERGE_ASSIGNMENT_INACTIVE', 'No se puede reemplazar una asignacion retirada o reemplazada');
+            }
+
+            $assignPayload = [
+                'rq_mina_detalle_id' => (string) $original->rq_mina_detalle_id,
+                'personal_id' => (string) $payload['personal_id'],
+                'puesto_asignado' => (string) ($original->puesto_asignado ?: ''),
+                'fecha_inicio' => (string) ($payload['fecha_inicio'] ?? $original->fecha_inicio?->toDateString()),
+                'fecha_fin' => (string) ($payload['fecha_fin'] ?? $original->fecha_fin?->toDateString()),
+                'comentario' => $payload['comentario'] ?? $original->comentario,
+                'ultimo_turno_referencia' => $payload['ultimo_turno_referencia'] ?? $original->ultimo_turno_referencia,
+                'posicion_asignacion' => $payload['posicion_asignacion'] ?? $original->posicion_asignacion ?? RQProsergeDetalle::POSICION_TITULAR,
+                'tipo_asignacion' => $payload['tipo_asignacion'] ?? $original->tipo_asignacion ?? RQProsergeDetalle::TIPO_REGULAR,
+            ];
+
+            if (!$this->assignmentFitsRqMinaDates($rq, $assignPayload['fecha_inicio'], $assignPayload['fecha_fin'])) {
+                return $this->businessError('RQ_PROSERGE_ASSIGNMENT_DATE_OUT_OF_RANGE', 'Las fechas de asignacion deben estar dentro de las fechas de la parada');
+            }
+
+            if ($this->hasOverlappingActiveAssignmentInsideRq($rq->id, $assignPayload['personal_id'], $assignPayload['fecha_inicio'], $assignPayload['fecha_fin'])) {
+                return $this->businessError('RQ_PROSERGE_DUPLICATE_ASSIGNMENT', 'Personal ya asignado en este rango dentro del RQ');
+            }
+
+            $personal = Personal::query()->select(['id', 'puesto'])->find($assignPayload['personal_id']);
+            if (!$personal) {
+                return $this->businessError('PERSONAL_NOT_FOUND', 'Personal no existe');
+            }
+
+            $disponibilidad = $this->evaluateAvailabilityForAssignment($rq, $assignPayload);
+            if (($disponibilidad['technical_error'] ?? false) === true) {
+                throw new RuntimeException($disponibilidad['reason_message'] ?? 'Error tecnico');
+            }
+            if (($disponibilidad['available'] ?? false) === false) {
+                return $this->businessError(
+                    (string) ($disponibilidad['reason_code'] ?? 'PERSONAL_UNAVAILABLE'),
+                    (string) ($disponibilidad['reason_message'] ?? 'Personal no disponible')
+                );
+            }
+
+            $original->forceFill([
+                'estado' => RQProsergeDetalle::ESTADO_REEMPLAZADO,
+                'retirado_por_id' => $usuario->id,
+                'retirado_at' => now(),
+                'motivo_retiro' => (string) $payload['motivo'],
+            ])->save();
+
+            $rqMinaDetalle = RQMinaDetalle::query()
+                ->where('id', $original->rq_mina_detalle_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $puestoSnapshot = (string) ($personal->puesto ?: $rqMinaDetalle->puesto);
+            $finalPosicion = $this->normalizeAssignmentPosition($assignPayload['posicion_asignacion']);
+            $finalTipo = $this->assignmentTypeForCapacity(
+                $rqMinaDetalle,
+                $finalPosicion,
+                $this->normalizeAssignmentType($assignPayload['tipo_asignacion']),
+                (string) $original->id,
+            );
+
+            RQProsergeDetalle::query()->create([
+                'id' => (string) Str::uuid(),
+                'rq_proserge_id' => $rq->id,
+                'rq_mina_detalle_id' => $original->rq_mina_detalle_id,
+                'personal_id' => $assignPayload['personal_id'],
+                'puesto_asignado' => $puestoSnapshot,
+                'puesto_asignado_snapshot' => $puestoSnapshot,
+                'fecha_inicio' => $assignPayload['fecha_inicio'],
+                'fecha_fin' => $assignPayload['fecha_fin'],
+                'comentario' => $assignPayload['comentario'] ?? null,
+                'ultimo_turno_referencia' => $assignPayload['ultimo_turno_referencia'] ?? null,
+                'posicion_asignacion' => $finalPosicion,
+                'tipo_asignacion' => $finalTipo,
+                'estado_habilitacion_snapshot' => $disponibilidad['mina_estado']['estado'] ?? null,
+                'disponibilidad_snapshot' => $this->safeAvailabilitySnapshot($disponibilidad),
+                'asignado_por_id' => $usuario->id,
+                'asignado_at' => now(),
+                'reemplaza_a_id' => $original->id,
+                'estado' => RQProsergeDetalle::ESTADO_ASIGNADO,
+            ]);
+
+            $this->recalculateCantidadAtendida((string) $original->rq_mina_detalle_id);
+            $this->recalculateEstado($rq, $usuario);
+
+            return [
+                'ok' => true,
+                'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
+                'coverage' => $this->coverageService->calculateForRq($rq->fresh()),
+            ];
+        });
     }
 
     public function disponibles(RQProserge $rq, string $fechaInicio, string $fechaFin, int $limit = 25): array
@@ -466,12 +746,11 @@ class RQProsergeService
 
     private function recalculateCantidadAtendida(string $rqMinaDetalleId): void
     {
-        $count = RQProsergeDetalle::query()->where('rq_mina_detalle_id', $rqMinaDetalleId)->count();
+        $detalle = RQMinaDetalle::query()->with('asignaciones')->find($rqMinaDetalleId);
 
-        RQMinaDetalle::query()->where('id', $rqMinaDetalleId)->update([
-            'cantidad_atendida' => $count,
-            'updated_at' => now(),
-        ]);
+        if ($detalle) {
+            $this->coverageService->syncDetalle($detalle);
+        }
     }
 
     private function assignmentFitsRqMinaDates(RQProserge $rq, string $fechaInicio, string $fechaFin): bool
@@ -590,17 +869,10 @@ class RQProsergeService
 
     private function operationalNeeds(RQProserge $rq): array
     {
-        $detalles = $rq->rqMina?->detalle ?? collect();
-
-        $solicitado = 0;
-        $atendido = 0;
-
-        foreach ($detalles as $detalle) {
-            $solicitado += (int) ($detalle->cantidad_total ?: $detalle->cantidad);
-            $atendido += $detalle->relationLoaded('asignaciones')
-                ? $detalle->asignaciones->count()
-                : (int) $detalle->cantidad_atendida;
-        }
+        $coverage = $this->coverageService->calculateForRq($rq);
+        $global = $coverage['global'] ?? [];
+        $solicitado = (int) ($global['total_objetivo'] ?? 0);
+        $atendido = (int) (($global['titular_efectivo'] ?? 0) + ($global['respaldo_efectivo'] ?? 0));
 
         return [
             'solicitado' => $solicitado,
@@ -629,21 +901,8 @@ class RQProsergeService
     private function recalculateEstado(RQProserge $rq, ?Usuario $actor = null): bool
     {
         $previousState = strtoupper((string) $rq->estado);
-        $totals = RQMinaDetalle::query()
-            ->where('rq_mina_id', $rq->rq_mina_id)
-            ->selectRaw('COALESCE(SUM(CASE WHEN cantidad_total > 0 THEN cantidad_total ELSE cantidad END), 0) as solicitado')
-            ->selectRaw('COALESCE(SUM(cantidad_atendida), 0) as atendido')
-            ->first();
-
-        $solicitado = (int) ($totals->solicitado ?? 0);
-        $atendido = (int) ($totals->atendido ?? 0);
-
-        $estado = 'PENDIENTE';
-        if ($solicitado > 0 && $atendido >= $solicitado) {
-            $estado = 'COMPLETADO';
-        } elseif ($atendido > 0) {
-            $estado = 'PARCIAL';
-        }
+        $coverage = $this->coverageService->syncRq($rq);
+        $estado = (string) $coverage['estado'];
 
         $changed = false;
         if (!in_array($rq->estado, ['CERRADO', 'CANCELADO'], true) && $rq->estado !== $estado) {
@@ -679,6 +938,115 @@ class RQProsergeService
             'code' => $code,
             'message' => $message,
             'technical_error' => false,
+        ];
+    }
+
+    private function normalizeAssignmentPosition(?string $position): string
+    {
+        $value = strtoupper(trim((string) $position));
+
+        return in_array($value, [RQProsergeDetalle::POSICION_TITULAR, RQProsergeDetalle::POSICION_SUPLENTE], true)
+            ? $value
+            : RQProsergeDetalle::POSICION_TITULAR;
+    }
+
+    private function normalizeAssignmentType(?string $type): string
+    {
+        $value = strtoupper(trim((string) $type));
+
+        return in_array($value, [RQProsergeDetalle::TIPO_REGULAR, RQProsergeDetalle::TIPO_ADICIONAL], true)
+            ? $value
+            : RQProsergeDetalle::TIPO_REGULAR;
+    }
+
+    private function assignmentTypeForCapacity(
+        RQMinaDetalle $detalle,
+        string $position,
+        string $type,
+        ?string $excludeAssignmentId = null,
+    ): string {
+        if ($type === RQProsergeDetalle::TIPO_ADICIONAL) {
+            return RQProsergeDetalle::TIPO_ADICIONAL;
+        }
+
+        $active = RQProsergeDetalle::query()
+            ->where('rq_mina_detalle_id', $detalle->id)
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
+            ->when($excludeAssignmentId, fn ($query) => $query->where('id', '!=', $excludeAssignmentId));
+
+        if ($position === RQProsergeDetalle::POSICION_SUPLENTE) {
+            $suplentes = (clone $active)
+                ->where('posicion_asignacion', RQProsergeDetalle::POSICION_SUPLENTE)
+                ->where('tipo_asignacion', RQProsergeDetalle::TIPO_REGULAR)
+                ->count();
+
+            return $suplentes < max(0, (int) $detalle->cantidad_backup)
+                ? RQProsergeDetalle::TIPO_REGULAR
+                : RQProsergeDetalle::TIPO_ADICIONAL;
+        }
+
+        $titulares = (clone $active)
+            ->where('posicion_asignacion', RQProsergeDetalle::POSICION_TITULAR)
+            ->where('tipo_asignacion', RQProsergeDetalle::TIPO_REGULAR)
+            ->count();
+
+        return $titulares < max(0, (int) $detalle->cantidad)
+            ? RQProsergeDetalle::TIPO_REGULAR
+            : RQProsergeDetalle::TIPO_ADICIONAL;
+    }
+
+    private function assignmentLimitReached(RQMinaDetalle $detalle, ?string $excludeAssignmentId = null): bool
+    {
+        $titularObjetivo = max(0, (int) $detalle->cantidad);
+        $respaldoObjetivo = max(0, (int) $detalle->cantidad_backup);
+        $totalObjetivo = max(0, (int) ($detalle->cantidad_total ?: ($titularObjetivo + $respaldoObjetivo)));
+
+        if ($totalObjetivo <= 0) {
+            return true;
+        }
+
+        $activeCount = RQProsergeDetalle::query()
+            ->where('rq_mina_detalle_id', $detalle->id)
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
+            ->when($excludeAssignmentId, fn ($query) => $query->where('id', '!=', $excludeAssignmentId))
+            ->count();
+
+        return $activeCount >= $totalObjetivo;
+    }
+
+    private function evaluateAvailabilityForAssignment(RQProserge $rq, array $payload, ?string $excludeAssignmentId = null): array
+    {
+        return $this->disponibilidadService->evaluar(
+            personalId: (string) $payload['personal_id'],
+            minaId: (string) $rq->mina_id,
+            fechaInicio: (string) $payload['fecha_inicio'],
+            fechaFin: (string) $payload['fecha_fin'],
+            excludeAsignacionId: $excludeAssignmentId,
+        );
+    }
+
+    private function hasOverlappingActiveAssignmentInsideRq(string $rqId, string $personalId, string $fechaInicio, string $fechaFin, ?string $excludeAssignmentId = null): bool
+    {
+        return RQProsergeDetalle::query()
+            ->when($excludeAssignmentId, fn ($query) => $query->where('id', '!=', $excludeAssignmentId))
+            ->where('rq_proserge_id', $rqId)
+            ->where('personal_id', $personalId)
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
+            ->whereDate('fecha_inicio', '<=', $fechaFin)
+            ->whereDate('fecha_fin', '>=', $fechaInicio)
+            ->lockForUpdate()
+            ->exists();
+    }
+
+    private function safeAvailabilitySnapshot(array $disponibilidad): array
+    {
+        return [
+            'available' => (bool) ($disponibilidad['available'] ?? false),
+            'reason_code' => $disponibilidad['reason_code'] ?? null,
+            'reason_message' => $disponibilidad['reason_message'] ?? null,
+            'lineas' => array_values($disponibilidad['lineas'] ?? []),
+            'mina_estado' => $disponibilidad['mina_estado'] ?? null,
+            'captured_at' => now()->toIso8601String(),
         ];
     }
 

@@ -90,6 +90,9 @@
             <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
                 Plan operativo
             </a>
+            <a href="{{ route('rq-mina.dashboard', $item['id']) }}" class="btn btn-outline">
+                Dashboard KPI
+            </a>
             @if($canEditRq)
                 <a href="{{ route('rq-mina.edit', $item['id']) }}" class="btn btn-primary">
                     Editar

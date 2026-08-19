@@ -6,6 +6,7 @@ use App\Http\Controllers\WebPageController;
 use App\Models\PersonalPuesto;
 use App\Modules\Personal\Services\PersonalIngresoService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -80,6 +81,7 @@ class PersonalIngresoController extends WebPageController
             $request->file('huella'),
             $request->file('documentos', []),
             $this->requireAuthenticatedUser(),
+            $this->canViewSensitiveFichaData(),
         );
 
         return redirect()
@@ -147,12 +149,15 @@ class PersonalIngresoController extends WebPageController
         $archivo = $ingreso->archivos->firstWhere('id', $archivoId);
 
         abort_unless($archivo && $archivo->path && Storage::disk('local')->exists($archivo->path), 404);
+        abort_if((string) $archivo->tipo === 'huella' && !$this->canViewSensitiveFichaData(), 403);
 
         return Storage::disk('local')->download($archivo->path, $archivo->nombre_original ?: 'archivo');
     }
 
     private function reviewView($ingreso, bool $editing): View
     {
+        $canViewSensitiveFichaData = $this->canViewSensitiveFichaData();
+
         return view('personal.fichas.ingreso-review', [
             'ingreso' => $ingreso,
             'editing' => $editing,
@@ -163,7 +168,16 @@ class PersonalIngresoController extends WebPageController
             'declarationCheckboxes' => PersonalFichaCatalog::declarationCheckboxes(),
             'puestoOptions' => $this->puestoOptions(),
             'ingresosService' => $this->ingresos,
+            'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
         ]);
+    }
+
+    private function canViewSensitiveFichaData(): bool
+    {
+        $permissions = session('user.permissions', []);
+
+        return PermissionMatrix::allowsDirect($permissions, 'personal_ingresos', 'ver_datos_sensibles')
+            || PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles');
     }
 
     private function rules(): array

@@ -98,6 +98,8 @@ class EnsureWebPermission
     {
         return match ($module) {
             'personal' => match ($action) {
+                'ver_ingresos',
+                'ver_ficha' => [['personal_ingresos', 'ver']],
                 'ver_documentos' => [['personal_documentos', 'ver']],
                 'subir_documentos' => [['personal_documentos', 'subir']],
                 'descargar_documentos' => [['personal_documentos', 'descargar'], ['personal_contratos', 'descargar']],
@@ -105,6 +107,15 @@ class EnsureWebPermission
                 'renovar' => [['personal_contratos', 'renovar']],
                 'reingresar' => [['personal_contratos', 'reingresar']],
                 default => [],
+            },
+            'personal_ingresos' => match ($action) {
+                'ver' => [['personal', 'ver_ingresos'], ['personal', 'ver']],
+                'editar' => [['personal', 'editar']],
+                'actualizar' => [['personal', 'actualizar']],
+                'eliminar' => [['personal', 'eliminar']],
+                'aprobar' => [['personal', 'aprobar'], ['personal', 'actualizar']],
+                'comunicar' => [['personal', 'comunicar'], ['personal', 'enviar']],
+                default => [['personal', $action]],
             },
             'personal_puestos' => [['personal', 'gestionar_puestos']],
             'vencimientos' => match ($action) {

@@ -6,9 +6,10 @@
 
 @php
     $ingresoPermissions = session('user.permissions', []);
-    $canEditIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'editar');
-    $canUpdateIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'actualizar');
-    $canDeleteIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'eliminar');
+    $canEditIngresos = \App\Support\Rbac\PermissionMatrix::allows($ingresoPermissions, 'personal_ingresos', 'editar');
+    $canUpdateIngresos = \App\Support\Rbac\PermissionMatrix::allows($ingresoPermissions, 'personal_ingresos', 'actualizar');
+    $canDeleteIngresos = \App\Support\Rbac\PermissionMatrix::allows($ingresoPermissions, 'personal_ingresos', 'eliminar');
+    $canApproveIngresos = \App\Support\Rbac\PermissionMatrix::allows($ingresoPermissions, 'personal_ingresos', 'aprobar');
     $data = is_array($data ?? null) ? $data : [];
     $name = trim(collect([$data['apellido_paterno'] ?? '', $data['apellido_materno'] ?? '', $data['nombres'] ?? ''])->filter()->implode(' '));
     $statusClass = $ingresosService->statusClass((string) $ingreso->estado);
@@ -75,6 +76,7 @@
                 'formMode' => 'internal',
                 'archivos' => $ingreso->archivos,
                 'firmaBase64' => $ingreso->firma_base64,
+                'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
             ])
         </form>
     @else
@@ -83,6 +85,7 @@
             'formMode' => 'internal',
             'archivos' => $ingreso->archivos,
             'firmaBase64' => $ingreso->firma_base64,
+            'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
         ])
     @endif
 
@@ -91,7 +94,7 @@
             <button class="btn btn-primary" type="submit" form="ingresoEditForm" data-loading-text="Guardando...">Guardar ficha (falta revision)</button>
         @endif
 
-        @if(!$locked && $canUpdateIngresos)
+        @if(!$locked && $canApproveIngresos)
             <button
                 class="btn btn-primary"
                 type="button"

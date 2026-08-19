@@ -109,6 +109,7 @@ class DisponibilidadPersonalService
             $rqConflict = RQProsergeDetalle::query()
                 ->when($excludeAsignacionId, fn ($q) => $q->where('id', '!=', $excludeAsignacionId))
                 ->where('personal_id', $personalId)
+                ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
                 ->whereDate('fecha_inicio', '<=', $fechaFin)
                 ->whereDate('fecha_fin', '>=', $fechaInicio)
                 ->orderBy('fecha_inicio')

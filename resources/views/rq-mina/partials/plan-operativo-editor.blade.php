@@ -5,6 +5,7 @@
     $weekYear = $weekYear ?? null;
     $paradaFechaInicio = $paradaFechaInicio ?? '';
     $paradaFechaFin = $paradaFechaFin ?? '';
+    $readOnly = (bool) ($readOnly ?? false);
 @endphp
 
 @once
@@ -28,6 +29,7 @@ function initRQMinaPlanEditor(root) {
     let isCollapsed = false;
     const collapsedGroups = new Set();
     const collapsedActivities = new Set();
+    const readOnly = root.dataset.readonly === '1';
 
     function applyCollapseState() {
         root.classList.toggle('is-collapsed', isCollapsed);
@@ -139,7 +141,7 @@ function initRQMinaPlanEditor(root) {
 
     function input(name, value, placeholder = '', extraClass = '', fieldKey = '', personalSearch = false, attributes = '') {
         const autocomplete = attributes.indexOf('autocomplete=') >= 0 ? '' : ((fieldKey || personalSearch) ? ' autocomplete="off"' : '');
-        return '<input type="text" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + personalAttr(personalSearch) + autocomplete + attributes + '>';
+        return '<input type="text" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + personalAttr(personalSearch) + autocomplete + attributes + (readOnly ? ' disabled' : '') + '>';
     }
 
     function realInput(name, value, placeholder = '') {
@@ -147,7 +149,7 @@ function initRQMinaPlanEditor(root) {
     }
 
     function dateInput(name, value, placeholder = '', extraClass = '') {
-        return '<input type="date" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" autocomplete="off">';
+        return '<input type="date" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" autocomplete="off"' + (readOnly ? ' disabled' : '') + '>';
     }
 
     function selectInput(name, value, options, extraClass = '') {
@@ -157,11 +159,11 @@ function initRQMinaPlanEditor(root) {
             return '<option value="' + escapeHtml(option.value) + '"' + selected + '>' + escapeHtml(option.label) + '</option>';
         }).join('');
 
-        return '<select class="rq-plan-select ' + extraClass + '" name="' + name + '">' + optionHtml + '</select>';
+        return '<select class="rq-plan-select ' + extraClass + '" name="' + name + '"' + (readOnly ? ' disabled' : '') + '>' + optionHtml + '</select>';
     }
 
     function textarea(name, value, placeholder = '', fieldKey = '') {
-        return '<textarea class="rq-plan-textarea" name="' + name + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + '>' + escapeHtml(value) + '</textarea>';
+        return '<textarea class="rq-plan-textarea" name="' + name + '" placeholder="' + escapeHtml(placeholder) + '"' + optionAttr(fieldKey) + (readOnly ? ' disabled' : '') + '>' + escapeHtml(value) + '</textarea>';
     }
 
     function transportField(label, content, span = 3, hint = '') {
@@ -205,7 +207,7 @@ function initRQMinaPlanEditor(root) {
                 '<div class="rq-plan-field"><label>Area</label>' + input(prefix + '[area]', activity.area || '', 'Area', '', 'rq_mina.plan.actividad_area') + '</div>' +
                 '<div class="rq-plan-field"><label>AIT trabajo</label>' + textarea(prefix + '[ait_trabajo]', activity.ait_trabajo || '', 'Puede contener mas de un AIT', 'rq_mina.plan.ait_trabajo') + '</div>' +
                 '<div class="rq-plan-activity-actions">' +
-                    '<button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button>' +
+                    (readOnly ? '' : '<button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button>') +
                     '<button type="button" class="rq-plan-btn rq-plan-activity-toggle' + (activityCollapsed ? ' is-collapsed' : '') + '" data-toggle-activity aria-expanded="' + (activityCollapsed ? 'false' : 'true') + '" title="' + (activityCollapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad') + '" aria-label="' + (activityCollapsed ? 'Mostrar detalle de actividad' : 'Ocultar detalle de actividad') + '">' +
                         '<span class="rq-plan-activity-toggle-icon" data-activity-toggle-icon>' + (activityCollapsed ? '&darr;' : '&uarr;') + '</span>' +
                     '</button>' +
@@ -252,7 +254,7 @@ function initRQMinaPlanEditor(root) {
         const chips = saits.map(function(sait) {
             const isChecked = selected.indexOf(sait) !== -1;
             return '<label class="rq-plan-sait-chip' + (isChecked ? ' is-checked' : '') + '">' +
-                '<input type="checkbox" class="rq-plan-sait-check" value="' + escapeHtml(sait) + '"' + (isChecked ? ' checked' : '') + ' data-alcance-prefix="' + escapeHtml(prefix) + '">' +
+                '<input type="checkbox" class="rq-plan-sait-check" value="' + escapeHtml(sait) + '"' + (isChecked ? ' checked' : '') + ' data-alcance-prefix="' + escapeHtml(prefix) + '"' + (readOnly ? ' disabled' : '') + '>' +
                 '<span>' + escapeHtml(sait) + '</span>' +
             '</label>';
         }).join('');
@@ -271,7 +273,7 @@ function initRQMinaPlanEditor(root) {
         return '<div class="rq-plan-transport-row">' +
             '<div class="rq-plan-transport-header">' +
                 '<span class="rq-plan-transport-number"><span class="rq-plan-transport-number-badge">' + num + '</span> Transporte #' + num + '</span>' +
-                '<button type="button" class="rq-plan-transport-remove" data-remove-transport>✕ Quitar</button>' +
+                (readOnly ? '' : '<button type="button" class="rq-plan-transport-remove" data-remove-transport>Quitar</button>') +
             '</div>' +
             '<div class="rq-plan-transport-body">' +
                 transportField('Alcance (SAIT)', saitCheckboxesHtml(prefix, row.alcance || ''), 3) +
@@ -303,7 +305,7 @@ function initRQMinaPlanEditor(root) {
                         '<div class="rq-plan-field"><label>Observaciones</label>' + input(groupPrefix + '[observaciones]', group.observaciones || '', 'Observaciones', '', 'rq_mina.plan.grupo_observaciones') + '</div>' +
                     '</div>' +
                     '<div class="rq-plan-group-actions">' +
-                        '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo</button>' +
+                        (readOnly ? '' : '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo</button>') +
                         '<button type="button" class="rq-plan-btn rq-plan-group-toggle' + (groupCollapsed ? ' is-collapsed' : '') + '" data-toggle-group aria-expanded="' + (groupCollapsed ? 'false' : 'true') + '" title="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '" aria-label="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '">' +
                             '<span class="rq-plan-group-toggle-icon" data-group-toggle-icon>' + (groupCollapsed ? '&darr;' : '&uarr;') + '</span>' +
                         '</button>' +
@@ -311,11 +313,11 @@ function initRQMinaPlanEditor(root) {
                 '</div>' +
                 '<div data-group-content>' +
                 '<div class="rq-plan-section">' +
-                    '<div class="rq-plan-section-title"><h4>Lista de actividades</h4><button type="button" class="rq-plan-btn" data-add-activity>Agregar actividad</button></div>' +
+                    '<div class="rq-plan-section-title"><h4>Lista de actividades</h4>' + (readOnly ? '' : '<button type="button" class="rq-plan-btn" data-add-activity>Agregar actividad</button>') + '</div>' +
                     '<div data-activities>' + activities.map((activity, i) => activityTemplate(groupIndex, i, activity)).join('') + '</div>' +
                 '</div>' +
                 '<div class="rq-plan-section">' +
-                    '<div class="rq-plan-section-title"><h4>🚛 Unidades de carga y transporte <span class="rq-plan-transport-count">' + transports.length + '</span></h4><button type="button" class="rq-plan-btn-add-transport" data-add-transport>+ Agregar transporte</button></div>' +
+                    '<div class="rq-plan-section-title"><h4>Unidades de carga y transporte <span class="rq-plan-transport-count">' + transports.length + '</span></h4>' + (readOnly ? '' : '<button type="button" class="rq-plan-btn-add-transport" data-add-transport>+ Agregar transporte</button>') + '</div>' +
                     '<div data-transports>' + transports.map((transport, i) => transportTemplate(groupIndex, i, transport)).join('') + '</div>' +
                 '</div>' +
                 '</div>' +
@@ -435,6 +437,7 @@ function initRQMinaPlanEditor(root) {
         }
 
         if (event.target.matches('[data-add-plan-group]')) {
+            if (readOnly) return;
             plan.push({ area_operativa: '', modulo: '', nombre: 'Grupo ' + (plan.length + 1), observaciones: '', actividades: [{}], transportes: [{}] });
             isCollapsed = false;
             collapsedGroups.clear();
@@ -442,26 +445,31 @@ function initRQMinaPlanEditor(root) {
             render();
         }
         if (event.target.matches('[data-remove-group]') && groupIndex >= 0) {
+            if (readOnly) return;
             plan.splice(groupIndex, 1);
             render();
         }
         if (event.target.matches('[data-add-activity]') && groupIndex >= 0) {
+            if (readOnly) return;
             plan[groupIndex].actividades = plan[groupIndex].actividades || [];
             plan[groupIndex].actividades.push({});
             render();
         }
         if (event.target.matches('[data-remove-activity]') && groupIndex >= 0) {
+            if (readOnly) return;
             const activityEl = event.target.closest('.rq-plan-activity');
             plan[groupIndex].actividades.splice(Number(activityEl.dataset.activityIndex), 1);
             collapsedActivities.delete(activityCollapseKey(activityEl));
             render();
         }
         if (event.target.matches('[data-add-transport]') && groupIndex >= 0) {
+            if (readOnly) return;
             plan[groupIndex].transportes = plan[groupIndex].transportes || [];
             plan[groupIndex].transportes.push({});
             render();
         }
         if (event.target.matches('[data-remove-transport]') && groupIndex >= 0) {
+            if (readOnly) return;
             const rows = Array.from(groupEl.querySelectorAll('[data-remove-transport]'));
             plan[groupIndex].transportes.splice(rows.indexOf(event.target), 1);
             render();
@@ -517,7 +525,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 @endonce
 
-<div id="{{ $editorId }}" class="rq-plan-editor" data-rq-plan-editor>
+<div id="{{ $editorId }}" class="rq-plan-editor {{ $readOnly ? 'is-readonly' : '' }}" data-rq-plan-editor data-readonly="{{ $readOnly ? '1' : '0' }}">
     <div class="rq-plan-head">
         <div>
             <h3>Areas y plan operativo semanal</h3>
@@ -527,7 +535,9 @@ document.addEventListener('DOMContentLoaded', function() {
             @endif
         </div>
         <div class="rq-plan-actions">
-            <button type="button" class="rq-plan-btn primary" data-add-plan-group>Agregar area</button>
+            @unless($readOnly)
+                <button type="button" class="rq-plan-btn primary" data-add-plan-group>Agregar area</button>
+            @endunless
             <button type="button" class="rq-plan-btn rq-plan-toggle" data-toggle-plan-body aria-expanded="true" title="Ocultar plan operativo" aria-label="Ocultar plan operativo">
                 <span class="rq-plan-toggle-icon">&uarr;</span>
             </button>

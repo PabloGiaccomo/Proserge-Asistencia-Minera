@@ -711,25 +711,31 @@ class EppService
         $configuredAttributes = collect($epp->otros_atributos ?: [])
             ->map(function (array $attribute): array {
                 return [
-                    'nombre' => trim((string) ($attribute['nombre'] ?? '')),
-                    'valores' => collect($attribute['valores'] ?? [])
-                        ->map(fn ($value): string => mb_strtoupper(trim((string) $value), 'UTF-8'))
-                        ->filter()
-                        ->values()
-                        ->all(),
+                    'nombre' => $this->normalizeOptionLabel((string) ($attribute['nombre'] ?? '')),
+                    'valores' => $this->normalizeOptionsFromList((array) ($attribute['valores'] ?? [])),
                 ];
             })
             ->filter(fn (array $attribute): bool => $attribute['nombre'] !== '' && $attribute['valores'] !== [])
             ->values();
 
-        $postedAttributes = collect($payload['atributos'] ?? []);
-        foreach ($configuredAttributes as $index => $configured) {
-            $posted = collect($postedAttributes)->first(function ($attribute) use ($configured, $index): bool {
-                $name = mb_strtoupper(trim((string) data_get($attribute, 'nombre', '')), 'UTF-8');
-                $configuredName = mb_strtoupper($configured['nombre'], 'UTF-8');
+        $postedByName = [];
+        $postedByIndex = [];
+        foreach ((array) ($payload['atributos'] ?? []) as $postedIndex => $attribute) {
+            $attribute = (array) $attribute;
+            $nameKey = $this->normalizeOptionKey((string) data_get($attribute, 'nombre', ''));
+            if ($nameKey !== '' && ! array_key_exists($nameKey, $postedByName)) {
+                $postedByName[$nameKey] = $attribute;
+            }
 
-                return $name === $configuredName || (string) data_get($attribute, 'index', '') === (string) $index;
-            });
+            $indexKey = (string) data_get($attribute, 'index', $postedIndex);
+            if ($indexKey !== '' && ! array_key_exists($indexKey, $postedByIndex)) {
+                $postedByIndex[$indexKey] = $attribute;
+            }
+        }
+
+        foreach ($configuredAttributes as $index => $configured) {
+            $configuredKey = $this->normalizeOptionKey($configured['nombre']);
+            $posted = $postedByName[$configuredKey] ?? $postedByIndex[(string) $index] ?? null;
 
             $value = $this->normalizeSelectedOption((string) data_get($posted, 'valor', ''), $configured['valores']);
             if ($value !== null) {
@@ -749,17 +755,17 @@ class EppService
 
     private function normalizeSelectedOption(string $value, array $allowed): ?string
     {
-        $value = mb_strtoupper(trim($value), 'UTF-8');
-        if ($value === '') {
+        $valueKey = $this->normalizeOptionKey($value);
+        if ($valueKey === '') {
             return null;
         }
 
-        $allowed = collect($allowed)
-            ->map(fn ($option): string => mb_strtoupper(trim((string) $option), 'UTF-8'))
-            ->filter()
-            ->values();
+        $allowedByKey = [];
+        foreach ($this->normalizeOptionsFromList($allowed) as $option) {
+            $allowedByKey[$this->normalizeOptionKey($option)] = $option;
+        }
 
-        return $allowed->contains($value) ? $value : null;
+        return $allowedByKey[$valueKey] ?? null;
     }
 
     public function presentEntrega(EppEntrega $entrega): array
@@ -1463,6 +1469,12 @@ class EppService
 
     private function saveCatalog(EppRegistro $epp, array $data): EppRegistro
     {
+        foreach (['requiere_talla', 'tallas', 'requiere_color', 'colores', 'otros_atributos'] as $column) {
+            if (! Schema::hasColumn('epp_registro', $column)) {
+                unset($data[$column]);
+            }
+        }
+
         $epp->forceFill($data)->save();
 
         return $epp->refresh();
@@ -1470,37 +1482,36 @@ class EppService
 
     private function normalizeOptions(string $value): array
     {
-        return collect(preg_split('/[\r\n,;]+/', $value) ?: [])
-            ->map(fn (string $item): string => mb_strtoupper(trim($item), 'UTF-8'))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        return $this->normalizeOptionsFromList(preg_split('/[\r\n,;]+/', $value) ?: []);
     }
 
     private function normalizeOtrosAtributos(array $atributos): ?array
     {
         $result = [];
+        $indexesByName = [];
 
         foreach ($atributos as $atributo) {
-            $nombre = mb_strtoupper(trim((string) ($atributo['nombre'] ?? '')), 'UTF-8');
+            $nombre = $this->normalizeOptionLabel((string) ($atributo['nombre'] ?? ''));
+            $nombreKey = $this->normalizeOptionKey($nombre);
             $valoresRaw = (string) ($atributo['valores'] ?? '');
 
-            if ($nombre === '' || trim($valoresRaw) === '') {
+            if ($nombreKey === '' || trim($valoresRaw) === '') {
                 continue;
             }
 
-            $valores = collect(preg_split('/[\r\n,;]+/', $valoresRaw) ?: [])
-                ->map(fn (string $item): string => mb_strtoupper(trim($item), 'UTF-8'))
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
+            $valores = $this->normalizeOptions($valoresRaw);
 
             if ($valores === []) {
                 continue;
             }
 
+            if (array_key_exists($nombreKey, $indexesByName)) {
+                $index = $indexesByName[$nombreKey];
+                $result[$index]['valores'] = $this->normalizeOptionsFromList(array_merge($result[$index]['valores'], $valores));
+                continue;
+            }
+
+            $indexesByName[$nombreKey] = count($result);
             $result[] = [
                 'nombre' => $nombre,
                 'valores' => $valores,
@@ -1508,6 +1519,36 @@ class EppService
         }
 
         return $result !== [] ? $result : null;
+    }
+
+    private function normalizeOptionsFromList(array $values): array
+    {
+        $result = [];
+        $seen = [];
+
+        foreach ($values as $value) {
+            $label = $this->normalizeOptionLabel((string) $value);
+            $key = $this->normalizeOptionKey($label);
+
+            if ($key === '' || array_key_exists($key, $seen)) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $result[] = $label;
+        }
+
+        return $result;
+    }
+
+    private function normalizeOptionLabel(string $value): string
+    {
+        return preg_replace('/\s+/', ' ', mb_strtoupper(trim($value), 'UTF-8')) ?: '';
+    }
+
+    private function normalizeOptionKey(string $value): string
+    {
+        return $this->normalizeOptionLabel($value);
     }
 
     private function documentoPersonal(Personal $personal): string

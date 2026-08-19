@@ -14,7 +14,8 @@ class AddGrupoPersonalRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'personal_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
+            'personal_id' => ['nullable', 'required_without:rq_proserge_detalle_id', 'string', 'size:36', 'exists:personal,id'],
+            'rq_proserge_detalle_id' => ['nullable', 'required_without:personal_id', 'string', 'size:36', 'exists:rq_proserge_detalle,id'],
         ];
     }
 }

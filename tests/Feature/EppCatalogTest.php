@@ -281,6 +281,71 @@ class EppCatalogTest extends TestCase
         $this->assertSame([['nombre' => 'MATERIAL', 'valor' => 'ABS']], $entrega->atributos_json);
     }
 
+    public function test_opciones_de_talla_color_y_atributos_no_dependen_del_orden_del_catalogo(): void
+    {
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '45670002',
+            'tipo_documento' => 'DNI',
+            'numero_documento' => '45670002',
+            'nombre_completo' => 'Trabajador Orden Catalogo',
+            'puesto' => 'OPERARIO',
+            'qr_code' => 'QR-TEST-ORDEN-CATALOGO-EPP',
+            'estado' => 'ACTIVO',
+        ]);
+
+        $service = app(EppService::class);
+        $epp = $service->storeCatalog([
+            'nombre' => 'Respirador con filtros',
+            'vida_util_dias' => 30,
+            'requiere_talla' => true,
+            'tallas' => 'E',
+            'requiere_color' => true,
+            'colores' => 'Azul',
+            'otros_atributos' => [
+                ['nombre' => 'Tipo', 'valores' => 'E'],
+                ['nombre' => 'Material', 'valores' => 'Carbon'],
+            ],
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+
+        $service->updateCatalog($epp->id, [
+            'nombre' => 'Respirador con filtros',
+            'vida_util_dias' => 30,
+            'requiere_talla' => true,
+            'tallas' => 'A, E, C',
+            'requiere_color' => true,
+            'colores' => 'Rojo, Azul, Verde',
+            'otros_atributos' => [
+                ['nombre' => 'Material', 'valores' => 'Fibra, Carbon, Nylon'],
+                ['nombre' => 'Tipo', 'valores' => 'A, E, C'],
+            ],
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+
+        $entrega = $service->deliver([
+            'personal_id' => $personal->id,
+            'epp_id' => $epp->id,
+            'cantidad' => 1,
+            'talla' => 'E',
+            'color' => 'Azul',
+            'atributos' => [
+                ['nombre' => 'Tipo', 'index' => 0, 'valor' => 'E'],
+                ['nombre' => 'Material', 'index' => 1, 'valor' => 'Carbon'],
+            ],
+            'fecha_entrega' => '2026-07-17',
+        ], null);
+
+        $entrega->refresh();
+
+        $this->assertSame('E', $entrega->talla);
+        $this->assertSame('AZUL', $entrega->color);
+        $this->assertSame([
+            ['nombre' => 'MATERIAL', 'valor' => 'CARBON'],
+            ['nombre' => 'TIPO', 'valor' => 'E'],
+        ], $entrega->atributos_json);
+    }
+
     public function test_entregas_se_pueden_filtrar_por_id_de_trabajador(): void
     {
         $personal = Personal::query()->create([

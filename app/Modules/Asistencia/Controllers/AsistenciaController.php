@@ -91,7 +91,7 @@ class AsistenciaController extends Controller
             return ApiResponse::error(
                 message: (string) $result['message'],
                 code: (string) $result['code'],
-                status: ($result['forbidden'] ?? false) ? 403 : 422,
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
             );
         }
 
@@ -122,7 +122,7 @@ class AsistenciaController extends Controller
             return ApiResponse::error(
                 message: (string) $result['message'],
                 code: (string) $result['code'],
-                status: ($result['forbidden'] ?? false) ? 403 : 422,
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
             );
         }
 
@@ -153,7 +153,7 @@ class AsistenciaController extends Controller
             return ApiResponse::error(
                 message: (string) $result['message'],
                 code: (string) $result['code'],
-                status: ($result['forbidden'] ?? false) ? 403 : 422,
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
             );
         }
 
@@ -184,7 +184,7 @@ class AsistenciaController extends Controller
             return ApiResponse::error(
                 message: (string) $result['message'],
                 code: (string) $result['code'],
-                status: ($result['forbidden'] ?? false) ? 403 : 422,
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
             );
         }
 
@@ -192,6 +192,110 @@ class AsistenciaController extends Controller
             data: AsistenciaGrupoResource::make($result['grupo'])->resolve(),
             message: 'Asistencia reabierta',
             code: 'ASISTENCIA_REABRIR_OK',
+        );
+    }
+
+    public function sincronizarPadron(Request $request, string $grupoId)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $grupo = $this->service->getGrupo($usuario, $grupoId);
+
+        if (!$grupo) {
+            return ApiResponse::error(
+                message: 'Grupo no encontrado o sin acceso',
+                code: 'ASISTENCIA_GRUPO_NOT_FOUND',
+                status: 404,
+            );
+        }
+
+        $result = $this->service->sincronizarPadron($usuario, $grupo);
+
+        if (($result['ok'] ?? false) === false) {
+            return ApiResponse::error(
+                message: (string) $result['message'],
+                code: (string) $result['code'],
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
+            );
+        }
+
+        return ApiResponse::success(
+            data: AsistenciaGrupoResource::make($result['grupo'])->resolve(),
+            message: 'Padron sincronizado',
+            code: 'ASISTENCIA_PADRON_SYNC_OK',
+        );
+    }
+
+    public function asignarActividad(Request $request, string $grupoId, string $detalleId)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $grupo = $this->service->getGrupo($usuario, $grupoId);
+
+        if (!$grupo) {
+            return ApiResponse::error(
+                message: 'Grupo no encontrado o sin acceso',
+                code: 'ASISTENCIA_GRUPO_NOT_FOUND',
+                status: 404,
+            );
+        }
+
+        $payload = $request->validate([
+            'rq_mina_actividad_id' => ['required', 'string', 'size:36', 'exists:rq_mina_actividades,id'],
+            'observacion' => ['nullable', 'string'],
+        ]);
+
+        $result = $this->service->asignarActividadPrincipal(
+            $usuario,
+            $grupo,
+            $detalleId,
+            $payload['rq_mina_actividad_id'],
+            $payload['observacion'] ?? null,
+        );
+
+        if (($result['ok'] ?? false) === false) {
+            return ApiResponse::error(
+                message: (string) $result['message'],
+                code: (string) $result['code'],
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
+            );
+        }
+
+        return ApiResponse::success(
+            data: AsistenciaGrupoResource::make($result['grupo'])->resolve(),
+            message: 'Actividad principal asignada',
+            code: 'ASISTENCIA_ACTIVIDAD_PRINCIPAL_OK',
+        );
+    }
+
+    public function ejecucion(Request $request)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+
+        $filters = $request->validate([
+            'rq_mina_id' => ['nullable', 'string', 'size:36'],
+            'rq_mina_plan_id' => ['nullable', 'string', 'size:36'],
+            'rq_mina_actividad_grupo_id' => ['nullable', 'string', 'size:36'],
+            'rq_mina_actividad_id' => ['nullable', 'string', 'size:36'],
+            'fecha' => ['nullable', 'date'],
+            'turno' => ['nullable', 'string', 'in:DIA,NOCHE'],
+        ]);
+
+        $result = $this->service->ejecucionResumen($usuario, $filters);
+
+        if (($result['ok'] ?? false) === false) {
+            return ApiResponse::error(
+                message: (string) $result['message'],
+                code: (string) $result['code'],
+                status: (int) (($result['forbidden'] ?? false) ? 403 : ($result['status'] ?? 422)),
+            );
+        }
+
+        return ApiResponse::success(
+            data: $result['items'],
+            message: 'Resumen de ejecucion obtenido',
+            code: 'ASISTENCIA_EJECUCION_OK',
         );
     }
 }

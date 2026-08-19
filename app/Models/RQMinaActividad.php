@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class RQMinaActividad extends Model
@@ -46,5 +47,15 @@ class RQMinaActividad extends Model
     public function transportes(): HasMany
     {
         return $this->hasMany(RQMinaActividadTransporte::class, 'actividad_id')->orderBy('orden');
+    }
+
+    public function serviciosTransporte(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            TransporteServicio::class,
+            'transporte_servicio_alcances',
+            'rq_mina_actividad_id',
+            'transporte_servicio_id'
+        )->whereNotNull('transporte_servicio_alcances.rq_mina_actividad_id');
     }
 }

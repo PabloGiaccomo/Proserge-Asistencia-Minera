@@ -36,9 +36,17 @@ class RQMinaActividadTransporte extends Model
         'id',
         'grupo_id',
         'actividad_id',
+        'rq_mina_plan_id',
         'alcance',
         'unidad_carga',
+        'fecha',
+        'turno',
+        'tipo_transporte',
+        'capacidad_requerida',
+        'cantidad_unidades_requeridas',
         'origen',
+        'origen_snapshot',
+        'destino_snapshot',
         'unidades_transporte',
         'placas_asignadas',
         'fecha_inicio',
@@ -46,6 +54,7 @@ class RQMinaActividadTransporte extends Model
         'dias_uso',
         'estado_logistico',
         'indicaciones',
+        'observaciones',
         'comentario_cambio',
         'incidencia_operativa',
         'recepcion_fecha',
@@ -58,13 +67,18 @@ class RQMinaActividadTransporte extends Model
         'doc_checklist_path',
         'documentos',
         'orden',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
+        'fecha' => 'date',
         'fecha_inicio' => 'date',
         'fecha_fin' => 'date',
         'recepcion_fecha' => 'date',
         'dias_uso' => 'integer',
+        'capacidad_requerida' => 'integer',
+        'cantidad_unidades_requeridas' => 'integer',
         'documentos' => 'array',
         'orden' => 'integer',
         'capacidad_camion' => 'string',
@@ -111,6 +125,11 @@ class RQMinaActividadTransporte extends Model
     public function actividad(): BelongsTo
     {
         return $this->belongsTo(RQMinaActividad::class, 'actividad_id');
+    }
+
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(RQMinaPlan::class, 'rq_mina_plan_id');
     }
 
     public function eventos(): HasMany

@@ -238,9 +238,13 @@ class PersonalIngresoService
         return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
     }
 
-    public function updateIngreso(PersonalIngreso $ingreso, array $fields, array $familiares, ?string $firmaBase64, ?UploadedFile $huella, array $documentos, Usuario $user): PersonalIngreso
+    public function updateIngreso(PersonalIngreso $ingreso, array $fields, array $familiares, ?string $firmaBase64, ?UploadedFile $huella, array $documentos, Usuario $user, bool $canEditSensitiveData = false): PersonalIngreso
     {
         $this->assertIngresoEditable($ingreso);
+
+        if (!$canEditSensitiveData) {
+            $fields = $this->preserveSensitiveFichaFields($ingreso, $fields);
+        }
 
         $data = $this->fichaService->normalizeFichaData($fields);
         $this->assertDocumentIsValid($data);
@@ -276,6 +280,27 @@ class PersonalIngresoService
 
             return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado', 'revisadoPor.personal']);
         });
+    }
+
+    private function preserveSensitiveFichaFields(PersonalIngreso $ingreso, array $fields): array
+    {
+        $current = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
+        $sensitiveKeys = collect(PersonalFichaCatalog::sections())
+            ->filter(fn (array $section): bool => in_array((string) ($section['title'] ?? ''), ['Datos bancarios', 'Sistema pensionario'], true))
+            ->flatMap(fn (array $section): array => collect($section['fields'] ?? [])
+                ->pluck('key')
+                ->filter()
+                ->values()
+                ->all())
+            ->all();
+
+        foreach ($sensitiveKeys as $key) {
+            if (array_key_exists($key, $current)) {
+                $fields[$key] = $current[$key];
+            }
+        }
+
+        return $fields;
     }
 
     public function accept(PersonalIngreso $ingreso, Usuario $user, array $contractPayload): Personal
