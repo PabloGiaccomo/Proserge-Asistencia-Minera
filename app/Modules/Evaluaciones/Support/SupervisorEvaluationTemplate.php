@@ -4,6 +4,12 @@ namespace App\Modules\Evaluaciones\Support;
 
 class SupervisorEvaluationTemplate
 {
+    public const SECTION_TITLES = [
+        'A' => 'Competencias Técnicas (Asociadas al Cargo)',
+        'B' => 'Desempeño en SSOMA',
+        'C' => 'Habilidades blandas',
+    ];
+
     public const ITEMS = [
         'A' => [
             'A1' => 'Realiza las coordinaciones correspondientes con el supervisor operativo de la minera, sobre el trabajo a realizar en las disciplinas de mecanica.',

@@ -59,13 +59,17 @@ class MiAsistenciaPageController extends WebPageController
             ))
             ->values()
             ->all();
+        $attendanceReady = filled($grupo->supervisor_id)
+            || filled($grupo->asistencia?->id)
+            || filled($user->personal_id);
 
         return view('mi-asistencia.show', [
             'user' => $user,
             'grupo' => $data,
             'canViewAll' => PermissionMatrix::userCanDirect($user, 'mi_asistencia', 'ver_todas_asistencias'),
-            'canRegister' => $this->policy->canRegisterGrupo($user, $grupo),
-            'canClose' => $this->policy->canCloseGrupo($user, $grupo),
+            'attendanceReady' => $attendanceReady,
+            'canRegister' => $attendanceReady && $this->policy->canRegisterGrupo($user, $grupo),
+            'canClose' => $attendanceReady && $this->policy->canCloseGrupo($user, $grupo),
         ]);
     }
 

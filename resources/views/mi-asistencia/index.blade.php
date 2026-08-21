@@ -88,7 +88,7 @@
                     </div>
                     <div class="mia-responsible">
                         <span>Responsable</span>
-                        <strong>{{ $grupo['responsable'] ?: 'Sin responsable' }}</strong>
+                        <strong>{{ $grupo['responsable'] ?: ($grupo['responsable_registro'] ?: 'Sin responsable asignado') }}</strong>
                     </div>
                 </div>
                 <div class="mia-group-progress">
@@ -100,11 +100,11 @@
                     <progress max="{{ max(1, $grupo['total']) }}" value="{{ $grupo['presentes'] }}"></progress>
                 </div>
                 <div class="mia-group-actions">
-                    <span class="mia-status is-{{ strtolower($grupo['estado_asistencia']) }}">
-                        {{ $grupo['estado_asistencia'] === 'CERRADO' ? 'Asistencia cerrada' : ($grupo['pendientes'] > 0 ? 'Pendiente de completar' : 'Registro completo') }}
+                    <span class="mia-status is-{{ $grupo['responsable_pendiente'] ? 'pendiente' : strtolower($grupo['estado_asistencia']) }}">
+                        {{ $grupo['responsable_pendiente'] ? ($grupo['puede_registrar'] ? 'Se registrara con tu cuenta' : 'Sin responsable asignado') : ($grupo['estado_asistencia'] === 'CERRADO' ? 'Asistencia cerrada' : ($grupo['pendientes'] > 0 ? 'Pendiente de completar' : 'Registro completo')) }}
                     </span>
                     <a class="mia-btn mia-btn-primary" href="{{ route('mi-asistencia.show', $grupo['id']) }}">
-                        {{ $grupo['estado_asistencia'] === 'CERRADO' ? 'Ver asistencia' : 'Tomar asistencia' }}
+                        {{ $grupo['estado_asistencia'] === 'CERRADO' ? 'Ver asistencia' : ($grupo['puede_registrar'] ? 'Tomar asistencia' : 'Revisar grupo') }}
                     </a>
                 </div>
             </article>

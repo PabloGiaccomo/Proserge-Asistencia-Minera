@@ -60,6 +60,8 @@ La cantidad es una referencia operativa. Man Power permite distribuir menos o ma
 
 La copia entre dias conserva por separado el SAIT de origen y el SAIT de destino. Puede pegarse la estructura de un SAIT sobre otro: se reemplazan solamente los grupos vigentes del SAIT destino, se vinculan los nuevos grupos a su actividad, area y sector, y los grupos de los demas SAIT permanecen intactos.
 
+Desde la seleccion diaria tambien se puede repetir el SAIT al resto de la semana o al resto de la parada. El dia seleccionado es la plantilla, la copia empieza en la fecha siguiente y nunca reemplaza fechas anteriores al dia actual. Cada destino reemplaza solamente sus grupos vigentes del mismo plan y SAIT.
+
 El dashboard tambien muestra los puestos del pedido de personal de RQ Mina, la cantidad solicitada, el back up, lo entregado por RR.HH. y cuantos trabajadores fueron distribuidos en cada turno.
 
 El usuario puede cambiar la perspectiva del dashboard sin salir del plan y SAIT seleccionados. Los modos disponibles son `Resumen`, `Turnos`, `Cargos` y `Cobertura SAIT`; cada uno prioriza solamente la informacion necesaria para esa lectura operativa.

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EvaluacionDesempeno extends Model
 {
@@ -41,4 +42,24 @@ class EvaluacionDesempeno extends Model
         'fecha' => 'date',
         'tuvo_incidencia' => 'boolean',
     ];
+
+    public function trabajador(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'trabajador_id');
+    }
+
+    public function evaluador(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'supervisor_id');
+    }
+
+    public function mina(): BelongsTo
+    {
+        return $this->belongsTo(Mina::class, 'mina_id');
+    }
+
+    public function asistenciaDetalle(): BelongsTo
+    {
+        return $this->belongsTo(AsistenciaDetalle::class, 'asistencia_detalle_id');
+    }
 }

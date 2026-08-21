@@ -10,8 +10,11 @@ use App\Models\EvaluacionSupervisor;
 use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
+use App\Modules\Evaluaciones\Support\ResidentEvaluationTemplate;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class EvaluacionDesempenoService
@@ -140,6 +143,95 @@ class EvaluacionDesempenoService
         return ['ok' => true, 'item' => $item];
     }
 
+    public function createDaily(Usuario $usuario, array $payload): array
+    {
+        if (!$this->policy->canEvaluateType($usuario, 'desempeno')) {
+            return $this->forbidden();
+        }
+
+        if (!$usuario->personal_id) {
+            return $this->businessError('EVAL_EVALUATOR_NOT_LINKED', 'Tu cuenta debe estar vinculada a Personal para registrar evaluaciones.');
+        }
+
+        $detail = AsistenciaDetalle::query()
+            ->with(['asistencia.grupoTrabajo', 'trabajador'])
+            ->find($payload['asistencia_detalle_id']);
+
+        if (!$detail || !$detail->asistencia || !$detail->trabajador) {
+            return $this->businessError('EVAL_ATTENDANCE_NOT_FOUND', 'No se encontro la asistencia seleccionada.');
+        }
+
+        $attendance = $detail->asistencia;
+        $isAttendanceOwner = (string) $attendance->supervisor_id === (string) $usuario->personal_id
+            || AsistenciaDetalle::query()
+                ->where('asistencia_id', $attendance->id)
+                ->where('marcado_por_id', $usuario->id)
+                ->exists();
+
+        if (!$isAttendanceOwner) {
+            return $this->businessError('EVAL_ATTENDANCE_OWNER_REQUIRED', 'Solo el encargado que registro esta asistencia puede evaluarla.');
+        }
+
+        if ((string) $attendance->estado !== 'CERRADO') {
+            return $this->businessError('EVAL_ATTENDANCE_OPEN', 'Cierra la asistencia antes de realizar la evaluacion diaria.');
+        }
+
+        if (!in_array((string) $detail->estado, AsistenciaDetalle::ESTADOS_REAL, true)) {
+            return $this->businessError('EVAL_WORKER_NOT_PRESENT', 'Solo se puede evaluar a personal que trabajo ese dia.');
+        }
+
+        if ((string) $detail->trabajador_id === (string) $usuario->personal_id) {
+            return $this->businessError('EVAL_SELF_NOT_ALLOWED', 'No puedes evaluarte a ti mismo.');
+        }
+
+        $item = DB::transaction(function () use ($usuario, $payload, $detail, $attendance): ?EvaluacionDesempeno {
+            $exists = EvaluacionDesempeno::query()
+                ->where('asistencia_detalle_id', $detail->id)
+                ->lockForUpdate()
+                ->exists();
+
+            if ($exists) {
+                return null;
+            }
+
+            $date = Carbon::parse($attendance->fecha);
+            $hasIncident = (bool) ($payload['tuvo_incidencia'] ?? false);
+
+            return EvaluacionDesempeno::query()->create([
+                'id' => (string) Str::uuid(),
+                'fecha' => $date->toDateString(),
+                'hora' => now()->format('H:i:s'),
+                'mina_id' => $attendance->mina_id,
+                'grupo_trabajo_id' => $attendance->grupo_trabajo_id,
+                'semana_parada' => $date->isoWeek(),
+                'desempeno_trabajo' => $payload['desempeno_trabajo'],
+                'orden_limpieza' => $payload['orden_limpieza'],
+                'compromiso' => $payload['compromiso'],
+                'respuesta_emocional' => $payload['respuesta_emocional'],
+                'seguridad_trabajo' => $payload['seguridad_trabajo'],
+                'total' => $this->calculateTotal($payload),
+                'observaciones' => $payload['observaciones'] ?? null,
+                'supervisor_id' => $usuario->personal_id,
+                'trabajador_id' => $detail->trabajador_id,
+                'tuvo_incidencia' => $hasIncident,
+                'descripcion_incidencia' => $hasIncident ? ($payload['descripcion_incidencia'] ?? null) : null,
+                'asistencia_detalle_id' => $detail->id,
+                'asistencia_encabezado_id' => $attendance->id,
+                'destino_tipo' => $attendance->destino_tipo,
+                'destino_id' => $attendance->destino_id,
+                'evaluado_por_usuario_id' => $usuario->id,
+            ]);
+        });
+
+        if (!$item) {
+            return $this->businessError('EVAL_DUPLICATED', 'Esta asistencia ya cuenta con una evaluacion para el trabajador.');
+        }
+
+        $this->promedios->refreshForTrabajador($item->trabajador_id);
+
+        return ['ok' => true, 'item' => $item];
+    }
+
     public function update(Usuario $usuario, EvaluacionDesempeno $item, array $payload): array
     {
         if (!PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])
@@ -168,7 +260,7 @@ class EvaluacionDesempenoService
 
     public function createSupervisor(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
+        if (!$this->policy->canEvaluateType($usuario, 'supervisores')
             || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
         ) {
             return $this->forbidden();
@@ -184,25 +276,39 @@ class EvaluacionDesempenoService
 
     public function createResidente(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
-            || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
-        ) {
+        if (!$this->policy->canEvaluateType($usuario, 'residentes')) {
             return $this->forbidden();
         }
 
-        $total = round((
-            $payload['indicadores_kpi'] +
-            $payload['costos_servicio'] +
-            $payload['eventos_seguridad'] +
-            $payload['reportes_calidad'] +
-            $payload['liderazgo_gestion'] +
-            $payload['innovacion']
-        ) / 6, 2);
+        if (!$usuario->personal_id) {
+            return $this->businessError('EVAL_EVALUATOR_NOT_LINKED', 'La cuenta debe estar vinculada a Personal para identificar al evaluador.');
+        }
+
+        $calculation = ResidentEvaluationTemplate::calculate($payload);
+
+        $period = Carbon::parse($payload['fecha'])->startOfMonth();
+        $duplicate = EvaluacionResidente::query()
+            ->where('residente_id', $payload['residente_id'])
+            ->whereDate('periodo_mes', $period->toDateString())
+            ->exists();
+
+        if ($duplicate) {
+            return $this->businessError('EVAL_RESIDENT_DUPLICATED', 'Ya existe una evaluacion mensual para este residente.');
+        }
 
         $item = EvaluacionResidente::query()->create([
             'id' => (string) Str::uuid(),
-            ...$payload,
-            'total' => $total,
+            'fecha' => $period->toDateString(),
+            'periodo_mes' => $period->toDateString(),
+            'destino_tipo' => null,
+            'destino_id' => null,
+            ...$calculation,
+            'residente_id' => $payload['residente_id'],
+            'evaluador_id' => $usuario->personal_id,
+            'comentarios' => $payload['comentarios'] ?? null,
+            'estado' => 'REGISTRADA',
+            'created_by_usuario_id' => $usuario->id,
+            'updated_by_usuario_id' => $usuario->id,
         ]);
 
         return ['ok' => true, 'item' => $item];

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EvaluacionSupervisor extends Model
 {
@@ -37,4 +38,19 @@ class EvaluacionSupervisor extends Model
         'respuestas' => 'array',
         'fecha' => 'date',
     ];
+
+    public function evaluador(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'evaluador_id');
+    }
+
+    public function evaluado(): BelongsTo
+    {
+        return $this->belongsTo(Personal::class, 'evaluado_id');
+    }
+
+    public function mina(): BelongsTo
+    {
+        return $this->belongsTo(Mina::class, 'mina_id');
+    }
 }

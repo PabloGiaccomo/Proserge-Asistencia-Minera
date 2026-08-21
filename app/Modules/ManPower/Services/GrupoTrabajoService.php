@@ -16,6 +16,8 @@ use App\Models\Usuario;
 use App\Modules\ManPower\Policies\ManPowerPolicy;
 use App\Modules\Transporte\Services\TransportePlanningService;
 use App\Support\Rbac\PermissionMatrix;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -785,6 +787,179 @@ class GrupoTrabajoService
         } catch (\RuntimeException $exception) {
             return $this->businessError('MANPOWER_DAY_COPY_FAILED', $exception->getMessage());
         }
+    }
+
+    public function copyDayGroupsToRange(Usuario $usuario, array $payload): array
+    {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar') && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear')) {
+            return $this->forbidden('MANPOWER_FORBIDDEN');
+        }
+
+        $rqMina = RQMina::query()->find($payload['rq_mina_id']);
+        if (!$rqMina || !$this->policy->manageGrupos($usuario)) {
+            return $this->forbidden('MANPOWER_FORBIDDEN');
+        }
+
+        try {
+            $plan = $this->resolvePlan($rqMina, $payload['rq_mina_plan_id'] ?? null);
+            $this->resolveCopyActivity($rqMina, $plan, (string) $payload['rq_mina_actividad_id']);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->businessError($exception->getMessage(), 'El SAIT no pertenece al plan seleccionado');
+        }
+
+        $sourceDate = CarbonImmutable::parse($payload['fecha_origen'])->startOfDay();
+        $today = CarbonImmutable::today();
+        $rangeStart = $sourceDate->addDay();
+
+        if ($rangeStart->lessThan($today)) {
+            $rangeStart = $today;
+        }
+
+        $paradaEnd = CarbonImmutable::parse($rqMina->fecha_fin ?? $sourceDate)->endOfDay();
+        $planEnd = $plan?->fecha_fin
+            ? CarbonImmutable::parse($plan->fecha_fin)->endOfDay()
+            : $paradaEnd;
+        $operationalEnd = $planEnd->lessThan($paradaEnd) ? $planEnd : $paradaEnd;
+        $rangeEnd = $payload['alcance'] === 'SEMANA'
+            ? $sourceDate->endOfWeek(CarbonInterface::SUNDAY)->endOfDay()
+            : $operationalEnd;
+
+        if ($rangeEnd->greaterThan($operationalEnd)) {
+            $rangeEnd = $operationalEnd;
+        }
+
+        if ($rangeStart->greaterThan($rangeEnd)) {
+            return $this->businessError(
+                'MANPOWER_RANGE_COPY_EMPTY',
+                $payload['alcance'] === 'SEMANA'
+                    ? 'No quedan dias futuros de esta semana dentro de la parada'
+                    : 'No quedan dias futuros dentro de la parada'
+            );
+        }
+
+        $dates = [];
+        for ($date = $rangeStart; $date->lessThanOrEqualTo($rangeEnd); $date = $date->addDay()) {
+            $dates[] = $date->toDateString();
+        }
+
+        try {
+            return DB::transaction(function () use ($usuario, $payload, $dates): array {
+                $totals = [
+                    'ok' => true,
+                    'alcance' => $payload['alcance'],
+                    'fecha_origen' => $payload['fecha_origen'],
+                    'fecha_inicio_copia' => $dates[0],
+                    'fecha_fin_copia' => $dates[count($dates) - 1],
+                    'dias_copiados' => 0,
+                    'grupos_copiados' => 0,
+                    'grupos_reemplazados' => 0,
+                    'grupos_omitidos' => 0,
+                    'integrantes_copiados' => 0,
+                    'integrantes_omitidos' => 0,
+                ];
+
+                foreach ($dates as $destinationDate) {
+                    $result = $this->copyDayGroups($usuario, [
+                        'rq_mina_id' => $payload['rq_mina_id'],
+                        'rq_mina_plan_id' => $payload['rq_mina_plan_id'] ?? null,
+                        'rq_mina_actividad_origen_id' => $payload['rq_mina_actividad_id'],
+                        'rq_mina_actividad_destino_id' => $payload['rq_mina_actividad_id'],
+                        'fecha_origen' => $payload['fecha_origen'],
+                        'fecha_destino' => $destinationDate,
+                        'copiar_integrantes' => (bool) ($payload['copiar_integrantes'] ?? true),
+                        'sobrescribir_destino' => (bool) ($payload['sobrescribir_destino'] ?? true),
+                    ]);
+
+                    if (($result['ok'] ?? false) === false) {
+                        throw new \RuntimeException((string) ($result['message'] ?? 'No se pudieron copiar los grupos del rango'));
+                    }
+
+                    $totals['dias_copiados']++;
+                    foreach (['grupos_copiados', 'grupos_reemplazados', 'grupos_omitidos', 'integrantes_copiados', 'integrantes_omitidos'] as $key) {
+                        $totals[$key] += (int) ($result[$key] ?? 0);
+                    }
+                }
+
+                return $totals;
+            });
+        } catch (\RuntimeException $exception) {
+            return $this->businessError('MANPOWER_RANGE_COPY_FAILED', $exception->getMessage());
+        }
+    }
+
+    public function cancelDayGroups(Usuario $usuario, array $payload): array
+    {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'man_power', ['editar', 'actualizar']) || !$this->policy->manageGrupos($usuario)) {
+            return $this->forbidden('MANPOWER_FORBIDDEN');
+        }
+
+        $rqMina = RQMina::query()->find($payload['rq_mina_id']);
+        if (!$rqMina || !$this->policy->canAccessMina($usuario, (string) $rqMina->mina_id)) {
+            return $this->forbidden('MINA_SCOPE_FORBIDDEN');
+        }
+
+        try {
+            $plan = $this->resolvePlan($rqMina, $payload['rq_mina_plan_id'] ?? null);
+            $this->resolveCopyActivity($rqMina, $plan, (string) $payload['rq_mina_actividad_id']);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->businessError($exception->getMessage(), 'El SAIT no pertenece al plan seleccionado');
+        }
+
+        return DB::transaction(function () use ($usuario, $payload): array {
+            $groupsQuery = GrupoTrabajo::query()
+                ->where('rq_mina_id', $payload['rq_mina_id'])
+                ->whereDate('fecha', $payload['fecha'])
+                ->where('estado', '!=', GrupoTrabajo::ESTADO_CANCELADO)
+                ->whereHas('actividades', fn ($query) => $query->where('rq_mina_actividades.id', $payload['rq_mina_actividad_id']));
+
+            if (!empty($payload['rq_mina_plan_id'])) {
+                $groupsQuery->where('rq_mina_plan_id', $payload['rq_mina_plan_id']);
+            } else {
+                $groupsQuery->whereNull('rq_mina_plan_id');
+            }
+
+            $groups = $groupsQuery->with('asistencia:id,grupo_trabajo_id,estado')->lockForUpdate()->get();
+            if ($groups->isEmpty()) {
+                return $this->businessError('MANPOWER_DAY_CANCEL_EMPTY', 'No hay grupos preparados para eliminar en este dia');
+            }
+
+            if ($groups->contains(fn (GrupoTrabajo $group): bool => $group->asistencia !== null)) {
+                return $this->businessError('MANPOWER_ASSISTENCIA_LOCKED', 'No se pueden eliminar grupos que ya tienen asistencia registrada');
+            }
+
+            $membersRetired = 0;
+            foreach ($groups as $group) {
+                $details = GrupoTrabajoDetalle::query()
+                    ->where('grupo_trabajo_id', $group->id)
+                    ->lockForUpdate()
+                    ->get();
+
+                foreach ($details as $detail) {
+                    if (!$detail->isDistribucionActiva()) {
+                        continue;
+                    }
+
+                    $this->markDetalleRetired($detail, $usuario, 'Grupo cancelado desde la seleccion diaria de Man Power');
+                    $this->transportePlanningService->retireActivePassengerForDetail(
+                        $usuario,
+                        $detail->id,
+                        'GRUPO_CANCELADO_DESDE_MAN_POWER'
+                    );
+                    $membersRetired++;
+                }
+
+                $group->fill([
+                    'estado' => GrupoTrabajo::ESTADO_CANCELADO,
+                    'updated_by_id' => $usuario->id,
+                ])->save();
+            }
+
+            return [
+                'ok' => true,
+                'grupos_cancelados' => $groups->count(),
+                'integrantes_retirados' => $membersRetired,
+            ];
+        });
     }
 
     public function showGrupo(Usuario $usuario, GrupoTrabajo $grupo): ?GrupoTrabajo

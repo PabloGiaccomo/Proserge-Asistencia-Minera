@@ -158,6 +158,7 @@
 .mia-group-progress progress { width: 100%; height: 6px; accent-color: #10b7aa; }
 .mia-group-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 13px; }
 .mia-status { background: #eef3f8; color: #5b6f8b; }
+.mia-status.is-pendiente { background: #fff1c7; color: #8a5700; }
 .mia-status.is-cerrado { background: #def8e8; color: #117044; }
 
 .mia-empty { padding: 40px 20px; text-align: center; color: #667995; }

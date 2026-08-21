@@ -28,7 +28,17 @@ class EvaluacionesApiTest extends TestCase
                 'id' => $this->rolPlannerId,
                 'nombre' => 'PLANNER',
                 'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                    'evaluaciones' => ['ver', 'crear', 'editar', 'actualizar'],
+                    'evaluaciones' => [
+                        'ver_desempeno',
+                        'evaluar_desempeno',
+                        'ver_supervisores',
+                        'evaluar_supervisores',
+                        'ver_residentes',
+                        'evaluar_residentes',
+                        'crear',
+                        'editar',
+                        'actualizar',
+                    ],
                 ])),
                 'estado' => 'ACTIVO',
             ],
@@ -70,13 +80,13 @@ class EvaluacionesApiTest extends TestCase
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
-        $this->withToken($token)->postJson('/api/v1/evaluaciones/desempeno', $this->payloadDesempeno($grupoId, $trabajadorId, 10))->assertStatus(201);
+        $this->withToken($token)->postJson('/api/v1/evaluaciones/desempeno', $this->payloadDesempeno($grupoId, $trabajadorId, 2))->assertStatus(201);
 
         $grupo2 = $this->duplicarGrupoConAsistencia($grupoId, $trabajadorId, $minaId);
-        $this->withToken($token)->postJson('/api/v1/evaluaciones/desempeno', $this->payloadDesempeno($grupo2, $trabajadorId, 20))->assertStatus(201);
+        $this->withToken($token)->postJson('/api/v1/evaluaciones/desempeno', $this->payloadDesempeno($grupo2, $trabajadorId, 4))->assertStatus(201);
 
         $avg = $this->withToken($token)->getJson('/api/v1/evaluaciones/promedios?trabajador_id='.$trabajadorId);
-        $avg->assertOk()->assertJsonPath('data.0.promedio_total', 75);
+        $avg->assertOk()->assertJsonPath('data.0.promedio_total', 15);
     }
 
     public function test_filtros_por_destino_funcionan(): void
@@ -95,7 +105,7 @@ class EvaluacionesApiTest extends TestCase
     public function test_supervisor_y_residente_respetan_reglas_acceso(): void
     {
         [$minaId, $grupoId, $trabajadorId, $supervisorId] = $this->crearContexto();
-        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
         $token = $this->crearToken($usuarioId);
 
         $sup = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor', [
@@ -126,18 +136,15 @@ class EvaluacionesApiTest extends TestCase
 
         $resOk = $this->withToken($token)->postJson('/api/v1/evaluaciones/residente', [
             'fecha' => '2026-09-01',
-            'destino_tipo' => 'MINA',
-            'destino_id' => $minaId,
-            'indicadores_kpi' => 80,
-            'costos_servicio' => 70,
-            'eventos_seguridad' => 90,
-            'reportes_calidad' => 85,
-            'liderazgo_gestion' => 75,
-            'innovacion' => 70,
+            'indicadores_kpi_items' => ['REPORTE_ASISTENCIA', 'ENTREGA_INFORMES'],
+            'costos_servicio_items' => ['COSTOS_MENSUALES'],
+            'eventos_seguridad_respuesta' => 'SI',
+            'reportes_calidad_respuesta' => 'NO',
+            'liderazgo_gestion_innovacion' => 3,
             'residente_id' => $trabajadorId,
-            'evaluador_id' => $supervisorId,
+            'comentarios' => 'Seguimiento mensual.',
         ]);
-        $resOk->assertStatus(201);
+        $resOk->assertStatus(201)->assertJsonPath('data.total', 11);
     }
 
     public function test_usuario_sin_permiso_no_opera(): void
@@ -151,7 +158,7 @@ class EvaluacionesApiTest extends TestCase
         $response->assertStatus(403)->assertJsonPath('code', 'EVAL_FORBIDDEN');
     }
 
-    private function payloadDesempeno(string $grupoId, string $trabajadorId, int $base = 15): array
+    private function payloadDesempeno(string $grupoId, string $trabajadorId, int $base = 3): array
     {
         return [
             'grupo_trabajo_id' => $grupoId,
@@ -301,10 +308,10 @@ class EvaluacionesApiTest extends TestCase
         return $id;
     }
 
-    private function crearUsuario(string $rolId): string
+    private function crearUsuario(string $rolId, ?string $personalId = null): string
     {
         $id = (string) Str::uuid();
-        DB::table('usuarios')->insert(['id' => $id, 'email' => Str::lower(Str::random(8)).'@test.local', 'password' => bcrypt('secret123'), 'rol_id' => $rolId]);
+        DB::table('usuarios')->insert(['id' => $id, 'email' => Str::lower(Str::random(8)).'@test.local', 'password' => bcrypt('secret123'), 'rol_id' => $rolId, 'personal_id' => $personalId]);
 
         return $id;
     }

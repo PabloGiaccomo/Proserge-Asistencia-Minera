@@ -224,6 +224,16 @@ class PermissionMatrix
 
     private static function applyDerivedPermissions(array $matrix): array
     {
+        if (($matrix['evaluaciones']['crear'] ?? false) === true) {
+            $matrix['evaluaciones']['evaluar_desempeno'] = true;
+        }
+
+        if (($matrix['evaluaciones']['ver'] ?? false) === true
+            && !self::hasEvaluationTypePermission($matrix['evaluaciones'] ?? [])
+        ) {
+            $matrix['evaluaciones']['ver_desempeno'] = true;
+        }
+
         if (($matrix['logistica']['ver_logistica_entregas'] ?? false) === true) {
             foreach (PermissionCatalog::availableModuleActions()['epps'] ?? [] as $action) {
                 if (array_key_exists($action, $matrix['epps'] ?? [])) {
@@ -233,6 +243,24 @@ class PermissionMatrix
         }
 
         return $matrix;
+    }
+
+    private static function hasEvaluationTypePermission(array $actions): bool
+    {
+        foreach ([
+            'ver_desempeno',
+            'evaluar_desempeno',
+            'ver_supervisores',
+            'evaluar_supervisores',
+            'ver_residentes',
+            'evaluar_residentes',
+        ] as $action) {
+            if (($actions[$action] ?? false) === true) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function fallbackPermissionChecks(string $module, string $action): array

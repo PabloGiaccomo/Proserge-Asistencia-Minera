@@ -1,7 +1,6 @@
 <?php
 
 use App\Modules\Auth\Controllers\LoginPageController;
-use App\Modules\Evaluaciones\Controllers\EvaluacionSupervisorPageController;
 use App\Modules\Evaluaciones\Controllers\EvaluacionDesempenoPageController;
 use App\Modules\Personal\Controllers\PersonalPageController;
 use App\Modules\Personal\Controllers\PersonalImportController;
@@ -320,15 +319,17 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/faltas/{id}/corregir', [FaltasPageController::class, 'corregir'])->middleware('web.permission:faltas,corregir')->name('faltas.corregir');
 
     // Evaluaciones
-    Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.index');
-    Route::get('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.desempeno.index');
-    Route::get('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'show'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.desempeno.show');
-    Route::get('/evaluaciones/desempeno/create', [EvaluacionDesempenoPageController::class, 'create'])->middleware('web.permission:evaluaciones,crear')->name('evaluaciones.desempeno.create');
+    Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno|ver_supervisores|evaluar_supervisores|ver_residentes|evaluar_residentes')->name('evaluaciones.index');
+    Route::get('/evaluaciones/personal/buscar', [EvaluacionDesempenoPageController::class, 'searchPersonal'])->middleware('web.permission:evaluaciones,evaluar_supervisores|evaluar_residentes')->name('evaluaciones.personal.buscar');
+    Route::get('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.index');
+    Route::get('/evaluaciones/desempeno/create', [EvaluacionDesempenoPageController::class, 'create'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.create');
+    Route::get('/evaluaciones/desempeno/promedios', [EvaluacionDesempenoPageController::class, 'promedios'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.promedios');
+    Route::get('/evaluaciones/desempeno/comparacion', [EvaluacionDesempenoPageController::class, 'comparacion'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.comparacion');
+    Route::get('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'show'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.show');
     Route::get('/evaluaciones/desempeno/{id}/edit', [EvaluacionDesempenoPageController::class, 'edit'])->middleware('web.permission:evaluaciones,editar')->name('evaluaciones.desempeno.edit');
-    Route::get('/evaluaciones/desempeno/promedios', [EvaluacionDesempenoPageController::class, 'promedios'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.desempeno.promedios');
-    Route::get('/evaluaciones/desempeno/comparacion', [EvaluacionDesempenoPageController::class, 'comparacion'])->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.desempeno.comparacion');
     
-    Route::get('/evaluaciones/supervisor', EvaluacionSupervisorPageController::class)->middleware('web.permission:evaluaciones,ver')->name('evaluaciones.supervisor');
+    Route::get('/evaluaciones/supervisor', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_supervisores|evaluar_supervisores')->name('evaluaciones.supervisor');
+    Route::get('/evaluaciones/residentes', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_residentes|evaluar_residentes')->name('evaluaciones.residentes');
 
     // Usuarios
     Route::get('/usuarios', [UsuarioPageController::class, 'index'])->middleware('web.permission:usuarios,ver')->name('usuarios.index');
@@ -407,6 +408,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/reubicar', [ManPowerPageController::class, 'reubicarPersonal'])->middleware('web.permission:man_power,asignar')->name('man-power.reubicar-personal');
     Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/responsable', [ManPowerPageController::class, 'asignarResponsable'])->middleware('web.permission:man_power,asignar')->name('man-power.asignar-responsable');
     Route::post('/man-power/grupos/copiar-dia', [ManPowerPageController::class, 'copiarGruposDia'])->middleware('web.permission:man_power,duplicar')->name('man-power.copiar-grupos-dia');
+    Route::post('/man-power/grupos/copiar-rango', [ManPowerPageController::class, 'copiarGruposRango'])->middleware('web.permission:man_power,duplicar')->name('man-power.copiar-grupos-rango');
+    Route::post('/man-power/grupos/cancelar-dia', [ManPowerPageController::class, 'cancelarGruposDia'])->middleware('web.permission:man_power,actualizar|editar')->name('man-power.cancelar-grupos-dia');
     Route::post('/man-power/grupos/{id}/copiar', [ManPowerPageController::class, 'copiarGrupo'])->middleware('web.permission:man_power,duplicar')->name('man-power.copiar-grupo');
     Route::post('/man-power/cargos/{detalleId}/compartir', [ManPowerPageController::class, 'updateCargoSharing'])->middleware('web.permission:man_power,actualizar')->name('man-power.cargos.compartir');
 
@@ -418,7 +421,9 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/faltas/{id}/corregir-asistencia', [FaltasPageController::class, 'corregirPost'])->middleware('web.permission:faltas,corregir')->name('faltas.corregir-post');
     Route::post('/faltas/{id}/anular', [FaltasPageController::class, 'anular'])->middleware('web.permission:faltas,anular')->name('faltas.anular');
 
-    Route::post('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'store'])->middleware('web.permission:evaluaciones,crear')->name('evaluaciones.desempeno.store');
+    Route::post('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'storeDaily'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.store');
+    Route::post('/evaluaciones/supervisores', [EvaluacionDesempenoPageController::class, 'storeSupervisor'])->middleware('web.permission:evaluaciones,evaluar_supervisores')->name('evaluaciones.supervisores.store');
+    Route::post('/evaluaciones/residentes', [EvaluacionDesempenoPageController::class, 'storeResident'])->middleware('web.permission:evaluaciones,evaluar_residentes')->name('evaluaciones.residentes.store');
     Route::put('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'update'])->middleware('web.permission:evaluaciones,actualizar')->name('evaluaciones.desempeno.update');
 
     Route::put('/usuarios/{usuarioId}/mina-scope', [UsuarioPageController::class, 'syncScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope-update');

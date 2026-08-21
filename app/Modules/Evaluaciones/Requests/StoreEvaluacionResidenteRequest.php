@@ -2,6 +2,7 @@
 
 namespace App\Modules\Evaluaciones\Requests;
 
+use App\Modules\Evaluaciones\Support\ResidentEvaluationTemplate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreEvaluacionResidenteRequest extends FormRequest
@@ -15,17 +16,15 @@ class StoreEvaluacionResidenteRequest extends FormRequest
     {
         return [
             'fecha' => ['required', 'date'],
-            'destino_tipo' => ['required', 'string', 'in:MINA,TALLER,OFICINA'],
-            'destino_id' => ['required', 'string', 'size:36'],
-            'indicadores_kpi' => ['required', 'numeric', 'min:0', 'max:100'],
-            'costos_servicio' => ['required', 'numeric', 'min:0', 'max:100'],
-            'eventos_seguridad' => ['required', 'numeric', 'min:0', 'max:100'],
-            'reportes_calidad' => ['required', 'numeric', 'min:0', 'max:100'],
-            'liderazgo_gestion' => ['required', 'numeric', 'min:0', 'max:100'],
-            'innovacion' => ['required', 'numeric', 'min:0', 'max:100'],
+            'indicadores_kpi_items' => ['required', 'array', 'min:1'],
+            'indicadores_kpi_items.*' => ['required', 'string', 'in:'.implode(',', array_keys(ResidentEvaluationTemplate::KPI_OPTIONS))],
+            'costos_servicio_items' => ['required', 'array', 'min:1'],
+            'costos_servicio_items.*' => ['required', 'string', 'in:'.implode(',', array_keys(ResidentEvaluationTemplate::COST_OPTIONS))],
+            'eventos_seguridad_respuesta' => ['required', 'string', 'in:SI,NO'],
+            'reportes_calidad_respuesta' => ['required', 'string', 'in:SI,NO'],
+            'liderazgo_gestion_innovacion' => ['required', 'integer', 'between:1,4'],
             'residente_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
-            'evaluador_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
-            'comentarios' => ['nullable', 'string'],
+            'comentarios' => ['required', 'string', 'max:3000'],
         ];
     }
 }

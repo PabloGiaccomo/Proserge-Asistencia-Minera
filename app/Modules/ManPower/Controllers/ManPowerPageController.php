@@ -6,7 +6,9 @@ use App\Models\GrupoTrabajo;
 use App\Models\RQMinaDetalle;
 use App\Http\Controllers\WebPageController;
 use App\Modules\ManPower\Requests\AddGrupoPersonalRequest;
+use App\Modules\ManPower\Requests\CancelGruposDiaRequest;
 use App\Modules\ManPower\Requests\CopyGruposDiaRequest;
+use App\Modules\ManPower\Requests\CopyGruposRangoRequest;
 use App\Modules\ManPower\Requests\CopyGrupoTrabajoRequest;
 use App\Modules\ManPower\Requests\RetireGrupoPersonalRequest;
 use App\Modules\ManPower\Requests\ReubicarGrupoPersonalRequest;
@@ -407,5 +409,56 @@ class ManPowerPageController extends WebPageController
             'fecha' => $payload['fecha_destino'],
             'vista' => 'seleccion',
         ])->with('success', $message);
+    }
+
+    public function copiarGruposRango(CopyGruposRangoRequest $request)
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $payload = $request->validated();
+        $result = $this->grupoService->copyDayGroupsToRange($usuario, $payload);
+
+        if (($result['ok'] ?? false) === false) {
+            return back()->withErrors(['grupo' => (string) ($result['message'] ?? 'No se pudieron copiar los grupos')]);
+        }
+
+        $scope = $payload['alcance'] === 'SEMANA' ? 'la semana' : 'la parada';
+        $message = sprintf(
+            'Grupos copiados al resto de %s: %d dia(s), %d grupo(s) y %d integrante(s).',
+            $scope,
+            $result['dias_copiados'] ?? 0,
+            $result['grupos_copiados'] ?? 0,
+            $result['integrantes_copiados'] ?? 0,
+        );
+
+        return redirect()->route('man-power.grupos', [
+            'rq_mina_id' => $payload['rq_mina_id'],
+            'plan_id' => $payload['rq_mina_plan_id'] ?? null,
+            'actividad_id' => $payload['rq_mina_actividad_id'],
+            'fecha' => $payload['fecha_origen'],
+            'vista' => 'seleccion',
+        ])->with('success', $message);
+    }
+
+    public function cancelarGruposDia(CancelGruposDiaRequest $request)
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $payload = $request->validated();
+        $result = $this->grupoService->cancelDayGroups($usuario, $payload);
+
+        if (($result['ok'] ?? false) === false) {
+            return back()->withErrors(['grupo' => (string) ($result['message'] ?? 'No se pudieron eliminar los grupos del dia')]);
+        }
+
+        return redirect()->route('man-power.grupos', [
+            'rq_mina_id' => $payload['rq_mina_id'],
+            'plan_id' => $payload['rq_mina_plan_id'] ?? null,
+            'actividad_id' => $payload['rq_mina_actividad_id'],
+            'fecha' => $payload['fecha'],
+            'vista' => 'seleccion',
+        ])->with('success', sprintf(
+            '%d grupo(s) eliminado(s) de la seleccion y %d integrante(s) liberado(s).',
+            $result['grupos_cancelados'] ?? 0,
+            $result['integrantes_retirados'] ?? 0,
+        ));
     }
 }

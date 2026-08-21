@@ -23,7 +23,7 @@ class EvaluacionSupervisorApiTest extends TestCase
             'id' => $this->rolPlannerId,
             'nombre' => 'PLANNER',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'evaluaciones' => ['ver', 'crear', 'editar', 'actualizar'],
+                'evaluaciones' => ['ver_supervisores', 'evaluar_supervisores', 'editar', 'actualizar'],
             ])),
             'estado' => 'ACTIVO',
         ]);
@@ -32,7 +32,7 @@ class EvaluacionSupervisorApiTest extends TestCase
     public function test_creacion_correcta_evaluacion_supervisor(): void
     {
         [$minaId, $grupoId, $evaluadorId, $evaluadoId] = $this->crearContextoMina();
-        $usuarioId = $this->crearUsuario();
+        $usuarioId = $this->crearUsuario($evaluadorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -72,7 +72,7 @@ class EvaluacionSupervisorApiTest extends TestCase
     public function test_no_duplicidad_para_mismo_contexto(): void
     {
         [$minaId, $grupoId, $evaluadorId, $evaluadoId] = $this->crearContextoMina();
-        $usuarioId = $this->crearUsuario();
+        $usuarioId = $this->crearUsuario($evaluadorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -87,7 +87,7 @@ class EvaluacionSupervisorApiTest extends TestCase
     public function test_visualizacion_y_edicion_correcta(): void
     {
         [$minaId, $grupoId, $evaluadorId, $evaluadoId] = $this->crearContextoMina();
-        $usuarioId = $this->crearUsuario();
+        $usuarioId = $this->crearUsuario($evaluadorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -114,7 +114,7 @@ class EvaluacionSupervisorApiTest extends TestCase
     public function test_compatibilidad_destino_taller_oficina(): void
     {
         [$evaluadorId, $evaluadoId] = $this->crearParPersonalSinScope();
-        $usuarioId = $this->crearUsuario();
+        $usuarioId = $this->crearUsuario($evaluadorId);
         $token = $this->crearToken($usuarioId);
 
         $tallerId = (string) Str::uuid();
@@ -219,10 +219,10 @@ class EvaluacionSupervisorApiTest extends TestCase
         return [$this->crearPersonal($minaId, true), $this->crearPersonal($minaId, true)];
     }
 
-    private function crearUsuario(): string
+    private function crearUsuario(?string $personalId = null): string
     {
         $id = (string) Str::uuid();
-        DB::table('usuarios')->insert(['id' => $id, 'email' => Str::lower(Str::random(8)).'@test.local', 'password' => bcrypt('secret123'), 'rol_id' => $this->rolPlannerId]);
+        DB::table('usuarios')->insert(['id' => $id, 'email' => Str::lower(Str::random(8)).'@test.local', 'password' => bcrypt('secret123'), 'rol_id' => $this->rolPlannerId, 'personal_id' => $personalId]);
         return $id;
     }
 

@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\GrupoTrabajo;
 use App\Models\Usuario;
 use App\Modules\ManPower\Requests\AddGrupoPersonalRequest;
+use App\Modules\ManPower\Requests\CancelGruposDiaRequest;
 use App\Modules\ManPower\Requests\CopyGruposDiaRequest;
+use App\Modules\ManPower\Requests\CopyGruposRangoRequest;
 use App\Modules\ManPower\Requests\CopyGrupoTrabajoRequest;
 use App\Modules\ManPower\Requests\RetireGrupoPersonalRequest;
 use App\Modules\ManPower\Requests\ReubicarGrupoPersonalRequest;
@@ -391,6 +393,49 @@ class ManPowerController extends Controller
             message: 'Grupos del dia copiados',
             code: 'MANPOWER_DAY_COPY_OK',
             status: 201,
+        );
+    }
+
+    public function copiarGruposRango(CopyGruposRangoRequest $request)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $result = $this->grupoService->copyDayGroupsToRange($usuario, $request->validated());
+
+        if (($result['ok'] ?? false) === false) {
+            return ApiResponse::error(
+                message: (string) ($result['message'] ?? 'No se pudieron copiar los grupos'),
+                code: (string) ($result['code'] ?? 'MANPOWER_RANGE_COPY_FAILED'),
+                status: ($result['forbidden'] ?? false) ? 403 : 422,
+            );
+        }
+
+        return ApiResponse::success(
+            data: $result,
+            message: 'Grupos copiados al rango seleccionado',
+            code: 'MANPOWER_RANGE_COPY_OK',
+            status: 201,
+        );
+    }
+
+    public function cancelarGruposDia(CancelGruposDiaRequest $request)
+    {
+        /** @var Usuario $usuario */
+        $usuario = $request->user();
+        $result = $this->grupoService->cancelDayGroups($usuario, $request->validated());
+
+        if (($result['ok'] ?? false) === false) {
+            return ApiResponse::error(
+                message: (string) ($result['message'] ?? 'No se pudieron eliminar los grupos del dia'),
+                code: (string) ($result['code'] ?? 'MANPOWER_DAY_CANCEL_FAILED'),
+                status: ($result['forbidden'] ?? false) ? 403 : 422,
+            );
+        }
+
+        return ApiResponse::success(
+            data: $result,
+            message: 'Grupos del dia eliminados de la seleccion',
+            code: 'MANPOWER_DAY_CANCEL_OK',
         );
     }
 

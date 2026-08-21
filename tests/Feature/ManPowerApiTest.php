@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Usuario;
 use App\Modules\ManPower\Services\ManPowerPlanningService;
 use App\Support\Rbac\PermissionCatalog;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -300,6 +301,170 @@ class ManPowerApiTest extends TestCase
                 ->assertOk()
                 ->assertJsonCount(1, 'data.grupos_man_power');
         }
+    }
+
+    public function test_copia_grupos_a_dias_restantes_y_no_reemplaza_dias_que_ya_pasaron(): void
+    {
+        CarbonImmutable::setTestNow('2026-06-01 08:00:00');
+
+        try {
+            [$minaId, $rqMinaId, $rqProsergeId, $supervisorId, $personalId] = $this->crearParadaAtendida(true, true);
+            [$planId, $operationalGroupId, $activityId] = $this->crearPlanOperativo($rqMinaId);
+            DB::table('rq_mina')->where('id', $rqMinaId)->update(['fecha_fin' => '2026-06-10']);
+            DB::table('rq_mina_planes')->where('id', $planId)->update(['fecha_fin' => '2026-06-10']);
+            DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->update(['fecha_fin' => '2026-06-10']);
+
+            $usuarioId = $this->crearUsuario($this->rolPlannerId);
+            $this->asignarScope($usuarioId, $minaId);
+            $token = $this->crearToken($usuarioId);
+            $sourceGroupId = $this->withToken($token)->postJson('/api/v1/man-power/grupos', [
+                'rq_mina_id' => $rqMinaId,
+                'rq_proserge_id' => $rqProsergeId,
+                'rq_mina_plan_id' => $planId,
+                'rq_mina_actividad_grupo_id' => $operationalGroupId,
+                'actividad_ids' => [$activityId],
+                'fecha' => '2026-06-01',
+                'turno' => 'DIA',
+                'servicio' => 'SAIT-TEST',
+                'area' => 'Area test',
+                'horario_salida' => '07:00',
+                'destino_tipo' => 'MINA',
+                'destino_id' => $minaId,
+                'estado' => 'BORRADOR',
+            ])->assertCreated()->json('data.id');
+
+            $assignmentId = DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('id');
+            $this->withToken($token)->postJson('/api/v1/man-power/grupos/'.$sourceGroupId.'/agregar-personal', [
+                'rq_proserge_detalle_id' => $assignmentId,
+            ])->assertOk();
+
+            $this->withSession([
+                'auth_token' => 'man-power-range-copy-test',
+                'user_id' => $usuarioId,
+                'user' => [
+                    'id' => $usuarioId,
+                    'email' => 'planner-range@test.local',
+                    'permissions' => PermissionCatalog::matrixFromSelections([
+                        'man_power' => ['ver', 'crear', 'actualizar', 'asignar', 'duplicar'],
+                    ]),
+                    'mina_scopes' => [$minaId],
+                ],
+            ])->get('/man-power/grupos?rq_mina_id='.$rqMinaId.'&plan_id='.$planId.'&actividad_id='.$activityId.'&fecha=2026-06-01&vista=seleccion')
+                ->assertOk()
+                ->assertSee('data-copy-range="SEMANA"', false)
+                ->assertSee('data-copy-range="PARADA"', false)
+                ->assertSee('data-cancel-day', false);
+
+            $basePayload = [
+                'rq_mina_id' => $rqMinaId,
+                'rq_mina_plan_id' => $planId,
+                'rq_mina_actividad_id' => $activityId,
+                'fecha_origen' => '2026-06-01',
+                'copiar_integrantes' => true,
+                'sobrescribir_destino' => true,
+            ];
+
+            $this->withToken($token)->postJson('/api/v1/man-power/grupos/copiar-rango', array_merge($basePayload, [
+                'alcance' => 'SEMANA',
+            ]))->assertCreated()
+                ->assertJsonPath('code', 'MANPOWER_RANGE_COPY_OK')
+                ->assertJsonPath('data.dias_copiados', 6)
+                ->assertJsonPath('data.grupos_copiados', 6)
+                ->assertJsonPath('data.integrantes_copiados', 6);
+
+            $protectedGroups = DB::table('grupo_trabajo')
+                ->where('rq_mina_id', $rqMinaId)
+                ->whereIn('fecha', ['2026-06-02', '2026-06-03'])
+                ->where('estado', '!=', 'CANCELADO')
+                ->orderBy('fecha')
+                ->pluck('id', 'fecha');
+
+            CarbonImmutable::setTestNow('2026-06-04 08:00:00');
+            $token = $this->crearToken($usuarioId);
+
+            $this->withToken($token)->postJson('/api/v1/man-power/grupos/copiar-rango', array_merge($basePayload, [
+                'alcance' => 'PARADA',
+            ]))->assertCreated()
+                ->assertJsonPath('data.dias_copiados', 7)
+                ->assertJsonPath('data.grupos_copiados', 7);
+
+            foreach ($protectedGroups as $date => $groupId) {
+                $this->assertDatabaseHas('grupo_trabajo', [
+                    'id' => $groupId,
+                    'fecha' => $date,
+                    'estado' => 'BORRADOR',
+                ]);
+            }
+
+            $this->assertSame(1, DB::table('grupo_trabajo')
+                ->where('rq_mina_id', $rqMinaId)
+                ->whereDate('fecha', '2026-06-10')
+                ->where('estado', '!=', 'CANCELADO')
+                ->count());
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_cancela_logicamente_los_grupos_del_sait_y_dia_seleccionados(): void
+    {
+        [$minaId, $rqMinaId, $rqProsergeId, $supervisorId, $personalId] = $this->crearParadaAtendida(true, true);
+        [$planId, $operationalGroupId, $activityId] = $this->crearPlanOperativo($rqMinaId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $createPayload = [
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $rqProsergeId,
+            'rq_mina_plan_id' => $planId,
+            'rq_mina_actividad_grupo_id' => $operationalGroupId,
+            'actividad_ids' => [$activityId],
+            'fecha' => '2026-06-01',
+            'servicio' => 'SAIT-TEST',
+            'area' => 'Area test',
+            'horario_salida' => '07:00',
+            'destino_tipo' => 'MINA',
+            'destino_id' => $minaId,
+            'estado' => 'BORRADOR',
+        ];
+
+        $dayGroupId = $this->withToken($token)->postJson('/api/v1/man-power/grupos', array_merge($createPayload, [
+            'turno' => 'DIA',
+        ]))->assertCreated()->json('data.id');
+
+        $nightGroupId = $this->withToken($token)->postJson('/api/v1/man-power/grupos', array_merge($createPayload, [
+            'turno' => 'NOCHE',
+            'horario_salida' => '19:00',
+        ]))->assertCreated()->json('data.id');
+
+        $assignmentId = DB::table('rq_proserge_detalle')->where('personal_id', $personalId)->value('id');
+        $this->withToken($token)->postJson('/api/v1/man-power/grupos/'.$dayGroupId.'/agregar-personal', [
+            'rq_proserge_detalle_id' => $assignmentId,
+        ])->assertOk();
+
+        $this->withToken($token)->postJson('/api/v1/man-power/grupos/cancelar-dia', [
+            'rq_mina_id' => $rqMinaId,
+            'rq_mina_plan_id' => $planId,
+            'rq_mina_actividad_id' => $activityId,
+            'fecha' => '2026-06-01',
+        ])->assertOk()
+            ->assertJsonPath('code', 'MANPOWER_DAY_CANCEL_OK')
+            ->assertJsonPath('data.grupos_cancelados', 2)
+            ->assertJsonPath('data.integrantes_retirados', 1);
+
+        foreach ([$dayGroupId, $nightGroupId] as $groupId) {
+            $this->assertDatabaseHas('grupo_trabajo', [
+                'id' => $groupId,
+                'estado' => 'CANCELADO',
+            ]);
+        }
+
+        $this->assertDatabaseHas('grupo_trabajo_detalle', [
+            'grupo_trabajo_id' => $dayGroupId,
+            'personal_id' => $personalId,
+            'estado_distribucion' => 'RETIRADO',
+        ]);
     }
 
     public function test_copia_grupo_de_un_sait_a_otro_en_un_dia_distinto(): void

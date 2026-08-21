@@ -98,6 +98,7 @@ class AsistenciaService
                 'actividades:id,sait,area,sector',
                 'supervisor:id,nombre_completo,dni,numero_documento',
                 'detalle.personal:id,nombre_completo,dni,numero_documento,puesto',
+                'asistencia.supervisor:id,nombre_completo,dni,numero_documento',
                 'asistencia.detalle:id,asistencia_id,grupo_trabajo_detalle_id,trabajador_id,estado,hora_marcado',
             ])
             ->where('estado', '!=', GrupoTrabajo::ESTADO_CANCELADO);
@@ -124,7 +125,7 @@ class AsistenciaService
             ->orderByRaw("CASE WHEN turno = 'DIA' THEN 0 ELSE 1 END")
             ->orderBy('horario_salida')
             ->get()
-            ->map(function (GrupoTrabajo $grupo): array {
+            ->map(function (GrupoTrabajo $grupo) use ($usuario): array {
                 $integrantes = $grupo->detalle
                     ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva());
                 $marcas = $grupo->asistencia?->detalle ?? collect();
@@ -132,6 +133,8 @@ class AsistenciaService
                 $ausentes = $marcas->where('estado', AsistenciaDetalle::ESTADO_AUSENTE)->count();
                 $pendientes = max(0, $integrantes->count() - $marcas->whereNotIn('estado', [AsistenciaDetalle::ESTADO_NO_CORRESPONDE])->count());
                 $actividad = $grupo->actividades->first();
+                $canRegister = $this->policy->canRegisterGrupo($usuario, $grupo)
+                    && (filled($grupo->supervisor_id) || filled($grupo->asistencia?->id) || filled($usuario->personal_id));
 
                 return [
                     'id' => (string) $grupo->id,
@@ -146,6 +149,9 @@ class AsistenciaService
                     'plan' => $grupo->plan?->codigo,
                     'responsable' => $grupo->supervisor?->nombre_completo,
                     'responsable_id' => $grupo->supervisor_id,
+                    'responsable_registro' => $grupo->asistencia?->supervisor?->nombre_completo,
+                    'responsable_pendiente' => blank($grupo->supervisor_id) && !$grupo->asistencia,
+                    'puede_registrar' => $canRegister,
                     'estado_grupo' => (string) $grupo->estado,
                     'estado_asistencia' => $grupo->asistencia?->estado ?? 'PENDIENTE',
                     'total' => $integrantes->count(),
@@ -164,6 +170,7 @@ class AsistenciaService
             'grupoOperativo:id,nombre,area_operativa,modulo',
             'actividades:id,sait,area,sector,ait_trabajo',
             'supervisor',
+            'asistencia.supervisor',
             'detalle.personal',
             'detalle.rqProsergeDetalle',
             'detalle.actividadesPrincipales.actividad:id,sait,area,sector,ait_trabajo',
@@ -195,7 +202,12 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_GROUP_CANCELLED', 'No se puede marcar asistencia de un grupo cancelado');
         }
 
-        $encabezado = $this->getOrCreateEncabezado($grupo);
+        $readiness = $this->validateAttendanceResponsible($grupo, $usuario);
+        if (($readiness['ok'] ?? false) === false) {
+            return $readiness;
+        }
+
+        $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
 
         if ($encabezado->estado === 'CERRADO') {
             return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
@@ -236,7 +248,12 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_GROUP_CANCELLED', 'No se puede marcar asistencia de un grupo cancelado');
         }
 
-        $encabezado = $this->getOrCreateEncabezado($grupo);
+        $readiness = $this->validateAttendanceResponsible($grupo, $usuario);
+        if (($readiness['ok'] ?? false) === false) {
+            return $readiness;
+        }
+
+        $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
 
         if ($encabezado->estado === 'CERRADO') {
             return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
@@ -285,8 +302,13 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_GROUP_CANCELLED', 'No se puede cerrar asistencia de un grupo cancelado');
         }
 
-        $encabezado = $this->getOrCreateEncabezado($grupo);
-        $result = $this->cierreService->cerrar($grupo, $encabezado, $payload);
+        $readiness = $this->validateAttendanceResponsible($grupo, $usuario);
+        if (($readiness['ok'] ?? false) === false) {
+            return $readiness;
+        }
+
+        $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
+        $result = $this->cierreService->cerrar($usuario, $grupo, $encabezado, $payload);
 
         if (($result['ok'] ?? false) === false) {
             return $result;
@@ -331,7 +353,12 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_GROUP_CANCELLED', 'No se puede sincronizar asistencia de un grupo cancelado');
         }
 
-        $encabezado = $this->getOrCreateEncabezado($grupo);
+        $readiness = $this->validateAttendanceResponsible($grupo, $usuario);
+        if (($readiness['ok'] ?? false) === false) {
+            return $readiness;
+        }
+
+        $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
         if ($encabezado->estado === 'CERRADO') {
             return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
         }
@@ -430,9 +457,9 @@ class AsistenciaService
         return ['ok' => true, 'items' => $query->orderBy('fecha')->orderBy('turno')->get()];
     }
 
-    private function getOrCreateEncabezado(GrupoTrabajo $grupo): AsistenciaEncabezado
+    private function getOrCreateEncabezado(GrupoTrabajo $grupo, Usuario $usuario): AsistenciaEncabezado
     {
-        return DB::transaction(function () use ($grupo): AsistenciaEncabezado {
+        return DB::transaction(function () use ($grupo, $usuario): AsistenciaEncabezado {
             $encabezado = AsistenciaEncabezado::query()
                 ->where('grupo_trabajo_id', $grupo->id)
                 ->lockForUpdate()
@@ -449,12 +476,13 @@ class AsistenciaService
                     'mina_id' => $minaId,
                     'destino_tipo' => $grupo->destino_tipo ?? $grupo->unidad,
                     'destino_id' => $grupo->destino_id,
-                    'supervisor_id' => $grupo->supervisor_id,
+                    'supervisor_id' => $grupo->supervisor_id ?: $usuario->personal_id,
                     'actividad_realizada' => null,
                     'reporte_suceso' => null,
                     'estado' => 'REGISTRADO',
                 ]);
             } elseif ($encabezado->estado !== 'CERRADO'
+                && filled($grupo->supervisor_id)
                 && (string) $encabezado->supervisor_id !== (string) $grupo->supervisor_id) {
                 $encabezado->forceFill(['supervisor_id' => $grupo->supervisor_id])->save();
             }
@@ -707,6 +735,20 @@ class AsistenciaService
     private function businessError(string $code, string $message): array
     {
         return ['ok' => false, 'code' => $code, 'message' => $message];
+    }
+
+    private function validateAttendanceResponsible(GrupoTrabajo $grupo, Usuario $usuario): array
+    {
+        if (filled($grupo->supervisor_id)
+            || filled($usuario->personal_id)
+            || AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->exists()) {
+            return ['ok' => true];
+        }
+
+        return $this->businessError(
+            'ASISTENCIA_RESPONSIBLE_REQUIRED',
+            'Vincula esta cuenta con un trabajador o asigna un responsable al grupo antes de registrar la asistencia.',
+        );
     }
 
     private function validateStatePayload(array $payload): array

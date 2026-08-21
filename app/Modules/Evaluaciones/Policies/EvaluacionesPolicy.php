@@ -8,9 +8,37 @@ use App\Support\Rbac\PermissionMatrix;
 
 class EvaluacionesPolicy
 {
+    private const TYPE_ACTIONS = [
+        'desempeno' => ['ver_desempeno', 'evaluar_desempeno'],
+        'supervisores' => ['ver_supervisores', 'evaluar_supervisores'],
+        'residentes' => ['ver_residentes', 'evaluar_residentes'],
+    ];
+
     public function manage(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['ver', 'crear', 'editar', 'actualizar']);
+        return collect(self::TYPE_ACTIONS)
+            ->flatten()
+            ->contains(fn (string $action): bool => PermissionMatrix::userCanDirect($usuario, 'evaluaciones', $action))
+            || PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'administrar');
+    }
+
+    public function canViewType(Usuario $usuario, string $type): bool
+    {
+        $actions = self::TYPE_ACTIONS[$type] ?? [];
+
+        return PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', $actions);
+    }
+
+    public function canEvaluateType(Usuario $usuario, string $type): bool
+    {
+        $action = match ($type) {
+            'desempeno' => 'evaluar_desempeno',
+            'supervisores' => 'evaluar_supervisores',
+            'residentes' => 'evaluar_residentes',
+            default => '',
+        };
+
+        return $action !== '' && PermissionMatrix::userCanDirect($usuario, 'evaluaciones', $action);
     }
 
     public function canAccessDestino(Usuario $usuario, ?string $destinoTipo, ?string $destinoId): bool
@@ -39,7 +67,7 @@ class EvaluacionesPolicy
             ->exists();
     }
 
-    private function isPrivileged(Usuario $usuario): bool
+    public function isPrivileged(Usuario $usuario): bool
     {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 

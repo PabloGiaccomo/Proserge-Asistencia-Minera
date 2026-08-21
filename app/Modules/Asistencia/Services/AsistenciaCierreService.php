@@ -7,13 +7,14 @@ use App\Models\AsistenciaEncabezado;
 use App\Models\Falta;
 use App\Models\GrupoTrabajo;
 use App\Models\GrupoTrabajoDetalle;
+use App\Models\Usuario;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class AsistenciaCierreService
 {
-    public function cerrar(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado, array $payload): array
+    public function cerrar(Usuario $usuario, GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado, array $payload): array
     {
         if ($encabezado->estado === 'CERRADO') {
             return [
@@ -23,7 +24,16 @@ class AsistenciaCierreService
             ];
         }
 
-        DB::transaction(function () use ($grupo, $encabezado, $payload): void {
+        $registradorId = $usuario->personal_id ?: $encabezado->supervisor_id ?: $grupo->supervisor_id;
+        if (blank($registradorId)) {
+            return [
+                'ok' => false,
+                'code' => 'ASISTENCIA_REGISTRAR_REQUIRED',
+                'message' => 'Vincula la cuenta con un trabajador antes de cerrar la asistencia.',
+            ];
+        }
+
+        DB::transaction(function () use ($grupo, $encabezado, $payload, $registradorId): void {
             $this->ensureDetalleCompleto($grupo, $encabezado);
 
             $encabezado->fill([
@@ -66,7 +76,7 @@ class AsistenciaCierreService
                     'descripcion' => 'Generada automaticamente al cierre de asistencia',
                     'observaciones' => 'grupo_trabajo_id='.$grupo->id,
                     'estado' => 'ACTIVA',
-                    'registrada_por_id' => $grupo->supervisor_id,
+                    'registrada_por_id' => $registradorId,
                     'asistencia_encabezado_id' => $encabezado->id,
                     'asistencia_detalle_id' => $item->id,
                     'destino_tipo' => $encabezado->destino_tipo,

@@ -67,10 +67,14 @@ class EvaluacionSupervisorService
 
     public function create(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'crear')
+        if (!$this->policy->canEvaluateType($usuario, 'supervisores')
             || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
         ) {
             return $this->forbidden();
+        }
+
+        if (!$usuario->personal_id) {
+            return $this->businessError('EVAL_EVALUATOR_NOT_LINKED', 'La cuenta debe estar vinculada a Personal para identificar al evaluador.');
         }
 
         if (!$this->isEvaluadoInContext($payload)) {
@@ -86,7 +90,7 @@ class EvaluacionSupervisorService
 
         $item = EvaluacionSupervisor::query()->create([
             'id' => (string) Str::uuid(),
-            'evaluador_id' => $payload['evaluador_id'],
+            'evaluador_id' => $usuario->personal_id,
             'evaluado_id' => $payload['evaluado_id'],
             'fecha' => $payload['fecha'],
             'mina_id' => $payload['mina_id'] ?? null,

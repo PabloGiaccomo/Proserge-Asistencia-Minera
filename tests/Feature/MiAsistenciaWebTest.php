@@ -92,7 +92,69 @@ class MiAsistenciaWebTest extends TestCase
         $actions = PermissionCatalog::availableModuleActions();
 
         $this->assertContains('ver_todas_asistencias', $actions['mi_asistencia']);
-        $this->assertSame('Ver todas las asistencias', PermissionCatalog::actionLabel('ver_todas_asistencias'));
+        $this->assertSame('Ver y registrar todas las asistencias', PermissionCatalog::actionLabel('ver_todas_asistencias'));
+    }
+
+    public function test_usuario_global_registra_grupo_sin_responsable_con_su_identidad(): void
+    {
+        $roleId = $this->createRole([
+            'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+        ]);
+        $personalId = $this->createPersonal('USUARIO ASISTENCIA GLOBAL');
+        $workerId = $this->createPersonal('TRABAJADOR SIN RESPONSABLE');
+        $userId = $this->createUser($roleId, $personalId);
+        $minaId = $this->createMine();
+        $rqMinaId = $this->createRqMina($minaId, $userId);
+        $this->assignMineScope($userId, $minaId);
+        $groupId = $this->createGroup($rqMinaId, $minaId, $userId, null, 'SERVICIO SIN RESPONSABLE');
+        $detailId = $this->addMember($groupId, $workerId);
+
+        $this->withSession([...$this->sessionFor($userId), '_token' => 'mi-asistencia-csrf'])
+            ->withHeader('X-CSRF-TOKEN', 'mi-asistencia-csrf')
+            ->postJson(route('mi-asistencia.marcar', $groupId), [
+                'grupo_trabajo_detalle_id' => $detailId,
+                'estado' => 'PRESENTE',
+                'hora_marcado' => '07:05',
+            ])
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->assertDatabaseHas('asistencia_encabezado', [
+            'grupo_trabajo_id' => $groupId,
+            'supervisor_id' => $personalId,
+        ]);
+        $this->assertDatabaseHas('grupo_trabajo', [
+            'id' => $groupId,
+            'supervisor_id' => null,
+        ]);
+    }
+
+    public function test_usuario_global_cierra_grupo_sin_responsable_y_registra_falta_con_su_identidad(): void
+    {
+        $roleId = $this->createRole([
+            'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+        ]);
+        $personalId = $this->createPersonal('USUARIO CIERRE GLOBAL');
+        $workerId = $this->createPersonal('TRABAJADOR AUSENTE SIN RESPONSABLE');
+        $userId = $this->createUser($roleId, $personalId);
+        $minaId = $this->createMine();
+        $rqMinaId = $this->createRqMina($minaId, $userId);
+        $this->assignMineScope($userId, $minaId);
+        $groupId = $this->createGroup($rqMinaId, $minaId, $userId, null, 'CIERRE SIN RESPONSABLE');
+        $this->addMember($groupId, $workerId);
+
+        $this->withSession([...$this->sessionFor($userId), '_token' => 'mi-asistencia-csrf'])
+            ->withHeader('X-CSRF-TOKEN', 'mi-asistencia-csrf')
+            ->postJson(route('mi-asistencia.cerrar', $groupId))
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->assertDatabaseHas('faltas', [
+            'trabajador_id' => $workerId,
+            'motivo' => 'INASISTENCIA_ASISTENCIA',
+            'estado' => 'ACTIVA',
+            'registrada_por_id' => $personalId,
+        ]);
     }
 
     private function createRole(array $permissions): string
@@ -175,7 +237,7 @@ class MiAsistenciaWebTest extends TestCase
         string $rqMinaId,
         string $minaId,
         string $userId,
-        string $supervisorId,
+        ?string $supervisorId,
         string $service,
         string $turno = 'DIA',
     ): string {
@@ -199,7 +261,9 @@ class MiAsistenciaWebTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $this->addMember($id, $supervisorId);
+        if ($supervisorId) {
+            $this->addMember($id, $supervisorId);
+        }
 
         return $id;
     }

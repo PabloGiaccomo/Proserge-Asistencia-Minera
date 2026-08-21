@@ -36,6 +36,7 @@ class AsistenciaGrupoResource extends JsonResource
                 'destino_id' => $this->asistencia?->destino_id,
                 'actividad_realizada' => $this->asistencia?->actividad_realizada,
                 'reporte_suceso' => $this->asistencia?->reporte_suceso,
+                'responsable_registro' => $this->asistencia?->supervisor?->nombre_completo,
                 'metricas' => $this->metricasAsistencia(),
             ],
             'integrantes' => $this->detalle->map(function ($item): array {

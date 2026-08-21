@@ -70,6 +70,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/reubicar', [ManPowerController::class, 'reubicarPersonal']);
         Route::post('/man-power/grupos/{id}/integrantes/{detalleId}/responsable', [ManPowerController::class, 'asignarResponsable']);
         Route::post('/man-power/grupos/copiar-dia', [ManPowerController::class, 'copiarGruposDia']);
+        Route::post('/man-power/grupos/copiar-rango', [ManPowerController::class, 'copiarGruposRango']);
+        Route::post('/man-power/grupos/cancelar-dia', [ManPowerController::class, 'cancelarGruposDia']);
         Route::post('/man-power/grupos/{id}/copiar', [ManPowerController::class, 'copiarGrupo']);
         Route::get('/man-power/grupos/{id}', [ManPowerController::class, 'showGrupo']);
 

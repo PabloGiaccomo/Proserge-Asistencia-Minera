@@ -341,13 +341,32 @@
                 <div class="mpw-panel-actions">
                     <span>{{ $cargoGroups->count() }} cargo(s)</span>
                     @if($canDuplicate)
-                        <div class="mpw-clipboard-actions" role="group" aria-label="Copiar y pegar grupos entre dias">
-                            <button type="button" class="mpw-clipboard-button" data-copy-groups title="Copiar grupos de este dia" aria-label="Copiar grupos de este dia" @disabled($allGroups->isEmpty())>
-                                <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        <div class="mpw-range-copy-actions" role="group" aria-label="Copiar grupos a dias futuros">
+                            <button type="button" class="mpw-range-copy-button" data-copy-range="SEMANA" title="Copiar al resto de la semana" @disabled($allGroups->isEmpty())>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+                                <span>Semana</span>
                             </button>
-                            <button type="button" class="mpw-clipboard-button is-paste" data-paste-groups title="Pegar grupos en este dia" aria-label="Pegar grupos en este dia" disabled>
-                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 14h10"/><path d="m17 10 4 4-4 4"/><path d="M16 4h2a2 2 0 0 1 2 2v1.5"/><path d="M4 13V6a2 2 0 0 1 2-2h2"/><path d="M4 13v7a2 2 0 0 0 2 2h8"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                            <button type="button" class="mpw-range-copy-button" data-copy-range="PARADA" title="Copiar al resto de la parada" @disabled($allGroups->isEmpty())>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="17" rx="2"/><path d="m9 16 2 2 4-4"/></svg>
+                                <span>Parada</span>
                             </button>
+                        </div>
+                    @endif
+                    @if($canDuplicate || $canUpdate)
+                        <div class="mpw-clipboard-actions" role="group" aria-label="Acciones de los grupos del dia">
+                            @if($canDuplicate)
+                                <button type="button" class="mpw-clipboard-button" data-copy-groups title="Copiar grupos de este dia" aria-label="Copiar grupos de este dia" @disabled($allGroups->isEmpty())>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                </button>
+                                <button type="button" class="mpw-clipboard-button is-paste" data-paste-groups title="Pegar grupos en este dia" aria-label="Pegar grupos en este dia" disabled>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 14h10"/><path d="m17 10 4 4-4 4"/><path d="M16 4h2a2 2 0 0 1 2 2v1.5"/><path d="M4 13V6a2 2 0 0 1 2-2h2"/><path d="M4 13v7a2 2 0 0 0 2 2h8"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                                </button>
+                            @endif
+                            @if($canUpdate)
+                                <button type="button" class="mpw-clipboard-button is-delete" data-cancel-day title="Eliminar grupos de este dia" aria-label="Eliminar grupos de este dia" @disabled($allGroups->isEmpty())>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>
+                                </button>
+                            @endif
                         </div>
                     @endif
                 </div>
@@ -357,9 +376,9 @@
             @else
                 <div class="mpw-selection-board" data-selection-board>
                     <aside class="mpw-cargo-sidebar" data-remove-zone>
-                        <label class="mpw-cargo-picker">
+                        <div class="mpw-cargo-picker">
                             <span>Cargo</span>
-                            <select data-cargo-selector>
+                            <select data-cargo-selector aria-label="Seleccionar cargo">
                                 @foreach($cargoGroups as $cargoKey => $cargoAssignments)
                                     @php
                                         $cargo = $cargoAssignments->first();
@@ -368,7 +387,7 @@
                                     <option value="{{ $cargoKey }}">{{ $cargoName }} ({{ $cargoAssignments->count() }})</option>
                                 @endforeach
                             </select>
-                        </label>
+                        </div>
 
                         @foreach($cargoGroups as $cargoKey => $cargoAssignments)
                             @php
@@ -576,6 +595,55 @@
     </div>
 </div>
 
+<div class="mpw-modal is-hidden" id="mpwCopyRangeModal" aria-hidden="true">
+    <div class="mpw-modal-panel mpw-copy-day-modal" role="dialog" aria-modal="true" aria-labelledby="mpwCopyRangeTitle">
+        <header>
+            <div><h2 id="mpwCopyRangeTitle" data-copy-range-title>Copiar grupos futuros</h2><p data-copy-range-subtitle>Confirma el periodo que se reemplazara.</p></div>
+            <button type="button" data-close-modal aria-label="Cerrar">×</button>
+        </header>
+        <form method="POST" action="{{ route('man-power.copiar-grupos-rango') }}" data-copy-range-form>
+            @csrf
+            <input type="hidden" name="rq_mina_id" value="{{ $selectedRqMinaId }}">
+            <input type="hidden" name="rq_mina_plan_id" value="{{ $selectedPlanId }}">
+            <input type="hidden" name="rq_mina_actividad_id" value="{{ $selectedActivityId }}">
+            <input type="hidden" name="fecha_origen" value="{{ $fecha }}">
+            <input type="hidden" name="alcance" value="" data-copy-range-scope>
+            <input type="hidden" name="copiar_integrantes" value="1">
+            <input type="hidden" name="sobrescribir_destino" value="1">
+            <div class="mpw-copy-range-content">
+                <div class="mpw-copy-day-source"><span>Grupo base</span><strong>{{ \Illuminate\Support\Carbon::parse($fecha)->format('d/m/Y') }}</strong><small>{{ $selectedActivityLabel }}</small></div>
+                <div class="mpw-copy-range-summary">
+                    <strong data-copy-range-summary>Se copiaran los grupos a los dias futuros.</strong>
+                    <p>Solo se reemplazaran los grupos de este SAIT. Los dias anteriores a hoy y los demas SAIT permaneceran intactos.</p>
+                </div>
+            </div>
+            <footer><button type="button" data-close-modal>Cancelar</button><button type="submit" class="is-primary" data-copy-range-submit>Confirmar copia</button></footer>
+        </form>
+    </div>
+</div>
+
+<div class="mpw-modal is-hidden" id="mpwCancelDayModal" aria-hidden="true">
+    <div class="mpw-modal-panel mpw-copy-day-modal" role="dialog" aria-modal="true" aria-labelledby="mpwCancelDayTitle">
+        <header>
+            <div><h2 id="mpwCancelDayTitle">Eliminar grupos de este dia</h2><p>Confirma antes de retirar esta seleccion de Man Power.</p></div>
+            <button type="button" data-close-modal aria-label="Cerrar">×</button>
+        </header>
+        <form method="POST" action="{{ route('man-power.cancelar-grupos-dia') }}" data-cancel-day-form>
+            @csrf
+            <input type="hidden" name="rq_mina_id" value="{{ $selectedRqMinaId }}">
+            <input type="hidden" name="rq_mina_plan_id" value="{{ $selectedPlanId }}">
+            <input type="hidden" name="rq_mina_actividad_id" value="{{ $selectedActivityId }}">
+            <input type="hidden" name="fecha" value="{{ $fecha }}">
+            <div class="mpw-cancel-day-content">
+                <strong>{{ $selectedActivityLabel }}</strong>
+                <span>{{ \Illuminate\Support\Carbon::parse($fecha)->format('d/m/Y') }}</span>
+                <p>Se retiraran los integrantes y se cancelaran los grupos Dia y Noche de este SAIT. La parada, el plan, los otros SAIT y el historial no se eliminaran.</p>
+            </div>
+            <footer><button type="button" data-close-modal>Cancelar</button><button type="submit" class="is-danger" data-cancel-day-submit>Eliminar grupos</button></footer>
+        </form>
+    </div>
+</div>
+
 <div class="mpw-modal is-hidden" id="mpwGroupModal" aria-hidden="true">
     <div class="mpw-modal-panel" role="dialog" aria-modal="true" aria-labelledby="mpwModalTitle">
         <header><div><h2 id="mpwModalTitle">Preparar grupo diario</h2><p>Define los datos operativos del turno.</p></div><button type="button" data-close-modal aria-label="Cerrar">×</button></header>
@@ -612,6 +680,8 @@
     const csrf = @json(csrf_token());
     const modal = document.getElementById('mpwGroupModal');
     const copyDayModal = document.getElementById('mpwCopyDayModal');
+    const copyRangeModal = document.getElementById('mpwCopyRangeModal');
+    const cancelDayModal = document.getElementById('mpwCancelDayModal');
     const createForm = document.getElementById('mpwCreateForm');
     const toastStack = document.getElementById('mpwToastStack');
     const cargoSelector = root.querySelector('[data-cargo-selector]');
@@ -866,11 +936,51 @@
         copyDayModal.setAttribute('aria-hidden', 'false');
         copyDayModal.querySelector('button[type="submit"]')?.focus();
     });
+    root.querySelectorAll('[data-copy-range]').forEach(button => button.addEventListener('click', event => {
+        if (event.currentTarget.disabled || currentGroupCount < 1 || !copyRangeModal) return;
+        const scope = event.currentTarget.dataset.copyRange;
+        const isWeek = scope === 'SEMANA';
+        copyRangeModal.querySelector('[data-copy-range-scope]').value = scope;
+        copyRangeModal.querySelector('[data-copy-range-title]').textContent = isWeek
+            ? 'Copiar al resto de la semana'
+            : 'Copiar al resto de la parada';
+        copyRangeModal.querySelector('[data-copy-range-subtitle]').textContent = isWeek
+            ? 'Se usaran los grupos de este dia hasta el domingo.'
+            : 'Se usaran los grupos de este dia hasta el final de la parada.';
+        copyRangeModal.querySelector('[data-copy-range-summary]').textContent = isWeek
+            ? 'Los grupos se copiaran desde el siguiente dia hasta el domingo.'
+            : 'Los grupos se copiaran desde el siguiente dia hasta el fin de la parada.';
+        copyRangeModal.classList.remove('is-hidden');
+        copyRangeModal.setAttribute('aria-hidden', 'false');
+        copyRangeModal.querySelector('[data-copy-range-submit]')?.focus();
+    }));
+    root.querySelector('[data-cancel-day]')?.addEventListener('click', event => {
+        if (event.currentTarget.disabled || currentGroupCount < 1 || !cancelDayModal) return;
+        cancelDayModal.classList.remove('is-hidden');
+        cancelDayModal.setAttribute('aria-hidden', 'false');
+        cancelDayModal.querySelector('[data-cancel-day-submit]')?.focus();
+    });
     document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => hideModal(button.closest('.mpw-modal'))));
-    [modal, copyDayModal].forEach(target => target?.addEventListener('click', event => { if (event.target === target) hideModal(target); }));
+    [modal, copyDayModal, copyRangeModal, cancelDayModal].forEach(target => target?.addEventListener('click', event => { if (event.target === target) hideModal(target); }));
     document.querySelectorAll('[data-toast-message]').forEach(message => { toast(message.textContent.trim(), message.classList.contains('is-error') ? 'error' : 'success'); message.remove(); });
     createForm?.addEventListener('submit', rememberWorkspaceState);
     document.querySelector('[data-copy-day-form]')?.addEventListener('submit', rememberWorkspaceState);
+    document.querySelector('[data-copy-range-form]')?.addEventListener('submit', event => {
+        rememberWorkspaceState();
+        const submit = event.currentTarget.querySelector('[data-copy-range-submit]');
+        if (submit) {
+            submit.disabled = true;
+            submit.textContent = 'Copiando...';
+        }
+    });
+    document.querySelector('[data-cancel-day-form]')?.addEventListener('submit', event => {
+        rememberWorkspaceState();
+        const submit = event.currentTarget.querySelector('[data-cancel-day-submit]');
+        if (submit) {
+            submit.disabled = true;
+            submit.textContent = 'Eliminando...';
+        }
+    });
     restoreWorkspaceState();
     updateClipboardButtons();
 })();

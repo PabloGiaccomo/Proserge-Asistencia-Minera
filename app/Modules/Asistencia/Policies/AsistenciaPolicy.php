@@ -61,6 +61,10 @@ class AsistenciaPolicy
             return true;
         }
 
+        if ($this->canViewAllAttendances($usuario)) {
+            return $this->manageGrupo($usuario, $grupo);
+        }
+
         return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar')
             && $this->manageGrupo($usuario, $grupo);
     }
@@ -70,6 +74,10 @@ class AsistenciaPolicy
         if ($this->isResponsibleFor($usuario, $grupo)
             && PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver')) {
             return true;
+        }
+
+        if ($this->canViewAllAttendances($usuario)) {
+            return $this->manageGrupo($usuario, $grupo);
         }
 
         return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'cerrar')

@@ -36,9 +36,21 @@
         <section class="mia-notice is-error">{{ $errors->first() }}</section>
     @endif
 
+    @if(!$grupo['supervisor']['id'] && !$grupo['asistencia']['id'] && $canRegister)
+        <section class="mia-notice is-warning">
+            <strong>Este grupo no tiene responsable asignado.</strong>
+            <span>Como tu rol permite gestionar todas las asistencias, el registro quedara a nombre de tu cuenta.</span>
+        </section>
+    @elseif(!$attendanceReady)
+        <section class="mia-notice is-warning">
+            <strong>No se puede identificar quien registra la asistencia.</strong>
+            <span>Vincula esta cuenta con un trabajador o asigna un responsable al grupo en Man Power.</span>
+        </section>
+    @endif
+
     <section class="mia-detail-summary">
         <div><span>Unidad minera</span><strong>{{ $grupo['mina_nombre'] ?: 'Sin definir' }}</strong></div>
-        <div><span>Responsable</span><strong>{{ $grupo['supervisor']['nombre_completo'] ?: 'Sin responsable' }}</strong></div>
+        <div><span>Responsable</span><strong>{{ $grupo['supervisor']['nombre_completo'] ?: ($grupo['asistencia']['responsable_registro'] ?: ($canRegister ? ($user->personal?->nombre_completo ?: $user->email) : 'Sin responsable')) }}</strong></div>
         <div><span>Horario</span><strong>{{ substr((string) ($grupo['asistencia']['hora_ingreso'] ?? $grupo['horario_salida'] ?? ''), 0, 5) ?: '--:--' }}</strong></div>
         <div><span>Estado</span><strong>{{ $isClosed ? 'Cerrada' : 'Abierta' }}</strong></div>
     </section>
@@ -56,7 +68,7 @@
             @endif
         </div>
 
-        @if(!$canRegister && !$isClosed)
+        @if(!$canRegister && !$isClosed && $attendanceReady)
             <div class="mia-notice is-warning mia-inline-notice">
                 Puedes revisar este grupo, pero tu rol no permite registrar su asistencia.
             </div>
