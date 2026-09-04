@@ -1,5 +1,16 @@
 import './bootstrap';
 
+window.loadProsergeBarcodeScanner = async function () {
+    if (window.ProsergeBarcodeScanner) {
+        return window.ProsergeBarcodeScanner;
+    }
+
+    const { BarcodeFormat, BrowserMultiFormatReader } = await import('@zxing/browser');
+    window.ProsergeBarcodeScanner = { BarcodeFormat, BrowserMultiFormatReader };
+
+    return window.ProsergeBarcodeScanner;
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     const menuToggle = document.getElementById('menuToggle');
     const mobileMenuToggle = document.getElementById('menuToggleBtn');

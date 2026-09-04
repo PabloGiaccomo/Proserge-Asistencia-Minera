@@ -120,7 +120,7 @@
     </div>
 
     @if($canPrepareContracts || $canRenewContract || $canReentryContract)
-        <div class="contract-flow-card">
+        <div class="contract-flow-card" id="movimiento-contractual" tabindex="-1">
             @if($hasPreparation)
                 <div class="contract-flow-head">
                     <div>

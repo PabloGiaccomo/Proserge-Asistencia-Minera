@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PersonalBloqueo extends Model
@@ -31,6 +32,15 @@ class PersonalBloqueo extends Model
         'fecha_fin' => 'date',
         'visible_para_planner' => 'boolean',
     ];
+
+    public function scopeVisiblesEnRango(Builder $query, string $from, string $to): Builder
+    {
+        return $query->where('estado', 'ACTIVO')
+            ->where('visible_para_planner', true)
+            ->whereDate('fecha_inicio', '<=', $to)
+            ->whereDate('fecha_fin', '>=', $from)
+            ->whereHas('personal');
+    }
 
     public function personal(): BelongsTo
     {

@@ -8,10 +8,15 @@
 - `evaluaciones.evaluar_supervisores`: registra evaluaciones de supervisores.
 - `evaluaciones.ver_residentes`: consulta evaluaciones mensuales de residentes.
 - `evaluaciones.evaluar_residentes`: registra evaluaciones mensuales de residentes.
+- `evaluaciones.ver_todas_evaluaciones`: permite consultar evaluaciones registradas por otros usuarios.
 
 Una accion para evaluar incluye la visualizacion del tipo correspondiente. Si el
 usuario solo tiene acceso a evaluacion diaria, la pantalla entra directamente a
 ese flujo y no muestra navegacion hacia los otros tipos.
+
+Sin `ver_todas_evaluaciones`, cada historial muestra solamente las evaluaciones
+registradas por el usuario autenticado. El permiso no habilita tipos de
+evaluacion por si mismo y conserva el alcance por mina donde corresponda.
 
 ## Evaluacion diaria
 
@@ -19,6 +24,8 @@ ese flujo y no muestra navegacion hacia los otros tipos.
 - El evaluador debe tener una cuenta vinculada a `personal`.
 - Solo el responsable de la asistencia o el usuario que registro sus marcas
   puede evaluarla.
+- Un usuario administrador con permiso para realizar la evaluacion diaria puede
+  intervenir sobre una asistencia cerrada registrada por otro responsable.
 - Solo se evalua personal con estado `PRESENTE` o `TARDANZA`.
 - No se permite autoevaluacion.
 - Existe una sola evaluacion por detalle de asistencia.

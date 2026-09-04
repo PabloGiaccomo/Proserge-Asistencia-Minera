@@ -512,21 +512,40 @@ class GrupoTrabajoService
             $detalle->save();
             $this->transportePlanningService->retireActivePassengerForDetail($usuario, $detalle->id, 'INTEGRANTE_RETIRADO_DE_MAN_POWER');
 
-            GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
-                'id' => (string) Str::uuid(),
-                'grupo_trabajo_id' => $destino->id,
-                'personal_id' => $detalle->personal_id,
-                'rq_proserge_detalle_id' => $detalle->rq_proserge_detalle_id,
-                'puesto_asignado_snapshot' => $detalle->puesto_asignado_snapshot,
-                'posicion_asignacion_snapshot' => $detalle->posicion_asignacion_snapshot,
-                'tipo_asignacion_snapshot' => $detalle->tipo_asignacion_snapshot,
-                'estado_habilitacion_snapshot' => $detalle->estado_habilitacion_snapshot,
-                'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO,
-                'asignado_por_id' => $usuario->id,
-                'asignado_at' => now(),
-                'estado_asistencia' => 'AUSENTE',
-                'observaciones' => null,
-            ]));
+            $existingInDestino = GrupoTrabajoDetalle::query()
+                ->where('grupo_trabajo_id', $destino->id)
+                ->where('personal_id', $detalle->personal_id)
+                ->first();
+
+            if ($existingInDestino) {
+                $existingInDestino->fill($this->filterColumns('grupo_trabajo_detalle', [
+                    'rq_proserge_detalle_id' => $detalle->rq_proserge_detalle_id,
+                    'puesto_asignado_snapshot' => $detalle->puesto_asignado_snapshot,
+                    'posicion_asignacion_snapshot' => $detalle->posicion_asignacion_snapshot,
+                    'tipo_asignacion_snapshot' => $detalle->tipo_asignacion_snapshot,
+                    'estado_habilitacion_snapshot' => $detalle->estado_habilitacion_snapshot,
+                    'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO,
+                    'estado_asistencia' => 'AUSENTE',
+                    'observaciones' => null,
+                ]));
+                $existingInDestino->save();
+            } else {
+                GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
+                    'id' => (string) Str::uuid(),
+                    'grupo_trabajo_id' => $destino->id,
+                    'personal_id' => $detalle->personal_id,
+                    'rq_proserge_detalle_id' => $detalle->rq_proserge_detalle_id,
+                    'puesto_asignado_snapshot' => $detalle->puesto_asignado_snapshot,
+                    'posicion_asignacion_snapshot' => $detalle->posicion_asignacion_snapshot,
+                    'tipo_asignacion_snapshot' => $detalle->tipo_asignacion_snapshot,
+                    'estado_habilitacion_snapshot' => $detalle->estado_habilitacion_snapshot,
+                    'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO,
+                    'asignado_por_id' => $usuario->id,
+                    'asignado_at' => now(),
+                    'estado_asistencia' => 'AUSENTE',
+                    'observaciones' => null,
+                ]));
+            }
             });
         } catch (\RuntimeException $exception) {
             if ($exception->getMessage() === 'MANPOWER_PERSON_GROUP_CONFLICT') {

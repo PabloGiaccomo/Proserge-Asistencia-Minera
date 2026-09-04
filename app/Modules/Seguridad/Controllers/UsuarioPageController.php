@@ -14,6 +14,7 @@ use App\Models\UsuarioMinaScope;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\AdminProtectionService;
 use App\Modules\Seguridad\Services\RoleManagementService;
+use App\Modules\Seguridad\Support\UsuarioEmailSuggestion;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -110,7 +111,7 @@ class UsuarioPageController extends Controller
         $trabajadorSeleccionado = null;
         if ($trabajadorId !== '') {
             $trabajadorSeleccionado = Personal::query()
-                ->with(['usuario.rol:id,nombre', 'usuario.rolesAdicionales:id,nombre'])
+                ->with(['usuario.rol:id,nombre', 'usuario.rolesAdicionales:id,nombre', 'fichaColaborador'])
                 ->find($trabajadorId, ['id', 'dni', 'nombre_completo', 'puesto', 'correo', 'estado']);
         }
 
@@ -119,6 +120,7 @@ class UsuarioPageController extends Controller
             'roleBuckets' => $roleBuckets,
             'trabajadores' => $trabajadores,
             'trabajadorSeleccionado' => $trabajadorSeleccionado,
+            'emailSugerido' => UsuarioEmailSuggestion::fromFicha($trabajadorSeleccionado?->fichaColaborador?->datos_json ?? []),
             'search' => $search,
             'hasEstadoColumn' => $this->hasEstadoColumn(),
         ]);

@@ -897,7 +897,7 @@
                                 <span>Ultima entrega</span>
                                 <strong data-epp-last-status>Sin historial</strong>
                             </div>
-                            <p data-epp-last-message>Selecciona trabajador y EPP para ver el ultimo movimiento registrado.</p>
+                            <p data-epp-last-message>Selecciona un trabajador para consultar su ultima entrega.</p>
                             <div class="epp-mini-kardex-content" data-epp-last-content hidden>
                                 <dl>
                                     <div>
@@ -936,7 +936,12 @@
                             <span>Observacion</span>
                             <textarea name="observacion" rows="3" placeholder="Detalle opcional de entrega, talla, condicion o cambio">{{ old('observacion') }}</textarea>
                         </label>
-                        <button type="submit" class="epp-btn epp-btn-primary epp-form-submit">Registrar entrega</button>
+                        <div class="epp-delivery-submit-actions epp-delivery-field-wide">
+                            <button type="submit" class="epp-btn epp-btn-primary">Registrar entrega</button>
+                            @unless(old('_epp_replaces_entrega_id'))
+                                <button type="submit" name="_epp_add_another" value="1" class="epp-btn epp-btn-secondary">Registrar y agregar otra</button>
+                            @endunless
+                        </div>
                     </form>
                 </div>
             </div>
@@ -1181,7 +1186,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const resetKardex = (message = 'Selecciona trabajador y EPP para ver el ultimo movimiento registrado.') => {
+    const resetKardex = (message = 'Selecciona un trabajador para consultar su ultima entrega.') => {
         if (!kardex) {
             return;
         }
@@ -1230,7 +1235,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderKardex = (data) => {
         if (!data) {
-            resetKardex('No hay entregas previas para este trabajador y EPP.');
+            resetKardex(eppSelect?.value
+                ? 'No hay entregas previas de este EPP para el trabajador.'
+                : 'El trabajador no tiene entregas registradas.');
             return;
         }
 
@@ -1272,7 +1279,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    let lastDeliveryRequest = 0;
+    let lastDeliveryAbort = null;
+    const invalidateLastDelivery = () => {
+        lastDeliveryRequest += 1;
+        lastDeliveryAbort?.abort();
+        lastDeliveryAbort = null;
+    };
+
     const refreshLastDelivery = async () => {
+        invalidateLastDelivery();
+        const requestId = lastDeliveryRequest;
         if (!kardex) {
             return;
         }
@@ -1280,12 +1297,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const personalId = hidden.value.trim();
         const eppId = eppSelect?.value || '';
 
-        if (!lastDeliveryUrl || !personalId || !eppId) {
+        if (!lastDeliveryUrl || !personalId) {
             resetKardex();
             return;
         }
 
         setKardexLoading();
+        lastDeliveryAbort = new AbortController();
 
         try {
             const url = new URL(lastDeliveryUrl, window.location.origin);
@@ -1293,6 +1311,8 @@ document.addEventListener('DOMContentLoaded', () => {
             url.searchParams.set('epp_id', eppId);
 
             const response = await fetch(url.toString(), {
+                cache: 'no-store',
+                signal: lastDeliveryAbort.signal,
                 headers: { 'Accept': 'application/json' }
             });
 
@@ -1301,11 +1321,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const payload = await response.json();
+            if (requestId !== lastDeliveryRequest || hidden.value.trim() !== personalId || eppSelect?.value !== eppId) {
+                return;
+            }
             renderKardex(payload.data || null);
         } catch (error) {
+            if (error.name === 'AbortError' || requestId !== lastDeliveryRequest) return;
             resetKardex('No se pudo cargar la ultima entrega. Puedes registrar la nueva entrega normalmente.');
+            if (kardexStatus) kardexStatus.textContent = 'Error de consulta';
         }
     };
+
+    modalRoot.querySelectorAll('[data-epp-open-modal="eppDeliveryModal"]').forEach((button) => {
+        button.addEventListener('click', refreshLastDelivery);
+    });
 
     const closeResults = () => {
         results.hidden = true;
@@ -1313,6 +1342,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     input.addEventListener('input', () => {
+        invalidateLastDelivery();
         hidden.value = '';
         resetKardex();
         clearTimeout(timer);
@@ -1371,7 +1401,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderDeliveryAttributes();
 
-    if (hidden.value && eppSelect?.value) {
+    if (hidden.value) {
         refreshLastDelivery();
     }
 });

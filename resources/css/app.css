@@ -13,6 +13,7 @@
 @import "./modules/evaluaciones.css";
 @import "./modules/personal-fichas.css";
 @import "./modules/personal-import.css";
+@import "./modules/personal-regularization.css";
 
 @theme {
     /* Color primario - Turquesa */

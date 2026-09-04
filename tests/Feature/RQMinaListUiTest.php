@@ -38,6 +38,9 @@ class RQMinaListUiTest extends TestCase
         $response->assertSee('Bus 40');
         $response->assertSee('Mas');
         $response->assertSee('Buscar: BOROO');
+        $response->assertSee('class="js-rq-send-form"', false);
+        $response->assertSee('Enviar RQ a RR.HH.');
+        $response->assertDontSee("confirm('¿Enviar este RQ?')", false);
     }
 
     public function test_listado_rq_mina_muestra_advertencias_y_respeta_acciones_por_permiso(): void

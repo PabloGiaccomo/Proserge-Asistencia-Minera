@@ -182,6 +182,19 @@ class EppCatalogTest extends TestCase
         $this->assertSame('11/01/2027', $summary['fecha_vencimiento_calendario']);
         $this->assertSame(EppEntrega::ESTADO_ENTREGADO, $summary['estado']);
         $this->assertSame('Entrega vigente', $summary['observacion']);
+
+        $withoutEpp = app(EppService::class)->lastDeliverySummary($personal->id);
+        $this->assertSame($summary['id'], $withoutEpp['id']);
+
+        EppEntrega::query()->findOrFail($summary['id'])->update([
+            'estado' => EppEntrega::ESTADO_DEVUELTO,
+            'devuelto_at' => '2026-07-16',
+        ]);
+        $returned = app(EppService::class)->lastDeliverySummary($personal->id);
+        $this->assertSame($summary['id'], $returned['id']);
+        $this->assertSame(EppEntrega::ESTADO_DEVUELTO, $returned['estado']);
+        $this->assertSame('16/07/2026', $returned['fecha_cierre']);
+        $this->assertNull(app(EppService::class)->lastDeliverySummary($personal->id, (string) Str::uuid()));
     }
 
     public function test_entrega_se_corrige_con_epp_vencimiento_cantidad_y_notas(): void

@@ -1618,6 +1618,133 @@
     margin-top: 12px;
 }
 
+body.rq-confirm-open {
+    overflow: hidden;
+}
+
+.rq-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.48);
+    padding: 20px;
+}
+
+.rq-confirm-overlay[hidden] {
+    display: none;
+}
+
+.rq-confirm-dialog {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px 16px;
+    width: min(100%, 480px);
+    border: 1px solid #dbe6f2;
+    border-radius: 8px;
+    background: #fff;
+    padding: 22px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.rq-confirm-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border-radius: 8px;
+    background: #e6fffb;
+    color: #0f9f91;
+}
+
+.rq-confirm-copy {
+    min-width: 0;
+}
+
+.rq-confirm-eyebrow {
+    color: #0f766e;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.rq-confirm-copy h2 {
+    margin: 4px 0 6px;
+    color: #0f172a;
+    font-size: 20px;
+    line-height: 1.25;
+}
+
+.rq-confirm-copy p {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.rq-confirm-summary {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0;
+    margin: 2px 0 0;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.rq-confirm-summary div {
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 12px;
+    padding: 10px 12px;
+}
+
+.rq-confirm-summary div + div {
+    border-top: 1px solid #e2e8f0;
+}
+
+.rq-confirm-summary dt,
+.rq-confirm-summary dd {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.rq-confirm-summary dt {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.rq-confirm-summary dd {
+    color: #0f172a;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.rq-confirm-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 2px;
+}
+
+.rq-confirm-actions .btn-row {
+    min-width: 112px;
+    justify-content: center;
+}
+
+.rq-confirm-actions .btn-send {
+    gap: 7px;
+}
+
+.rq-confirm-actions .btn-send:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
 @media (max-width: 1180px) {
     .rq-mina-page .rq-metrics {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1685,5 +1812,20 @@
 
     .rq-mina-page .rq-date-range {
         display: grid;
+    }
+
+    .rq-confirm-dialog {
+        grid-template-columns: 1fr;
+        padding: 18px;
+    }
+
+    .rq-confirm-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .rq-confirm-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
     }
 }

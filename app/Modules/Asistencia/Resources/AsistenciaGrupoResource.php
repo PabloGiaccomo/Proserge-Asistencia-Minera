@@ -4,6 +4,7 @@ namespace App\Modules\Asistencia\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Modules\Asistencia\Services\AsistenciaHorarioService;
 
 class AsistenciaGrupoResource extends JsonResource
 {
@@ -14,6 +15,7 @@ class AsistenciaGrupoResource extends JsonResource
             'fecha' => optional($this->fecha)->toDateString(),
             'turno' => $this->turno,
             'horario_salida' => $this->horario_salida,
+            'horario_marcacion' => app(AsistenciaHorarioService::class)->resumen($this->resource),
             'servicio' => $this->servicio,
             'area' => $this->area,
             'estado_grupo' => $this->estado,
@@ -43,6 +45,7 @@ class AsistenciaGrupoResource extends JsonResource
                 $marca = $this->asistencia?->detalle?->firstWhere('grupo_trabajo_detalle_id', $item->id)
                     ?: $this->asistencia?->detalle?->firstWhere('trabajador_id', $item->personal_id);
                 $actividadPrincipal = $item->actividadesPrincipales?->firstWhere('es_principal', true);
+                $pendiente = $marca?->pendienteDeMarcacion() && $this->asistencia?->estado !== 'CERRADO';
 
                 return [
                     'grupo_trabajo_detalle_id' => $item->id,
@@ -55,8 +58,8 @@ class AsistenciaGrupoResource extends JsonResource
                     'posicion_asignacion' => $marca?->posicion_asignacion_snapshot ?? $item->posicion_asignacion_snapshot ?? 'SIN CLASIFICAR',
                     'tipo_asignacion' => $marca?->tipo_asignacion_snapshot ?? $item->tipo_asignacion_snapshot ?? 'SIN CLASIFICAR',
                     'estado_distribucion' => $marca?->estado_distribucion_snapshot ?? $item->estado_distribucion,
-                    'estado_asistencia' => $marca?->estado ?? 'PENDIENTE',
-                    'hora_marcado' => $marca?->hora_marcado,
+                    'estado_asistencia' => $pendiente ? 'PENDIENTE' : ($marca?->estado ?? 'PENDIENTE'),
+                    'hora_marcado' => $pendiente ? null : $marca?->hora_marcado,
                     'marcado_at' => optional($marca?->marcado_at)->toDateTimeString(),
                     'marcado_por' => $marca?->marcador?->personal?->nombre_completo ?? $marca?->marcador?->email,
                     'observaciones' => $marca?->observaciones,
@@ -76,7 +79,8 @@ class AsistenciaGrupoResource extends JsonResource
 
     private function metricasAsistencia(): array
     {
-        $detalles = $this->asistencia?->detalle ?? collect();
+        $detalles = ($this->asistencia?->detalle ?? collect())
+            ->reject(fn ($marca): bool => $this->asistencia?->estado !== 'CERRADO' && $marca->pendienteDeMarcacion());
         $programado = $this->detalle->filter(fn ($item): bool => $item->isDistribucionActiva())->count();
         $presentes = $detalles->whereIn('estado', ['PRESENTE', 'TARDANZA'])->count();
 

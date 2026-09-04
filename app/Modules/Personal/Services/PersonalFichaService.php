@@ -32,6 +32,8 @@ class PersonalFichaService
     public const TEMPORAL_ESTADO_LINK_ENVIADO_PENDIENTE = 'LINK_ENVIADO_PENDIENTE';
     public const TEMPORAL_ESTADO_LINK_ENVIADO_VENCIDO = 'LINK_ENVIADO_VENCIDO';
 
+    private ?bool $documentStatesTableAvailable = null;
+
     public function __construct(
         private readonly PersonalService $personalService,
         private readonly PersonalContratoDatoService $contratoDatoService,
@@ -485,13 +487,13 @@ class PersonalFichaService
         }
 
         $relations = ['archivos', 'familiares'];
-        if (Schema::hasTable('personal_documento_estados')) {
+        if ($this->hasDocumentStatesTable()) {
             $relations[] = 'documentoEstados';
         }
         $ficha->loadMissing($relations);
 
         $archivos = $ficha->archivos->keyBy('tipo');
-        $estados = Schema::hasTable('personal_documento_estados')
+        $estados = $this->hasDocumentStatesTable()
             ? $ficha->documentoEstados->keyBy('tipo')
             : collect();
 
@@ -583,7 +585,7 @@ class PersonalFichaService
 
     public function updateDocumentState(PersonalFicha $ficha, string $tipo, array $payload, Usuario $user): PersonalDocumentoEstado
     {
-        if (!Schema::hasTable('personal_documento_estados')) {
+        if (!$this->hasDocumentStatesTable()) {
             throw ValidationException::withMessages([
                 'documento' => 'La tabla de estados documentales todavia no esta disponible. Ejecuta las migraciones.',
             ]);
@@ -2461,7 +2463,7 @@ class PersonalFichaService
 
     private function markDocumentUploaded(PersonalFicha $ficha, string $tipo, ?Usuario $user): void
     {
-        if (!Schema::hasTable('personal_documento_estados') || !array_key_exists($tipo, PersonalFichaCatalog::documentRequirements())) {
+        if (!$this->hasDocumentStatesTable() || !array_key_exists($tipo, PersonalFichaCatalog::documentRequirements())) {
             return;
         }
 
@@ -2480,6 +2482,11 @@ class PersonalFichaService
             'updated_by_usuario_id' => $user?->id,
             'estado_updated_at' => now(),
         ])->save();
+    }
+
+    private function hasDocumentStatesTable(): bool
+    {
+        return $this->documentStatesTableAvailable ??= Schema::hasTable('personal_documento_estados');
     }
 
     private function replaceFichaArchivo(

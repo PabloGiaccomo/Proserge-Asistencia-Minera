@@ -9,6 +9,7 @@ use App\Http\Middleware\EnsureWebPermission;
 use App\Http\Middleware\WebAuthenticate;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -29,6 +30,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if (!$request->is('mi-asistencia', 'mi-asistencia/*')) {
+                return null;
+            }
+
+            $message = 'No se pudo completar la operacion de asistencia. Intenta nuevamente. Si el problema persiste, comunicalo a administracion.';
+
+            return $request->expectsJson()
+                ? response()->json(['ok' => false, 'error' => 'ASISTENCIA_DATABASE_ERROR', 'message' => $message], 500)
+                : back()->withErrors(['asistencia' => $message]);
+        });
+
         $sessionExpiredResponse = static function (Request $request) {
             $message = 'Tu sesion caduco por inactividad. Recarga la pagina e inicia sesion nuevamente.';
 

@@ -10,6 +10,7 @@ use App\Models\PersonalMina;
 use App\Models\PersonalMinaExamen;
 use App\Models\PersonalMinaExamenIntento;
 use App\Models\Usuario;
+use App\Modules\Personal\Services\PersonalMinaExcelImportService;
 use App\Modules\Personal\Services\PersonalMinaHabilitacionService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -1053,6 +1054,154 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
     }
 
+    public function test_excel_master_sin_datos_sincroniza_catalogo_nombres_y_convalidacion_compartida(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $suffix = Str::upper(Str::random(6));
+        $oldName = 'CURSO-' . $suffix;
+        $newName = 'CURSO ' . $suffix;
+        $blankExamName = 'INDUCCION ' . $suffix;
+        $mineOneName = 'OPERACION ' . $suffix . ' A';
+        $mineTwoName = 'OPERACION ' . $suffix . ' B';
+        $existingExam = $this->createExam($oldName);
+        $file = $this->buildCatalogOnlyMasterExcel($mineOneName, $mineTwoName, $newName, $blankExamName);
+        $service = app(PersonalMinaExcelImportService::class);
+
+        $preview = $service->preview($file);
+
+        $this->assertSame(1, $preview['summary']['nombres_examen_por_actualizar']);
+        $this->assertSame(1, $preview['summary']['examenes_nuevos']);
+        $this->assertSame(1, $preview['summary']['examenes_compartidos_convalidables']);
+        $this->assertContains($blankExamName, $preview['examenes_no_encontrados']);
+        $this->assertNotEmpty($preview['examenes_faltantes_por_mina']);
+
+        $result = $service->confirm($preview, $actor);
+
+        $this->assertSame(1, $result['examenes_renombrados']);
+        $this->assertSame(1, $result['examenes_convalidables_activados']);
+        $this->assertSame($newName, $existingExam->fresh()->nombre);
+        $this->assertTrue((bool) $existingExam->fresh()->permite_convalidacion);
+        $this->assertDatabaseHas('examenes_mineros', ['nombre' => $blankExamName, 'activo' => true]);
+
+        foreach ([$mineOneName, $mineTwoName] as $mineName) {
+            $mine = Mina::query()->where('nombre', $mineName)->firstOrFail();
+            $this->assertDatabaseHas('mina_requisitos', [
+                'mina_id' => $mine->id,
+                'examen_id' => $existingExam->id,
+                'nombre' => $newName,
+                'permite_convalidacion_mina' => true,
+                'convalidar_desde_otras_minas' => true,
+                'activo' => true,
+            ]);
+        }
+
+        $this->assertSame(0, PersonalMina::query()
+            ->whereIn('mina_id', Mina::query()->whereIn('nombre', [$mineOneName, $mineTwoName])->pluck('id'))
+            ->count());
+    }
+
+    public function test_excel_master_ignora_hojas_ocultas_y_no_crea_minas_auxiliares(): void
+    {
+        $service = app(PersonalMinaExcelImportService::class);
+        $file = $this->buildMasterWithHiddenAuxiliarySheet();
+
+        $preview = $service->preview($file);
+
+        $this->assertContains('MINA VISIBLE', $preview['sheets']['detectadas']);
+        $this->assertNotContains('Hoja1', $preview['sheets']['detectadas']);
+        $this->assertTrue(collect($preview['sheets']['omitidas'])->contains(
+            fn ($sheet) => $sheet['hoja'] === 'Hoja1' && str_contains($sheet['motivo'], 'oculta')
+        ));
+
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service->confirm($preview, $actor);
+
+        $this->assertDatabaseHas('minas', ['nombre' => 'MINA VISIBLE']);
+        $this->assertDatabaseMissing('minas', ['nombre' => 'Hoja1']);
+    }
+
+    public function test_excel_master_reemplaza_catalogo_vigente_por_mina_sin_borrar_historial(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $service = app(PersonalMinaHabilitacionService::class);
+        $importer = app(PersonalMinaExcelImportService::class);
+        $mine = $this->createMine('Mina catalogo');
+        $oldExam = $this->createExam('EXAMEN ANTIGUO ' . Str::upper(Str::random(5)));
+        $newExamName = 'EXAMEN VIGENTE ' . Str::upper(Str::random(5));
+        $requirement = $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $oldExam->id,
+            'obligatorio' => true,
+        ], $actor);
+        $worker = $this->createPersonal();
+        $assignment = $service->assignMine([
+            'personal_id' => $worker->id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor)->load('examenes');
+        $historicalExamId = $assignment->examenes->firstOrFail()->id;
+        $file = $this->buildSingleMineCatalogExcel($mine->nombre, $newExamName);
+
+        $preview = $importer->preview($file);
+
+        $this->assertSame(1, $preview['summary']['requisitos_obsoletos_por_desactivar']);
+        $this->assertTrue(collect($preview['requisitos_obsoletos_por_mina'])
+            ->flatMap(fn ($row) => $row['requisitos'])
+            ->contains(fn ($row) => $row['id'] === $requirement->id));
+
+        $result = $importer->confirm($preview, $actor);
+
+        $this->assertSame(1, $result['examenes_mina_desactivados']);
+        $this->assertSame(1, $result['examenes_catalogo_desactivados']);
+        $this->assertFalse((bool) $oldExam->fresh()->activo);
+        $this->assertDatabaseHas('mina_requisitos', ['id' => $requirement->id, 'activo' => false]);
+        $this->assertDatabaseHas('personal_mina_examenes', ['id' => $historicalExamId]);
+        $this->assertDatabaseHas('mina_requisitos', [
+            'mina_id' => $mine->id,
+            'nombre' => $newExamName,
+            'activo' => true,
+        ]);
+
+        $returnPreview = $importer->preview($this->buildSingleMineCatalogExcel($mine->nombre, $oldExam->nombre));
+        $returnResult = $importer->confirm($returnPreview, $actor);
+
+        $this->assertSame(1, $returnResult['examenes_mina_reactivados']);
+        $this->assertTrue((bool) $oldExam->fresh()->activo);
+        $this->assertDatabaseHas('mina_requisitos', ['id' => $requirement->id, 'activo' => true]);
+        $this->assertDatabaseHas('personal_mina_examenes', ['id' => $historicalExamId]);
+        $this->assertDatabaseHas('mina_requisitos', [
+            'mina_id' => $mine->id,
+            'nombre' => $newExamName,
+            'activo' => false,
+        ]);
+    }
+
+    public function test_excel_master_reemplaza_variante_tipografica_por_el_nombre_del_archivo(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $suffix = Str::upper(Str::random(5));
+        $officialName = 'CURSO DE IZAJE ' . $suffix;
+        $detectedName = 'CURSO DE IZAGE ' . $suffix;
+        $official = $this->createExam($officialName);
+        $file = $this->buildSingleMineCatalogExcel('MINA EQUIVALENCIA', $detectedName);
+        $importer = app(PersonalMinaExcelImportService::class);
+
+        $preview = $importer->preview($file);
+
+        $this->assertContains($detectedName, $preview['examenes_no_encontrados']);
+        $this->assertContains($officialName, $preview['examenes_ausentes_en_excel']);
+
+        $result = $importer->confirm($preview, $actor);
+
+        $this->assertSame($officialName, $official->fresh()->nombre);
+        $this->assertFalse((bool) $official->fresh()->activo);
+        $this->assertSame(1, $result['examenes_catalogo_desactivados']);
+        $this->assertDatabaseHas('examenes_mineros', [
+            'nombre' => $detectedName,
+            'activo' => true,
+        ]);
+    }
+
     public function test_excel_master_actualiza_solo_habilitacion_de_trabajador_existente_sin_pisar_datos_internos(): void
     {
         $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
@@ -1483,6 +1632,92 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         (new Xlsx($spreadsheet))->save($path);
 
         return new \Illuminate\Http\UploadedFile($path, 'master.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    private function buildCatalogOnlyMasterExcel(string $mineOne, string $mineTwo, string $sharedExam, string $singleMineExam)
+    {
+        $spreadsheet = new Spreadsheet();
+        $first = $spreadsheet->getActiveSheet();
+        $first->setTitle($mineOne);
+        $first->setCellValue('A2', 'DNI');
+        $first->setCellValue('B2', 'Nombre completo');
+        $first->setCellValue('C1', $sharedExam);
+        $first->setCellValue('D1', $sharedExam);
+        $first->setCellValue('E1', $singleMineExam);
+        $first->setCellValue('F1', $singleMineExam);
+        $first->setCellValue('C2', 'Fecha de realizacion');
+        $first->setCellValue('D2', 'Resultado');
+        $first->setCellValue('E2', 'Fecha de realizacion');
+        $first->setCellValue('F2', 'Resultado');
+
+        $second = $spreadsheet->createSheet();
+        $second->setTitle($mineTwo);
+        $second->setCellValue('A2', 'DNI');
+        $second->setCellValue('B2', 'Nombre completo');
+        $second->setCellValue('C1', $sharedExam);
+        $second->setCellValue('D1', $sharedExam);
+        $second->setCellValue('C2', 'Fecha de realizacion');
+        $second->setCellValue('D2', 'Resultado');
+
+        $path = storage_path('app/testing/master-catalogo-' . Str::random(8) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new \Illuminate\Http\UploadedFile($path, 'master-catalogo.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    private function buildSingleMineCatalogExcel(string $mineName, string $examName)
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(mb_substr($mineName, 0, 31));
+        $sheet->setCellValue('A2', 'DNI');
+        $sheet->setCellValue('B2', 'Nombre completo');
+        $sheet->setCellValue('C1', $examName);
+        $sheet->setCellValue('D1', $examName);
+        $sheet->setCellValue('C2', 'Fecha de realizacion');
+        $sheet->setCellValue('D2', 'Resultado');
+
+        $path = storage_path('app/testing/master-una-mina-' . Str::random(8) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new \Illuminate\Http\UploadedFile($path, 'master-una-mina.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    private function buildMasterWithHiddenAuxiliarySheet()
+    {
+        $spreadsheet = new Spreadsheet();
+        $visible = $spreadsheet->getActiveSheet();
+        $visible->setTitle('MINA VISIBLE');
+        $visible->setCellValue('A2', 'DNI');
+        $visible->setCellValue('B2', 'Nombre completo');
+        $visible->setCellValue('C1', 'EXAMEN VISIBLE');
+        $visible->setCellValue('D1', 'EXAMEN VISIBLE');
+        $visible->setCellValue('C2', 'Fecha de realizacion');
+        $visible->setCellValue('D2', 'Resultado');
+
+        $hidden = $spreadsheet->createSheet();
+        $hidden->setTitle('Hoja1');
+        $hidden->setSheetState('hidden');
+        $hidden->setCellValue('A2', 'DNI');
+        $hidden->setCellValue('B2', 'Nombre completo');
+        $hidden->setCellValue('C1', 'EXAMEN OCULTO');
+        $hidden->setCellValue('D1', 'EXAMEN OCULTO');
+        $hidden->setCellValue('C2', 'Fecha de realizacion');
+        $hidden->setCellValue('D2', 'Resultado');
+
+        $path = storage_path('app/testing/master-hoja-oculta-' . Str::random(8) . '.xlsx');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        (new Xlsx($spreadsheet))->save($path);
+
+        return new \Illuminate\Http\UploadedFile($path, 'master-hoja-oculta.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
     }
 
     private function buildMasterExcelProgramarEmo()

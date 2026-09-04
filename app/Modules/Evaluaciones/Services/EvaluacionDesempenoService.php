@@ -27,11 +27,15 @@ class EvaluacionDesempenoService
 
     public function list(Usuario $usuario, array $filters): ?Collection
     {
-        if (!$this->policy->manage($usuario)) {
+        if (!$this->policy->canViewType($usuario, 'desempeno')) {
             return null;
         }
 
         $query = EvaluacionDesempeno::query();
+
+        if (!$this->policy->canViewOthers($usuario)) {
+            $query->where('evaluado_por_usuario_id', $usuario->id);
+        }
 
         if (!empty($filters['destino_tipo'])) {
             $query->where('destino_tipo', strtoupper((string) $filters['destino_tipo']));
@@ -67,6 +71,12 @@ class EvaluacionDesempenoService
         $item = EvaluacionDesempeno::query()->find($id);
 
         if (!$item) {
+            return null;
+        }
+
+        if (!$this->policy->canViewType($usuario, 'desempeno')
+            || (!$this->policy->canViewOthers($usuario) && (string) $item->evaluado_por_usuario_id !== (string) $usuario->id)
+        ) {
             return null;
         }
 
@@ -168,7 +178,7 @@ class EvaluacionDesempenoService
                 ->where('marcado_por_id', $usuario->id)
                 ->exists();
 
-        if (!$isAttendanceOwner) {
+        if (!$isAttendanceOwner && !$this->policy->canEvaluateOthers($usuario)) {
             return $this->businessError('EVAL_ATTENDANCE_OWNER_REQUIRED', 'Solo el encargado que registro esta asistencia puede evaluarla.');
         }
 

@@ -41,6 +41,16 @@ class EvaluacionesPolicy
         return $action !== '' && PermissionMatrix::userCanDirect($usuario, 'evaluaciones', $action);
     }
 
+    public function canViewOthers(Usuario $usuario): bool
+    {
+        return PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'ver_todas_evaluaciones');
+    }
+
+    public function canEvaluateOthers(Usuario $usuario): bool
+    {
+        return $this->canEvaluateType($usuario, 'desempeno') && $this->isPrivileged($usuario);
+    }
+
     public function canAccessDestino(Usuario $usuario, ?string $destinoTipo, ?string $destinoId): bool
     {
         if (!$this->manage($usuario)) {

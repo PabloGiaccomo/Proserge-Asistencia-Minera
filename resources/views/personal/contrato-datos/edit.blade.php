@@ -50,7 +50,7 @@
             <div class="contract-data-grid">
                 <div class="form-group">
                     <label class="form-label">Fecha inicio contrato</label>
-                    <input type="date" name="fecha_inicio_contrato" class="form-control" value="{{ $dateValue('fecha_inicio_contrato') }}">
+                    <input type="date" name="fecha_inicio_contrato" class="form-control" value="{{ $dateValue('fecha_inicio_contrato') }}" data-auto-fill="periodo_prueba_inicio">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha fin</label>
@@ -66,7 +66,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_HORA_PARADAS</label>
-                    <input type="text" name="sueldo_hora_paradas" class="form-control" value="{{ $textValue('sueldo_hora_paradas') }}">
+                    <input type="text" name="sueldo_hora_paradas" class="form-control" value="{{ $textValue('sueldo_hora_paradas') }}" data-auto-fill-texto="sueldo_hora_paradas_texto">
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_HORA_PARADAS_TEXTO</label>
@@ -74,7 +74,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_DIA_TALLER</label>
-                    <input type="text" name="sueldo_dia_taller" class="form-control" value="{{ $textValue('sueldo_dia_taller') }}">
+                    <input type="text" name="sueldo_dia_taller" class="form-control" value="{{ $textValue('sueldo_dia_taller') }}" data-auto-fill-texto="sueldo_dia_taller_texto">
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_DIA_TALLER_TEXTO</label>
@@ -82,7 +82,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_NUM</label>
-                    <input type="text" name="sueldo_num" class="form-control" value="{{ $textValue('sueldo_num') }}">
+                    <input type="text" name="sueldo_num" class="form-control" value="{{ $textValue('sueldo_num') }}" data-auto-fill-texto="sueldo_texto">
                 </div>
                 <div class="form-group">
                     <label class="form-label">SUELDO_TEXTO</label>
@@ -102,7 +102,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fecha en la que firmo</label>
-                    <input type="date" name="fecha_firma" class="form-control" value="{{ $dateValue('fecha_firma') }}">
+                    <input type="date" name="fecha_firma" class="form-control" value="{{ $dateValue('fecha_firma') }}" data-auto-fill="fecha_inicio_contrato">
                 </div>
                 <div class="form-group contract-data-wide">
                     <label class="form-label">FUNCIONES</label>
@@ -116,4 +116,94 @@
         </div>
     </form>
 </div>
+@section('scripts')
+<script>
+(function () {
+    /* ---------- numero a texto en espanol ---------- */
+    function numeroATexto(n) {
+        if (n === 0) return 'cero';
+        var unidades = ['','un','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez','once','doce','trece','catorce','quince','dieciseis','diecisiete','dieciocho','diecinueve','veinte','veintiun','veintidos','veintitres','veinticuatro','veinticinco','veintiseis','veintisiete','veintiocho','veintinueve'];
+        var decenas = ['','','treinta','cuarenta','cincuenta','sesenta','setenta','ochenta','noventa'];
+        var centenas = ['','ciento','doscientos','trescientos','cuatrocientos','quinientos','seiscientos','setecientos','ochocientos','novecientos'];
+        var resultado = '';
+        if (n >= 1000000) { var m = Math.floor(n / 1000000); resultado += (m === 1 ? 'un' : numeroATexto(m)) + ' million'; if (m > 1) resultado += 'es'; n %= 1000000; if (n > 0) resultado += ' '; }
+        if (n >= 1000) { var k = Math.floor(n / 1000); resultado += (k === 1 ? 'mil' : numeroATexto(k) + ' mil'); n %= 1000; if (n > 0) resultado += ' '; }
+        if (n >= 100) { var c = Math.floor(n / 100); if (c === 1 && n % 100 === 0) { resultado += 'cien'; } else { resultado += centenas[c]; } n %= 100; if (n > 0) resultado += ' y '; }
+        if (n >= 30) { var d = Math.floor(n / 10); resultado += decenas[d]; n %= 10; if (n > 0) resultado += ' y '; }
+        if (n > 0 && n < 30) resultado += unidades[n];
+        return resultado.trim();
+    }
+
+    function detectarMiles(valor) {
+        var clean = valor.replace(/[^0-9.]/g, '');
+        var num = parseFloat(clean);
+        if (isNaN(num) || num <= 0 || num !== Math.floor(num)) return null;
+        if (num >= 1000 && num % 1000 === 0) return Math.floor(num / 1000);
+        return null;
+    }
+
+    function formatearNumero(valor) {
+        var clean = valor.replace(/[^0-9.]/g, '');
+        var num = parseFloat(clean);
+        if (isNaN(num) || num <= 0) return '';
+        var texto = numeroATexto(Math.floor(num));
+        if (num % 1 !== 0) { var dec = Math.round((num % 1) * 100); texto += ' punto ' + numeroATexto(dec); }
+        if (num >= 1000) texto += ' (' + Math.floor(num).toLocaleString('es-PE') + ')';
+        return texto;
+    }
+
+    var form = document.querySelector('form');
+    if (!form) return;
+
+    /* ---------- Fecha inicio contrato -> Inicio prueba ---------- */
+    var fechaInicio = form.querySelector('[name="fecha_inicio_contrato"]');
+    var periodoPruebaInicio = form.querySelector('[name="periodo_prueba_inicio"]');
+    if (fechaInicio && periodoPruebaInicio) {
+        fechaInicio.addEventListener('change', function () {
+            if (this.value && !periodoPruebaInicio.value) {
+                periodoPruebaInicio.value = this.value;
+            }
+        });
+    }
+
+    /* ---------- Fecha firma -> Fecha inicio contrato ---------- */
+    var fechaFirma = form.querySelector('[name="fecha_firma"]');
+    if (fechaFirma && fechaInicio) {
+        fechaFirma.addEventListener('change', function () {
+            if (this.value && !fechaInicio.value) {
+                fechaInicio.value = this.value;
+            }
+        });
+    }
+
+    /* ---------- Sueldo numerico -> texto ---------- */
+    var camposSueldo = [
+        { num: 'sueldo_hora_paradas', texto: 'sueldo_hora_paradas_texto' },
+        { num: 'sueldo_dia_taller', texto: 'sueldo_dia_taller_texto' },
+        { num: 'sueldo_num', texto: 'sueldo_texto' },
+    ];
+
+    camposSueldo.forEach(function (par) {
+        var numInput = form.querySelector('[name="' + par.num + '"]');
+        var textoInput = form.querySelector('[name="' + par.texto + '"]');
+        if (!numInput || !textoInput) return;
+
+        textoInput.dataset.autoFilled = textoInput.value ? '1' : '0';
+
+        numInput.addEventListener('input', function () {
+            var textoActual = formatearNumero(this.value);
+            if (textoInput.dataset.autoFilled === '1' || !textoInput.value) {
+                textoInput.value = textoActual;
+                textoInput.dataset.autoFilled = '1';
+            }
+        });
+
+        textoInput.addEventListener('input', function () {
+            if (this.value) this.dataset.autoFilled = '0';
+        });
+    });
+})();
+</script>
+@endsection
+
 @endsection

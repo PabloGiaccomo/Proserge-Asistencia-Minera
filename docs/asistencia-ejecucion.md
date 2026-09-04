@@ -12,6 +12,14 @@ ejecucion real del plan operativo.
 
 ## Relacion operativa
 
+Al restaurar respaldos antiguos, comprobar tambien las columnas del esquema,
+no solo el historial de migraciones. Los scripts `setup/004_destino_operativo.sql`
+y `setup/005_faltas_gestion.sql` no estaban cubiertos completamente por Laravel.
+La migracion `2026_08_31_000100_repair_attendance_destination_schema` agrega solo
+los campos faltantes de destino y gestion de faltas, sin borrar registros ni
+reescribir destinos historicos. Los errores SQL de Mi Asistencia se registran
+internamente y se muestran al usuario como un mensaje operativo sin datos SQL.
+
 Flujo:
 
 1. RQ Mina define parada, plan, grupos operativos, actividades y cantidades.
@@ -59,6 +67,52 @@ Estados validos:
 - `NO_CORRESPONDE`: no cuenta como presencia ni genera falta.
 
 `JUSTIFICADO` y `NO_CORRESPONDE` exigen motivo u observacion.
+
+## Horario y ausencias automaticas
+
+- El limite es la fecha del grupo y su `horario_salida`, en `app.display_timezone`.
+  No hay tolerancia adicional: despues de ese instante se rechaza `PRESENTE`
+  en marcaciones individuales y masivas, aunque el cliente envie otra hora.
+- `asistencia:ausentes-por-horario` corre cada minuto con el scheduler Laravel.
+  Tambien se sincroniza al consultar Mi Asistencia; la pantalla consulta el
+  estado cada 10 segundos sin cerrar la camara ni recargar el formulario.
+- El barrido solo procesa grupos `PROGRAMADO` de la fecha local actual.
+  No hace backfill de dias anteriores ni modifica grupos futuros, cancelados
+  o asistencias cerradas.
+- Solo los pendientes pasan a `AUSENTE`: conserva todas las marcas existentes.
+  Los registros del padron con ausencia inicial, hora cero, origen `SISTEMA`
+  y sin fecha/usuario de marcacion se presentan como pendientes hasta el limite.
+- La ausencia automatica guarda origen `SISTEMA`, fecha y motivo; no inventa
+  un usuario responsable. No genera faltas hasta el cierre.
+- Una llegada por lector despues del limite queda `TARDANZA`. Una lectura
+  repetida no altera `PRESENTE`, `TARDANZA` ni `JUSTIFICADO` existentes.
+  El responsable puede cambiar una ausencia a tardanza o justificarla con motivo.
+- El servidor determina la hora de las nuevas marcas. No cambia las existentes.
+- Para funcionar sin pantallas abiertas, el servidor debe ejecutar
+  `php artisan schedule:run` cada minuto, como indica `OPERACION_DESPLIEGUE.md`.
+  No se ejecuto este barrido sobre datos reales durante la implementacion.
+
+Archivos de esta implementacion:
+
+- `app/Modules/Asistencia/Services/AsistenciaHorarioService.php`
+- `app/Modules/Asistencia/Services/AsistenciaService.php`
+- `app/Models/AsistenciaDetalle.php`
+- `app/Modules/Asistencia/Resources/AsistenciaGrupoResource.php`
+- `app/Modules/MiAsistencia/Controllers/MiAsistenciaPageController.php`
+- `app/Console/Commands/AsistenciaAusentesPorHorarioCommand.php`
+- `routes/web.php`
+- `routes/console.php`
+- `resources/views/mi-asistencia/show.blade.php`
+- `tests/Feature/MiAsistenciaWebTest.php`
+- `tests/Feature/AsistenciaApiTest.php`
+- `tests/JavaScript/attendance-schedule.test.mjs`
+- `docs/asistencia-ejecucion.md`
+
+Validacion: pruebas web/API en base aislada, reloj controlado, repeticion del
+comando, preservacion de marcas, permisos, horario exacto y turno nocturno;
+pruebas JavaScript de lector continuo y refresco; compilacion Blade y revision
+visual con datos ficticios en 390x844 y 1440x900. Pendiente: camara fisica y
+verificacion del scheduler en el servidor de despliegue. Sin subida al FTP.
 
 ## Cierre y reapertura
 

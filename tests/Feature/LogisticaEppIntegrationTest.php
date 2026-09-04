@@ -16,6 +16,55 @@ class LogisticaEppIntegrationTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_registrar_otra_entrega_conserva_solo_trabajador_y_fecha(): void
+    {
+        $session = $this->sessionWithEppPermissions();
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => '98'.random_int(100000, 999999),
+            'nombre_completo' => 'TRABAJADOR ENTREGAS CONTINUAS',
+            'puesto' => 'OPERARIO DE PRUEBA',
+            'qr_code' => (string) Str::uuid(),
+            'estado' => 'ACTIVO',
+        ]);
+        $epp = app(EppService::class)->storeCatalog([
+            'nombre' => 'EPP PRUEBA CONTINUA',
+            'vida_util_dias' => 30,
+            'estado' => EppRegistro::ESTADO_ACTIVO,
+        ]);
+        $url = route('logistica.index', ['tab' => 'entregas']);
+        $payload = [
+            'personal_id' => $personal->id,
+            'epp_id' => $epp->id,
+            'cantidad' => 3,
+            'fecha_entrega' => '2026-09-04',
+            'observacion' => 'Solo para la primera entrega',
+            '_epp_add_another' => '1',
+        ];
+
+        $this->withSession($session)->from($url)
+            ->post(route('epps.entregas.store'), $payload)
+            ->assertRedirect($url)
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('_old_input.personal_id', $personal->id)
+            ->assertSessionHas('_old_input.personal_label', $personal->nombre_completo.' - '.$personal->dni.' - '.$personal->puesto)
+            ->assertSessionHas('_old_input.fecha_entrega', '2026-09-04')
+            ->assertSessionHas('_old_input._epp_open_modal', 'eppDeliveryModal')
+            ->assertSessionMissing('_old_input.epp_id')
+            ->assertSessionMissing('_old_input.cantidad')
+            ->assertSessionMissing('_old_input.observacion')
+            ->assertSessionMissing('_old_input._epp_replaces_entrega_id');
+
+        $this->assertSame(1, EppEntrega::query()->where('personal_id', $personal->id)->count());
+        $this->get($url)->assertOk()->assertSee('Registrar y agregar otra');
+
+        unset($payload['_epp_add_another']);
+        $this->from($url)->post(route('epps.entregas.store'), $payload)
+            ->assertRedirect($url)->assertSessionHasNoErrors()
+            ->assertSessionMissing('_old_input._epp_open_modal');
+        $this->assertSame(2, EppEntrega::query()->where('personal_id', $personal->id)->count());
+    }
+
     public function test_logistica_entregas_renderiza_la_vista_operativa_de_epp(): void
     {
         $session = $this->sessionWithEppPermissions();

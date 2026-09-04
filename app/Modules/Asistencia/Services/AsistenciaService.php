@@ -6,6 +6,7 @@ use App\Models\AsistenciaDetalle;
 use App\Models\AsistenciaEncabezado;
 use App\Models\GrupoTrabajo;
 use App\Models\GrupoTrabajoDetalle;
+use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Asistencia\Policies\AsistenciaPolicy;
 use App\Support\Rbac\PermissionMatrix;
@@ -20,6 +21,7 @@ class AsistenciaService
         private readonly AsistenciaPolicy $policy,
         private readonly AsistenciaCierreService $cierreService,
         private readonly ParadaExecutionMetricsService $metricsService,
+        private readonly AsistenciaHorarioService $horarioService,
     ) {
     }
 
@@ -99,7 +101,7 @@ class AsistenciaService
                 'supervisor:id,nombre_completo,dni,numero_documento',
                 'detalle.personal:id,nombre_completo,dni,numero_documento,puesto',
                 'asistencia.supervisor:id,nombre_completo,dni,numero_documento',
-                'asistencia.detalle:id,asistencia_id,grupo_trabajo_detalle_id,trabajador_id,estado,hora_marcado',
+                'asistencia.detalle',
             ])
             ->where('estado', '!=', GrupoTrabajo::ESTADO_CANCELADO);
 
@@ -126,12 +128,16 @@ class AsistenciaService
             ->orderBy('horario_salida')
             ->get()
             ->map(function (GrupoTrabajo $grupo) use ($usuario): array {
+                if ($this->marcarAusentesPorHorario($grupo) > 0) {
+                    $grupo->load('asistencia.detalle');
+                }
                 $integrantes = $grupo->detalle
                     ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva());
                 $marcas = $grupo->asistencia?->detalle ?? collect();
                 $presentes = $marcas->whereIn('estado', AsistenciaDetalle::ESTADOS_REAL)->count();
-                $ausentes = $marcas->where('estado', AsistenciaDetalle::ESTADO_AUSENTE)->count();
-                $pendientes = max(0, $integrantes->count() - $marcas->whereNotIn('estado', [AsistenciaDetalle::ESTADO_NO_CORRESPONDE])->count());
+                $marcados = $marcas->reject(fn (AsistenciaDetalle $marca): bool => $grupo->asistencia?->estado !== 'CERRADO' && $marca->pendienteDeMarcacion());
+                $ausentes = $marcados->where('estado', AsistenciaDetalle::ESTADO_AUSENTE)->count();
+                $pendientes = max(0, $integrantes->count() - $marcados->whereNotIn('estado', [AsistenciaDetalle::ESTADO_NO_CORRESPONDE])->count());
                 $actividad = $grupo->actividades->first();
                 $canRegister = $this->policy->canRegisterGrupo($usuario, $grupo)
                     && (filled($grupo->supervisor_id) || filled($grupo->asistencia?->id) || filled($usuario->personal_id));
@@ -189,7 +195,132 @@ class AsistenciaService
             return null;
         }
 
+        if ($this->marcarAusentesPorHorario($grupo) > 0) {
+            $grupo->load('asistencia.detalle.marcador.personal');
+        }
+
         return $grupo;
+    }
+
+    public function marcarAusentesPorHorario(GrupoTrabajo $grupo): int
+    {
+        $horario = $this->horarioService->resumen($grupo);
+        if (!$horario['vencido'] || !$horario['jornada_actual']
+            || $grupo->estado !== GrupoTrabajo::ESTADO_PROGRAMADO) {
+            return 0;
+        }
+
+        $count = DB::transaction(function () use ($grupo, $horario): int {
+            $lockedGroup = GrupoTrabajo::query()->whereKey($grupo->id)->lockForUpdate()->firstOrFail();
+            if ($lockedGroup->estado !== GrupoTrabajo::ESTADO_PROGRAMADO) {
+                return 0;
+            }
+            $existing = AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->lockForUpdate()->first();
+            if ($existing?->estado === 'CERRADO') {
+                return 0;
+            }
+            $active = $lockedGroup->detalle()->get()->filter(fn ($item) => $item->isDistribucionActiva());
+            if ($active->isEmpty()) {
+                return 0;
+            }
+            if ($existing) {
+                $marcas = $existing->detalle()->get();
+                $needsSync = $active->contains(function ($item) use ($marcas): bool {
+                    $marca = $marcas->firstWhere('grupo_trabajo_detalle_id', $item->id)
+                        ?: $marcas->first(fn ($marca) => !$marca->grupo_trabajo_detalle_id && $marca->trabajador_id === $item->personal_id);
+                    return !$marca || $marca->pendienteDeMarcacion();
+                });
+                if (!$needsSync) {
+                    return 0;
+                }
+            }
+            $encabezado = $this->getOrCreateEncabezado($lockedGroup);
+            $details = $encabezado->detalle()->lockForUpdate()->get();
+            $count = 0;
+            foreach ($details as $detalle) {
+                if (!$detalle->pendienteDeMarcacion()) {
+                    continue;
+                }
+                $detalle->forceFill([
+                    'estado' => AsistenciaDetalle::ESTADO_AUSENTE,
+                    'hora_marcado' => $horario['hora_actual'],
+                    'marcado_at' => now(),
+                    'marcado_por_id' => null,
+                    'origen_registro' => 'SISTEMA',
+                    'motivo_estado' => 'Ausencia automatica por horario vencido',
+                ])->save();
+                $count++;
+            }
+            return $count;
+        });
+        if ($count > 0) {
+            $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
+        }
+        return $count;
+    }
+
+    public function buscarPersonalPorCodigoDni(GrupoTrabajo $grupo, string $codigo): array
+    {
+        $codigo = trim($codigo);
+        $digitos = preg_replace('/\D+/', '', $codigo) ?: '';
+        $personal = null;
+
+        if ($digitos !== '') {
+            $personal = Personal::query()
+                ->select(['id', 'dni', 'numero_documento', 'nombre_completo', 'puesto', 'estado'])
+                ->where(function ($query) use ($digitos): void {
+                    $query->where('dni', $digitos)
+                        ->orWhere('numero_documento', $digitos);
+                })
+                ->first();
+        }
+
+        if (!$personal && strlen($digitos) > 8) {
+            $personal = Personal::query()
+                ->select(['id', 'dni', 'numero_documento', 'nombre_completo', 'puesto', 'estado'])
+                ->where(function ($query): void {
+                    $query->whereNotNull('numero_documento')
+                        ->orWhereNotNull('dni');
+                })
+                ->get()
+                ->sortByDesc(fn (Personal $item): int => strlen($this->documentoNormalizado($item)))
+                ->first(function (Personal $item) use ($digitos): bool {
+                    $documento = $this->documentoNormalizado($item);
+
+                    return strlen($documento) >= 6 && str_contains($digitos, $documento);
+                });
+        }
+
+        if (!$personal) {
+            return [
+                'ok' => true,
+                'reconocido' => false,
+                'pertenece_grupo' => false,
+                'dni' => mb_substr($digitos !== '' ? $digitos : $codigo, 0, 30),
+                'message' => 'DNI no reconocido en el sistema.',
+            ];
+        }
+
+        $detalle = $grupo->detalle
+            ->first(fn (GrupoTrabajoDetalle $item): bool => (string) $item->personal_id === (string) $personal->id
+                && $item->isDistribucionActiva());
+
+        return [
+            'ok' => true,
+            'reconocido' => true,
+            'pertenece_grupo' => (bool) $detalle,
+            'dni' => $this->documentoNormalizado($personal),
+            'personal' => [
+                'id' => (string) $personal->id,
+                'nombre' => (string) ($personal->nombre_completo ?: 'Trabajador sin nombre'),
+                'puesto' => (string) ($personal->puesto ?: 'Sin puesto'),
+                'estado' => (string) ($personal->estado ?: 'Sin estado'),
+            ],
+            'grupo_trabajo_detalle_id' => $detalle?->id,
+            'message' => $detalle
+                ? 'Trabajador identificado en el grupo.'
+                : 'El trabajador existe en Personal, pero no pertenece a la lista de este grupo.',
+        ];
     }
 
     public function marcar(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
@@ -207,6 +338,9 @@ class AsistenciaService
             return $readiness;
         }
 
+        if (empty($payload['registrar_llegada'])) {
+            $this->horarioService->validarPresente($grupo, $payload);
+        }
         $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
 
         if ($encabezado->estado === 'CERRADO') {
@@ -224,18 +358,32 @@ class AsistenciaService
             return $validation;
         }
 
-        DB::transaction(function () use ($usuario, $detalle, $payload): void {
+        $marca = DB::transaction(function () use ($usuario, $grupo, $detalle, $payload): AsistenciaDetalle {
             $locked = AsistenciaDetalle::query()
                 ->where('id', $detalle['detalle']->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $this->markDetalle($usuario, $locked, $payload, 'MANUAL');
+            if (!empty($payload['registrar_llegada'])) {
+                if (in_array($locked->estado, ['PRESENTE', 'TARDANZA', 'JUSTIFICADO'], true)) {
+                    return $locked;
+                }
+                $payload['estado'] = $this->horarioService->resumen($grupo)['vencido'] ? 'TARDANZA' : 'PRESENTE';
+            }
+            $this->horarioService->validarPresente($grupo, $payload);
+            $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
+            $this->markDetalle($usuario, $locked, $payload, !empty($payload['registrar_llegada']) ? 'LECTOR' : 'MANUAL');
+            return $locked;
         });
 
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id)];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id), 'estado' => $marca->estado, 'hora_marcado' => $marca->hora_marcado];
+    }
+
+    private function documentoNormalizado(Personal $personal): string
+    {
+        return preg_replace('/\D+/', '', (string) ($personal->numero_documento ?: $personal->dni)) ?: '';
     }
 
     public function marcarMasivo(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
@@ -253,6 +401,7 @@ class AsistenciaService
             return $readiness;
         }
 
+        $this->horarioService->validarPresente($grupo, $payload);
         $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
 
         if ($encabezado->estado === 'CERRADO') {
@@ -275,7 +424,9 @@ class AsistenciaService
             'errores' => [],
         ];
 
-        DB::transaction(function () use ($usuario, $payload, $resolved, &$summary): void {
+        DB::transaction(function () use ($usuario, $grupo, $payload, $resolved, &$summary): void {
+            $this->horarioService->validarPresente($grupo, $payload);
+            $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
             foreach ($resolved['detalles'] as $detalle) {
                 if ((string) $detalle->estado === AsistenciaDetalle::ESTADO_NO_CORRESPONDE) {
                     $summary['omitidos']++;
@@ -457,9 +608,10 @@ class AsistenciaService
         return ['ok' => true, 'items' => $query->orderBy('fecha')->orderBy('turno')->get()];
     }
 
-    private function getOrCreateEncabezado(GrupoTrabajo $grupo, Usuario $usuario): AsistenciaEncabezado
+    private function getOrCreateEncabezado(GrupoTrabajo $grupo, ?Usuario $usuario = null): AsistenciaEncabezado
     {
         return DB::transaction(function () use ($grupo, $usuario): AsistenciaEncabezado {
+            GrupoTrabajo::query()->whereKey($grupo->id)->lockForUpdate()->firstOrFail();
             $encabezado = AsistenciaEncabezado::query()
                 ->where('grupo_trabajo_id', $grupo->id)
                 ->lockForUpdate()
@@ -476,7 +628,7 @@ class AsistenciaService
                     'mina_id' => $minaId,
                     'destino_tipo' => $grupo->destino_tipo ?? $grupo->unidad,
                     'destino_id' => $grupo->destino_id,
-                    'supervisor_id' => $grupo->supervisor_id ?: $usuario->personal_id,
+                    'supervisor_id' => $grupo->supervisor_id ?: $usuario?->personal_id ?: null,
                     'actividad_realizada' => null,
                     'reporte_suceso' => null,
                     'estado' => 'REGISTRADO',
@@ -487,7 +639,9 @@ class AsistenciaService
                 $encabezado->forceFill(['supervisor_id' => $grupo->supervisor_id])->save();
             }
 
-            $this->syncPadron($encabezado, $grupo);
+            if ($encabezado->estado !== 'CERRADO') {
+                $this->syncPadron($encabezado, $grupo);
+            }
 
             return $encabezado->fresh(['detalle']);
         });
@@ -741,7 +895,8 @@ class AsistenciaService
     {
         if (filled($grupo->supervisor_id)
             || filled($usuario->personal_id)
-            || AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->exists()) {
+            || AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->exists()
+            || PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver_todas_asistencias')) {
             return ['ok' => true];
         }
 
@@ -859,5 +1014,35 @@ class AsistenciaService
         return $result['ok'] ?? false
             ? ['success' => true, 'message' => 'Asistencia reopenida']
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
+    }
+
+    public function getMiEstadoAsistencia(Usuario $usuario, string $grupoId): ?array
+    {
+        if (!$usuario->personal_id) {
+            return null;
+        }
+
+        $encabezado = AsistenciaEncabezado::query()
+            ->where('grupo_trabajo_id', $grupoId)
+            ->first();
+
+        if (!$encabezado) {
+            return null;
+        }
+
+        $detalle = AsistenciaDetalle::query()
+            ->where('asistencia_id', $encabezado->id)
+            ->where('trabajador_id', $usuario->personal_id)
+            ->first();
+
+        if (!$detalle) {
+            return null;
+        }
+
+        return [
+            'estado' => $detalle->estado,
+            'hora_marcado' => $detalle->hora_marcado,
+            'observaciones' => $detalle->observaciones,
+        ];
     }
 }

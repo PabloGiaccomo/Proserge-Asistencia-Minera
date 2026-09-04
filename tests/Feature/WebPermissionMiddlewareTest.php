@@ -449,6 +449,8 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertSee('name="permisos[personal][ver_datos_sensibles]"', false)
             ->assertSee('name="permisos[personal_ingresos][ver_datos_sensibles]"', false)
             ->assertSee('Ver datos sensibles')
+            ->assertSee('name="permisos[evaluaciones][ver_todas_evaluaciones]"', false)
+            ->assertSee('Ver evaluaciones de otros')
             ->assertSee('Ver entregas y cambios de EPP')
             ->assertSee('name="permisos[logistica][ver_logistica_kardex]"', false)
             ->assertDontSee('name="permisos[epps][ver]"', false)

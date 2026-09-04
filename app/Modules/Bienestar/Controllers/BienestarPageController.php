@@ -34,13 +34,8 @@ class BienestarPageController extends Controller
 
         $baseQuery = PersonalBloqueo::query()
             ->with(['personal:id,dni,nombre_completo', 'bloqueadoPor.personal:id,nombre_completo'])
-            ->where('estado', 'ACTIVO')
-            ->where('visible_para_planner', true)
-            ->whereDate('fecha_inicio', '<=', $to)
-            ->whereDate('fecha_fin', '>=', $from)
+            ->visiblesEnRango($from, $to)
             ->whereHas('personal', function ($q) use ($search): void {
-                $q->where('estado', 'ACTIVO');
-
                 if ($search !== '') {
                     $needle = '%' . mb_strtolower($search) . '%';
                     $q->where(function ($sub) use ($needle): void {
@@ -96,10 +91,7 @@ class BienestarPageController extends Controller
 
         $hoy = Carbon::today()->toDateString();
         $resumenActivosHoy = PersonalBloqueo::query()
-            ->where('estado', 'ACTIVO')
-            ->where('visible_para_planner', true)
-            ->whereDate('fecha_inicio', '<=', $hoy)
-            ->whereDate('fecha_fin', '>=', $hoy);
+            ->visiblesEnRango($hoy, $hoy);
 
         $resumen = [
             'total_activos_hoy' => (clone $resumenActivosHoy)->count(),

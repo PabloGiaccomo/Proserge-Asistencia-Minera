@@ -62,7 +62,7 @@ class EppPageController extends WebPageController
                 (string) $request->query('personal_id', ''),
                 (string) $request->query('epp_id', '')
             ),
-        ]);
+        ])->header('Cache-Control', 'private, no-store, max-age=0');
     }
 
     public function kardexPersonal(Request $request): JsonResponse
@@ -134,6 +134,7 @@ class EppPageController extends WebPageController
             '_epp_replacement_fecha' => ['nullable', 'date'],
             '_epp_replacement_motivo' => ['nullable', 'string', 'max:120'],
             '_epp_replacement_observacion' => ['nullable', 'string', 'max:1000'],
+            '_epp_add_another' => ['nullable', 'boolean'],
         ]);
 
         try {
@@ -152,10 +153,26 @@ class EppPageController extends WebPageController
                 return back()->with('success', 'Cambio de EPP registrado correctamente.');
             }
 
-            $this->service->deliver($validated, $usuario);
+            $entrega = $this->service->deliver($validated, $usuario);
         } catch (InvalidArgumentException $exception) {
             return back()->withInput($request->input() + ['_epp_open_modal' => 'eppDeliveryModal'])
                 ->with('error', $exception->getMessage());
+        }
+
+        if ($request->boolean('_epp_add_another')) {
+            $personal = $entrega->personal;
+
+            return back()->with('success', 'Entrega registrada. Puedes agregar otra para el mismo trabajador.')
+                ->withInput([
+                    '_epp_open_modal' => 'eppDeliveryModal',
+                    'personal_id' => $entrega->personal_id,
+                    'personal_label' => collect([
+                        $personal?->nombre_completo,
+                        $personal?->dni ?: $personal?->numero_documento,
+                        $personal?->puesto,
+                    ])->filter()->implode(' - '),
+                    'fecha_entrega' => $validated['fecha_entrega'],
+                ]);
         }
 
         return back()->with('success', 'Entrega de EPP registrada correctamente.');

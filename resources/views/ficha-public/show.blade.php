@@ -76,8 +76,8 @@
         overflow: hidden;
     }
 
-    .public-guide-details summary {
-        cursor: pointer;
+    .public-guide-docs-title {
+        margin: 0;
         padding: 13px 14px;
         color: #172033;
         font-size: 13px;
@@ -208,6 +208,7 @@
         <div class="ficha-alert" id="localDraftNotice" style="display:none;">
             Se recupero un borrador local de esta ficha en este dispositivo.
         </div>
+        <div class="ficha-alert ficha-alert-danger" id="publicSubmitNotice" role="alert" aria-live="assertive" style="display:none;"></div>
     @endif
 
     @if(in_array($mode, ['invalid', 'expired', 'disabled'], true))
@@ -479,7 +480,7 @@
                                         <label class="ficha-label" for="documento_{{ $docKey }}">
                                             {{ $docLabel }}
                                             @if(!$readonly)
-                                                <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Opcional</span>
+                                                <span class="ficha-status" style="padding:2px 7px;font-size:10px;">Obligatorio</span>
                                             @endif
                                         </label>
                                         @if($readonly)
@@ -593,7 +594,7 @@
 
             @if(!$readonly)
                 <div class="ficha-actions-bar">
-                    <button type="submit" class="btn btn-primary">Enviar ficha</button>
+                    <button type="submit" class="btn btn-primary" id="submitWorkerFicha">Enviar ficha</button>
                 </div>
             @endif
         </form>
@@ -618,12 +619,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const hidden = document.getElementById('firmaBase64');
     const clearBtn = document.getElementById('clearSignature');
     const draftNotice = document.getElementById('localDraftNotice');
+    const submitNotice = document.getElementById('publicSubmitNotice');
+    const submitButton = document.getElementById('submitWorkerFicha');
     const draftStorageBaseKey = 'proserge:ficha-borrador:' + @json($token);
     const draftRevisionKey = @json($draftRevisionKey);
     const draftStorageKey = draftStorageBaseKey + ':' + draftRevisionKey;
     const draftFileDbName = 'proserge-ficha-drafts';
     const draftFileStoreName = 'files';
     const draftFileInputs = Array.from(document.querySelectorAll('.js-draft-file-input'));
+    const pendingFileUploads = new WeakMap();
     const csrfToken = form?.querySelector('input[name="_token"]')?.value || '';
     const draftDataUrl = @json(route('ficha-colaborador.datos-borrador', ['token' => $token]));
     let drawing = false;
@@ -737,8 +741,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     draftFileInputs.forEach(function (input) {
         input.addEventListener('change', async function () {
+            input.dataset.uploadState = input.files?.length ? 'pending' : '';
+            delete input.dataset.uploadError;
             await saveDraftFile(input);
-            await uploadDraftFile(input);
+            await queueDraftFileUpload(input);
         });
     });
 
@@ -804,20 +810,72 @@ document.addEventListener('DOMContentLoaded', function () {
         statusNode.style.display = 'block';
     };
 
-    const uploadDraftFile = async function (input) {
+    const showSubmitNotice = function (message) {
+        if (!submitNotice) return;
+        submitNotice.textContent = message || '';
+        submitNotice.style.display = message ? 'block' : 'none';
+        if (message) {
+            submitNotice.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    };
+
+    const setSubmitBusy = function (busy) {
+        if (!submitButton) return;
+        submitButton.disabled = busy;
+        submitButton.textContent = busy ? 'Guardando ficha...' : 'Enviar ficha';
+    };
+
+    const ensureFileReadable = async function (file) {
+        if (!file) return false;
+
+        const sample = file.slice(0, Math.min(Math.max(file.size, 1), 64));
+        if (typeof sample.arrayBuffer === 'function') {
+            await sample.arrayBuffer();
+            return true;
+        }
+
+        await new Promise(function (resolve, reject) {
+            const reader = new FileReader();
+            reader.onload = () => resolve(true);
+            reader.onerror = () => reject(reader.error || new Error('No se pudo leer el archivo.'));
+            reader.onabort = () => reject(new Error('La lectura del archivo fue cancelada.'));
+            reader.readAsArrayBuffer(sample);
+        });
+
+        return true;
+    };
+
+    const forgetDraftFile = async function (input) {
+        if (!input?.dataset.fileDraftKey) return;
+
+        const db = await openDraftFileDb();
+        if (!db) return;
+
+        try {
+            const tx = db.transaction(draftFileStoreName, 'readwrite');
+            tx.objectStore(draftFileStoreName).delete(draftFileRecordId(input.dataset.fileDraftKey));
+        } catch (error) {
+            // El respaldo principal permanece en el servidor.
+        }
+    };
+
+    const uploadDraftFile = async function (input, selectedFile = null) {
         if (isReadonly || !input || !input.dataset.serverDraftUrl || !input.dataset.serverDraftTipo) return false;
 
-        const file = input.files && input.files[0] ? input.files[0] : null;
-        if (!file) return false;
+        const file = selectedFile || (input.files && input.files[0] ? input.files[0] : null);
+        if (!file) return input.dataset.hasServerFile === '1';
 
         const payload = new FormData();
         payload.append('_token', csrfToken);
         payload.append('tipo', input.dataset.serverDraftTipo);
         payload.append('archivo', file);
 
+        input.dataset.uploadState = 'uploading';
         setFileStatus(input, 'Guardando archivo en la ficha...');
 
         try {
+            await ensureFileReadable(file);
+
             const response = await fetch(input.dataset.serverDraftUrl, {
                 method: 'POST',
                 body: payload,
@@ -834,18 +892,59 @@ document.addEventListener('DOMContentLoaded', function () {
 
             input.required = false;
             input.dataset.hasServerFile = '1';
-            setFileStatus(input, 'Guardado en la ficha: ' + (data.nombre_original || file.name));
-            try {
-                input.value = '';
-            } catch (error) {
-                // noop
+            input.dataset.uploadState = 'saved';
+            delete input.dataset.uploadError;
+
+            if (!input.files?.[0] || input.files[0] === file) {
+                setFileStatus(input, 'Guardado en la ficha: ' + (data.nombre_original || file.name));
+                try {
+                    input.value = '';
+                } catch (error) {
+                    // noop
+                }
             }
 
             return true;
         } catch (error) {
-            setFileStatus(input, (error && error.message ? error.message : 'No se pudo guardar el archivo.') + ' Vuelve a intentarlo o mantenlo seleccionado antes de enviar.');
+            const message = 'El dispositivo dejo de compartir "' + file.name + '". Tus demas datos siguen guardados; vuelve a elegir solo este archivo.';
+            input.dataset.uploadState = 'error';
+            input.dataset.uploadError = message;
+            setFileStatus(input, message);
+
+            try {
+                input.value = '';
+            } catch (clearError) {
+                // noop
+            }
+
+            if (input.id === 'huella' && input.dataset.hasServerFile !== '1') {
+                input.required = true;
+            }
+
+            await forgetDraftFile(input);
             return false;
         }
+    };
+
+    const queueDraftFileUpload = function (input) {
+        const file = input?.files?.[0] || null;
+        if (!file) {
+            return Promise.resolve(input?.dataset.hasServerFile === '1');
+        }
+
+        const pending = pendingFileUploads.get(input);
+        if (pending?.file === file) {
+            return pending.promise;
+        }
+
+        const promise = uploadDraftFile(input, file).finally(function () {
+            if (pendingFileUploads.get(input)?.promise === promise) {
+                pendingFileUploads.delete(input);
+            }
+        });
+
+        pendingFileUploads.set(input, { file, promise });
+        return promise;
     };
 
     const saveDraftFile = async function (input) {
@@ -854,33 +953,39 @@ document.addEventListener('DOMContentLoaded', function () {
         const db = await openDraftFileDb();
         if (!db) return;
 
-        const tx = db.transaction(draftFileStoreName, 'readwrite');
-        const store = tx.objectStore(draftFileStoreName);
-        const recordId = draftFileRecordId(input.dataset.fileDraftKey);
-        const file = input.files && input.files[0] ? input.files[0] : null;
+        try {
+            const tx = db.transaction(draftFileStoreName, 'readwrite');
+            const store = tx.objectStore(draftFileStoreName);
+            const recordId = draftFileRecordId(input.dataset.fileDraftKey);
+            const file = input.files && input.files[0] ? input.files[0] : null;
 
-        if (!file) {
-            store.delete(recordId);
-            setFileStatus(input, '');
-            return;
+            if (!file) {
+                store.delete(recordId);
+                setFileStatus(input, '');
+                return false;
+            }
+
+            store.put({
+                id: recordId,
+                key: input.dataset.fileDraftKey,
+                file: file,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                saved_at: new Date().toISOString(),
+            });
+
+            setFileStatus(input, 'Documento recuperable en este equipo: ' + file.name);
+            return true;
+        } catch (error) {
+            return false;
         }
-
-        store.put({
-            id: recordId,
-            key: input.dataset.fileDraftKey,
-            file: file,
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            saved_at: new Date().toISOString(),
-        });
-
-        setFileStatus(input, 'Documento recuperable en este equipo: ' + file.name);
     };
 
     const loadDraftFile = async function (input) {
         if (isReadonly || !input || !input.dataset.fileDraftKey) return false;
         if (input.dataset.hasServerFile === '1') return false;
+        if (input.files?.[0]) return true;
 
         const db = await openDraftFileDb();
         if (!db) return false;
@@ -985,7 +1090,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isReadonly || !form) return null;
 
         const draft = collectDraft();
-        window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+        try {
+            window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+        } catch (error) {
+            // El borrador tambien se guarda en el servidor.
+        }
 
         return draft;
     };
@@ -1354,6 +1463,7 @@ document.addEventListener('DOMContentLoaded', function () {
         let serverAutosaveTimer = null;
         let lastServerAutosave = Promise.resolve(false);
         let draftSubmitting = false;
+        let allowFinalSubmit = false;
         const scheduleDraftSave = function () {
             window.clearTimeout(autosaveTimer);
             window.clearTimeout(serverAutosaveTimer);
@@ -1366,27 +1476,66 @@ document.addEventListener('DOMContentLoaded', function () {
         form?.addEventListener('input', scheduleDraftSave, true);
         form?.addEventListener('change', scheduleDraftSave, true);
         form?.addEventListener('submit', async function (event) {
-            if (draftSubmitting) {
-                draftSubmitting = false;
+            if (allowFinalSubmit) {
                 return;
             }
 
             event.preventDefault();
+            if (draftSubmitting) return;
+
             draftSubmitting = true;
+            setSubmitBusy(true);
+            showSubmitNotice('');
             window.clearTimeout(autosaveTimer);
             window.clearTimeout(serverAutosaveTimer);
-            syncEmployers();
-            writeDraft();
-            await lastServerAutosave.catch(() => false);
-            await saveDraftData();
-            await Promise.allSettled(draftFileInputs.map(loadDraftFile));
-            await Promise.allSettled(draftFileInputs.map(uploadDraftFile));
-            if (typeof form.requestSubmit === 'function') {
-                form.requestSubmit();
-                return;
-            }
 
-            HTMLFormElement.prototype.submit.call(form);
+            try {
+                syncEmployers();
+                writeDraft();
+                await lastServerAutosave.catch(() => false);
+
+                const dataSaved = await saveDraftData();
+                if (!dataSaved) {
+                    showSubmitNotice('No se pudo respaldar la ficha. Revisa tu conexion y vuelve a presionar Enviar; no necesitas completar los campos otra vez.');
+                    return;
+                }
+
+                await Promise.allSettled(draftFileInputs.map(loadDraftFile));
+                const selectedInputs = draftFileInputs.filter(input => Boolean(input.files?.[0]));
+                await Promise.all(selectedInputs.map(queueDraftFileUpload));
+
+                const unresolvedInputs = draftFileInputs.filter(input => input.dataset.uploadState === 'error');
+                if (unresolvedInputs.length > 0) {
+                    const names = unresolvedInputs.map(input => input.labels?.[0]?.textContent?.trim() || 'archivo').join(', ');
+                    showSubmitNotice('No se enviaron estos archivos: ' + names + '. Vuelve a seleccionarlos; todos los demas datos ya quedaron guardados.');
+                    unresolvedInputs[0].focus();
+                    return;
+                }
+
+                const unsafeFileInputs = draftFileInputs.filter(input => Boolean(input.files?.[0]));
+                if (unsafeFileInputs.length > 0) {
+                    showSubmitNotice('Aun se estan guardando algunos archivos. Espera unos segundos y vuelve a presionar Enviar.');
+                    return;
+                }
+
+                if (!form.checkValidity()) {
+                    form.reportValidity();
+                    return;
+                }
+
+                allowFinalSubmit = true;
+                if (typeof form.requestSubmit === 'function') {
+                    form.requestSubmit(submitButton || undefined);
+                    return;
+                }
+
+                HTMLFormElement.prototype.submit.call(form);
+            } finally {
+                if (!allowFinalSubmit) {
+                    draftSubmitting = false;
+                    setSubmitBusy(false);
+                }
+            }
         });
     } else if (@json(session('success') ? true : false)) {
         clearDraft();

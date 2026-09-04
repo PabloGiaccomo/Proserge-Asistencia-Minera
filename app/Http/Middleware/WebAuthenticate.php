@@ -13,27 +13,24 @@ class WebAuthenticate
     public function handle(Request $request, Closure $next): Response
     {
         if (!session('auth_token')) {
-            if ($request->expectsJson() || $request->ajax()) {
-                return response()->json([
-                    'ok' => false,
-                    'error' => 'SESSION_REQUIRED',
-                    'message' => 'Sesion no valida o expirada',
-                ], 401);
-            }
-
-            return redirect()->route('login');
+            return $this->invalidSessionResponse($request, 'SESSION_REQUIRED');
         }
 
-        $this->refreshSessionPermissions();
+        if (!$this->refreshSessionPermissions()) {
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return $this->invalidSessionResponse($request, 'SESSION_USER_NOT_FOUND');
+        }
 
         return $next($request);
     }
 
-    private function refreshSessionPermissions(): void
+    private function refreshSessionPermissions(): bool
     {
         $userId = session('user_id') ?: session('user.id');
-        if (!$userId || $userId === '00000000-0000-0000-0000-000000000001') {
-            return;
+        if (!$userId) {
+            return false;
         }
 
         $usuario = Usuario::query()
@@ -41,7 +38,7 @@ class WebAuthenticate
             ->find($userId);
 
         if (!$usuario) {
-            return;
+            return false;
         }
 
         $roles = collect([$usuario->rol])
@@ -63,5 +60,25 @@ class WebAuthenticate
             ],
             'user_id' => $usuario->id,
         ]);
+
+        return true;
+    }
+
+    private function invalidSessionResponse(Request $request, string $error): Response
+    {
+        $message = 'Tu sesion ya no es valida. Inicia sesion nuevamente para continuar.';
+
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'ok' => false,
+                'error' => $error,
+                'message' => $message,
+                'redirect' => route('login'),
+            ], 401);
+        }
+
+        return redirect()
+            ->route('login')
+            ->with('session_expired', $message);
     }
 }

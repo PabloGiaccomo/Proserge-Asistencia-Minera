@@ -1,0 +1,564 @@
+.regularization-page {
+    max-width: 1560px;
+    margin: 0 auto;
+    color: #10213b;
+}
+
+.regularization-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.regularization-header h1 {
+    margin: 4px 0 2px;
+    font-size: 26px;
+    line-height: 1.25;
+    letter-spacing: 0;
+}
+
+.regularization-header p,
+.regularization-list-head p {
+    margin: 0;
+    color: #587095;
+}
+
+.regularization-back {
+    color: #087f78;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.regularization-refresh {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.regularization-refresh.is-loading svg {
+    animation: regularization-spin .8s linear infinite;
+}
+
+@keyframes regularization-spin {
+    to { transform: rotate(360deg); }
+}
+
+.regularization-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 14px;
+    border: 1px solid #d8e2ef;
+    background: #fff;
+}
+
+.regularization-tabs a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 42px;
+    padding: 8px 18px;
+    color: #415575;
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid transparent;
+}
+
+.regularization-tabs a.is-active {
+    color: #076e69;
+    border-color: #29c9be;
+    background: #eafbf8;
+}
+
+.regularization-tabs span {
+    min-width: 24px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: #e7eef7;
+    text-align: center;
+    font-size: 12px;
+}
+
+.regularization-filters {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(180px, 240px) 110px auto auto;
+    align-items: end;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid #d8e2ef;
+    background: #fff;
+}
+
+.regularization-filters label {
+    display: grid;
+    gap: 6px;
+    color: #455b7c;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.regularization-filters input,
+.regularization-filters select {
+    width: 100%;
+    min-height: 42px;
+    padding: 9px 12px;
+    border: 1px solid #cfdbea;
+    border-radius: 7px;
+    background: #fff;
+    color: #10213b;
+    font: inherit;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.regularization-input-wrap {
+    position: relative;
+    display: block;
+}
+
+.regularization-input-wrap svg {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    transform: translateY(-50%);
+    color: #8295b2;
+    pointer-events: none;
+}
+
+.regularization-input-wrap input {
+    padding-left: 40px;
+}
+
+.regularization-live {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    min-height: 32px;
+    color: #647895;
+    font-size: 12px;
+}
+
+.regularization-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #12a99f;
+}
+
+.regularization-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid #d8e2ef;
+    background: #fff;
+}
+
+.regularization-metrics > a,
+.regularization-ceased-summary {
+    display: grid;
+    gap: 3px;
+    min-height: 92px;
+    padding: 17px 20px;
+    color: #587095;
+    text-decoration: none;
+    border-right: 1px solid #e3eaf3;
+}
+
+.regularization-metrics > a:last-child {
+    border-right: 0;
+}
+
+.regularization-metrics strong {
+    color: #10213b;
+    font-size: 24px;
+    line-height: 1.15;
+}
+
+.regularization-metrics > a:hover {
+    background: #f6fbfb;
+}
+
+.regularization-list {
+    margin-top: 16px;
+    border: 1px solid #d8e2ef;
+    background: #fff;
+}
+
+.regularization-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #e3eaf3;
+}
+
+.regularization-list-head h2 {
+    margin: 0 0 2px;
+    font-size: 17px;
+    letter-spacing: 0;
+}
+
+.regularization-range {
+    color: #587095;
+    white-space: nowrap;
+}
+
+.regularization-worker {
+    border-bottom: 1px solid #e3eaf3;
+}
+
+.regularization-worker:last-of-type {
+    border-bottom: 0;
+}
+
+.regularization-worker summary {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto 20px;
+    align-items: center;
+    gap: 18px;
+    min-height: 78px;
+    padding: 15px 20px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.regularization-worker summary::-webkit-details-marker {
+    display: none;
+}
+
+.regularization-worker summary:hover {
+    background: #f8fbfd;
+}
+
+.regularization-worker[open] summary {
+    background: #f1f9f8;
+}
+
+.regularization-worker-main {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.regularization-worker-main strong {
+    overflow-wrap: anywhere;
+    color: #10213b;
+    font-size: 14px;
+}
+
+.regularization-worker-main small {
+    overflow-wrap: anywhere;
+    color: #587095;
+}
+
+.regularization-worker-counts {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.regularization-chip,
+.document-state {
+    display: inline-flex;
+    align-items: center;
+    min-height: 25px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.regularization-chip.is-warning,
+.document-state.is-missing { color: #915500; background: #fff0c7; }
+.regularization-chip.is-info,
+.document-state.is-review { color: #1552a0; background: #e7f0ff; }
+.regularization-chip.is-danger,
+.document-state.is-observed { color: #a22328; background: #ffe5e6; }
+
+.regularization-chevron {
+    color: #6d82a2;
+    transition: transform .18s ease;
+}
+
+.regularization-worker[open] .regularization-chevron {
+    transform: rotate(90deg);
+}
+
+.regularization-worker-body {
+    padding: 18px 20px 20px;
+    border-top: 1px solid #dce8ef;
+}
+
+.regularization-issues {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+}
+
+.regularization-issues section {
+    min-width: 0;
+}
+
+.regularization-issues h3 {
+    margin: 0 0 9px;
+    color: #415575;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0;
+}
+
+.regularization-issues ul {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.regularization-issues li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px dashed #dbe4ee;
+}
+
+.regularization-issues li span,
+.regularization-issues li small {
+    overflow-wrap: anywhere;
+}
+
+.regularization-issues li small:not(.document-state) {
+    color: #7083a0;
+    text-align: right;
+}
+
+.regularization-contract-warning {
+    margin: 0;
+    color: #8d3438;
+}
+
+.regularization-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid #e3eaf3;
+}
+
+.regularization-ceased-row {
+    display: grid;
+    grid-template-columns: minmax(250px, 1.3fr) minmax(310px, 1fr) auto;
+    align-items: center;
+    gap: 24px;
+    min-height: 88px;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e3eaf3;
+}
+
+.regularization-ceased-row dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+}
+
+.regularization-ceased-row dl div {
+    min-width: 0;
+}
+
+.regularization-ceased-row dt {
+    color: #7083a0;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.regularization-ceased-row dd {
+    margin: 2px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.regularization-empty {
+    display: grid;
+    justify-items: center;
+    gap: 7px;
+    padding: 58px 20px;
+    color: #6c809e;
+    text-align: center;
+}
+
+.regularization-empty svg {
+    color: #12a99f;
+}
+
+.regularization-pagination {
+    padding: 14px 20px;
+    border-top: 1px solid #e3eaf3;
+}
+
+.regularization-pagination nav > div:first-child {
+    display: none;
+}
+
+.regularization-pagination nav > div:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+@media (max-width: 980px) {
+    .regularization-filters {
+        grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 100px;
+    }
+
+    .regularization-filters .btn {
+        width: 100%;
+    }
+
+    .regularization-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .regularization-metrics > a:nth-child(2) {
+        border-right: 0;
+    }
+
+    .regularization-metrics > a:nth-child(-n+2) {
+        border-bottom: 1px solid #e3eaf3;
+    }
+
+    .regularization-issues {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .regularization-ceased-row {
+        grid-template-columns: minmax(220px, 1fr) minmax(280px, 1fr);
+    }
+
+    .regularization-ceased-row > .btn {
+        justify-self: end;
+        grid-column: 2;
+    }
+}
+
+@media (max-width: 640px) {
+    .regularization-header {
+        align-items: flex-start;
+    }
+
+    .regularization-header h1 {
+        font-size: 22px;
+    }
+
+    .regularization-page .regularization-refresh {
+        width: 42px;
+        height: 42px;
+        justify-content: center;
+        padding: 0;
+    }
+
+    .regularization-page .regularization-refresh span {
+        display: none;
+    }
+
+    .regularization-tabs a {
+        flex: 1;
+        padding-inline: 10px;
+    }
+
+    .regularization-filters {
+        grid-template-columns: 1fr 92px;
+    }
+
+    .regularization-search,
+    .regularization-filters label:nth-of-type(2) {
+        grid-column: 1 / -1;
+    }
+
+    .regularization-metrics {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .regularization-metrics > a,
+    .regularization-ceased-summary {
+        min-height: 84px;
+        padding: 14px;
+    }
+
+    .regularization-metrics strong {
+        font-size: 21px;
+    }
+
+    .regularization-worker summary {
+        grid-template-columns: minmax(0, 1fr) 18px;
+        gap: 10px;
+        padding: 14px;
+    }
+
+    .regularization-worker-counts {
+        grid-column: 1;
+        justify-content: flex-start;
+    }
+
+    .regularization-chevron {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+    }
+
+    .regularization-worker-body {
+        padding: 16px 14px;
+    }
+
+    .regularization-issues {
+        grid-template-columns: 1fr;
+    }
+
+    .regularization-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .regularization-list-head {
+        align-items: flex-start;
+        padding: 16px 14px;
+    }
+
+    .regularization-range {
+        font-size: 12px;
+    }
+
+    .regularization-ceased-row {
+        grid-template-columns: 1fr;
+        gap: 13px;
+        padding: 16px 14px;
+    }
+
+    .regularization-ceased-row dl {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .regularization-ceased-row > .btn {
+        width: 100%;
+        justify-content: center;
+        grid-column: 1;
+    }
+
+    .regularization-pagination nav > div:last-child {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}

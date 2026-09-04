@@ -310,12 +310,12 @@ class EppService
         }
     }
 
-    public function lastDeliverySummary(string $personalId, string $eppId): ?array
+    public function lastDeliverySummary(string $personalId, string $eppId = ''): ?array
     {
         $personalId = trim($personalId);
         $eppId = trim($eppId);
 
-        if ($personalId === '' || $eppId === '') {
+        if ($personalId === '') {
             return null;
         }
 
@@ -329,7 +329,7 @@ class EppService
                 'cerradoPor.personal:id,nombre_completo',
             ])
             ->where('personal_id', $personalId)
-            ->where('epp_id', $eppId)
+            ->when($eppId !== '', fn ($query) => $query->where('epp_id', $eppId))
             ->orderByDesc('fecha_entrega')
             ->orderByDesc('created_at')
             ->first();

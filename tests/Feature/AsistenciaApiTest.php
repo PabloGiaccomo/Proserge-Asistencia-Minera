@@ -17,6 +17,8 @@ class AsistenciaApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['app.display_timezone' => 'America/Lima']);
+        $this->travelTo(\Carbon\CarbonImmutable::parse('2026-07-01 06:29:00', 'America/Lima'));
 
         $this->rolPlannerId = (string) Str::uuid();
 
@@ -45,6 +47,21 @@ class AsistenciaApiTest extends TestCase
         ]);
 
         $response->assertStatus(404)->assertJsonPath('code', 'ASISTENCIA_GRUPO_NOT_FOUND');
+    }
+
+    public function test_api_no_permite_presente_fuera_de_horario_con_hora_alterada(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $this->travelTo(\Carbon\CarbonImmutable::parse('2026-07-01 06:31:00', 'America/Lima'));
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'PRESENTE',
+            'hora_marcado' => '06:00',
+        ])->assertStatus(422);
+        $this->assertDatabaseMissing('asistencia_detalle', ['trabajador_id' => $trabajadorId, 'estado' => 'PRESENTE']);
     }
 
     public function test_no_marca_personal_fuera_del_grupo(): void

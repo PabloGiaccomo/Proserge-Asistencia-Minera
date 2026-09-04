@@ -202,6 +202,59 @@ class PersonalContractStatusHighlightTest extends TestCase
             ->assertSee('Renuncia');
     }
 
+    public function test_filtro_visible_se_aplica_antes_de_paginar_y_actualiza_el_total(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver']]);
+
+        foreach (range(1, 26) as $index) {
+            app(PersonalService::class)->create([
+                'dni' => '76' . str_pad((string) $index, 6, '0', STR_PAD_LEFT),
+                'tipo_documento' => 'DNI',
+                'numero_documento' => '76' . str_pad((string) $index, 6, '0', STR_PAD_LEFT),
+                'nombre_completo' => 'FILTRO PAGINADO CESADO ' . str_pad((string) $index, 2, '0', STR_PAD_LEFT),
+                'puesto' => 'OPERARIO FILTRO',
+                'contrato' => 'INTER',
+                'estado' => 'CESADO',
+            ]);
+        }
+
+        $firstPage = $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.index', [
+                'q' => 'FILTRO PAGINADO CESADO',
+                'visible_estados' => ['cesado'],
+                'puestos' => ['OPERARIO FILTRO'],
+                'contratos' => ['Intermitente'],
+                'situaciones' => ['no_habilitado'],
+                'per_page' => 25,
+            ]));
+
+        $firstPage->assertOk();
+        $this->assertSame(26, $firstPage->viewData('paginationMeta')['total']);
+        $this->assertSame(1, $firstPage->viewData('paginationMeta')['currentPage']);
+        $this->assertSame(25, count($firstPage->viewData('trabajadores')));
+        $this->assertSame(25, $firstPage->viewData('paginationMeta')['to']);
+        $firstPage
+            ->assertSee("window.personalSkipBootLoading = skipBoot", false)
+            ->assertSee("window.sessionStorage.setItem('proserge.personal.skipBootOnce', '1')", false);
+
+        $secondPage = $this->get(route('personal.index', [
+                'q' => 'FILTRO PAGINADO CESADO',
+                'visible_estados' => ['cesado'],
+                'puestos' => ['OPERARIO FILTRO'],
+                'contratos' => ['Intermitente'],
+                'situaciones' => ['no_habilitado'],
+                'per_page' => 25,
+                'page' => 2,
+            ]));
+
+        $secondPage->assertOk();
+        $this->assertSame(26, $secondPage->viewData('paginationMeta')['total']);
+        $this->assertSame(2, $secondPage->viewData('paginationMeta')['currentPage']);
+        $this->assertCount(1, $secondPage->viewData('trabajadores'));
+        $this->assertSame(26, $secondPage->viewData('paginationMeta')['from']);
+        $this->assertSame(26, $secondPage->viewData('paginationMeta')['to']);
+    }
+
     private function createUser(array $permissions): string
     {
         $roleId = (string) Str::uuid();

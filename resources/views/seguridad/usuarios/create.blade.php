@@ -126,8 +126,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label class="form-label required">Correo electrónico</label>
-                            <input type="email" name="email" class="form-control" value="{{ old('email', $trabajadorSeleccionado->correo) }}" required>
+                            <label class="form-label required" for="usuario-email">Correo electrónico</label>
+                            <input id="usuario-email" type="email" name="email" class="form-control" value="{{ old('email', $emailSugerido) }}" placeholder="nombre.apellido@proserge.com" autocomplete="off" autocapitalize="none" spellcheck="false" required>
                         </div>
 
                         <div class="form-row">

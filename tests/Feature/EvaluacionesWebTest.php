@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Support\Rbac\PermissionCatalog;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -90,9 +91,151 @@ class EvaluacionesWebTest extends TestCase
     {
         $actions = PermissionCatalog::availableModuleActions()['evaluaciones'];
 
-        foreach (['ver_desempeno', 'evaluar_desempeno', 'ver_supervisores', 'evaluar_supervisores', 'ver_residentes', 'evaluar_residentes'] as $action) {
+        foreach (['ver_todas_evaluaciones', 'ver_desempeno', 'evaluar_desempeno', 'ver_supervisores', 'evaluar_supervisores', 'ver_residentes', 'evaluar_residentes'] as $action) {
             $this->assertContains($action, $actions);
         }
+    }
+
+    public function test_permisos_genericos_no_habilitan_tipos_de_evaluacion_desmarcados(): void
+    {
+        $selected = [
+            'evaluaciones' => [
+                'ver',
+                'ver_desempeno',
+                'evaluar_desempeno',
+                'ver_supervisores',
+                'dashboards',
+                'crear',
+                'editar',
+                'actualizar',
+                'aprobar',
+                'administrar',
+            ],
+        ];
+        $permissions = PermissionCatalog::matrixFromSelections($selected);
+
+        $this->assertTrue(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'ver_desempeno'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'evaluar_desempeno'));
+        $this->assertTrue(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'ver_supervisores'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'ver_todas_evaluaciones'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'evaluar_supervisores'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'ver_residentes'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($permissions, 'evaluaciones', 'evaluar_residentes'));
+
+        [$userId] = $this->createUser($selected);
+        $session = [...$this->sessionFor($userId), '_token' => 'evaluation-role-csrf'];
+
+        $this->withSession($session)
+            ->get(route('evaluaciones.index', ['tipo' => 'supervisores']))
+            ->assertOk()
+            ->assertSee('Evaluación realizada por residentes')
+            ->assertDontSee('Nueva evaluación de supervisor')
+            ->assertDontSee('Seguimiento mensual');
+
+        $this->withSession($session)
+            ->get(route('evaluaciones.residentes'))
+            ->assertForbidden();
+
+        $this->withSession($session)
+            ->post(route('evaluaciones.supervisores.store'), ['_token' => 'evaluation-role-csrf'])
+            ->assertForbidden();
+    }
+
+    public function test_ver_evaluaciones_de_otros_controla_el_historial(): void
+    {
+        $basePermissions = [
+            'evaluaciones' => ['ver_desempeno', 'evaluar_desempeno'],
+        ];
+        [$userId, $personalId, $roleId] = $this->createUser($basePermissions);
+        [$otherUserId, $otherPersonalId] = $this->createUser($basePermissions);
+        [$ownMineId, $ownDetailId, $ownWorkerId] = $this->createClosedAttendance($userId, $personalId);
+        [$otherMineId, $otherDetailId, $otherWorkerId] = $this->createClosedAttendance($otherUserId, $otherPersonalId);
+        DB::table('personal')->where('id', $ownWorkerId)->update(['nombre_completo' => 'TECNICO HISTORIAL PROPIO']);
+        DB::table('personal')->where('id', $otherWorkerId)->update(['nombre_completo' => 'TECNICO HISTORIAL AJENO']);
+        $this->assignScope($userId, $ownMineId);
+        $this->assignScope($userId, $otherMineId);
+
+        $payload = static fn (string $detailId, string $token): array => [
+            '_token' => $token,
+            'asistencia_detalle_id' => $detailId,
+            'desempeno_trabajo' => 4,
+            'orden_limpieza' => 4,
+            'seguridad_trabajo' => 4,
+            'compromiso' => 4,
+            'respuesta_emocional' => 4,
+        ];
+
+        $this->withSession([...$this->sessionFor($userId), '_token' => 'own-evaluation-csrf'])
+            ->post(route('evaluaciones.desempeno.store'), $payload($ownDetailId, 'own-evaluation-csrf'))
+            ->assertSessionHasNoErrors();
+        $this->withSession([...$this->sessionFor($otherUserId), '_token' => 'other-evaluation-csrf'])
+            ->post(route('evaluaciones.desempeno.store'), $payload($otherDetailId, 'other-evaluation-csrf'))
+            ->assertSessionHasNoErrors();
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21']))
+            ->assertOk()
+            ->assertSee('TECNICO HISTORIAL PROPIO')
+            ->assertDontSee('TECNICO HISTORIAL AJENO');
+
+        DB::table('roles')->where('id', $roleId)->update([
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'evaluaciones' => ['ver_desempeno', 'evaluar_desempeno', 'ver_todas_evaluaciones'],
+            ])),
+        ]);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21']))
+            ->assertOk()
+            ->assertSee('TECNICO HISTORIAL PROPIO')
+            ->assertSee('TECNICO HISTORIAL AJENO');
+    }
+
+    public function test_administrador_puede_evaluar_una_asistencia_cerrada_por_otro_responsable(): void
+    {
+        [$adminUserId, $adminPersonalId] = $this->createUser([
+            'evaluaciones' => [
+                'ver_desempeno',
+                'evaluar_desempeno',
+                'ver_todas_evaluaciones',
+                'administrar',
+            ],
+        ]);
+        [$ownerUserId, $ownerPersonalId] = $this->createUser([
+            'evaluaciones' => ['ver_desempeno', 'evaluar_desempeno'],
+        ]);
+        [, $detailId, $workerId] = $this->createClosedAttendance($ownerUserId, $ownerPersonalId);
+        DB::table('personal')->where('id', $workerId)->update([
+            'nombre_completo' => 'TECNICO PENDIENTE DE OTRO RESPONSABLE',
+        ]);
+
+        $session = [...$this->sessionFor($adminUserId), '_token' => 'admin-evaluation-csrf'];
+
+        $this->withSession($session)
+            ->get(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21']))
+            ->assertOk()
+            ->assertSee('TECNICO PENDIENTE DE OTRO RESPONSABLE')
+            ->assertSee('incluidas las registradas por otros responsables');
+
+        $this->withSession($session)
+            ->post(route('evaluaciones.desempeno.store'), [
+                '_token' => 'admin-evaluation-csrf',
+                'asistencia_detalle_id' => $detailId,
+                'desempeno_trabajo' => 4,
+                'orden_limpieza' => 4,
+                'seguridad_trabajo' => 4,
+                'compromiso' => 4,
+                'respuesta_emocional' => 4,
+                'observaciones' => 'Evaluación registrada por contingencia administrativa.',
+            ])
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('evaluacion_desempeno', [
+            'asistencia_detalle_id' => $detailId,
+            'evaluado_por_usuario_id' => $adminUserId,
+            'supervisor_id' => $adminPersonalId,
+            'total' => 20,
+        ]);
     }
 
     public function test_permisos_especificos_habilitan_supervisor_y_residente(): void

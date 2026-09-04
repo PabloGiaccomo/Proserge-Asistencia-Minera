@@ -308,7 +308,7 @@
                     <div class="ficha-field ficha-field-wide">
                         <label class="ficha-label" for="documento_{{ $docKey }}">
                             {{ $requirement['label'] ?? $docKey }}
-                            @if(!$readonly)<span class="ficha-status ficha-status-pending">Opcional</span>@endif
+                            @if(!$readonly)<span class="ficha-status ficha-status-pending">Obligatorio</span>@endif
                         </label>
                         @if($storedDoc)
                             <div class="ingreso-file-row">

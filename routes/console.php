@@ -12,3 +12,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command(NotificationsCleanupExpiredCommand::class)->dailyAt('02:10');
 Schedule::command(ParadaHerramientasDeadlineReminderCommand::class)->dailyAt('07:30');
+Schedule::command(\App\Console\Commands\AsistenciaAusentesPorHorarioCommand::class)->everyMinute()->withoutOverlapping();

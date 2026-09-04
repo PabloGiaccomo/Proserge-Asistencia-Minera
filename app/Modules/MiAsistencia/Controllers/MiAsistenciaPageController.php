@@ -59,14 +59,16 @@ class MiAsistenciaPageController extends WebPageController
             ))
             ->values()
             ->all();
-        $attendanceReady = filled($grupo->supervisor_id)
+        $canManageAll = PermissionMatrix::userCanDirect($user, 'mi_asistencia', 'ver_todas_asistencias');
+        $attendanceReady = $canManageAll
+            || filled($grupo->supervisor_id)
             || filled($grupo->asistencia?->id)
             || filled($user->personal_id);
 
         return view('mi-asistencia.show', [
             'user' => $user,
             'grupo' => $data,
-            'canViewAll' => PermissionMatrix::userCanDirect($user, 'mi_asistencia', 'ver_todas_asistencias'),
+            'canViewAll' => $canManageAll,
             'attendanceReady' => $attendanceReady,
             'canRegister' => $attendanceReady && $this->policy->canRegisterGrupo($user, $grupo),
             'canClose' => $attendanceReady && $this->policy->canCloseGrupo($user, $grupo),
@@ -81,6 +83,7 @@ class MiAsistenciaPageController extends WebPageController
             'estado' => ['required', 'string', 'in:PRESENTE,AUSENTE,TARDANZA,JUSTIFICADO'],
             'hora_marcado' => ['nullable', 'date_format:H:i'],
             'observaciones' => ['nullable', 'string', 'max:1000'],
+            'registrar_llegada' => ['sometimes', 'boolean'],
         ]);
         $grupo = $this->service->getGrupo($user, $id);
         abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
@@ -88,6 +91,36 @@ class MiAsistenciaPageController extends WebPageController
         $result = $this->service->marcar($user, $grupo, $payload);
 
         return $this->attendanceResponse($request, $result, 'Asistencia actualizada.');
+    }
+
+    public function estado(Request $request, string $id): JsonResponse
+    {
+        $grupo = $this->service->getGrupo($this->requireAuthenticatedUser(), $id);
+        abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
+        $data = AsistenciaGrupoResource::make($grupo)->resolve($request);
+        return response()->json([
+            'horario' => $data['horario_marcacion'],
+            'cerrado' => $grupo->asistencia?->estado === 'CERRADO',
+            'integrantes' => collect($data['integrantes'])->map(fn (array $item): array => [
+                'id' => $item['grupo_trabajo_detalle_id'],
+                'estado' => $item['estado_asistencia'],
+                'hora' => $item['hora_marcado'],
+            ])->values(),
+        ])->header('Cache-Control', 'no-store');
+    }
+
+    public function buscarDni(Request $request, string $id): JsonResponse
+    {
+        $user = $this->requireAuthenticatedUser();
+        $payload = $request->validate([
+            'codigo' => ['required', 'string', 'max:500'],
+        ]);
+        $grupo = $this->service->getGrupo($user, $id);
+
+        abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
+        abort_unless($this->policy->canRegisterGrupo($user, $grupo), 403, 'No tienes permiso para registrar esta asistencia');
+
+        return response()->json($this->service->buscarPersonalPorCodigoDni($grupo, $payload['codigo']));
     }
 
     public function marcarTodos(Request $request, string $id): JsonResponse|RedirectResponse
@@ -124,6 +157,59 @@ class MiAsistenciaPageController extends WebPageController
         return $this->attendanceResponse($request, $result, 'Asistencia cerrada correctamente.');
     }
 
+    public function mobile(Request $request): View
+    {
+        $user = $this->requireAuthenticatedUser();
+        $fecha = $request->validate(['fecha' => ['nullable', 'date']])['fecha'] ?? now()->toDateString();
+        $turno = now()->hour < 18 ? 'DIA' : 'NOCHE';
+
+        $grupos = $this->service->listMiAsistencia($user, ['fecha' => $fecha, 'turno' => $turno]) ?? collect();
+        $grupo = $grupos->first();
+
+        if (!$grupo) {
+            return view('mi-asistencia.mobile-empty', [
+                'user' => $user,
+                'fecha' => $fecha,
+            ]);
+        }
+
+        $canRegister = $this->policy->canRegisterGrupo($user, (object) $grupo);
+
+        $miAsistencia = null;
+        if (filled($user->personal_id) && filled($grupo['grupo_id'])) {
+            $miAsistencia = $this->service->getMiEstadoAsistencia($user, $grupo['grupo_id']);
+        }
+
+        return view('mi-asistencia.mobile', [
+            'user' => $user,
+            'grupo' => $grupo,
+            'canRegister' => $canRegister,
+            'miAsistencia' => $miAsistencia,
+        ]);
+    }
+
+    public function marcarMobile(Request $request, string $id): JsonResponse
+    {
+        $user = $this->requireAuthenticatedUser();
+        $grupo = $this->service->getGrupo($user, $id);
+        abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
+
+        $payload = $request->validate([
+            'grupo_trabajo_detalle_id' => ['required', 'string', 'size:36', 'exists:grupo_trabajo_detalle,id'],
+            'estado' => ['required', 'string', 'in:PRESENTE,AUSENTE,TARDANZA,JUSTIFICADO'],
+            'hora_marcado' => ['nullable', 'date_format:H:i'],
+            'observaciones' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $result = $this->service->marcar($user, $grupo, $payload);
+
+        if (($result['ok'] ?? false) === false) {
+            return response()->json(['ok' => false, 'message' => $result['message'] ?? 'No se pudo marcar.'], 422);
+        }
+
+        return response()->json(['ok' => true, 'message' => 'Asistencia registrada.']);
+    }
+
     private function attendanceResponse(Request $request, array $result, string $message): JsonResponse|RedirectResponse
     {
         if (($result['ok'] ?? false) === false) {
@@ -135,7 +221,7 @@ class MiAsistenciaPageController extends WebPageController
         }
 
         return $request->expectsJson()
-            ? response()->json(['ok' => true, 'message' => $message])
+            ? response()->json(['ok' => true, 'message' => $message, 'estado' => $result['estado'] ?? null, 'hora_marcado' => $result['hora_marcado'] ?? null])
             : back()->with('success', $message);
     }
 }

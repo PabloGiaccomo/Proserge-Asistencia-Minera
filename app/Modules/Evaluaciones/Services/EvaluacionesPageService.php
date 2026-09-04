@@ -45,14 +45,15 @@ class EvaluacionesPageService
                 'supervisores' => $this->policy->canEvaluateType($usuario, 'supervisores'),
                 'residentes' => $this->policy->canEvaluateType($usuario, 'residentes'),
             ],
+            'canEvaluateOthers' => $this->policy->canEvaluateOthers($usuario),
             'availableTypes' => $availableTypes,
             'activeType' => $activeType,
             'selectedDate' => $date,
             'mines' => $mines,
             'dailyPending' => $access['desempeno'] ? $this->dailyPending($usuario, $date) : collect(),
-            'dailyHistory' => $access['desempeno'] ? $this->dailyHistory($usuario) : collect(),
+            'dailyHistory' => $access['desempeno'] ? $this->dailyHistory($usuario, $mineIds) : collect(),
             'supervisorHistory' => $access['supervisores'] ? $this->supervisorHistory($usuario, $mineIds) : collect(),
-            'residentHistory' => $access['residentes'] ? $this->residentHistory() : collect(),
+            'residentHistory' => $access['residentes'] ? $this->residentHistory($usuario) : collect(),
         ];
     }
 
@@ -92,9 +93,11 @@ class EvaluacionesPageService
             ])
             ->whereDate('fecha', $date)
             ->where('estado', 'CERRADO')
-            ->where(function ($query) use ($usuario): void {
-                $query->where('supervisor_id', $usuario->personal_id)
-                    ->orWhereHas('detalle', fn ($detail) => $detail->where('marcado_por_id', $usuario->id));
+            ->when(!$this->policy->canEvaluateOthers($usuario), function ($query) use ($usuario): void {
+                $query->where(function ($ownerQuery) use ($usuario): void {
+                    $ownerQuery->where('supervisor_id', $usuario->personal_id)
+                        ->orWhereHas('detalle', fn ($detail) => $detail->where('marcado_por_id', $usuario->id));
+                });
             })
             ->orderBy('hora_ingreso')
             ->get();
@@ -121,11 +124,14 @@ class EvaluacionesPageService
         })->filter(fn (array $group): bool => $group['workers']->isNotEmpty())->values();
     }
 
-    private function dailyHistory(Usuario $usuario): Collection
+    private function dailyHistory(Usuario $usuario, Collection $mineIds): Collection
     {
+        $canViewOthers = $this->policy->canViewOthers($usuario);
+
         return EvaluacionDesempeno::query()
             ->with(['trabajador:id,nombre_completo,puesto', 'evaluador:id,nombre_completo', 'mina:id,nombre'])
-            ->when(!$this->policy->isPrivileged($usuario), fn ($query) => $query->where('evaluado_por_usuario_id', $usuario->id))
+            ->when(!$canViewOthers, fn ($query) => $query->where('evaluado_por_usuario_id', $usuario->id))
+            ->when($canViewOthers && !$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('mina_id', $mineIds))
             ->orderByDesc('fecha')
             ->orderByDesc('hora')
             ->limit(20)
@@ -137,15 +143,17 @@ class EvaluacionesPageService
         return EvaluacionSupervisor::query()
             ->with(['evaluador:id,nombre_completo', 'evaluado:id,nombre_completo,puesto', 'mina:id,nombre'])
             ->when(!$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('mina_id', $mineIds))
+            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $query->where('evaluador_id', $usuario->personal_id))
             ->orderByDesc('fecha')
             ->limit(20)
             ->get();
     }
 
-    private function residentHistory(): Collection
+    private function residentHistory(Usuario $usuario): Collection
     {
         return EvaluacionResidente::query()
             ->with(['evaluador:id,nombre_completo', 'residente:id,nombre_completo,puesto'])
+            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $query->where('evaluador_id', $usuario->personal_id))
             ->orderByDesc('periodo_mes')
             ->orderByDesc('fecha')
             ->limit(20)

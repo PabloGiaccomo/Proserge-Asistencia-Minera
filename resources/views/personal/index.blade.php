@@ -59,6 +59,18 @@
         ->filter(fn ($value) => in_array($value, ['HABILITADO', 'EN_PROCESO', 'NO_HABILITADO'], true))
         ->values()
         ->all();
+    $serverGridFiltersData = [
+        'puestos' => array_values(array_filter((array) request('puestos', []))),
+        'contratos' => array_values(array_filter((array) request('contratos', []))),
+        'estados' => array_values(array_filter((array) request('visible_estados', request('estado', [])))),
+        'situaciones' => array_values(array_filter((array) request('situaciones', []))),
+        'sort' => (string) request('sort', ''),
+        'order' => strtolower((string) request('order', 'asc')) === 'desc' ? 'desc' : 'asc',
+    ];
+    $serverGridFilterOptions = [
+        'puestos' => array_values($puestoOptions ?? []),
+        'contratos' => array_values($contractTypeOptions ?? []),
+    ];
 @endphp
 <style>
 .acciones-dropdown .accion-item {
@@ -241,6 +253,10 @@
 .personal-page.is-booting .personal-boot-overlay {
     opacity: 1;
     pointer-events: auto;
+}
+
+html.personal-skip-boot .personal-page .personal-boot-overlay {
+    display: none !important;
 }
 
 .personal-boot-card {
@@ -2155,6 +2171,24 @@
     }
 }
 </style>
+<script>
+(function () {
+    const key = 'proserge.personal.skipBootOnce';
+    let skipBoot = false;
+
+    try {
+        skipBoot = window.sessionStorage.getItem(key) === '1';
+        window.sessionStorage.removeItem(key);
+    } catch (error) {
+        skipBoot = false;
+    }
+
+    window.personalSkipBootLoading = skipBoot;
+    if (skipBoot) {
+        document.documentElement.classList.add('personal-skip-boot');
+    }
+})();
+</script>
 <div class="module-page personal-page is-booting" id="personalPageRoot">
     <div class="personal-boot-overlay" id="personalBootOverlay" aria-hidden="true">
         <div class="personal-boot-card">
@@ -2175,6 +2209,15 @@
                 <p class="page-subtitle">Gestión y búsqueda de trabajadores</p>
             </div>
             <div class="page-actions" style="gap: 8px;">
+                @if($canEditPersonal)
+                    <a href="{{ route('personal.regularizacion.index') }}" class="btn btn-outline personal-regularization-link">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M9 11l3 3L22 4"/>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                        </svg>
+                        Regularización
+                    </a>
+                @endif
                 <!-- Dropdown acciones principales -->
                 <div class="dropdown-container" style="position: relative;">
                     <button type="button" id="accionesBtn" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
@@ -3567,6 +3610,16 @@ let contractFormatCurrentStep = 'templates';
 let contractFormatSelectedWorkers = new Map();
 let contractFormatSearchTimer = null;
 
+function normalizeText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, function (char) {
         return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[char];
@@ -4360,6 +4413,7 @@ function openActivateWorker(worker) {
     };
 
     if (form) {
+        form.reset();
         form.action = '/personal/' + encodeURIComponent(worker.id) + '/activar';
     }
     if (nameNode) {
@@ -4412,7 +4466,7 @@ function openActivateWorkerFromRow(row) {
     try {
         openActivateWorker(JSON.parse(row.dataset.worker || '{}'));
     } catch (error) {
-        openActivateWorker({});
+        showToast('No se pudo abrir la reactivacion. Actualiza la pagina e intenta nuevamente.', 'error');
     }
 }
 
@@ -4685,6 +4739,9 @@ document.addEventListener('DOMContentLoaded', function () {
         'minas' => $serverOccupationMineFilters,
         'states' => $serverOccupationStateFilters,
     ]);
+    const serverGridFilters = @json($serverGridFiltersData);
+    const serverGridOptions = @json($serverGridFilterOptions);
+    const skipBootLoading = window.personalSkipBootLoading === true;
     const searchInput = document.getElementById('personal-search');
     const sortNombre = document.getElementById('dgSortNombre');
     const sortDni = document.getElementById('dgSortDni');
@@ -4718,6 +4775,11 @@ document.addEventListener('DOMContentLoaded', function () {
     let gridDragState = null;
     let scrollbarSyncFrame = null;
 
+    if (skipBootLoading) {
+        pageRoot?.classList.remove('is-booting');
+        bootOverlay?.setAttribute('aria-hidden', 'true');
+    }
+
     const filterTriggers = Array.from(document.querySelectorAll('.js-dg-filter-trigger'));
     const filterPopovers = Array.from(document.querySelectorAll('.dg-filter-popover'));
     const filterTriggerByTarget = filterTriggers.reduce(function (map, trigger) {
@@ -4737,6 +4799,13 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const finishBootLoading = function () {
+        if (skipBootLoading) {
+            pageRoot?.classList.remove('is-booting');
+            bootOverlay?.setAttribute('aria-hidden', 'true');
+            document.documentElement.classList.remove('personal-skip-boot');
+            return;
+        }
+
         setBootProgress(100, 'Vista lista');
         window.requestAnimationFrame(function () {
             setTimeout(function () {
@@ -4772,6 +4841,14 @@ document.addEventListener('DOMContentLoaded', function () {
             window.localStorage.removeItem(viewStateKey);
         } catch (error) {
             // noop
+        }
+    };
+
+    const markInternalPersonalNavigation = function () {
+        try {
+            window.sessionStorage.setItem('proserge.personal.skipBootOnce', '1');
+        } catch (error) {
+            // La navegacion continua aunque el navegador bloquee sessionStorage.
         }
     };
 
@@ -4977,6 +5054,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (url.toString() !== window.location.href) {
             clearViewState();
+            markInternalPersonalNavigation();
             window.location.href = url.toString();
         }
     };
@@ -5079,6 +5157,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const url = new URL(window.location.href);
         url.searchParams.set('page', String(Math.max(1, Number(page || 1))));
         url.searchParams.set('per_page', String(Number(nextPageSize || pageSize || serverPagination?.perPage || 25)));
+        markInternalPersonalNavigation();
         window.location.href = url.toString();
     };
 
@@ -5098,8 +5177,55 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (url.toString() !== window.location.href) {
             clearViewState();
+            markInternalPersonalNavigation();
+            try {
+                window.sessionStorage.setItem('proserge.personal.focusSearchOnce', '1');
+            } catch (error) {
+                // La busqueda sigue disponible sin almacenamiento de sesion.
+            }
             window.location.href = url.toString();
         }
+    };
+
+    let serverGridFilterTimer = null;
+    const navigateServerGridFilters = function () {
+        if (!hasServerPagination) return;
+
+        const url = new URL(window.location.href);
+        ['puestos', 'contratos', 'visible_estados', 'situaciones'].forEach(function (key) {
+            url.searchParams.delete(key);
+            url.searchParams.delete(key + '[]');
+        });
+        url.searchParams.delete('estado');
+
+        collectSelectedPuestos().forEach(function (value) { url.searchParams.append('puestos[]', value); });
+        collectSelectedContratos().forEach(function (value) { url.searchParams.append('contratos[]', value); });
+        collectSelectedEstados().forEach(function (value) { url.searchParams.append('visible_estados[]', value); });
+        collectSelectedBienestares().forEach(function (value) { url.searchParams.append('situaciones[]', value); });
+
+        const nameOrder = sortNombre?.value || '';
+        const dniOrder = sortDni?.value || '';
+        if (dniOrder) {
+            url.searchParams.set('sort', 'dni');
+            url.searchParams.set('order', dniOrder);
+        } else if (nameOrder) {
+            url.searchParams.set('sort', 'nombre');
+            url.searchParams.set('order', nameOrder);
+        } else {
+            url.searchParams.delete('sort');
+            url.searchParams.delete('order');
+        }
+
+        url.searchParams.set('page', '1');
+        url.searchParams.set('per_page', String(Number(pageSize || serverPagination?.perPage || 25)));
+        clearViewState();
+        markInternalPersonalNavigation();
+        window.location.href = url.toString();
+    };
+
+    const scheduleServerGridFilters = function () {
+        window.clearTimeout(serverGridFilterTimer);
+        serverGridFilterTimer = window.setTimeout(navigateServerGridFilters, 220);
     };
 
     const buildPageSizeOptions = function (totalCount, preferredValue) {
@@ -5420,19 +5546,10 @@ document.addEventListener('DOMContentLoaded', function () {
         resetViewButton.addEventListener('click', function () {
             clearViewState();
             const targetUrl = resetViewButton.dataset.resetUrl || window.location.pathname;
+            markInternalPersonalNavigation();
             window.location.href = targetUrl;
         });
     }
-
-    const normalizeText = function(value) {
-        return String(value || '')
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9\s]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-    };
 
     const savedState = readViewState();
 
@@ -5466,8 +5583,16 @@ document.addEventListener('DOMContentLoaded', function () {
         return Array.from(container.querySelectorAll('input[type="checkbox"]'));
     };
 
-    puestoFilterCheckboxes = populateCheckboxGroup(puestoFilterChecks, rows.map(r => r.dataset.puesto || ''), 'js-dg-puesto-check');
-    contratoFilterCheckboxes = populateCheckboxGroup(contratoFilterChecks, rows.map(r => r.dataset.contrato || ''), 'js-dg-contrato-check');
+    puestoFilterCheckboxes = populateCheckboxGroup(
+        puestoFilterChecks,
+        (serverGridOptions.puestos || []).concat(rows.map(r => r.dataset.puesto || ''), serverGridFilters.puestos || []),
+        'js-dg-puesto-check'
+    );
+    contratoFilterCheckboxes = populateCheckboxGroup(
+        contratoFilterChecks,
+        (serverGridOptions.contratos || []).concat(rows.map(r => r.dataset.contrato || ''), serverGridFilters.contratos || []),
+        'js-dg-contrato-check'
+    );
 
     let currentPage = hasServerPagination ? Number(serverPagination.currentPage || 1) : 1;
     let pageSize = hasServerPagination
@@ -5503,7 +5628,14 @@ document.addEventListener('DOMContentLoaded', function () {
         pageSize = Number(nextPageSize || 10);
     }
 
-    if (!hasServerPagination) {
+    if (hasServerPagination) {
+        if (sortNombre && serverGridFilters.sort === 'nombre') sortNombre.value = serverGridFilters.order || 'asc';
+        if (sortDni && serverGridFilters.sort === 'dni') sortDni.value = serverGridFilters.order || 'asc';
+        applyCheckedValues(puestoFilterCheckboxes, serverGridFilters.puestos || []);
+        applyCheckedValues(contratoFilterCheckboxes, serverGridFilters.contratos || []);
+        applyCheckedValues(estadoFilterCheckboxes, serverGridFilters.estados || []);
+        applyCheckedValues(bienestarFilterCheckboxes, serverGridFilters.situaciones || []);
+    } else {
         if (sortNombre && typeof savedState.sortNombre === 'string') sortNombre.value = savedState.sortNombre;
         if (sortDni && typeof savedState.sortDni === 'string') sortDni.value = savedState.sortDni;
         applyCheckedValues(puestoFilterCheckboxes, normalizeSavedFilterValues(savedState.puestos, savedState.puesto));
@@ -5634,6 +5766,10 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const applyFiltersAndSort = function() {
+        if (hasServerPagination) {
+            return rows;
+        }
+
         const search = hasServerPagination ? '' : normalizeText(searchInput?.value || '');
         const searchTokens = search.split(' ').filter(Boolean);
         const puestos = normalizeFilterValues(collectSelectedPuestos());
@@ -5847,13 +5983,28 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         if (hasServerPagination) {
-            simpleSearchInput.setAttribute('title', 'Presiona Enter para buscar en todo el personal.');
+            simpleSearchInput.removeAttribute('title');
+            try {
+                if (window.sessionStorage.getItem('proserge.personal.focusSearchOnce') === '1') {
+                    window.sessionStorage.removeItem('proserge.personal.focusSearchOnce');
+                    simpleSearchInput.focus({ preventScroll: true });
+                    const end = simpleSearchInput.value.length;
+                    simpleSearchInput.setSelectionRange(end, end);
+                }
+            } catch (error) {
+                // Algunos navegadores restringen sessionStorage o la seleccion.
+            }
         }
 
-        simpleSearchInput.addEventListener('input', function () {
+        simpleSearchInput.addEventListener('input', function (event) {
             syncSearchClear();
             if (hasServerPagination) {
                 window.clearTimeout(simpleSearchTimer);
+                if (!event.isComposing) {
+                    simpleSearchTimer = window.setTimeout(function () {
+                        navigateServerSearch(simpleSearchInput.value);
+                    }, 350);
+                }
                 return;
             }
             renderGrid(true);
@@ -5884,11 +6035,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
     [sortNombre, sortDni].forEach(function(el) {
         if (!el) return;
-        el.addEventListener('change', function () { renderGrid(true); });
+        el.addEventListener('change', function () {
+            if (hasServerPagination) {
+                if (el === sortNombre && sortDni) sortDni.value = '';
+                if (el === sortDni && sortNombre) sortNombre.value = '';
+                scheduleServerGridFilters();
+                return;
+            }
+            renderGrid(true);
+        });
     });
     [puestoFilterCheckboxes, contratoFilterCheckboxes, estadoFilterCheckboxes, bienestarFilterCheckboxes].forEach(function (checkboxGroup) {
         checkboxGroup.forEach(function (input) {
             input.addEventListener('change', function () {
+                if (hasServerPagination) {
+                    scheduleServerGridFilters();
+                    return;
+                }
                 renderGrid(true);
             });
         });

@@ -35,8 +35,25 @@ class PersonalMinaExcelImportService
         $unmapped = [];
         $errors = [];
         $omitted = [];
+        $examCatalog = [];
 
         foreach ($spreadsheet->getWorksheetIterator() as $sheet) {
+            if ($sheet->getSheetState() !== 'visible') {
+                $omitted[] = [
+                    'hoja' => $sheet->getTitle(),
+                    'motivo' => 'Hoja oculta o auxiliar. No participa en la importacion.',
+                ];
+                continue;
+            }
+
+            if ($this->isAuxiliarySheetName($sheet->getTitle())) {
+                $omitted[] = [
+                    'hoja' => $sheet->getTitle(),
+                    'motivo' => 'Nombre de hoja auxiliar o de respaldo.',
+                ];
+                continue;
+            }
+
             $grid = $this->sheetGrid($sheet);
             $headerRow = $this->detectHeaderRow($grid);
             if ($headerRow === null) {
@@ -64,6 +81,23 @@ class PersonalMinaExcelImportService
             }
 
             $mineName = $this->detectMineName($sheet->getTitle(), $columns);
+            if ($mineName === '') {
+                $omitted[] = [
+                    'hoja' => $sheet->getTitle(),
+                    'motivo' => 'No se pudo identificar una unidad minera valida.',
+                ];
+                continue;
+            }
+            $examCatalog[] = [
+                'hoja' => $sheet->getTitle(),
+                'mina' => $mineName,
+                'examenes' => collect(array_keys($columns['examenes']))
+                    ->filter()
+                    ->map(fn ($name) => ['nombre' => (string) $name])
+                    ->values()
+                    ->all(),
+            ];
+
             for ($rowIndex = $headerRow + 1; $rowIndex <= count($grid); $rowIndex++) {
                 $row = $grid[$rowIndex] ?? [];
                 if ($this->rowIsBlank($row)) {
@@ -129,10 +163,11 @@ class PersonalMinaExcelImportService
             }
         }
 
-        $index = $this->previewDatabaseIndex($rows);
+        $index = $this->previewDatabaseIndex($rows, $examCatalog);
         $rows = $this->decoratePreviewRows($rows, $index);
+        $examCatalog = $this->decorateExamCatalog($examCatalog, $index);
 
-        return $this->buildPreviewSummary($rows, $errors, $omitted, $unmapped, $index);
+        return $this->buildPreviewSummary($rows, $errors, $omitted, $unmapped, $index, $examCatalog);
     }
 
     public function confirm(array $preview, Usuario $user): array
@@ -145,7 +180,16 @@ class PersonalMinaExcelImportService
             'trabajadores_no_encontrados' => 0,
             'minas_creadas' => 0,
             'examenes_creados' => 0,
+            'examenes_renombrados' => 0,
+            'examenes_reactivados' => 0,
+            'examenes_catalogo_desactivados' => 0,
+            'examenes_convalidables_activados' => 0,
+            'examenes_convalidables_desactivados' => 0,
             'examenes_mina_agregados' => 0,
+            'examenes_mina_actualizados' => 0,
+            'examenes_mina_reactivados' => 0,
+            'examenes_mina_desactivados' => 0,
+            'minas_catalogo_reconciliado' => 0,
             'asignaciones_creadas' => 0,
             'examenes_trabajador_actualizados' => 0,
             'intentos_importados' => 0,
@@ -164,6 +208,48 @@ class PersonalMinaExcelImportService
             $assignmentCache = [];
             $processedWorkerIds = [];
             $missingDocuments = [];
+            $changedMineIds = [];
+            $examCatalog = $preview['catalogo_examenes'] ?? $this->examCatalogFromRows($preview['rows'] ?? []);
+            $catalogByMine = $this->catalogByMine($examCatalog);
+            if ($catalogByMine === [] || collect($catalogByMine)->sum(fn (array $row) => count($row['examenes'] ?? [])) === 0) {
+                throw new \RuntimeException('El Master no contiene un catalogo minero valido. No se reemplazo ningun dato.');
+            }
+            $sharedExamKeys = $this->sharedExamKeys($examCatalog);
+            $currentExamIds = [];
+            $currentRequirementIds = [];
+
+            foreach ($catalogByMine as $catalogRow) {
+                $mina = $this->resolveMineCached((string) ($catalogRow['mina'] ?? ''), $counts, $mineCache);
+                if (!$mina) {
+                    continue;
+                }
+
+                foreach ($catalogRow['examenes'] ?? [] as $examRow) {
+                    $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache);
+                    $currentExamIds[$exam->id] = true;
+                    $allowsConvalidation = isset($sharedExamKeys[$this->sharedExamIdentity($examRow)]);
+                    $this->syncExamConvalidation($exam, $allowsConvalidation, $counts, $user);
+                    $requirement = $this->resolveRequirementCached($mina, $exam, $counts, $requirementCache, $allowsConvalidation);
+                    $currentRequirementIds[$requirement->id] = true;
+                }
+
+                $changedMineIds[$mina->id] = true;
+                $counts['minas_catalogo_reconciliado']++;
+            }
+
+            foreach ($this->replaceActiveCatalog(
+                array_keys($currentExamIds),
+                array_keys($currentRequirementIds),
+                $counts,
+                $user,
+            ) as $mineId) {
+                $changedMineIds[$mineId] = true;
+            }
+
+            foreach (array_keys($changedMineIds) as $mineId) {
+                $sync = $this->habilitation->syncMineAssignmentsAfterRequirementChanges($mineId, $user);
+                $counts['estados_habilitacion_actualizados'] += (int) ($sync['asignaciones_recalculadas'] ?? 0);
+            }
 
             foreach ($preview['rows'] ?? [] as $row) {
                 if (empty($row['documento'])) {
@@ -187,7 +273,8 @@ class PersonalMinaExcelImportService
                     if (!empty($examRow['preview']['convalidacion_sugerida'])) {
                         $counts['convalidaciones_sugeridas']++;
                     }
-                    $this->resolveRequirementCached($mina, $exam, $counts, $requirementCache);
+                    $allowsConvalidation = isset($sharedExamKeys[$this->sharedExamIdentity($examRow)]);
+                    $this->resolveRequirementCached($mina, $exam, $counts, $requirementCache, $allowsConvalidation);
                     $resolvedExams[] = [$exam, $examRow];
                 }
 
@@ -237,6 +324,7 @@ class PersonalMinaExcelImportService
                     $counts['estados_habilitacion_actualizados']++;
                 }
             }
+
         });
 
         return $counts;
@@ -459,6 +547,14 @@ class PersonalMinaExcelImportService
         return mb_substr($name, 0, 191);
     }
 
+    private function isAuxiliarySheetName(string $sheetTitle): bool
+    {
+        $name = $this->normalizeHeader($sheetTitle);
+
+        return preg_match('/^(hoja|sheet)\s*\d*$/u', $name) === 1
+            || preg_match('/^(copia|backup|respaldo|temporal|temp)(\s|$)/u', $name) === 1;
+    }
+
     private function examValuesFromRow(array $row, array $fields): array
     {
         $values = [];
@@ -496,15 +592,25 @@ class PersonalMinaExcelImportService
         ];
     }
 
-    private function previewDatabaseIndex(array $rows): array
+    private function previewDatabaseIndex(array $rows, array $examCatalog = []): array
     {
         $workerDocs = collect($rows)->pluck('documento')->filter()->unique()->values();
         $workerDocVariants = $workerDocs
             ->flatMap(fn ($document) => $this->documentLookupVariants((string) $document))
             ->unique()
             ->values();
-        $mineNames = collect($rows)->pluck('mina')->filter()->unique()->values();
-        $examNames = collect($rows)->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))->filter()->unique()->values();
+        $mineNames = collect($examCatalog)
+            ->pluck('mina')
+            ->merge(collect($rows)->pluck('mina'))
+            ->filter()
+            ->unique()
+            ->values();
+        $examNames = collect($examCatalog)
+            ->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))
+            ->merge(collect($rows)->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre')))
+            ->filter()
+            ->unique()
+            ->values();
 
         $workersByDocument = [];
         if ($workerDocVariants->isNotEmpty()) {
@@ -530,10 +636,18 @@ class PersonalMinaExcelImportService
             ->mapWithKeys(fn (Mina $mine) => [$this->indexKey($mine->nombre) => $mine])
             ->all();
 
-        $examsByName = ExamenMinero::query()
-            ->where('activo', true)
-            ->get(['id', 'nombre'])
+        $allExams = ExamenMinero::query()
+            ->get(['id', 'nombre', 'activo'])
+            ->values();
+        $activeExams = $allExams->where('activo', true)->values();
+        $examsByName = $allExams
+            ->sortBy(fn (ExamenMinero $exam) => $exam->activo ? 1 : 0)
             ->mapWithKeys(fn (ExamenMinero $exam) => [$this->indexKey($exam->nombre) => $exam])
+            ->all();
+        $examsByCanonicalName = $allExams
+            ->groupBy(fn (ExamenMinero $exam) => $this->examIndexKey($exam->nombre))
+            ->filter(fn ($matches, $key) => $key !== '' && $matches->count() === 1)
+            ->map(fn ($matches) => $matches->first())
             ->all();
 
         $mineIds = $mineNames
@@ -542,7 +656,11 @@ class PersonalMinaExcelImportService
             ->unique()
             ->values();
         $examIds = $examNames
-            ->map(fn ($name) => $examsByName[$this->indexKey((string) $name)]?->id ?? null)
+            ->map(fn ($name) => $this->matchingExam((string) $name, [
+                'examsByName' => $examsByName,
+                'examsByCanonicalName' => $examsByCanonicalName,
+                'allExams' => $allExams,
+            ])?->id)
             ->filter()
             ->unique()
             ->values();
@@ -579,6 +697,9 @@ class PersonalMinaExcelImportService
             'workersByDocument' => $workersByDocument,
             'minesByName' => $minesByName,
             'examsByName' => $examsByName,
+            'examsByCanonicalName' => $examsByCanonicalName,
+            'activeExams' => $activeExams,
+            'allExams' => $allExams,
             'requirementKeys' => $requirementKeys,
             'assignmentKeys' => $assignmentKeys,
         ];
@@ -599,7 +720,11 @@ class PersonalMinaExcelImportService
 
             foreach ($row['examenes'] as &$examRow) {
                 $examName = (string) ($examRow['nombre'] ?? '');
-                $examRow['existe'] = isset($index['examsByName'][$this->indexKey($examName)]);
+                $matchedExam = $this->matchingExam($examName, $index);
+                $examRow['existe'] = (bool) $matchedExam;
+                $examRow['examen_id_existente'] = $matchedExam?->id;
+                $examRow['nombre_anterior'] = $matchedExam?->nombre;
+                $examRow['accion_catalogo'] = $this->catalogActionFor($examName, $matchedExam);
                 $examRow['examenes_parecidos'] = $this->similarExamSuggestionsFor($examName, $index);
             }
             unset($examRow);
@@ -609,14 +734,34 @@ class PersonalMinaExcelImportService
         return $rows;
     }
 
-    private function buildPreviewSummary(array $rows, array $errors, array $omitted, array $unmapped, array $index): array
+    private function decorateExamCatalog(array $examCatalog, array $index): array
+    {
+        foreach ($examCatalog as &$catalogRow) {
+            foreach ($catalogRow['examenes'] as &$examRow) {
+                $name = (string) ($examRow['nombre'] ?? '');
+                $matchedExam = $this->matchingExam($name, $index);
+                $examRow['existe'] = (bool) $matchedExam;
+                $examRow['examen_id_existente'] = $matchedExam?->id;
+                $examRow['nombre_anterior'] = $matchedExam?->nombre;
+                $examRow['accion_catalogo'] = $this->catalogActionFor($name, $matchedExam);
+            }
+            unset($examRow);
+        }
+        unset($catalogRow);
+
+        return $examCatalog;
+    }
+
+    private function buildPreviewSummary(array $rows, array $errors, array $omitted, array $unmapped, array $index, array $examCatalog): array
     {
         $workerDocs = collect($rows)->pluck('documento')->filter()->unique();
-        $mineNames = collect($rows)->pluck('mina')->filter()->unique();
-        $examNames = collect($rows)->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))->filter()->unique();
+        $mineNames = collect($examCatalog)->pluck('mina')->merge(collect($rows)->pluck('mina'))->filter()->unique();
+        $catalogExamRows = collect($examCatalog)->flatMap(fn ($row) => $row['examenes'] ?? []);
+        $matchedExamIds = $catalogExamRows->pluck('examen_id_existente')->filter()->unique();
         $conflicts = $this->conflicts($rows, $index);
         $missingWorkerDocs = $workerDocs->filter(fn ($doc) => !isset($index['workersByDocument'][$doc]));
         $existingWorkerDocs = $workerDocs->filter(fn ($doc) => isset($index['workersByDocument'][$doc]));
+        $requirementsToDeactivate = $this->obsoleteRequirementsByMine($examCatalog, $index);
 
         return [
             'token' => (string) Str::uuid(),
@@ -629,9 +774,13 @@ class PersonalMinaExcelImportService
                 'filas_no_importables_trabajador_no_encontrado' => collect($rows)->where('trabajador_existe', false)->count(),
                 'minas_nuevas' => $mineNames->filter(fn ($name) => !isset($index['minesByName'][$this->indexKey((string) $name)]))->count(),
                 'minas_existentes' => $mineNames->filter(fn ($name) => isset($index['minesByName'][$this->indexKey((string) $name)]))->count(),
-                'examenes_nuevos' => $examNames->filter(fn ($name) => !isset($index['examsByName'][$this->indexKey((string) $name)]))->count(),
-                'examenes_existentes' => $examNames->filter(fn ($name) => isset($index['examsByName'][$this->indexKey((string) $name)]))->count(),
-                'examenes_agregados_a_minas' => $this->countMissingRequirements($rows, $index),
+                'examenes_nuevos' => $catalogExamRows->where('existe', false)->pluck('nombre')->unique()->count(),
+                'examenes_existentes' => $catalogExamRows->where('existe', true)->pluck('examen_id_existente')->unique()->count(),
+                'examenes_catalogo_por_desactivar' => collect($index['activeExams'] ?? [])->reject(fn (ExamenMinero $exam) => $matchedExamIds->contains($exam->id))->count(),
+                'nombres_examen_por_actualizar' => $catalogExamRows->where('accion_catalogo', 'ACTUALIZAR_NOMBRE')->pluck('examen_id_existente')->unique()->count(),
+                'examenes_compartidos_convalidables' => count($this->sharedExamKeys($examCatalog)),
+                'examenes_agregados_a_minas' => $this->countMissingRequirements($examCatalog, $index),
+                'requisitos_obsoletos_por_desactivar' => collect($requirementsToDeactivate)->sum(fn ($row) => count($row['requisitos'] ?? [])),
                 'trabajadores_asignados_a_minas' => $this->countMissingAssignments($rows, $index),
                 'filas_con_error' => count($errors),
                 'filas_omitidas' => count($omitted),
@@ -644,7 +793,7 @@ class PersonalMinaExcelImportService
                 'dni_7_digitos_corregidos' => collect($rows)->where('documento_corregido_con_cero', true)->pluck('documento')->unique()->count(),
             ],
             'sheets' => [
-                'detectadas' => collect($rows)->pluck('hoja')->filter()->unique()->values()->all(),
+                'detectadas' => collect($examCatalog)->pluck('hoja')->merge(collect($rows)->pluck('hoja'))->filter()->unique()->values()->all(),
                 'omitidas' => $omitted,
             ],
             'trabajadores_no_encontrados' => $rows
@@ -660,7 +809,43 @@ class PersonalMinaExcelImportService
                     ->values()
                     ->all()
                 : [],
-            'examenes_parecidos' => $this->similarExamSuggestions($rows, $index),
+            'examenes_no_encontrados' => $catalogExamRows
+                ->where('existe', false)
+                ->pluck('nombre')
+                ->filter()
+                ->unique()
+                ->sort()
+                ->values()
+                ->all(),
+            'nombres_examen_por_actualizar' => $catalogExamRows
+                ->where('accion_catalogo', 'ACTUALIZAR_NOMBRE')
+                ->map(fn ($exam) => [
+                    'actual' => $exam['nombre_anterior'] ?? null,
+                    'nuevo' => $exam['nombre'] ?? null,
+                ])
+                ->unique(fn ($exam) => ($exam['actual'] ?? '') . '|' . ($exam['nuevo'] ?? ''))
+                ->values()
+                ->all(),
+            'equivalencias_nombres_seguras' => $catalogExamRows
+                ->where('accion_catalogo', 'USAR_NOMBRE_EXISTENTE')
+                ->map(fn ($exam) => [
+                    'detectado' => $exam['nombre'] ?? null,
+                    'catalogo' => $exam['nombre_anterior'] ?? null,
+                ])
+                ->unique(fn ($exam) => ($exam['detectado'] ?? '') . '|' . ($exam['catalogo'] ?? ''))
+                ->values()
+                ->all(),
+            'examenes_ausentes_en_excel' => collect($index['activeExams'] ?? [])
+                ->reject(fn (ExamenMinero $exam) => $matchedExamIds->contains($exam->id))
+                ->pluck('nombre')
+                ->filter()
+                ->sort()
+                ->values()
+                ->all(),
+            'examenes_faltantes_por_mina' => $this->missingExamNamesByMine($examCatalog),
+            'requisitos_obsoletos_por_mina' => $requirementsToDeactivate,
+            'examenes_parecidos' => $this->similarExamSuggestions($examCatalog, $index),
+            'catalogo_examenes' => $examCatalog,
             'rows' => $rows,
             'errors' => $errors,
             'omitted' => $omitted,
@@ -733,11 +918,39 @@ class PersonalMinaExcelImportService
     private function resolveExam(array $examRow, array &$counts, Usuario $user): ExamenMinero
     {
         $name = mb_substr(PersonalNormalizer::text($examRow['nombre'] ?? ''), 0, 191);
-        $exam = ExamenMinero::query()
-            ->whereRaw('LOWER(TRIM(nombre)) = ?', [mb_strtolower($name)])
-            ->where('activo', true)
-            ->first();
+        $allExams = ExamenMinero::query()->get();
+        $exam = $allExams
+            ->sortByDesc(fn (ExamenMinero $candidate) => (int) $candidate->activo)
+            ->first(fn (ExamenMinero $candidate) => $this->indexKey($candidate->nombre) === $this->indexKey($name));
+        $matchType = $exam ? 'exact' : null;
+        if (!$exam) {
+            $canonicalKey = $this->examIndexKey($name);
+            $canonicalMatches = $allExams
+                ->filter(fn (ExamenMinero $candidate) => $this->examIndexKey($candidate->nombre) === $canonicalKey);
+            $exam = $canonicalMatches->count() === 1 ? $canonicalMatches->first() : null;
+            $matchType = $exam ? 'canonical' : null;
+        }
         if ($exam) {
+            if (!$exam->activo) {
+                $exam->forceFill([
+                    'activo' => true,
+                    'updated_by_usuario_id' => $user->id,
+                ])->save();
+                $counts['examenes_reactivados']++;
+            }
+
+            if ($exam->nombre !== $name && $name !== '') {
+                $exam->forceFill([
+                    'nombre' => $name,
+                    'updated_by_usuario_id' => $user->id,
+                ])->save();
+                MinaRequisito::query()
+                    ->where('examen_id', $exam->id)
+                    ->where('activo', true)
+                    ->update(['nombre' => $name, 'updated_at' => now()]);
+                $counts['examenes_renombrados']++;
+            }
+
             return $exam;
         }
 
@@ -753,7 +966,7 @@ class PersonalMinaExcelImportService
 
     private function resolveExamCached(array $examRow, array &$counts, Usuario $user, array &$cache): ExamenMinero
     {
-        $key = $this->indexKey((string) ($examRow['nombre'] ?? ''));
+        $key = $this->examIndexKey((string) ($examRow['nombre'] ?? ''));
         if (isset($cache[$key])) {
             return $cache[$key];
         }
@@ -761,14 +974,36 @@ class PersonalMinaExcelImportService
         return $cache[$key] = $this->resolveExam($examRow, $counts, $user);
     }
 
-    private function resolveRequirement(Mina $mine, ExamenMinero $exam, array &$counts): MinaRequisito
+    private function resolveRequirement(Mina $mine, ExamenMinero $exam, array &$counts, bool $allowsConvalidation = false): MinaRequisito
     {
         $requirement = MinaRequisito::query()
             ->where('mina_id', $mine->id)
             ->where('examen_id', $exam->id)
-            ->where('activo', true)
+            ->orderByDesc('activo')
+            ->orderByDesc('updated_at')
             ->first();
         if ($requirement) {
+            $payload = [
+                'nombre' => $exam->nombre,
+                'tipo' => $exam->tipo,
+                'activo' => true,
+                'permite_convalidacion_mina' => $allowsConvalidation,
+                'convalidar_desde_otras_minas' => $allowsConvalidation,
+            ];
+            if (!$allowsConvalidation) {
+                $payload['fecha_inicio_convalidacion'] = null;
+                $payload['fecha_fin_convalidacion'] = null;
+                $payload['minas_origen_convalidacion_json'] = null;
+            }
+            $requirement->forceFill($payload);
+            if ($requirement->isDirty()) {
+                if (!$requirement->getOriginal('activo')) {
+                    $counts['examenes_mina_reactivados']++;
+                }
+                $requirement->save();
+                $counts['examenes_mina_actualizados']++;
+            }
+
             return $requirement;
         }
 
@@ -787,18 +1022,32 @@ class PersonalMinaExcelImportService
             'activo' => true,
             'orden' => 0,
             'permite_no_aplica' => true,
-            'permite_convalidacion_mina' => (bool) $exam->permite_convalidacion,
+            'permite_convalidacion_mina' => $allowsConvalidation,
+            'convalidar_desde_otras_minas' => $allowsConvalidation,
         ]);
     }
 
-    private function resolveRequirementCached(Mina $mine, ExamenMinero $exam, array &$counts, array &$cache): MinaRequisito
+    private function resolveRequirementCached(Mina $mine, ExamenMinero $exam, array &$counts, array &$cache, bool $allowsConvalidation = false): MinaRequisito
     {
         $key = $mine->id . '|' . $exam->id;
         if (isset($cache[$key])) {
             return $cache[$key];
         }
 
-        return $cache[$key] = $this->resolveRequirement($mine, $exam, $counts);
+        return $cache[$key] = $this->resolveRequirement($mine, $exam, $counts, $allowsConvalidation);
+    }
+
+    private function syncExamConvalidation(ExamenMinero $exam, bool $allowsConvalidation, array &$counts, Usuario $user): void
+    {
+        if ((bool) $exam->permite_convalidacion === $allowsConvalidation) {
+            return;
+        }
+
+        $exam->forceFill([
+            'permite_convalidacion' => true,
+            'updated_by_usuario_id' => $user->id,
+        ])->save();
+        $counts[$allowsConvalidation ? 'examenes_convalidables_activados' : 'examenes_convalidables_desactivados']++;
     }
 
     private function resolveAssignment(Personal $personal, Mina $mine, Usuario $user, array &$counts): PersonalMina
@@ -1314,6 +1563,253 @@ class PersonalMinaExcelImportService
         return $this->normalizeHeader($value);
     }
 
+    private function examIndexKey(string $value): string
+    {
+        return preg_replace('/[^a-z0-9]+/', '', $this->normalizeHeader($value)) ?: '';
+    }
+
+    private function matchingExam(string $name, array $index): ?ExamenMinero
+    {
+        $matched = $index['examsByName'][$this->indexKey($name)]
+            ?? $index['examsByCanonicalName'][$this->examIndexKey($name)]
+            ?? null;
+        if ($matched) {
+            return $matched;
+        }
+
+        return null;
+    }
+
+    private function catalogActionFor(string $name, ?ExamenMinero $exam): string
+    {
+        if (!$exam) {
+            return 'CREAR_EXAMEN';
+        }
+        if (!$exam->activo) {
+            return 'REACTIVAR_EXAMEN';
+        }
+        if ($exam->nombre === $name) {
+            return 'SIN_CAMBIOS';
+        }
+
+        return $this->examIndexKey($exam->nombre) === $this->examIndexKey($name)
+            ? 'ACTUALIZAR_NOMBRE'
+            : 'USAR_NOMBRE_EXISTENTE';
+    }
+
+    private function examCatalogFromRows(array $rows): array
+    {
+        return collect($rows)
+            ->groupBy(fn ($row) => ($row['hoja'] ?? '') . '|' . ($row['mina'] ?? ''))
+            ->map(function ($sheetRows) {
+                $first = $sheetRows->first();
+
+                return [
+                    'hoja' => $first['hoja'] ?? null,
+                    'mina' => $first['mina'] ?? null,
+                    'examenes' => $sheetRows
+                        ->flatMap(fn ($row) => $row['examenes'] ?? [])
+                        ->filter(fn ($exam) => filled($exam['nombre'] ?? null))
+                        ->unique(fn ($exam) => $this->examIndexKey((string) ($exam['nombre'] ?? '')))
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function catalogByMine(array $examCatalog): array
+    {
+        return collect($examCatalog)
+            ->filter(fn ($row) => filled($row['mina'] ?? null))
+            ->groupBy(fn ($row) => $this->indexKey((string) ($row['mina'] ?? '')))
+            ->map(function ($mineRows): array {
+                $first = $mineRows->first();
+
+                return [
+                    'hoja' => $first['hoja'] ?? null,
+                    'hojas' => $mineRows->pluck('hoja')->filter()->unique()->values()->all(),
+                    'mina' => $first['mina'] ?? null,
+                    'examenes' => $mineRows
+                        ->flatMap(fn ($row) => $row['examenes'] ?? [])
+                        ->filter(fn ($exam) => filled($exam['nombre'] ?? null))
+                        ->unique(fn ($exam) => $this->sharedExamIdentity($exam))
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Replaces the active catalog while preserving historical rows referenced by attempts.
+     * Inactive records are excluded from future configurations and habilitation calculations.
+     *
+     * @return array<int, string> Mine IDs whose active requirements changed.
+     */
+    private function replaceActiveCatalog(
+        array $currentExamIds,
+        array $currentRequirementIds,
+        array &$counts,
+        Usuario $user,
+    ): array {
+        if ($currentExamIds === [] || $currentRequirementIds === []) {
+            throw new \RuntimeException('El Master no contiene examenes y requisitos suficientes para reemplazar el catalogo activo.');
+        }
+
+        $obsoleteRequirements = MinaRequisito::query()
+            ->where('activo', true)
+            ->whereNotIn('id', $currentRequirementIds)
+            ->get(['id', 'mina_id']);
+
+        if ($obsoleteRequirements->isNotEmpty()) {
+            MinaRequisito::query()
+                ->whereIn('id', $obsoleteRequirements->pluck('id'))
+                ->update([
+                    'activo' => false,
+                    'updated_at' => now(),
+                ]);
+            $counts['examenes_mina_desactivados'] += $obsoleteRequirements->count();
+        }
+
+        $obsoleteExams = ExamenMinero::query()
+            ->where('activo', true)
+            ->whereNotIn('id', $currentExamIds)
+            ->get(['id']);
+
+        if ($obsoleteExams->isNotEmpty()) {
+            ExamenMinero::query()
+                ->whereIn('id', $obsoleteExams->pluck('id'))
+                ->update([
+                    'activo' => false,
+                    'updated_by_usuario_id' => $user->id,
+                    'updated_at' => now(),
+                ]);
+            $counts['examenes_catalogo_desactivados'] += $obsoleteExams->count();
+        }
+
+        return $obsoleteRequirements->pluck('mina_id')->filter()->unique()->values()->all();
+    }
+
+    private function obsoleteRequirementsByMine(array $examCatalog, array $index): array
+    {
+        $expectedByMine = collect($this->catalogByMine($examCatalog))
+            ->mapWithKeys(function (array $catalogRow) use ($index): array {
+                $mine = $index['minesByName'][$this->indexKey((string) ($catalogRow['mina'] ?? ''))] ?? null;
+                if (!$mine) {
+                    return [];
+                }
+
+                return [$mine->id => [
+                    'exam_ids' => collect($catalogRow['examenes'] ?? [])
+                    ->map(fn ($examRow) => $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index)?->id)
+                    ->filter()
+                    ->unique()
+                    ->values(),
+                    'names' => collect($catalogRow['examenes'] ?? [])
+                        ->pluck('nombre')
+                        ->map(fn ($name) => $this->examIndexKey((string) $name))
+                        ->filter()
+                        ->flip(),
+                ]];
+            });
+
+        return MinaRequisito::query()
+            ->with(['examen:id,nombre', 'mina:id,nombre'])
+            ->where('activo', true)
+            ->get()
+            ->reject(function (MinaRequisito $requirement) use ($expectedByMine): bool {
+                $expected = $expectedByMine->get($requirement->mina_id);
+                if (!$expected) {
+                    return false;
+                }
+                if (filled($requirement->examen_id) && $expected['exam_ids']->contains($requirement->examen_id)) {
+                    return true;
+                }
+
+                $name = $requirement->examen?->nombre ?: $requirement->nombre;
+
+                return $expected['names']->has($this->examIndexKey((string) $name));
+            })
+            ->groupBy('mina_id')
+            ->map(function ($requirements): array {
+                $first = $requirements->first();
+
+                return [
+                    'mina' => $first->mina?->nombre ?: 'Mina sin nombre',
+                    'requisitos' => $requirements->map(fn (MinaRequisito $requirement) => [
+                        'id' => $requirement->id,
+                        'nombre' => $requirement->examen?->nombre ?: $requirement->nombre,
+                    ])->values()->all(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function sharedExamKeys(array $examCatalog): array
+    {
+        $minesByExam = [];
+        foreach ($examCatalog as $catalogRow) {
+            $mineKey = $this->indexKey((string) ($catalogRow['mina'] ?? ''));
+            if ($mineKey === '') {
+                continue;
+            }
+            foreach ($catalogRow['examenes'] ?? [] as $examRow) {
+                $examKey = $this->sharedExamIdentity($examRow);
+                if ($examKey !== '') {
+                    $minesByExam[$examKey][$mineKey] = true;
+                }
+            }
+        }
+
+        return collect($minesByExam)
+            ->filter(fn ($mines) => count($mines) > 1)
+            ->map(fn () => true)
+            ->all();
+    }
+
+    private function sharedExamIdentity(array $examRow): string
+    {
+        $existingId = trim((string) ($examRow['examen_id_existente'] ?? ''));
+
+        return $existingId !== ''
+            ? 'id:' . $existingId
+            : 'name:' . $this->examIndexKey((string) ($examRow['nombre'] ?? ''));
+    }
+
+    private function missingExamNamesByMine(array $examCatalog): array
+    {
+        $allNames = collect($examCatalog)
+            ->flatMap(fn ($row) => collect($row['examenes'] ?? [])->pluck('nombre'))
+            ->filter()
+            ->unique(fn ($name) => $this->examIndexKey((string) $name))
+            ->values();
+
+        return collect($examCatalog)
+            ->map(function ($row) use ($allNames) {
+                $present = collect($row['examenes'] ?? [])
+                    ->pluck('nombre')
+                    ->map(fn ($name) => $this->examIndexKey((string) $name))
+                    ->filter()
+                    ->flip();
+                $missing = $allNames
+                    ->reject(fn ($name) => $present->has($this->examIndexKey((string) $name)))
+                    ->values();
+
+                return [
+                    'hoja' => $row['hoja'] ?? null,
+                    'mina' => $row['mina'] ?? null,
+                    'nombres' => $missing->all(),
+                ];
+            })
+            ->filter(fn ($row) => !empty($row['nombres']))
+            ->values()
+            ->all();
+    }
+
     private function countMissingRequirements(array $rows, array $index): int
     {
         $count = 0;
@@ -1327,7 +1823,7 @@ class PersonalMinaExcelImportService
                 }
                 $seen[$key] = true;
 
-                $exam = $index['examsByName'][$this->indexKey((string) ($examRow['nombre'] ?? ''))] ?? null;
+                $exam = $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index);
                 if (!$mine || !$exam || !isset($index['requirementKeys'][$mine->id . '|' . $exam->id])) {
                     $count++;
                 }
@@ -1396,7 +1892,7 @@ class PersonalMinaExcelImportService
     private function similarExamSuggestionsFor(string $name, array $index): array
     {
         $normalized = $this->indexKey($name);
-        if ($normalized === '' || isset($index['examsByName'][$normalized])) {
+        if ($normalized === '' || $this->matchingExam($name, $index)) {
             return [];
         }
 

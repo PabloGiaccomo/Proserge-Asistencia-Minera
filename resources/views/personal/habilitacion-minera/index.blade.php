@@ -2690,7 +2690,7 @@
             </div>
 
             <div class="mine-dialog-body">
-                <div class="alert alert-info">Al confirmar se crean catálogos detectados y se actualizan habilitaciones solo de trabajadores existentes. Los DNI no encontrados quedan pendientes de registro manual.</div>
+                <div class="alert alert-info">El Master reemplazará toda la configuración activa de exámenes y requisitos por mina. Lo que no aparezca en el archivo quedará archivado y fuera de nuevas habilitaciones. Solo se actualizarán trabajadores ya registrados; los DNI no encontrados quedarán pendientes.</div>
 
                 <form method="POST" enctype="multipart/form-data" action="{{ route('personal.habilitacion-minera.import.preview', $currentQuery) }}" class="mine-form mine-form-section" data-loading-message="Analizando Excel master. Puede tardar si el archivo tiene muchas hojas..." data-inline-loading="#mineExcelPreviewLoading" data-loading-button-label="Analizando..." data-defer-loading-submit="true">
                     @csrf
@@ -2738,8 +2738,134 @@
                         @endforeach
                     </div>
 
+                    @if(!empty($importPreview['trabajadores_no_encontrados']))
+                        <details open>
+                            <summary>Trabajadores no encontrados en Personal ({{ count($importPreview['trabajadores_no_encontrados']) }})</summary>
+                            <div class="mine-config-list">
+                                @foreach(array_slice($importPreview['trabajadores_no_encontrados'], 0, 100) as $worker)
+                                    <div class="mine-config-item">
+                                        <strong>{{ $worker['nombre'] ?: 'Nombre no informado' }}</strong>
+                                        <span class="mine-muted">{{ $worker['documento'] ?: 'Sin documento' }} · {{ $worker['hoja'] ?: 'Hoja sin nombre' }} · fila {{ $worker['fila'] ?: '-' }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['examenes_no_encontrados']))
+                        <details open>
+                            <summary>Exámenes nuevos que no existen en el catálogo ({{ count($importPreview['examenes_no_encontrados']) }})</summary>
+                            <p class="mine-muted">Se crearán al confirmar. Revisa sus nombres antes de continuar.</p>
+                            <div class="mine-inline-tags">
+                                @foreach($importPreview['examenes_no_encontrados'] as $examName)
+                                    <span class="mine-badge info">{{ $examName }}</span>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['nombres_examen_por_actualizar']))
+                        <details open>
+                            <summary>Nombres de exámenes que se corregirán ({{ count($importPreview['nombres_examen_por_actualizar']) }})</summary>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['nombres_examen_por_actualizar'] as $rename)
+                                    <div class="mine-config-item">
+                                        <span>{{ $rename['actual'] ?: '-' }}</span>
+                                        <strong>{{ $rename['nuevo'] ?: '-' }}</strong>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['equivalencias_nombres_seguras']))
+                        <details open>
+                            <summary>Variaciones de nombre reconocidas ({{ count($importPreview['equivalencias_nombres_seguras']) }})</summary>
+                            <p class="mine-muted">El importador usará el examen existente y conservará su nombre oficial para no crear duplicados por errores menores de escritura.</p>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['equivalencias_nombres_seguras'] as $equivalence)
+                                    <div class="mine-config-item">
+                                        <span>{{ $equivalence['detectado'] ?: '-' }}</span>
+                                        <strong>{{ $equivalence['catalogo'] ?: '-' }}</strong>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['examenes_parecidos']))
+                        <details open>
+                            <summary>Nombres parecidos que requieren revisión ({{ count($importPreview['examenes_parecidos']) }})</summary>
+                            <p class="mine-muted">No se unirán automáticamente. El nombre escrito en el Master se creará como examen vigente y la variante anterior quedará archivada si ya no aparece en el archivo.</p>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['examenes_parecidos'] as $similar)
+                                    <div class="mine-config-item">
+                                        <strong>{{ $similar['detectado'] ?? '-' }}</strong>
+                                        <span class="mine-muted">Posible coincidencia: {{ $similar['existente'] ?? '-' }} · similitud {{ round(((float) ($similar['similitud'] ?? 0)) * 100) }}%</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['examenes_faltantes_por_mina']))
+                        <details>
+                            <summary>Columnas de examen que faltan en algunas hojas ({{ count($importPreview['examenes_faltantes_por_mina']) }})</summary>
+                            <p class="mine-muted">Es una comparación informativa: cada unidad minera puede tener un catálogo diferente.</p>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['examenes_faltantes_por_mina'] as $missing)
+                                    <div class="mine-config-item">
+                                        <strong>{{ $missing['mina'] ?: $missing['hoja'] }}</strong>
+                                        <span class="mine-muted">{{ implode(', ', $missing['nombres'] ?? []) }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['requisitos_obsoletos_por_mina']))
+                        <details open>
+                            <summary>Requisitos que dejarán de estar vigentes por mina ({{ collect($importPreview['requisitos_obsoletos_por_mina'])->sum(fn ($row) => count($row['requisitos'] ?? [])) }})</summary>
+                            <p class="mine-muted">Al confirmar dejarán de formar parte de la configuración activa. Los intentos y resultados anteriores se conservarán únicamente como historial interno.</p>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['requisitos_obsoletos_por_mina'] as $obsolete)
+                                    <div class="mine-config-item">
+                                        <strong>{{ $obsolete['mina'] ?: 'Mina sin nombre' }}</strong>
+                                        <span class="mine-muted">{{ collect($obsolete['requisitos'] ?? [])->pluck('nombre')->filter()->implode(', ') }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
+                    @if(!empty($importPreview['examenes_ausentes_en_excel']))
+                        <details open>
+                            <summary>Exámenes activos del sistema no presentes en este Excel ({{ count($importPreview['examenes_ausentes_en_excel']) }})</summary>
+                            <p class="mine-muted">Al confirmar quedarán archivados y desaparecerán del catálogo vigente, de las minas y de las nuevas habilitaciones.</p>
+                            <div class="mine-inline-tags">
+                                @foreach(array_slice($importPreview['examenes_ausentes_en_excel'], 0, 100) as $examName)
+                                    <span class="mine-badge">{{ $examName }}</span>
+                                @endforeach
+                            </div>
+                        </details>
+                    @endif
+
                     @if(!empty($importPreview['errors']))
                         <div class="alert alert-danger">Filas con errores: {{ count($importPreview['errors']) }}</div>
+                    @endif
+
+                    @if(!empty($importPreview['sheets']['omitidas']))
+                        <details>
+                            <summary>Hojas omitidas de forma segura ({{ count($importPreview['sheets']['omitidas']) }})</summary>
+                            <div class="mine-config-list">
+                                @foreach($importPreview['sheets']['omitidas'] as $sheet)
+                                    <div class="mine-config-item">
+                                        <strong>{{ $sheet['hoja'] ?? 'Hoja sin nombre' }}</strong>
+                                        <span class="mine-muted">{{ $sheet['motivo'] ?? 'No corresponde a una hoja minera importable.' }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
                     @endif
 
                     @if(!empty($importPreview['unmapped']))
@@ -2760,7 +2886,7 @@
                         @csrf
                         <input type="hidden" name="token" value="{{ $importPreview['token'] }}">
                         <div class="mine-form-actions">
-                            <button type="submit" class="btn btn-primary btn-sm">Confirmar importación</button>
+                            <button type="submit" class="btn btn-primary btn-sm">Reemplazar catálogo con este Master</button>
                         </div>
                         <div id="mineExcelConfirmLoading" class="mine-inline-loading" hidden>
                             <div class="mine-inline-spinner" aria-hidden="true"></div>

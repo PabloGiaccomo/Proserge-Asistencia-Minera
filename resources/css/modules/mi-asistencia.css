@@ -175,13 +175,29 @@
 .mia-attendance-card { overflow: hidden; }
 .mia-live-summary { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 11px 20px; border-bottom: 1px solid #e3ebf4; background: #f8fbfe; color: #5d718d; font-size: 12px; }
 .mia-live-summary strong { color: #102342; }
-.mia-worker { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(420px, 1.3fr) minmax(190px, .8fr); gap: 14px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e3ebf4; transition: opacity .15s, background .15s; }
+.mia-worker { min-width: 0; border-bottom: 1px solid #e3ebf4; transition: opacity .15s, background .15s; }
 .mia-worker.is-saving { opacity: .55; background: #f3fffd; pointer-events: none; }
-.mia-worker-info { display: grid; gap: 4px; }
-.mia-worker-info strong { font-size: 13px; }
-.mia-worker-info span { color: #71839d; font-size: 11px; }
-.mia-state-actions { display: grid; grid-template-columns: repeat(4, minmax(82px, 1fr)); gap: 6px; }
-.mia-state-btn { min-height: 34px; border: 1px solid #cbd8e8; border-radius: 6px; background: #fff; color: #4b607e; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.mia-worker-info { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto 24px; align-items: center; gap: 12px; padding: 18px 20px; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+.mia-worker-info:hover, .mia-worker-info[aria-expanded="true"] { background: #f4f9fb; }
+.mia-worker-info:focus-visible { outline: 2px solid #0f9387; outline-offset: -3px; }
+.mia-worker-identity { display: grid; gap: 5px; min-width: 0; }
+.mia-worker-identity strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.mia-worker-identity > span { color: #60738c; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.mia-worker-summary { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.mia-worker-status { border-radius: 6px; padding: 5px 9px; background: #eef2f7; color: #4b607e; font-size: 12px; font-weight: 600; }
+.mia-worker[data-current-state="PRESENTE"] .mia-worker-status { background: #def8e8; color: #087443; }
+.mia-worker[data-current-state="TARDANZA"] .mia-worker-status { background: #fff4ce; color: #956000; }
+.mia-worker[data-current-state="AUSENTE"] .mia-worker-status { background: #fee7e7; color: #aa2020; }
+.mia-worker[data-current-state="JUSTIFICADO"] .mia-worker-status { background: #e8f1ff; color: #235aa5; }
+.mia-expand-icon { display: block; font-size: 18px; text-align: center; color: #4b607e; transition: transform .15s; }
+.mia-worker[data-expanded="true"] .mia-expand-icon { transform: rotate(180deg); }
+.mia-worker-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 20px; padding: 4px 20px 20px; background: #f4f9fb; }
+.mia-worker-panel[hidden], .mia-time-badge[hidden] { display: none !important; }
+.mia-state-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-items: center; min-width: 0; }
+.mia-state-btn { width: 100%; min-height: 46px; gap: 6px; padding: 8px; border: 1px solid #cbd8e8; border-radius: 8px; background: #fff; color: #4b607e; font: inherit; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; transition: background .15s; touch-action: manipulation; }
+.mia-state-btn:focus-visible { outline: 2px solid #0f9387; outline-offset: 2px; }
+.mia-state-btn:hover { border-color: #a0b4cc; background: #f4f7fb; }
+.mia-time-badge { font-size: 10px; font-weight: 700; color: #5d718d; background: #f0f4f9; border-radius: 4px; padding: 2px 6px; margin-left: 6px; white-space: nowrap; }
 .mia-state-btn:disabled { cursor: not-allowed; opacity: .65; }
 .mia-state-btn.is-presente.is-active { border-color: #62d59c; background: #def8e8; color: #087443; }
 .mia-state-btn.is-tardanza.is-active { border-color: #f2c35e; background: #fff4ce; color: #956000; }
@@ -189,19 +205,80 @@
 .mia-state-btn.is-justificado.is-active { border-color: #9bbce9; background: #e8f1ff; color: #235aa5; }
 .mia-observation { display: grid; gap: 4px; }
 .mia-observation span { color: #6b7e99; font-size: 10px; font-weight: 800; text-transform: uppercase; }
-.mia-observation input { min-width: 0; width: 100%; min-height: 34px; }
+.mia-observation input { min-width: 0; width: 100%; min-height: 46px; }
 .mia-close-panel { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; padding: 16px 20px; background: #f8fbfe; }
 
 .mia-toast { position: fixed; right: 22px; bottom: 22px; z-index: 1000; max-width: min(360px, calc(100vw - 32px)); padding: 12px 15px; border-left: 4px solid #0e9b74; border-radius: 7px; background: #fff; box-shadow: 0 16px 38px rgba(15,35,66,.2); color: #17304f; font-size: 12px; font-weight: 700; opacity: 0; transform: translateY(12px); pointer-events: none; transition: .18s ease; }
 .mia-toast.is-visible { opacity: 1; transform: translateY(0); }
 .mia-toast.is-error { border-left-color: #d83232; }
 
+.mia-scanner-bar { padding: 16px 20px; background: linear-gradient(135deg, #0f2b3d 0%, #163d5c 100%); border-bottom: none; }
+.mia-scanner-label { display: flex; align-items: center; gap: 6px; color: #8ecae6; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+.mia-scanner-label-dot { width: 6px; height: 6px; border-radius: 50%; background: #19d3c5; animation: scanPulse 1.5s infinite; }
+@keyframes scanPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.mia-scanner-actions { display: flex; align-items: center; gap: 10px; }
+.mia-scan-cam-btn { display: flex; align-items: center; gap: 8px; background: #19d3c5; color: #fff; border: none; border-radius: 10px; padding: 12px 18px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: all .15s; }
+.mia-scan-cam-btn:hover { background: #14b5a8; transform: translateY(-1px); }
+.mia-scan-cam-btn:active { transform: scale(.97); }
+.mia-scan-or { color: rgba(255,255,255,.4); font-size: 11px; font-weight: 700; }
+.mia-scanner-input-wrap { flex: 1; display: flex; align-items: center; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); border-radius: 10px; padding: 10px 14px; min-width: 0; }
+.mia-scanner-input-wrap:focus-within { border-color: #19d3c5; background: rgba(255,255,255,.18); box-shadow: 0 0 0 3px rgba(25,211,197,.25); }
+.mia-scanner-input { width: 100%; border: none; outline: none; font-size: 16px; font-weight: 700; letter-spacing: 2px; color: #fff; background: transparent; min-width: 0; font-family: 'Plus Jakarta Sans', monospace; }
+.mia-scanner-input::placeholder { color: rgba(255,255,255,.4); font-weight: 500; letter-spacing: normal; font-size: 13px; }
+.mia-scan-result { margin-top: 10px; padding: 10px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.mia-scan-result.is-success { background: rgba(16,185,129,.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); }
+.mia-scan-result.is-not-found { background: rgba(245,158,11,.15); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+.mia-scan-result.is-error { background: rgba(239,68,68,.15); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+.mia-scan-findings { margin-top: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; background: rgba(255,255,255,.08); }
+.mia-scan-findings[hidden] { display: none; }
+.mia-scan-findings-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,.14); }
+.mia-scan-findings-head > div { display: grid; gap: 2px; }
+.mia-scan-findings-head strong { color: #fff; font-size: 12px; }
+.mia-scan-findings-head span { color: #a9bdd0; font-size: 11px; line-height: 1.4; }
+.mia-scan-findings-head button { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.25); border-radius: 7px; background: transparent; color: #dbeafe; padding: 6px 9px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.mia-scan-findings-head button:hover { background: rgba(255,255,255,.1); }
+.mia-scan-findings-list { display: grid; }
+.mia-scan-finding { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; }
+.mia-scan-finding + .mia-scan-finding { border-top: 1px solid rgba(255,255,255,.12); }
+.mia-scan-finding > div { display: grid; gap: 3px; min-width: 0; }
+.mia-scan-finding strong { color: #fff; font-size: 12px; overflow-wrap: anywhere; }
+.mia-scan-finding > div span { color: #b9c8d8; font-size: 11px; overflow-wrap: anywhere; }
+.mia-scan-finding-status { flex: 0 0 auto; border-radius: 999px; padding: 5px 8px; font-size: 10px; font-weight: 800; }
+.mia-scan-finding.is-known .mia-scan-finding-status { background: #fff4ce; color: #8a5b00; }
+.mia-scan-finding.is-unknown .mia-scan-finding-status { background: #fee7e7; color: #a22020; }
+
+.mia-camera-modal { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.mia-camera-box { width: 100%; max-width: 640px; height: 100%; max-height: 100vh; max-height: 100dvh; display: flex; flex-direction: column; background: #111; border-radius: 0; overflow: hidden; }
+@media (min-width: 700px) { .mia-camera-box { max-height: 85vh; max-height: 85dvh; border-radius: 16px; margin: 20px; height: auto; } }
+.mia-camera-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: #0d1b2a; color: #fff; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.mia-camera-close { background: rgba(255,255,255,.1); border: none; color: #fff; font-size: 18px; cursor: pointer; padding: 6px 10px; border-radius: 8px; }
+.mia-camera-close:hover { background: rgba(255,255,255,.2); }
+.mia-camera-preview { flex: 1 1 300px; position: relative; overflow: hidden; background: #000; min-height: 0; }
+.mia-camera-preview video { width: 100%; height: 100%; object-fit: cover; }
+.mia-camera-preview img { width: 100%; height: 100%; object-fit: contain; }
+.mia-camera-message { display: flex; height: 100%; min-height: 300px; align-items: center; justify-content: center; color: #8ecae6; padding: 24px; font-size: 14px; text-align: center; }
+.mia-camera-message.is-error { flex-direction: column; gap: 8px; color: #fca5a5; }
+.mia-camera-message.is-error strong { font-size: 16px; }
+.mia-camera-message.is-error span { max-width: 380px; color: #a9bdd0; font-size: 12px; line-height: 1.5; }
+.mia-camera-footer { display: grid; justify-items: center; gap: 10px; padding: 12px 16px 16px; background: #0d1b2a; flex-shrink: 0; max-height: 55vh; max-height: 55dvh; overflow-y: auto; }
+.mia-camera-footer .mia-scan-result { width: 100%; margin-top: 0; overflow-wrap: anywhere; }
+.mia-camera-hint { margin: 0; text-align: center; color: #8ecae6; font-size: 13px; font-weight: 600; line-height: 1.45; }
+.mia-camera-photo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border: 1px solid rgba(255,255,255,.28); border-radius: 9px; padding: 9px 14px; background: rgba(255,255,255,.08); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.mia-camera-photo-btn:hover { background: rgba(255,255,255,.15); }
+.mia-camera-photo-btn:focus-visible { outline: 3px solid rgba(25,211,197,.45); outline-offset: 2px; }
+.mia-camera-photo-btn:disabled { opacity: .55; cursor: wait; }
+.mia-camera-scan-line { position: absolute; left: 10%; right: 10%; height: 2px; background: #19d3c5; box-shadow: 0 0 12px #19d3c5; animation: scanLine 2s infinite ease-in-out; pointer-events: none; top: 40%; }
+@keyframes scanLine { 0%, 100% { top: 30%; } 50% { top: 60%; } }
+body.mia-camera-open { overflow: hidden; }
+
+.mia-btn-outline { background: transparent; border: 1px solid #cbd8e8; color: #4b607e; border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s; }
+.mia-btn-outline:hover { background: #f4f7fb; border-color: #a0b4cc; }
+
 @media (max-width: 900px) {
     .mia-group-main { grid-template-columns: 100px 1fr; }
     .mia-responsible { grid-column: 1 / -1; }
-    .mia-worker { grid-template-columns: 1fr; }
+    .mia-worker-panel { grid-template-columns: minmax(0, 1fr); gap: 16px; }
     .mia-close-panel { grid-template-columns: 1fr; }
-    .mia-state-actions { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
 }
 
 @media (max-width: 640px) {
@@ -220,5 +297,17 @@
     .mia-detail-summary > div:nth-child(-n+2) { border-bottom: 1px solid #e3ebf4; }
     .mia-group-main { grid-template-columns: 1fr; }
     .mia-responsible { grid-column: auto; }
-    .mia-worker { padding: 14px; }
+    .mia-worker-info { grid-template-columns: minmax(0, 1fr) 24px; padding: 16px; gap: 8px; }
+    .mia-worker-summary { grid-column: 1; justify-content: flex-start; }
+    .mia-expand-icon { grid-column: 2; grid-row: 1 / 3; }
+    .mia-worker-panel { padding: 4px 16px 16px; }
+    .mia-state-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .mia-observation input, .mia-close-panel input { font-size: 16px; }
+    .mia-scanner-bar { padding: 12px 14px; }
+    .mia-scanner-actions { flex-direction: column; align-items: stretch; }
+    .mia-scan-cam-btn { justify-content: center; }
+    .mia-scan-or { text-align: center; }
+    .mia-scanner-input { font-size: 16px; letter-spacing: 2px; text-align: center; }
+    .mia-scan-findings-head,
+    .mia-scan-finding { align-items: flex-start; }
 }

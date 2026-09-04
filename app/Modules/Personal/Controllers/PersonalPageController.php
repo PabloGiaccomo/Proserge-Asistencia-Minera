@@ -126,26 +126,14 @@ class PersonalPageController extends WebPageController
 
         $filters = $this->extractIndexFilters($request);
         $perPage = $this->resolvePerPage($request);
-        $paginator = $this->service->paginatedForIndex($filters, $perPage);
-        $trabajadores = PersonalIndexResource::collection($paginator->items())->resolve();
-        $trabajadores = $this->filterByVisibleState($trabajadores, (string) ($filters['visible_estado'] ?? ''));
-        $currentPageCount = count($trabajadores);
-        $firstItem = $paginator->firstItem();
+        [$trabajadores, $paginationMeta] = $this->resolveIndexRows($filters, $perPage);
 
         $catalogs = $this->getLocationCatalogs();
 
         return view('personal.index', array_merge($catalogs, compact('trabajadores'), [
             'puestoOptions' => $this->puestoOptions(),
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
-            'paginationMeta' => [
-                'total' => $paginator->total(),
-                'currentPage' => $paginator->currentPage(),
-                'lastPage' => $paginator->lastPage(),
-                'perPage' => $paginator->perPage(),
-                'from' => $currentPageCount > 0 ? $firstItem : null,
-                'to' => $currentPageCount > 0 && $firstItem !== null ? $firstItem + $currentPageCount - 1 : null,
-                'serverSide' => true,
-            ],
+            'paginationMeta' => $paginationMeta,
         ]));
     }
 
@@ -154,18 +142,110 @@ class PersonalPageController extends WebPageController
         $filters = $this->extractIndexFilters($request);
         $perPage = $this->resolvePerPage($request);
 
-        $paginator = $this->service->paginatedForIndex($filters, $perPage);
-        $workers = PersonalIndexResource::collection($paginator->items())->resolve();
+        [$workers, $paginationMeta] = $this->resolveIndexRows($filters, $perPage);
 
         return response()->json([
             'data' => $workers,
-            'total' => $paginator->total(),
-            'currentPage' => $paginator->currentPage(),
-            'lastPage' => $paginator->lastPage(),
-            'perPage' => $paginator->perPage(),
-            'from' => $paginator->firstItem(),
-            'to' => $paginator->lastItem(),
+            'total' => $paginationMeta['total'],
+            'currentPage' => $paginationMeta['currentPage'],
+            'lastPage' => $paginationMeta['lastPage'],
+            'perPage' => $paginationMeta['perPage'],
+            'from' => $paginationMeta['from'],
+            'to' => $paginationMeta['to'],
         ]);
+    }
+
+    private function resolveIndexRows(array $filters, int $perPage): array
+    {
+        if (!$this->hasResolvedRowFilters($filters)) {
+            $paginator = $this->service->paginatedForIndex($filters, $perPage);
+
+            return [
+                PersonalIndexResource::collection($paginator->items())->resolve(),
+                [
+                    'total' => $paginator->total(),
+                    'currentPage' => $paginator->currentPage(),
+                    'lastPage' => $paginator->lastPage(),
+                    'perPage' => $paginator->perPage(),
+                    'from' => $paginator->firstItem(),
+                    'to' => $paginator->lastItem(),
+                    'serverSide' => true,
+                ],
+            ];
+        }
+
+        $rows = PersonalIndexResource::collection($this->service->listForIndex($filters))->resolve();
+        $rows = $this->filterResolvedRows($rows, $filters);
+        $total = count($rows);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $currentPage = min(max(1, (int) ($filters['page'] ?? 1)), $lastPage);
+        $offset = ($currentPage - 1) * $perPage;
+        $pageRows = array_slice($rows, $offset, $perPage);
+
+        return [
+            $pageRows,
+            [
+                'total' => $total,
+                'currentPage' => $currentPage,
+                'lastPage' => $lastPage,
+                'perPage' => $perPage,
+                'from' => $pageRows === [] ? null : $offset + 1,
+                'to' => $pageRows === [] ? null : $offset + count($pageRows),
+                'serverSide' => true,
+            ],
+        ];
+    }
+
+    private function hasResolvedRowFilters(array $filters): bool
+    {
+        foreach (['visible_estado', 'visible_estados', 'puestos', 'contratos', 'situaciones'] as $key) {
+            if ($this->normalizedFilterValues($filters[$key] ?? [])->isNotEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function filterResolvedRows(array $rows, array $filters): array
+    {
+        $visibleStates = $this->normalizedFilterValues([
+            ...collect($filters['visible_estados'] ?? [])->all(),
+            $filters['visible_estado'] ?? null,
+        ]);
+        $puestos = $this->normalizedFilterValues($filters['puestos'] ?? []);
+        $contratos = $this->normalizedFilterValues($filters['contratos'] ?? []);
+        $situaciones = $this->normalizedFilterValues($filters['situaciones'] ?? []);
+
+        return array_values(array_filter($rows, function (array $row) use ($visibleStates, $puestos, $contratos, $situaciones): bool {
+            $state = PersonalNormalizer::normalizeKey($row['estado_operativo'] ?? $row['estado'] ?? '');
+            if ($visibleStates->isNotEmpty() && !$visibleStates->contains($state)) {
+                return false;
+            }
+
+            $puesto = PersonalNormalizer::normalizeKey($row['puesto'] ?? '');
+            if ($puestos->isNotEmpty() && !$puestos->contains(fn (string $filter): bool => str_contains($puesto, $filter))) {
+                return false;
+            }
+
+            $contrato = PersonalNormalizer::normalizeKey($row['tipo_contrato'] ?? $row['contrato'] ?? '');
+            if ($contratos->isNotEmpty() && !$contratos->contains(fn (string $filter): bool => str_contains($contrato, $filter))) {
+                return false;
+            }
+
+            $situacion = PersonalNormalizer::normalizeKey($row['situacion'] ?? '');
+
+            return $situaciones->isEmpty() || $situaciones->contains($situacion);
+        }));
+    }
+
+    private function normalizedFilterValues(mixed $values): \Illuminate\Support\Collection
+    {
+        return collect(is_array($values) ? $values : [$values])
+            ->map(fn ($value): string => PersonalNormalizer::normalizeKey((string) $value))
+            ->filter()
+            ->unique()
+            ->values();
     }
 
     private function extractIndexFilters(Request $request): array
@@ -195,21 +275,6 @@ class PersonalPageController extends WebPageController
         $perPage = (int) ($request->query('per_page', 25));
 
         return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 25;
-    }
-
-    private function filterByVisibleState(array $trabajadores, string $visibleStateFilter): array
-    {
-        if (!in_array($visibleStateFilter, ['ACTIVO', 'INACTIVO', 'CESADO'], true)) {
-            return $trabajadores;
-        }
-
-        return array_values(array_filter($trabajadores, function (array $trabajador) use ($visibleStateFilter): bool {
-            if (!empty($trabajador['en_lista_negra'])) {
-                return true;
-            }
-
-            return strtoupper((string) ($trabajador['estado_operativo'] ?? $trabajador['estado'] ?? '')) === $visibleStateFilter;
-        }));
     }
 
     private function runIndexMaintenance(): void

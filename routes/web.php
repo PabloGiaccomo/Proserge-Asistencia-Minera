@@ -11,6 +11,7 @@ use App\Modules\Personal\Controllers\PersonalContratoController;
 use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
 use App\Modules\Personal\Controllers\PersonalContratoDatoController;
 use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
+use App\Modules\Personal\Controllers\PersonalRegularizationController;
 use App\Modules\Personal\Controllers\PersonalPuestoController;
 use App\Modules\Personal\Controllers\PublicPersonalFichaController;
 use App\Modules\Personal\Controllers\PublicPersonalIngresoController;
@@ -184,6 +185,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/no-aplica', [PersonalMinaHabilitacionController::class, 'notApplicable'])->middleware('web.permission:habilitacion_minera,registrar')->name('personal.habilitacion-minera.exam.not-applicable');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/convalidar', [PersonalMinaHabilitacionController::class, 'convalidate'])->middleware('web.permission:habilitacion_minera,convalidar')->name('personal.habilitacion-minera.exam.convalidate');
     Route::get('/personal/habilitacion-minera/intentos/{attemptId}/archivo', [PersonalMinaHabilitacionController::class, 'downloadAttempt'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.attempt.download');
+    Route::get('/personal/regularizacion', [PersonalRegularizationController::class, 'index'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.regularizacion.index');
     Route::get('/personal/{id}/contratos', [PersonalContratoController::class, 'index'])->middleware('web.permission:personal,ver_contratos')->name('personal.contratos.index');
     Route::post('/personal/{id}/contratos/renovar', [PersonalContratoController::class, 'renew'])->middleware('web.permission:personal,renovar|actualizar')->name('personal.contratos.renew');
     Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,reingresar|actualizar')->name('personal.contratos.reentry');
@@ -212,9 +214,13 @@ Route::middleware('web.auth')->group(function (): void {
     // Mi Asistencia
     Route::get('/mi-asistencia', [MiAsistenciaPageController::class, 'index'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.index');
     Route::get('/mi-asistencia/{id}', [MiAsistenciaPageController::class, 'show'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.show');
+    Route::get('/mi-asistencia/{id}/buscar-dni', [MiAsistenciaPageController::class, 'buscarDni'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.buscar-dni');
+    Route::get('/mi-asistencia/{id}/estado', [MiAsistenciaPageController::class, 'estado'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.estado');
     Route::post('/mi-asistencia/{id}/marcar', [MiAsistenciaPageController::class, 'marcar'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar');
     Route::post('/mi-asistencia/{id}/marcar-todos', [MiAsistenciaPageController::class, 'marcarTodos'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar-todos');
     Route::post('/mi-asistencia/{id}/cerrar', [MiAsistenciaPageController::class, 'cerrar'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.cerrar');
+    Route::get('/mi-asistencia-mobile', [MiAsistenciaPageController::class, 'mobile'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.mobile');
+    Route::post('/mi-asistencia-mobile/{id}/marcar', [MiAsistenciaPageController::class, 'marcarMobile'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar-mobile');
     
     // Man Power
     Route::get('/man-power', [ManPowerPageController::class, 'index'])->middleware('web.permission:man_power,ver')->name('man-power.index');

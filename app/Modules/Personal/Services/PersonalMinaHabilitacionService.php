@@ -888,6 +888,11 @@ class PersonalMinaHabilitacionService
             ->setAttribute('deactivated_requirement_ids', $deactivatedIds);
     }
 
+    public function syncMineAssignmentsAfterRequirementChanges(string $mineId, Usuario $user): array
+    {
+        return $this->syncMineAssignmentsForRequirementChange($mineId, $user);
+    }
+
     public function syncCurrentInformation(Usuario $user): array
     {
         $generated = 0;
@@ -1323,6 +1328,12 @@ class PersonalMinaHabilitacionService
         $workerExam = PersonalMinaExamen::query()
             ->with(['asignacion.mina', 'requisitoMina'])
             ->findOrFail($workerExam->id);
+
+        if ($workerExam->asignacion?->estadoHabilitacionActual() !== PersonalMina::ESTADO_EN_PROCESO) {
+            throw ValidationException::withMessages([
+                'convalidacion' => 'Solo se puede convalidar mientras la habilitacion de destino esta en proceso.',
+            ]);
+        }
 
         if (!$workerExam->requisitoMina?->permite_convalidacion_mina) {
             throw ValidationException::withMessages(['convalidacion' => 'Este examen no permite convalidacion para esta mina.']);

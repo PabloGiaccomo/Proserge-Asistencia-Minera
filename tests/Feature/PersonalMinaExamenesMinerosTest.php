@@ -369,6 +369,16 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $this->assertSame(PersonalMinaExamen::ESTADO_CONVALIDADO, $targetExam->fresh()->estado);
         $this->assertSame(PersonalMina::ESTADO_HABILITADO, $targetAssignment->fresh()->estado_habilitacion);
 
+        try {
+            $service->convalidateExam($targetExam->fresh(), $origin->id, [], $actor);
+            $this->fail('No debio convalidar una habilitacion que ya no esta en proceso.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                'Solo se puede convalidar mientras la habilitacion de destino esta en proceso.',
+                collect($exception->errors())->flatten()->first()
+            );
+        }
+
         [$service, $actor, $blockedAssignment] = $this->assignmentWithExam(['nombre' => 'Convalidacion bloqueada']);
         try {
             $service->convalidateExam($blockedAssignment->examenes->first(), $origin->id, [], $actor);

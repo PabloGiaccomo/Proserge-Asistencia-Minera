@@ -88,13 +88,18 @@ class PersonalContratoService
                 ->orderBy('contrato_numero');
         } else {
             $query
-                ->whereIn('estado', [
-                    PersonalContrato::ESTADO_PREPARACION,
-                    PersonalContrato::ESTADO_ACTIVO,
-                    PersonalContrato::ESTADO_CERRADO,
-                    PersonalContrato::ESTADO_CESADO,
-                    PersonalContrato::ESTADO_NO_RENOVADO,
-                ])
+                ->where(function ($estadoQuery): void {
+                    $estadoQuery->whereIn('estado', [
+                        PersonalContrato::ESTADO_ACTIVO,
+                        PersonalContrato::ESTADO_CERRADO,
+                        PersonalContrato::ESTADO_CESADO,
+                        PersonalContrato::ESTADO_NO_RENOVADO,
+                    ])
+                    ->orWhere(function ($preparacionQuery): void {
+                        $preparacionQuery->where('estado', PersonalContrato::ESTADO_PREPARACION)
+                            ->whereNotNull('origen_contrato_id');
+                    });
+                })
                 ->where(function ($query) use ($start, $end): void {
                     $query
                         ->where(function ($ownContractQuery) use ($start, $end): void {

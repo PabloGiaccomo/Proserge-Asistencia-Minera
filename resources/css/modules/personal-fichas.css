@@ -389,8 +389,8 @@
     overflow: hidden;
 }
 
-.public-guide-details summary {
-    cursor: pointer;
+.public-guide-docs-title {
+    margin: 0;
     padding: 13px 14px;
     color: #172033;
     font-size: 13px;

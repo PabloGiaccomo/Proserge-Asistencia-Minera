@@ -107,6 +107,7 @@ class DisponibilidadPersonalService
             }
 
             $rqConflict = RQProsergeDetalle::query()
+                ->with(['rqProserge.mina'])
                 ->when($excludeAsignacionId, fn ($q) => $q->where('id', '!=', $excludeAsignacionId))
                 ->where('personal_id', $personalId)
                 ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
@@ -116,10 +117,17 @@ class DisponibilidadPersonalService
                 ->first();
 
             if ($rqConflict) {
+                $minaNombre = $rqConflict->rqProserge?->mina?->nombre ?? '';
+                $rqLine = 'Ya esta asignado en otro RQ entre '.$this->formatDate($rqConflict->fecha_inicio).' y '.$this->formatDate($rqConflict->fecha_fin);
+                if ($minaNombre !== '') {
+                    $rqLine .= ' en la mina '.$minaNombre;
+                }
+                $rqLine .= '.';
+
                 $blockers[] = [
                     'code' => 'PERSONAL_CONFLICT_RQ',
                     'message' => 'Personal con conflicto en otro RQ en el rango solicitado',
-                    'line' => 'Ya esta asignado en otro RQ entre '.$this->formatDate($rqConflict->fecha_inicio).' y '.$this->formatDate($rqConflict->fecha_fin).'.',
+                    'line' => $rqLine,
                 ];
             } else {
                 $okLines[] = 'Sin cruces con otros RQ en el rango seleccionado.';

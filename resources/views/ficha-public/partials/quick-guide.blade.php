@@ -19,8 +19,8 @@
     <div class="public-guide-step">
         <span class="public-guide-number">3</span>
         <div>
-            <strong>Envia tus documentos por WhatsApp.</strong>
-            <p>Envia todos los documentos a este WhatsApp: <a class="public-guide-link" href="https://wa.me/51999350044" target="_blank" rel="noopener">999 350 044 - Tania</a>.</p>
+            <strong>Sube tus documentos al sistema.</strong>
+            <p>Adjunta los documentos solicitados en la seccion de carga ubicada mas abajo. Verifica que sean legibles y esten vigentes antes de enviar la ficha.</p>
         </div>
     </div>
 
@@ -28,13 +28,13 @@
         <span class="public-guide-number">4</span>
         <div>
             <strong>Si un enlace no abre.</strong>
-            <p>Agrega el numero de WhatsApp como contacto o reenvia el link para que pueda redireccionar correctamente.</p>
+            <p>Recarga la pagina o copia y pega la direccion en tu navegador. Guarda tus avances antes de salir.</p>
         </div>
     </div>
 </div>
 
-<details class="public-guide-details" open>
-    <summary>Ver documentos y enlaces de apoyo</summary>
+<section class="public-guide-details" aria-labelledby="public-guide-docs-title">
+    <h2 id="public-guide-docs-title" class="public-guide-docs-title">Documentos y enlaces de apoyo</h2>
     <div class="public-guide-docs">
         <div>
             <h3>Documentos solicitados</h3>
@@ -61,7 +61,6 @@
                 <li><a href="https://www.youtube.com/watch?v=WuPQDC4B3Eo" target="_blank" rel="noopener">Video para descargar retenciones de quinta categoria</a></li>
                 <li><a href="https://drive.google.com/file/d/1enh_NO7JLd1C9HgTUXZYYCYiUPF2MnUR/view?usp=sharing" target="_blank" rel="noopener">Descargar Declaracion Jurada Vida Ley</a></li>
                 <li><a href="https://carnetvacunacion.minsa.gob.pe/" target="_blank" rel="noopener">Descargar carnet de vacunacion MINSA</a></li>
-                <li><a href="https://wa.me/51999350044" target="_blank" rel="noopener">Enviar documentos por WhatsApp a Tania</a></li>
             </ul>
 
             <div class="public-guide-photo">
@@ -69,8 +68,8 @@
             </div>
         </div>
     </div>
-</details>
+</section>
 
 <div class="ficha-alert ficha-alert-warning public-guide-warning">
-    Envia los documentos a WhatsApp 999 350 044. Si algun enlace no abre, copia la direccion en tu navegador o agrega el contacto de WhatsApp antes de abrirlo.
+    Adjunta todos los documentos solicitados en la seccion de carga ubicada mas abajo. Revisa cada archivo antes de enviar la ficha para evitar observaciones posteriores.
 </div>

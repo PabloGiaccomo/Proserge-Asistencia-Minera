@@ -1089,6 +1089,17 @@
     width: 100%;
 }
 
+.epp-delivery-submit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.epp-delivery-submit-actions .epp-btn {
+    flex: 1 1 220px;
+    white-space: normal;
+}
+
 .epp-empty {
     color: #64748b;
     font-weight: 700;

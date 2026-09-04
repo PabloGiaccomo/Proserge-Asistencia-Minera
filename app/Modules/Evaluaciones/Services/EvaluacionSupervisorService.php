@@ -19,11 +19,15 @@ class EvaluacionSupervisorService
 
     public function list(Usuario $usuario, array $filters): ?Collection
     {
-        if (!$this->policy->manage($usuario)) {
+        if (!$this->policy->canViewType($usuario, 'supervisores')) {
             return null;
         }
 
         $query = EvaluacionSupervisor::query();
+
+        if (!$this->policy->canViewOthers($usuario)) {
+            $query->where('evaluador_id', $usuario->personal_id);
+        }
 
         if (!empty($filters['destino_tipo'])) {
             $query->where('destino_tipo', strtoupper((string) $filters['destino_tipo']));
@@ -59,6 +63,12 @@ class EvaluacionSupervisorService
         $item = EvaluacionSupervisor::query()->find($id);
 
         if (!$item) {
+            return null;
+        }
+
+        if (!$this->policy->canViewType($usuario, 'supervisores')
+            || (!$this->policy->canViewOthers($usuario) && (string) $item->evaluador_id !== (string) $usuario->personal_id)
+        ) {
             return null;
         }
 

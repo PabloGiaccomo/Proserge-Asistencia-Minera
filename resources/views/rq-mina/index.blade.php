@@ -442,7 +442,14 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                                             @endif
 
                                             @if($isBorrador && $canSendRq)
-                                                <form method="POST" action="{{ route('rq-mina.enviar', $rq['id']) }}" onsubmit="return confirm('¿Enviar este RQ?');">
+                                                <form
+                                                    method="POST"
+                                                    action="{{ route('rq-mina.enviar', $rq['id']) }}"
+                                                    class="js-rq-send-form"
+                                                    data-rq-title="{{ $tituloParada !== '-' ? $tituloParada : 'Parada sin nombre' }}"
+                                                    data-rq-destination="{{ $destinoNombre }}"
+                                                    data-rq-range="{{ $fechaInicioFmt }} al {{ $fechaFinFmt }}"
+                                                >
                                                     @csrf
                                                     <button type="submit" class="rq-actions-item">Enviar</button>
                                                 </form>
@@ -519,6 +526,54 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
         @endif
     </div>
     </div>
+</div>
+
+<div class="rq-confirm-overlay" id="rqSendConfirm" hidden>
+    <section
+        class="rq-confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rqSendConfirmTitle"
+        aria-describedby="rqSendConfirmDescription"
+    >
+        <div class="rq-confirm-icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="m22 2-7 20-4-9-9-4Z"></path>
+                <path d="M22 2 11 13"></path>
+            </svg>
+        </div>
+        <div class="rq-confirm-copy">
+            <span class="rq-confirm-eyebrow">Confirmar envío</span>
+            <h2 id="rqSendConfirmTitle">Enviar RQ a RR.HH.</h2>
+            <p id="rqSendConfirmDescription">
+                Revisa el requerimiento antes de enviarlo. Después del envío dejará de estar en borrador.
+            </p>
+        </div>
+        <dl class="rq-confirm-summary">
+            <div>
+                <dt>Parada</dt>
+                <dd id="rqSendConfirmRqTitle">-</dd>
+            </div>
+            <div>
+                <dt>Destino</dt>
+                <dd id="rqSendConfirmDestination">-</dd>
+            </div>
+            <div>
+                <dt>Periodo</dt>
+                <dd id="rqSendConfirmRange">-</dd>
+            </div>
+        </dl>
+        <div class="rq-confirm-actions">
+            <button type="button" class="btn-row btn-row-outline" id="rqSendConfirmCancel">Cancelar</button>
+            <button type="button" class="btn-row btn-send" id="rqSendConfirmSubmit">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="m22 2-7 20-4-9-9-4Z"></path>
+                    <path d="M22 2 11 13"></path>
+                </svg>
+                Enviar RQ
+            </button>
+        </div>
+    </section>
 </div>
 
 <!-- Modal Nuevo RQ Mina -->
@@ -948,12 +1003,75 @@ function initializeRQMinaActionMenus() {
     });
 }
 
+function initializeRQSendConfirmation() {
+    const overlay = document.getElementById('rqSendConfirm');
+    const cancelButton = document.getElementById('rqSendConfirmCancel');
+    const submitButton = document.getElementById('rqSendConfirmSubmit');
+    const title = document.getElementById('rqSendConfirmRqTitle');
+    const destination = document.getElementById('rqSendConfirmDestination');
+    const range = document.getElementById('rqSendConfirmRange');
+    let pendingForm = null;
+    let triggerButton = null;
+
+    if (!overlay || !cancelButton || !submitButton) return;
+
+    const closeConfirmation = () => {
+        overlay.hidden = true;
+        document.body.classList.remove('rq-confirm-open');
+        pendingForm = null;
+
+        if (triggerButton) {
+            triggerButton.focus({ preventScroll: true });
+            triggerButton = null;
+        }
+    };
+
+    document.querySelectorAll('.js-rq-send-form').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            if (form.dataset.confirmed === 'true') return;
+
+            event.preventDefault();
+            pendingForm = form;
+            triggerButton = event.submitter || form.querySelector('button[type="submit"]');
+            title.textContent = form.dataset.rqTitle || 'Parada sin nombre';
+            destination.textContent = form.dataset.rqDestination || '-';
+            range.textContent = form.dataset.rqRange || '-';
+            overlay.hidden = false;
+            document.body.classList.add('rq-confirm-open');
+            submitButton.focus({ preventScroll: true });
+        });
+    });
+
+    cancelButton.addEventListener('click', closeConfirmation);
+    submitButton.addEventListener('click', () => {
+        if (!pendingForm) return;
+
+        submitButton.disabled = true;
+        submitButton.textContent = 'Enviando...';
+        pendingForm.dataset.confirmed = 'true';
+        pendingForm.submit();
+    });
+
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closeConfirmation();
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !overlay.hidden) {
+            closeConfirmation();
+        }
+    });
+}
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalRQ(); });
 document.getElementById('modalRQ').addEventListener('click', e => { if (e.target.id === 'modalRQ') closeModalRQ(); });
 
 document.addEventListener('DOMContentLoaded', function () {
     initializeRQMinaAutoFilters();
     initializeRQMinaActionMenus();
+    initializeRQSendConfirmation();
 
     if (window.ProsergeUI) {
         window.ProsergeUI.initCollapsiblePanel({

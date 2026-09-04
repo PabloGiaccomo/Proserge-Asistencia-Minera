@@ -63,6 +63,7 @@ class PermissionCatalog
         'ver_logistica_kardex',
         'ver_logistica_cesados',
         'ver_todas_asistencias',
+        'ver_todas_evaluaciones',
         'ver_desempeno',
         'evaluar_desempeno',
         'ver_supervisores',
@@ -229,6 +230,7 @@ class PermissionCatalog
         'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'anular'],
         'evaluaciones' => [
             'ver',
+            'ver_todas_evaluaciones',
             'ver_desempeno',
             'evaluar_desempeno',
             'ver_supervisores',
@@ -388,6 +390,7 @@ class PermissionCatalog
             'ver_logistica_kardex' => 'Ver Kardex',
             'ver_logistica_cesados' => 'Ver cesados por entregar',
             'ver_todas_asistencias' => 'Ver y registrar todas las asistencias',
+            'ver_todas_evaluaciones' => 'Ver evaluaciones de otros',
             'ver_desempeno' => 'Ver evaluación diaria',
             'evaluar_desempeno' => 'Realizar evaluación diaria',
             'ver_supervisores' => 'Ver evaluaciones de supervisores',

@@ -85,6 +85,11 @@ Trabajadores nuevos:
 - El master Excel de habilitacion es apoyo de importacion con preview y
   confirmacion; no es fuente absoluta de verdad y por ahora no crea trabajadores
   nuevos automaticamente.
+- Una vez confirmado por un usuario autorizado, el Master si reemplaza de forma
+  completa la configuracion activa de examenes y requisitos por mina. Lo que no
+  aparece en el archivo queda inactivo y fuera de nuevas habilitaciones. Los
+  intentos, resultados y snapshots anteriores se conservan solo como historial
+  interno para no romper auditoria ni relaciones de base de datos.
 - En habilitacion minera se separa estado general de accion siguiente: tareas
   del Excel como "programar examen" deben quedar como `EN_PROCESO` mas accion
   pendiente, no como estado final.

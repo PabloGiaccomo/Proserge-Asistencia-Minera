@@ -91,6 +91,15 @@ class AsistenciaDetalle extends Model
         return !$this->grupo_trabajo_detalle_id;
     }
 
+    public function pendienteDeMarcacion(): bool
+    {
+        return $this->estado === 'PENDIENTE'
+            || ($this->estado === self::ESTADO_AUSENTE
+                && $this->origen_registro === 'SISTEMA'
+                && !$this->marcado_at && !$this->marcado_por_id
+                && in_array($this->hora_marcado, [null, '00:00', '00:00:00'], true));
+    }
+
     public function cuentaComoReal(): bool
     {
         return in_array((string) $this->estado, self::ESTADOS_REAL, true);

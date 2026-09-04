@@ -56,7 +56,7 @@
             <div class="eval-section-heading">
                 <div>
                     <h2>Evaluaciones pendientes del día</h2>
-                    <p>Solo aparecen asistencias cerradas que registraste como encargado.</p>
+                    <p>{{ $canEvaluateOthers ? 'Asistencias cerradas pendientes de evaluación, incluidas las registradas por otros responsables.' : 'Solo aparecen asistencias cerradas que registraste como encargado.' }}</p>
                 </div>
                 <span class="eval-count">{{ $dailyPending->sum(fn ($group) => $group['workers']->count()) }} pendientes</span>
             </div>
@@ -66,7 +66,7 @@
             @elseif($dailyPending->isEmpty())
                 <div class="eval-empty">
                     <strong>No tienes evaluaciones pendientes para esta fecha.</strong>
-                    <span>Cuando cierres una asistencia, el personal que trabajó aparecerá aquí.</span>
+                    <span>{{ $canEvaluateOthers ? 'El personal aparecerá aquí cuando su asistencia haya sido cerrada.' : 'Cuando cierres una asistencia, el personal que trabajó aparecerá aquí.' }}</span>
                 </div>
             @else
                 <div class="eval-attendance-list">
