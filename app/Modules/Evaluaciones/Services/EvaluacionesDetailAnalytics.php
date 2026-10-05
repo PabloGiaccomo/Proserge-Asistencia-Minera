@@ -13,6 +13,7 @@ class EvaluacionesDetailAnalytics
         $max = $type === 'supervisores' ? 100 : 20;
         $scores = $rows->pluck('score')->filter(fn ($v) => $this->valid($v, 0, $max))->values();
         $records = $rows->pluck('detail');
+        $historicalCount = $records->filter(fn ($r) => ($r['calculo_version'] ?? '') === 'HISTORICA' || ($r['origen'] ?? '') === 'HISTORICA')->count();
         $charts = [];
         $extra = [];
         if ($type === 'desempeno') {
@@ -30,7 +31,7 @@ class EvaluacionesDetailAnalytics
             foreach (Supervisor::ITEMS as $block => $questions) {
                 $weights = array_intersect_key(Supervisor::WEIGHTS, $questions);
                 $blockMax = array_sum($weights) * 100;
-                $contributions = $withResponses->map(function ($r) use ($weights) {
+                $contributions = $withResponses->filter(fn ($r) => ($r['calculo_version'] ?? '') !== 'HISTORICA')->map(function ($r) use ($weights) {
                     $normalized = Supervisor::normalizeResponses($r['respuestas']);
                     return array_sum(array_map(fn ($key) => $normalized[$key] / 5 * $weights[$key] * 100, array_keys($weights)));
                 });
@@ -84,6 +85,7 @@ class EvaluacionesDetailAnalytics
         })->values()->all();
 
         return ['type' => $type, 'max' => $max, 'total' => $rows->count(), 'n' => $scores->count(),
+            'historicalCount' => $historicalCount,
             'median' => $scores->isEmpty() ? null : round($scores->median(), 1),
             'min' => $scores->min(), 'maxObserved' => $scores->max(), 'charts' => $charts, 'extra' => $extra,
             'bands' => $bands, 'trend' => $trend];

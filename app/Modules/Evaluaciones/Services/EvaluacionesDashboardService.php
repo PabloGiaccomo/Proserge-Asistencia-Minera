@@ -26,7 +26,8 @@ class EvaluacionesDashboardService
             ->filter(fn ($definition, $key) => $this->policy->canViewType($user, $key))
             ->map(fn ($definition) => $definition[5])->all();
 
-        $authorizedRows = $this->authorizedRows($user, $filters, $definitions, $selectedType);
+        $authorizedRows = $this->authorizedRows($user, $filters, $definitions, $selectedType)
+            ->filter(fn ($row) => empty($filters['origen']) || $row['origin'] === $filters['origen'])->values();
         $cargos = $authorizedRows->pluck('cargo')->unique()->sort()->values();
         if ($filters['cargo'] && !$cargos->contains($filters['cargo'])) $cargos->push($filters['cargo']);
 
@@ -56,7 +57,7 @@ class EvaluacionesDashboardService
         return ['types' => $typeOptions, 'total' => $rows->count(), 'people' => $rows->pluck('person')->filter()->unique()->count(),
             'scored' => $scored->count(), 'unscored' => $rows->count() - $scored->count(),
             'scoreCoverage' => $rows->isEmpty() ? 0.0 : round($scored->count() / $rows->count() * 100, 1),
-            'activeFilterCount' => collect([$selectedType, $filters['mina'], $filters['cargo']])->filter(fn ($value) => filled($value))->count() + 1,
+            'activeFilterCount' => collect([$selectedType, $filters['mina'], $filters['cargo'], $filters['origen'] ?? ''])->filter(fn ($value) => filled($value))->count() + 1,
             'details' => $selectedType !== '' && isset($typeOptions[$selectedType])
                 ? $this->detailAnalytics->build($selectedType, $rows) : null,
             'summary' => $summary, 'cargos' => $cargos, 'pie' => $rows->isEmpty() ? '#e5e9ed 0% 100%' : implode(', ', $segments),
@@ -94,6 +95,10 @@ class EvaluacionesDashboardService
                         if ($type === 'desempeno') {
                             $scope->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $user->id));
                         }
+                        if ($this->policy->canViewOthers($user)) {
+                            $marker = $type === 'desempeno' ? 'origen' : 'calculo_version';
+                            $scope->orWhere(fn ($history) => $history->where($marker, 'HISTORICA')->whereNull('mina_id'));
+                        }
                     });
                 }
             }
@@ -109,6 +114,8 @@ class EvaluacionesDashboardService
             foreach ($query->get() as $evaluation) {
                 $rows->push([
                     'type' => $type,
+                    'origin' => $type === 'desempeno' ? ($evaluation->origen ?: 'LEGADO')
+                        : ($evaluation->calculo_version === 'HISTORICA' ? 'HISTORICA' : 'ACTUAL'),
                     'label' => $label,
                     'color' => $color,
                     'max' => $max,

@@ -14,6 +14,7 @@
         <div><label for="ed-to">Hasta</label><input id="ed-to" name="hasta" type="date" required value="{{ $dashboardFilters['hasta'] }}"></div>
         <div><label for="ed-mine">Mina</label><select id="ed-mine" name="mina"><option value="">Todas</option><option value="sin_mina" @selected($dashboardFilters['mina'] === 'sin_mina')>Sin mina</option>@foreach($mines as $mine)<option value="{{ $mine->id }}" @selected($dashboardFilters['mina'] === $mine->id)>{{ $mine->nombre }}</option>@endforeach</select></div>
         <div><label for="ed-job">Cargo</label><select id="ed-job" name="cargo"><option value="">Todos</option>@foreach($dashboard['cargos'] as $job)<option @selected($dashboardFilters['cargo'] === $job)>{{ $job }}</option>@endforeach</select></div>
+        <div><label for="ed-origin">Origen</label><select id="ed-origin" name="origen"><option value="">Todos</option>@foreach(['ASISTENCIA' => 'Desde asistencia', 'DIRECTA' => 'Diaria directa', 'HISTORICA' => 'Carga histórica', 'ACTUAL' => 'Supervisor / residente actual', 'LEGADO' => 'Registro previo sin origen'] as $key => $label)<option value="{{ $key }}" @selected(($dashboardFilters['origen'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
         <button type="submit" class="btn btn-primary">Aplicar</button>
         <a href="{{ route('evaluaciones.index', ['tipo' => 'dashboard']) }}">Restablecer</a>
     </form>
@@ -23,6 +24,7 @@
         <span>{{ $dashboardFilters['evaluacion_tipo'] ? ($dashboard['types'][$dashboardFilters['evaluacion_tipo']] ?? 'Tipo sin acceso') : 'Todos los tipos permitidos' }}</span>
         <span>{{ $dashboardFilters['mina'] ? ($dashboardFilters['mina'] === 'sin_mina' ? 'Sin mina' : ($mines->firstWhere('id', $dashboardFilters['mina'])?->nombre ?? 'Mina filtrada')) : 'Todas las minas permitidas' }}</span>
         <span>{{ $dashboardFilters['cargo'] ?: 'Todos los cargos' }}</span>
+        @if(!empty($dashboardFilters['origen']))<span>{{ $dashboardFilters['origen'] === 'HISTORICA' ? 'Carga histórica' : $dashboardFilters['origen'] }}</span>@endif
     </div>
     <div class="ed-kpis"><div><span>Evaluaciones</span><strong>{{ $dashboard['total'] }}</strong><small>Registros del universo filtrado</small></div><div><span>Personas evaluadas</span><strong>{{ $dashboard['people'] }}</strong><small>Personas únicas en los resultados</small></div><div><span>Cobertura de puntaje</span><strong>{{ $dashboard['scoreCoverage'] }}%</strong><small>{{ $dashboard['scored'] }} con puntaje · {{ $dashboard['unscored'] }} pendientes o inválidos</small></div>
     @foreach($dashboard['summary'] as $item)<div><span>{{ $item['label'] }} · Promedio</span><strong>{{ $item['average'] !== null ? $item['average'].' / '.$item['max'] : 'Sin puntaje' }}</strong><small>{{ $item['count'] }} evaluaciones · {{ $item['scored'] }} con puntaje valido</small></div>@endforeach</div>

@@ -135,7 +135,8 @@ class EvaluacionesPageService
             ->when(!$canViewOthers, fn ($query) => $query->where('evaluado_por_usuario_id', $usuario->id))
             ->when($canViewOthers && !$this->policy->isPrivileged($usuario), fn ($query) => $query->where(function ($scope) use ($mineIds, $usuario): void {
                 $scope->whereIn('mina_id', $mineIds)
-                    ->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $usuario->id));
+                    ->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $usuario->id))
+                    ->orWhere(fn ($history) => $history->where('origen', 'HISTORICA')->whereNull('mina_id'));
             }))
             ->orderByDesc('fecha')
             ->orderByDesc('hora')

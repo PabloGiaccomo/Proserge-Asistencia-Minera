@@ -1,5 +1,8 @@
 <section class="ed-specific" data-detail-type="{{ $detail['type'] }}">
     <header><h2>Analisis detallado · {{ $dashboard['types'][$detail['type']] }}</h2><p>{{ $detail['total'] }} evaluaciones dentro de los filtros seleccionados</p></header>
+    @if(($detail['historicalCount'] ?? 0) && $detail['type'] !== 'desempeno')
+        <p class="ed-method">{{ $detail['historicalCount'] }} evaluaciones conservan la nota histórica registrada. Sus totales cuentan en los promedios; el aporte ponderado por bloque utiliza la fórmula vigente solo para las evaluaciones actuales.</p>
+    @endif
     <div class="ed-kpis">
         <div><span>Mediana del resultado</span><strong>{{ $detail['median'] ?? 'Sin datos' }}</strong><small>Escala de {{ $detail['max'] }} puntos</small></div>
         <div><span>Minimo / maximo observado</span><strong>{{ $detail['min'] ?? '-' }} / {{ $detail['maxObserved'] ?? '-' }}</strong><small>{{ $detail['n'] }} puntajes validos</small></div>

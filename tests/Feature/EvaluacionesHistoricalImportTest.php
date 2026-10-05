@@ -9,6 +9,9 @@ use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalReconciler;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalMapper;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
 use App\Modules\Evaluaciones\Services\PromedioDesempenoService;
+use App\Modules\Evaluaciones\Services\EvaluacionesDashboardService;
+use App\Modules\Evaluaciones\Services\EvaluacionesPageService;
+use App\Modules\Evaluaciones\Services\EvaluacionDesempenoService;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalWorkbookReader;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -557,6 +560,52 @@ class EvaluacionesHistoricalImportTest extends TestCase
                 unlink($path);
             }
         }
+    }
+
+    public function test_confirmed_history_without_mine_is_visible_to_view_all_and_obeys_filters(): void
+    {
+        $viewer = $this->administrator(['evaluaciones' => ['ver_desempeno', 'ver_todas_evaluaciones']]);
+        $ownOnly = $this->administrator(['evaluaciones' => ['ver_desempeno']]);
+        $worker = $this->personal('93939393');
+        $id = (string) Str::uuid();
+        DB::table('evaluacion_desempeno')->insert([
+            'id' => $id, 'fecha' => '2025-04-30', 'hora' => null,
+            'mina_id' => null, 'supervisor_id' => null, 'trabajador_id' => $worker,
+            'desempeno_trabajo' => 3, 'orden_limpieza' => 3, 'compromiso' => 3,
+            'respuesta_emocional' => 3, 'seguridad_trabajo' => 3, 'total' => 15,
+            'origen' => 'HISTORICA',
+        ]);
+        $this->assertTrue(app(EvaluacionesPageService::class)->build($viewer, 'desempeno', '2025-04-30')['dailyHistory']->contains('id', $id));
+        $this->assertFalse(app(EvaluacionesPageService::class)->build($ownOnly, 'desempeno', '2025-04-30')['dailyHistory']->contains('id', $id));
+        $this->assertNotNull(app(EvaluacionDesempenoService::class)->find($viewer, $id));
+        $this->assertNull(app(EvaluacionDesempenoService::class)->find($ownOnly, $id));
+        $filters = ['desde' => '2025-04-30', 'hasta' => '2025-04-30', 'mina' => '', 'cargo' => '', 'evaluacion_tipo' => 'desempeno', 'origen' => 'HISTORICA'];
+        $dashboard = app(EvaluacionesDashboardService::class);
+        $data = $dashboard->build($viewer, $filters);
+        $this->assertSame(1, $data['total']);
+        $this->assertSame(15.0, $data['summary'][0]['average']);
+        $this->assertSame(0, $dashboard->build($ownOnly, $filters)['total']);
+        $this->assertSame(0, $dashboard->build($viewer, [...$filters, 'mina' => (string) Str::uuid()])['total']);
+        $this->assertSame(0, $dashboard->build($viewer, [...$filters, 'origen' => 'DIRECTA'])['total']);
+    }
+
+    public function test_historical_supervisor_total_is_counted_but_not_recalculated_for_weighted_blocks(): void
+    {
+        $viewer = $this->administrator(['evaluaciones' => ['ver_supervisores', 'ver_todas_evaluaciones']]);
+        $worker = $this->personal('94949494');
+        DB::table('evaluacion_supervisor')->insert([
+            'id' => (string) Str::uuid(), 'evaluado_id' => $worker, 'evaluador_id' => null,
+            'fecha' => '2025-12-17', 'mina_id' => null, 'resultado_final' => 61,
+            'calculo_version' => 'HISTORICA', 'respuestas' => json_encode(array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4)),
+        ]);
+        $data = app(EvaluacionesDashboardService::class)->build($viewer, [
+            'desde' => '2025-12-01', 'hasta' => '2025-12-31', 'mina' => '', 'cargo' => '',
+            'evaluacion_tipo' => 'supervisores', 'origen' => 'HISTORICA',
+        ]);
+        $this->assertSame(1, $data['total']);
+        $this->assertSame(61.0, $data['summary'][0]['average']);
+        $this->assertSame(0, $data['details']['charts'][0]['items'][0]['n']);
+        $this->assertSame(1, $data['details']['historicalCount']);
     }
 
     private function webSession(Usuario $user): array

@@ -438,6 +438,10 @@ class EvaluacionDesempenoService
 
     private function canReadEvaluation(Usuario $usuario, EvaluacionDesempeno $item): bool
     {
+        if ((string) $item->origen === 'HISTORICA' && $item->mina_id === null) {
+            return $this->policy->canViewOthers($usuario);
+        }
+
         return ((string) $item->origen === 'DIRECTA' && (string) $item->evaluado_por_usuario_id === (string) $usuario->id)
             || $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id);
     }
