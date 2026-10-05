@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_editar_bloqueo" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_bienestar_editar_bloqueo" name="Editar bloqueo de bienestar" isExecutable="false">
+    <bpmn:documentation>Actualiza tipo, motivo, detalle y fechas de un bloqueo existente; no cambia estado ni emite notificacion. | Evidencia: routes/web.php; app/Modules/Bienestar/Controllers/BienestarPageController.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_editar_bloqueo">
+    <bpmn:lane id="Lane_User" name="Bienestar/RR.HH. autorizado">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Enter</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Validate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Allowed</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Save</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Se solicita editar bloqueo">
+      <bpmn:documentation>routes/web.php: PUT /bienestar/bloqueos/{bloqueoId}.</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Enter" name="Modificar datos del bloqueo">
+      <bpmn:documentation>app/Modules/Bienestar/Controllers/BienestarPageController.php::updateBloqueo</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Validate" name="Validar permiso, bloqueo y datos">
+      <bpmn:documentation>app/Modules/Bienestar/Controllers/BienestarPageController.php::updateBloqueo: permiso editar/actualizar, fechas, tipo y gestacion segun sexo.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Allowed" name="Edicion valida?">
+      <bpmn:documentation>app/Modules/Bienestar/Controllers/BienestarPageController.php::updateBloqueo</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Save" name="Actualizar tipo, motivo y fechas">
+      <bpmn:documentation>app/Modules/Bienestar/Controllers/BienestarPageController.php::updateBloqueo: no modifica estado, no notifica.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Bloqueo actualizado">
+      <bpmn:documentation>app/Modules/Bienestar/Controllers/BienestarPageController.php: redirige a listado.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Edicion rechazada">
+      <bpmn:documentation>Permiso, bloqueo o datos invalidos.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Enter"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Enter" targetRef="Validate"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Validate" targetRef="Allowed"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Allowed" targetRef="Save" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Allowed" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Save" targetRef="Done"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_editar_bloqueo">
+    <bpmndi:BPMNPlane id="Plane_editar_bloqueo" bpmnElement="Process_bienestar_editar_bloqueo">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1310" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="250" width="1310" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Enter_di" bpmnElement="Enter">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Validate_di" bpmnElement="Validate">
+        <dc:Bounds x="595" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Allowed_di" bpmnElement="Allowed">
+        <dc:Bounds x="785" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Save_di" bpmnElement="Save">
+        <dc:Bounds x="975" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="340" />
+        <di:waypoint x="595" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="785" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="835" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="975" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1125" y="340" />
+        <di:waypoint x="1145" y="340" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

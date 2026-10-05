@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ciclo_contractual" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_personal_ciclo_contractual" name="Contrato, renovacion, reingreso y cierre" isExecutable="false">
+    <bpmn:documentation>Crea contratos independientes, activa solo con firmado vigente y conserva historicos inamovibles. | Evidencia: app/Modules/Personal/Services/PersonalContratoService.php; app/Modules/Personal/Services/PersonalContratoDatoService.php; app/Modules/Personal/Controllers/PersonalContratoController.php; app/Models/PersonalContrato.php; tests/Feature/PersonalContratoServiceTest.php; tests/Feature/PersonalContratoRenewalTest.php; tests/Feature/PersonalContratoNotRenewedClosureTest.php | Por confirmar: Responsable operativo final de decidir renovacion y documentos obligatorios por tipo contractual.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_ciclo_contractual">
+    <bpmn:lane id="Lane_RRHH" name="RR.HH.">
+      <bpmn:flowNodeRef>Start_Contract</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Prepare</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Decision</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Renew</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_History</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Sign</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Wait</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Create</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Signed</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Activate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_New</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Close</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Contract" name="Requiere contrato, renovacion o reingreso">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Prepare" name="Registrar datos del nuevo contrato">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_Create" name="Crear contrato PREPARACION">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Signed" name="Contrato firmado vigente?">
+      <bpmn:incoming>Flow_CheckSigned</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Activate" name="Contrato ACTIVO y trabajador ACTIVO">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_Decision" name="Registrar decision de renovacion">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_Renew" name="Decision registrada">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Wait</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_New" name="Crear nuevo contrato PREPARACION">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Close" name="Validar cierre y guardar NO_RENOVADO">
+      <bpmn:documentation>PersonalContratoService::closeAsNotRenewed: contrato ACTIVO, decision NO_RENOVAR, fecha fin; cierre anticipado exige confirmacion y observacion. CESADO solo si no existe otro contrato firmado vigente.</bpmn:documentation>
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_History" name="Historial conservado">
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="Task_Sign" name="Adjuntar firmado al mismo contrato">
+      <bpmn:documentation>PersonalContratoService::uploadSignedFileForContract. Conservar contrato_id; no preparar otro contrato por falta de firma.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_CheckSigned</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_Wait" name="Decision pendiente; sin cierre">
+      <bpmn:documentation>PersonalContratoService::registerRenewalDecision; una decision pendiente no autoriza closeAsNotRenewed.</bpmn:documentation>
+      <bpmn:incoming>Flow_Wait</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Contract" targetRef="Task_Prepare"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Prepare" targetRef="Task_Create"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Create" targetRef="Task_Sign"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Gateway_Signed" targetRef="Task_Activate" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Gateway_Signed" targetRef="Task_Sign" name="Falta firmado vigente"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_Activate" targetRef="Task_Decision"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_Decision" targetRef="Gateway_Renew"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Gateway_Renew" targetRef="Task_New" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_New" targetRef="End_History"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_10" sourceRef="Gateway_Renew" targetRef="Task_Close" name="NO_RENOVAR y solicitar cierre"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_Close" targetRef="End_History"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_CheckSigned" sourceRef="Task_Sign" targetRef="Gateway_Signed"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Wait" sourceRef="Gateway_Renew" targetRef="End_Wait" name="Pendiente"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_ciclo_contractual">
+    <bpmndi:BPMNPlane id="Plane_ciclo_contractual" bpmnElement="Process_personal_ciclo_contractual">
+      <bpmndi:BPMNShape id="Lane_RRHH_di" bpmnElement="Lane_RRHH" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1850" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1850" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Contract_di" bpmnElement="Start_Contract">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Prepare_di" bpmnElement="Task_Prepare">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Create_di" bpmnElement="Task_Create">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Signed_di" bpmnElement="Gateway_Signed">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Activate_di" bpmnElement="Task_Activate">
+        <dc:Bounds x="975" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Decision_di" bpmnElement="Task_Decision">
+        <dc:Bounds x="1165" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Renew_di" bpmnElement="Gateway_Renew">
+        <dc:Bounds x="1355" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_New_di" bpmnElement="Task_New">
+        <dc:Bounds x="1545" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Close_di" bpmnElement="Task_Close">
+        <dc:Bounds x="1545" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_History_di" bpmnElement="End_History">
+        <dc:Bounds x="1735" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Sign_di" bpmnElement="Task_Sign">
+        <dc:Bounds x="785" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Wait_di" bpmnElement="End_Wait">
+        <dc:Bounds x="1735" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="785" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="810" y="460" />
+        <di:waypoint x="810" y="160" />
+        <di:waypoint x="785" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1125" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1315" y="160" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1405" y="160" />
+        <di:waypoint x="1475" y="160" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1545" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1695" y="460" />
+        <di:waypoint x="1715" y="460" />
+        <di:waypoint x="1715" y="160" />
+        <di:waypoint x="1735" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1405" y="160" />
+        <di:waypoint x="1475" y="160" />
+        <di:waypoint x="1475" y="580" />
+        <di:waypoint x="1545" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1695" y="580" />
+        <di:waypoint x="1715" y="580" />
+        <di:waypoint x="1715" y="160" />
+        <di:waypoint x="1735" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_CheckSigned_di" bpmnElement="Flow_CheckSigned">
+        <di:waypoint x="935" y="160" />
+        <di:waypoint x="860" y="160" />
+        <di:waypoint x="860" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Wait_di" bpmnElement="Flow_Wait">
+        <di:waypoint x="1405" y="160" />
+        <di:waypoint x="1570" y="160" />
+        <di:waypoint x="1570" y="280" />
+        <di:waypoint x="1735" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

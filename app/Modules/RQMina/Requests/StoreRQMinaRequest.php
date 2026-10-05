@@ -32,11 +32,15 @@ class StoreRQMinaRequest extends FormRequest
             'transporte.*.transporte' => ['required', 'string', 'max:191'],
             'transporte.*.cantidad' => ['required', 'integer', 'min:1'],
             'plan_operativo' => ['nullable', 'array'],
+            // Id de la fila actual: permite guardar sin recrear el requerimiento. El
+            // servicio lo ignora si no es un uuid valido.
+            'plan_operativo.*.id' => ['nullable', 'string', 'max:36'],
             'plan_operativo.*.area_operativa' => ['nullable', 'string', 'max:80'],
             'plan_operativo.*.modulo' => ['nullable', 'string', 'max:80'],
             'plan_operativo.*.nombre' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.observaciones' => ['nullable', 'string'],
             'plan_operativo.*.actividades' => ['nullable', 'array'],
+            'plan_operativo.*.actividades.*.id' => ['nullable', 'string', 'max:36'],
             'plan_operativo.*.actividades.*.sait' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.actividades.*.sector' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.actividades.*.area' => ['nullable', 'string', 'max:191'],
@@ -55,6 +59,7 @@ class StoreRQMinaRequest extends FormRequest
             'plan_operativo.*.actividades.*.turnos.*.real_turno_b' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.actividades.*.turnos.*.real' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.transportes' => ['nullable', 'array'],
+            'plan_operativo.*.transportes.*.id' => ['nullable', 'string', 'max:36'],
             'plan_operativo.*.transportes.*.alcance' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.transportes.*.unidad_carga' => ['nullable', 'string', 'max:191'],
             'plan_operativo.*.transportes.*.fecha' => ['nullable', 'date'],

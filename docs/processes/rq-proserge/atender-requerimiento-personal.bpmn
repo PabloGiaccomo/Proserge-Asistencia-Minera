@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_atender_requerimiento_personal" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_rq_proserge_atender_requerimiento_personal" name="Asignar personal a RQ Proserge" isExecutable="false">
+    <bpmn:documentation>Busca trabajador disponible para un puesto y crea una asignacion activa con cobertura recalculada. | Evidencia: app/Modules/RQProserge/Services/RQProsergeService.php; app/Modules/RQProserge/Policies/RQProsergePolicy.php; app/Modules/RQProserge/Services/RQProsergeCoverageService.php; routes/web.php; routes/api.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_atender_requerimiento_personal">
+    <bpmn:lane id="Lane_User" name="RR.HH. / Operaciones">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Select</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Allowed</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Lock</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Save</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Puesto de RQ Proserge por atender">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Select" name="Seleccionar puesto, persona y fechas">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal; puesto procede de RQMinaDetalle.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Validar permiso, parada, fechas y disponibilidad">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal: policy-&gt;assign, parada no finalizada, detalle pertenece al RQ, fecha en parada, trabajador existente y disponible.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Allowed" name="Candidato asignable?">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal devuelve error de negocio o lanza RuntimeException si hay error tecnico.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Lock" name="Bloquear RQ y puesto; revalidar cupo">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal: DB::transaction, lockForUpdate, limite por puesto, traslape activo y segunda comprobacion de disponibilidad.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Save" name="Crear ASIGNADO y actualizar cobertura">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal: snapshot de puesto, habilitacion/disponibilidad, actor y fecha; recalculateCantidadAtendida y recalculateEstado.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Asignacion activa registrada">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal devuelve cobertura.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Sin asignacion">
+      <bpmn:documentation>app/Modules/RQProserge/Services/RQProsergeService.php::assignPersonal retorna error cuando falla regla antes de insertar.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Select"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Select" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Check" targetRef="Allowed"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Allowed" targetRef="Lock" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Allowed" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Lock" targetRef="Save"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Save" targetRef="Done"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_atender_requerimiento_personal">
+    <bpmndi:BPMNPlane id="Plane_atender_requerimiento_personal" bpmnElement="Process_rq_proserge_atender_requerimiento_personal">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="250" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Select_di" bpmnElement="Select">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="595" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Allowed_di" bpmnElement="Allowed">
+        <dc:Bounds x="785" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lock_di" bpmnElement="Lock">
+        <dc:Bounds x="975" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Save_di" bpmnElement="Save">
+        <dc:Bounds x="1165" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="340" />
+        <di:waypoint x="595" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="785" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="835" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="975" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="340" />
+        <di:waypoint x="905" y="340" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1125" y="340" />
+        <di:waypoint x="1145" y="340" />
+        <di:waypoint x="1145" y="340" />
+        <di:waypoint x="1165" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1315" y="340" />
+        <di:waypoint x="1335" y="340" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

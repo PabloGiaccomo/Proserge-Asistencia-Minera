@@ -122,6 +122,41 @@ RQ Mina sigue registrando requerimientos de transporte dentro del plan operativo
 
 Desde el plan se agrega acceso a `Transporte operativo` para gestionar servicios concretos.
 
+## Flujo RQ Mina -> Logistica
+
+1. Operaciones registra el requerimiento en el plan operativo del RQ Mina: grupo, alcance o SAIT, unidad de carga, tipo, turno, unidades y capacidad requeridas, fechas y texto solicitado.
+2. Logistica atiende el requerimiento en `Logistica > Servicios y alquileres`: origen, unidad o placa, capacidad del camion, documentos y estado logistico.
+3. Logistica registra la recepcion (resultado, fecha y observacion) y puede corregir con `Hacer cambios`; cada cambio deja evento en `rq_mina_actividad_transporte_eventos`.
+4. Transporte operativo planifica los servicios concretos (pasajeros, tramos, alcances) y en `Requerimientos del plan` ve la atencion logistica de cada requerimiento.
+
+### Propiedad de los datos
+
+- RQ Mina es dueno del requerimiento: grupo, alcance/SAIT, unidad de carga, tipo, turno, unidades y capacidad requeridas, fechas y texto solicitado.
+- Logistica es duena de la atencion: origen, placa, capacidad del camion, documentos, estado logistico, incidencias y recepcion.
+- Guardar el plan operativo **no** borra la atencion de Logistica ni su trazabilidad: cuando el editor reenvia el `id` del transporte, `RQMinaService` actualiza la misma fila, asi que el historial de eventos y los documentos siguen ligados al mismo requerimiento. Si el payload no trae ids, `reservarDatosLogisticos()` y `aplicarDatosLogisticosReservados()` copian esos campos al reemplazar los grupos, emparejando por posicion y por firma (`alcance + unidad de carga`). Un requerimiento nuevo arranca en `REQUERIDO` / `PENDIENTE`.
+- En RQ Mina el editor de plan muestra `Logistica: <estado de atencion>` con placa y recepcion, y pide confirmacion antes de quitar un requerimiento ya atendido.
+- Ningun modulo de transporte cambia estado laboral ni contratos.
+
+### Recepcion y correccion
+
+- `recepcion_estado` se registra desde el panel `Registrar recepcion` (`PENDIENTE`, `RECIBIDO`, `INCOMPLETO`, `NO_LLEGO`, `CON_OBSERVACION`) con fecha y observacion.
+- `Hacer cambios` depende de que la parada siga activa, no de la recepcion, para que se pueda corregir un dato mal registrado.
+- Un panel que no envia un campo ya no lo borra: `normalizeTransportPayload()` conserva el valor existente.
+
+### Lectura, documentos y scope
+
+- El resumen de atencion y los documentos se muestran tambien a usuarios sin `logistica,actualizar`.
+- La descarga usa `logistica.transportes.documento` con `logistica,ver` o `logistica,ver_logistica_servicios`; los slots son `legacy-*` para los campos historicos y `adicional-N` para los documentos cargados con nombre.
+- Actualizar transporte exige `logistica,actualizar` y scope de mina (`MinaScopeAccess`), igual que las herramientas de parada.
+
+### Historial de atencion
+
+Cada cambio de Logistica queda en `rq_mina_actividad_transporte_eventos` con estado anterior, estado nuevo, descripcion, usuario y fecha. El tab Servicios muestra ese historial en un panel plegable `Historial de atencion` por requerimiento (ultimos 8 eventos, consultados en bloque para no disparar una consulta por fila).
+
+### Filtros del tab Servicios
+
+`servicio_parada_id`, `servicio_estado`, `servicio_recepcion`, `servicio_desde`, `servicio_hasta` y `servicio_q` se aplican en base de datos (tope 300) para no perder requerimientos por el limite de la vista. El explorador de paradas filtra al instante en el cliente y `Actualizar lista` recarga con los filtros del servidor.
+
 ## Integracion con Man Power
 
 Cada grupo diario puede vincularse a uno o varios servicios mediante alcances. Desde Man Power se puede abrir la planificacion del contexto.

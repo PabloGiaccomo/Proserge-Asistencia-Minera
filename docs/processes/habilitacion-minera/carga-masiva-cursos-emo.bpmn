@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_carga_masiva_cursos_emo" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_habilitacion_minera_carga_masiva_cursos_emo" name="Carga masiva de cursos y EMO" isExecutable="false">
+    <bpmn:documentation>Previsualiza programaciones/resultados, bloquea observaciones, confirma con token e idempotencia y aplica solo a la mina declarada. | Evidencia: docs/HABILITACION_CARGA_MASIVA.md; app/Modules/Personal/Services/PersonalMinaBulkPreviewService.php; app/Modules/Personal/Services/PersonalCursoImportPlanner.php; app/Modules/Personal/Services/PersonalCursoBulkService.php; tests/Unit/PersonalMinaBulkPreviewTest.php; tests/Unit/PersonalCursoImportPlannerTest.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_carga_masiva_cursos_emo">
+    <bpmn:lane id="Lane_User" name="Usuario autorizado">
+      <bpmn:flowNodeRef>Start_File</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Confirm</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Applied</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Review</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Preview</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Validate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Clean</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Revalidate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Apply</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_File" name="Carga XLSX">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_Preview" name="Leer hojas y construir preview">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:businessRuleTask id="Task_Validate" name="Validar DNI, examen, mina, fechas y conflictos">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Gateway_Clean" name="Hay observaciones?">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_Confirm" name="Confirmar cambios propuestos">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Task_Revalidate" name="Revalidar token, referencias e historial">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:serviceTask id="Task_Apply" name="Aplicar idempotente y recalcular mina">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Applied" name="Resumen aplicado">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_Review" name="Corregir archivo">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_File" targetRef="Task_Preview"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Preview" targetRef="Task_Validate"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Validate" targetRef="Gateway_Clean"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Gateway_Clean" targetRef="Task_Confirm" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_Confirm" targetRef="Task_Revalidate"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_Revalidate" targetRef="Task_Apply"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_Apply" targetRef="End_Applied"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Gateway_Clean" targetRef="End_Review" name="Si"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_carga_masiva_cursos_emo">
+    <bpmndi:BPMNPlane id="Plane_carga_masiva_cursos_emo" bpmnElement="Process_habilitacion_minera_carga_masiva_cursos_emo">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_File_di" bpmnElement="Start_File">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Preview_di" bpmnElement="Task_Preview">
+        <dc:Bounds x="405" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Validate_di" bpmnElement="Task_Validate">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Clean_di" bpmnElement="Gateway_Clean">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Confirm_di" bpmnElement="Task_Confirm">
+        <dc:Bounds x="975" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Revalidate_di" bpmnElement="Task_Revalidate">
+        <dc:Bounds x="1165" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Apply_di" bpmnElement="Task_Apply">
+        <dc:Bounds x="1355" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Applied_di" bpmnElement="End_Applied">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Review_di" bpmnElement="End_Review">
+        <dc:Bounds x="975" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="460" />
+        <di:waypoint x="405" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="460" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1125" y="160" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1315" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1505" y="460" />
+        <di:waypoint x="1525" y="460" />
+        <di:waypoint x="1525" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="280" />
+        <di:waypoint x="975" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

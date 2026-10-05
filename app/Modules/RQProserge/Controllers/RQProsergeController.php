@@ -157,10 +157,10 @@ class RQProsergeController extends Controller
         try {
             $result = $this->service->assignPersonal($usuario, $rq, $request->validated());
         } catch (Throwable $e) {
+            report($e);
             return ApiResponse::error(
                 message: 'Error tecnico al asignar personal',
                 code: 'RQ_PROSERGE_ASSIGN_TECHNICAL_ERROR',
-                detail: ['exception' => $e->getMessage()],
                 status: 500,
             );
         }
@@ -287,10 +287,10 @@ class RQProsergeController extends Controller
         try {
             $result = $this->service->replaceAssignment($usuario, $rq, $detalleId, $request->validated());
         } catch (Throwable $e) {
+            report($e);
             return ApiResponse::error(
                 message: 'Error tecnico al reemplazar personal',
                 code: 'RQ_PROSERGE_REPLACE_TECHNICAL_ERROR',
-                detail: ['exception' => $e->getMessage()],
                 status: 500,
             );
         }

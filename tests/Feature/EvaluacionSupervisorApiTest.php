@@ -166,7 +166,8 @@ class EvaluacionSupervisorApiTest extends TestCase
         $minaId = (string) Str::uuid();
         DB::table('minas')->insert(['id' => $minaId, 'nombre' => 'Mina Eval', 'unidad_minera' => 'UM-E', 'estado' => 'ACTIVO']);
 
-        $evaluadorId = $this->crearPersonal($minaId, true);
+        $evaluadorId = $this->crearPersonal($minaId, false);
+        DB::table('personal')->where('id', $evaluadorId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
         $evaluadoId = $this->crearPersonal($minaId, true);
         $creador = $this->crearUsuario();
 
@@ -187,7 +188,7 @@ class EvaluacionSupervisorApiTest extends TestCase
         DB::table('grupo_trabajo')->insert([
             'id' => $grupoId,
             'fecha' => '2026-10-01',
-            'supervisor_id' => $evaluadorId,
+            'supervisor_id' => $evaluadoId,
             'mina' => 'Mina Eval',
             'unidad' => 'MINA',
             'destino_tipo' => 'MINA',
@@ -216,7 +217,10 @@ class EvaluacionSupervisorApiTest extends TestCase
         $minaId = (string) Str::uuid();
         DB::table('minas')->insert(['id' => $minaId, 'nombre' => 'Mina Aux', 'unidad_minera' => 'UM-A', 'estado' => 'ACTIVO']);
 
-        return [$this->crearPersonal($minaId, true), $this->crearPersonal($minaId, true)];
+        $evaluator = $this->crearPersonal($minaId, false);
+        DB::table('personal')->where('id', $evaluator)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+
+        return [$evaluator, $this->crearPersonal($minaId, true)];
     }
 
     private function crearUsuario(?string $personalId = null): string

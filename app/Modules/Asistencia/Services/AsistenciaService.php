@@ -31,7 +31,11 @@ class AsistenciaService
             return null;
         }
 
-        $query = GrupoTrabajo::query()->with(['rqMina.mina:id,nombre', 'supervisor']);
+        $query = GrupoTrabajo::query()->with([
+            'rqMina.mina:id,nombre',
+            'supervisor',
+            'asistencia:id,grupo_trabajo_id,estado',
+        ]);
 
         if (!empty($filters['fecha'])) {
             $query->where('fecha', $filters['fecha']);
@@ -63,7 +67,7 @@ class AsistenciaService
         }
 
         return $query->orderByDesc('fecha')->get()->map(function (GrupoTrabajo $grupo): array {
-            $asistencia = AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->first();
+            $asistencia = $grupo->asistencia;
 
             return [
                 'grupo_id' => $grupo->id,
@@ -1012,7 +1016,7 @@ class AsistenciaService
         $result = $this->reabrir($usuario, $grupo);
         
         return $result['ok'] ?? false
-            ? ['success' => true, 'message' => 'Asistencia reopenida']
+            ? ['success' => true, 'message' => 'Asistencia reabierta']
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
     }
 

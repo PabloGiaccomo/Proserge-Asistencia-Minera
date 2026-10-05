@@ -168,11 +168,17 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/contratos/{contractId}/preparar-renovacion', [PersonalContratoController::class, 'prepareFromDecision'])->middleware('web.permission:vencimientos,renovar')->name('personal.contratos.prepare-from-decision');
     Route::post('/personal/contratos/{contractId}/cerrar-no-renovado', [PersonalContratoController::class, 'closeNotRenewed'])->middleware('web.permission:vencimientos,cerrar')->name('personal.contratos.close-not-renewed');
     Route::get('/personal/habilitacion-minera', [PersonalMinaHabilitacionController::class, 'index'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.index');
+    Route::get('/personal/habilitacion-minera/dashboard/examen-trabajadores', [PersonalMinaHabilitacionController::class, 'dashboardExamWorkers'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.dashboard.exam-workers');
     Route::post('/personal/habilitacion-minera/examenes', [PersonalMinaHabilitacionController::class, 'storeExam'])->middleware('web.permission:habilitacion_minera,crear|configurar')->name('personal.habilitacion-minera.examenes.store');
+    Route::get('/personal/habilitacion-minera/examenes/diagnostico', [PersonalMinaHabilitacionController::class, 'catalogAudit'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.examenes.diagnostico');
     Route::post('/personal/habilitacion-minera/examenes/{examId}', [PersonalMinaHabilitacionController::class, 'updateExam'])->middleware('web.permission:habilitacion_minera,editar|configurar')->name('personal.habilitacion-minera.examenes.update');
     Route::post('/personal/habilitacion-minera/examenes/{examId}/precios', [PersonalMinaHabilitacionController::class, 'storeExamPrice'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.examenes.prices.store');
     Route::post('/personal/habilitacion-minera/requisitos', [PersonalMinaHabilitacionController::class, 'storeRequirement'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.requisitos.store');
     Route::post('/personal/habilitacion-minera/requisitos/{requirementId}/desactivar', [PersonalMinaHabilitacionController::class, 'deactivateRequirement'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.requisitos.deactivate');
+    Route::match(['get', 'post'], '/personal/habilitacion-minera/carga-masiva', [PersonalMinaHabilitacionController::class, 'bulkPreview'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.bulk-preview');
+    Route::post('/personal/habilitacion-minera/carga-masiva/revisar-de-nuevo', [PersonalMinaHabilitacionController::class, 'bulkRecheck'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.bulk-recheck');
+    Route::post('/personal/habilitacion-minera/carga-masiva/configurar-requisito', [PersonalMinaHabilitacionController::class, 'bulkConfigureRequirement'])->middleware('web.permission:habilitacion_minera,configurar')->name('personal.habilitacion-minera.bulk-configure-requirement');
+    Route::post('/personal/habilitacion-minera/carga-masiva/confirmar', [PersonalMinaHabilitacionController::class, 'bulkConfirm'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.bulk-confirm');
     Route::post('/personal/habilitacion-minera/importar/preview', [PersonalMinaHabilitacionController::class, 'previewImport'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.import.preview');
     Route::post('/personal/habilitacion-minera/importar/confirmar', [PersonalMinaHabilitacionController::class, 'confirmImport'])->middleware('web.permission:habilitacion_minera,importar')->name('personal.habilitacion-minera.import.confirm');
     Route::post('/personal/habilitacion-minera/sincronizar-actual', [PersonalMinaHabilitacionController::class, 'syncCurrent'])->middleware('web.permission:habilitacion_minera,actualizar')->name('personal.habilitacion-minera.sync-current');
@@ -183,6 +189,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/intentos', [PersonalMinaHabilitacionController::class, 'storeAttempt'])->middleware('web.permission:habilitacion_minera,registrar|programar')->name('personal.habilitacion-minera.exam-attempts.store');
     Route::post('/personal/habilitacion-minera/intentos/{attemptId}/completar', [PersonalMinaHabilitacionController::class, 'completeScheduledAttempt'])->middleware('web.permission:habilitacion_minera,registrar')->name('personal.habilitacion-minera.exam-attempts.complete');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/no-aplica', [PersonalMinaHabilitacionController::class, 'notApplicable'])->middleware('web.permission:habilitacion_minera,registrar')->name('personal.habilitacion-minera.exam.not-applicable');
+    Route::get('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/opciones-convalidacion', [PersonalMinaHabilitacionController::class, 'convalidationOptions'])->middleware('web.permission:habilitacion_minera,convalidar')->name('personal.habilitacion-minera.exam.convalidation-options');
     Route::post('/personal/habilitacion-minera/examenes-trabajador/{workerExamId}/convalidar', [PersonalMinaHabilitacionController::class, 'convalidate'])->middleware('web.permission:habilitacion_minera,convalidar')->name('personal.habilitacion-minera.exam.convalidate');
     Route::get('/personal/habilitacion-minera/intentos/{attemptId}/archivo', [PersonalMinaHabilitacionController::class, 'downloadAttempt'])->middleware('web.permission:habilitacion_minera,ver')->name('personal.habilitacion-minera.attempt.download');
     Route::get('/personal/regularizacion', [PersonalRegularizationController::class, 'index'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.regularizacion.index');
@@ -233,6 +240,7 @@ Route::middleware('web.auth')->group(function (): void {
     // Herramientas por parada
     Route::get('/logistica', [LogisticaPageController::class, 'index'])->middleware('web.permission:logistica,ver')->name('logistica.index');
     Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:logistica,actualizar')->name('logistica.transportes.update');
+    Route::get('/logistica/transportes/{id}/documentos/{slot}', [LogisticaPageController::class, 'downloadTransportDocument'])->middleware('web.permission:logistica,ver|ver_logistica_servicios')->name('logistica.transportes.documento');
 
     Route::get('/transporte/planificacion', [TransportePageController::class, 'index'])->middleware('web.permission:transportes,ver')->name('transporte.planificacion');
     Route::post('/transporte/servicios', [TransportePageController::class, 'store'])->middleware('web.permission:transportes,crear')->name('transporte.servicios.store');
@@ -342,9 +350,12 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/usuarios/crear', [UsuarioPageController::class, 'create'])->middleware('web.permission:usuarios,crear')->name('usuarios.create');
     Route::post('/usuarios', [UsuarioPageController::class, 'store'])->middleware('web.permission:usuarios,crear')->name('usuarios.store');
     Route::get('/usuarios/{id}', [UsuarioPageController::class, 'show'])->middleware('web.permission:usuarios,ver')->name('usuarios.show');
+    Route::get('/usuarios/{id}/editar', [UsuarioPageController::class, 'edit'])->middleware('web.permission:usuarios,editar|actualizar')->name('usuarios.edit');
     Route::put('/usuarios/{id}', [UsuarioPageController::class, 'update'])->middleware('web.permission:usuarios,editar|actualizar|asignar|activar|desactivar')->name('usuarios.update');
+    Route::delete('/usuarios/{id}', [UsuarioPageController::class, 'destroy'])->middleware('web.permission:usuarios,eliminar')->name('usuarios.destroy');
     Route::post('/usuarios/{id}/estado', [UsuarioPageController::class, 'toggleEstado'])->middleware('web.permission:usuarios,activar|desactivar')->name('usuarios.toggle-estado');
     Route::post('/usuarios/{id}/password', [UsuarioPageController::class, 'updatePassword'])->middleware('web.permission:usuarios,configurar')->name('usuarios.password');
+    Route::post('/usuarios/{id}/update-password', [UsuarioPageController::class, 'updatePassword'])->middleware('web.permission:usuarios,configurar')->name('usuarios.update-password');
     Route::post('/usuarios/{id}/notificaciones', [UsuarioPageController::class, 'updateNotificationPreferences'])->middleware('web.permission:usuarios,configurar')->name('usuarios.notificaciones');
     Route::get('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'editarScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope');
 
@@ -433,4 +444,5 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'update'])->middleware('web.permission:evaluaciones,actualizar')->name('evaluaciones.desempeno.update');
 
     Route::put('/usuarios/{usuarioId}/mina-scope', [UsuarioPageController::class, 'syncScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope-update');
+    Route::put('/usuarios/{usuarioId}/scope', [UsuarioPageController::class, 'syncScope'])->middleware('web.permission:usuarios,scope')->name('usuarios.scope.sync');
 });

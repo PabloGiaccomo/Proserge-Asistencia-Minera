@@ -12,6 +12,7 @@ use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -152,6 +153,106 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('Van 15, minibus 35', $row['solicitado']);
         $this->assertSame('ABC-123; chofer Juan', $row['placas_asignadas']);
+
+        // La trazabilidad ya se registraba, pero tenia que poder verse en pantalla.
+        $this->assertNotEmpty($row['eventos']);
+        $this->assertSame('Requerido', $row['eventos'][0]['estado_anterior_label']);
+        $this->assertSame('Asignado', $row['eventos'][0]['estado_nuevo_label']);
+        $this->assertSame('Asignado por proveedor local', $row['eventos'][0]['descripcion']);
+        $this->assertSame($usuario->email, $row['eventos'][0]['usuario']);
+    }
+
+    public function test_logistica_registra_recepcion_sin_borrar_la_atencion_de_uso(): void
+    {
+        $mineId = $this->createMine('BOROO');
+        $usuario = $this->createLogisticsUser();
+        $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
+        $service = app(LogisticaDashboardService::class);
+
+        $service->updateTransportRequirement($transportId, [
+            'origen' => 'EMPRESA',
+            'placas_asignadas' => 'XYZ-987',
+            'fecha_inicio' => '2026-07-10',
+            'fecha_fin' => '2026-07-12',
+            'estado_logistico' => RQMinaActividadTransporte::ESTADO_EN_USO,
+        ], $usuario);
+
+        // El panel de recepcion no reenvia placas ni fechas de uso: no debe borrarlas.
+        $updated = $service->updateTransportRequirement($transportId, [
+            'recepcion_estado' => RQMinaActividadTransporte::RECEPCION_INCOMPLETO,
+            'recepcion_fecha' => '2026-07-13',
+            'recepcion_observacion' => 'Falto un extintor',
+        ], $usuario);
+
+        $this->assertSame(RQMinaActividadTransporte::RECEPCION_INCOMPLETO, $updated->recepcion_estado);
+        $this->assertSame('2026-07-13', $updated->recepcion_fecha?->toDateString());
+        $this->assertSame('Falto un extintor', $updated->recepcion_observacion);
+        $this->assertSame('XYZ-987', $updated->placas_asignadas);
+        $this->assertSame('EMPRESA', $updated->origen);
+        $this->assertSame(RQMinaActividadTransporte::ESTADO_EN_USO, $updated->estado_logistico);
+        $this->assertSame(3, $updated->dias_uso);
+    }
+
+    public function test_requerimientos_de_servicios_se_filtran_por_parada_y_estado(): void
+    {
+        $mineId = $this->createMine('BOROO');
+        $usuario = $this->createLogisticsUser();
+        $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
+        $rqMinaId = (string) DB::table('rq_mina_actividad_transportes')
+            ->join('rq_mina_actividad_grupos', 'rq_mina_actividad_grupos.id', '=', 'rq_mina_actividad_transportes.grupo_id')
+            ->where('rq_mina_actividad_transportes.id', $transportId)
+            ->value('rq_mina_actividad_grupos.rq_mina_id');
+        $service = app(LogisticaDashboardService::class);
+
+        $filtrado = $service->pageData(['tab' => 'servicios', 'servicio_parada_id' => $rqMinaId])['serviceRows'];
+        $this->assertCount(1, $filtrado);
+        $this->assertSame($transportId, $filtrado->first()['id']);
+        $this->assertFalse($filtrado->first()['atendido']);
+
+        $otraParada = $service->pageData(['tab' => 'servicios', 'servicio_parada_id' => (string) Str::uuid()])['serviceRows'];
+        $this->assertCount(0, $otraParada);
+
+        $porEstado = $service->pageData([
+            'tab' => 'servicios',
+            'servicio_parada_id' => $rqMinaId,
+            'servicio_estado' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
+        ])['serviceRows'];
+        $this->assertCount(0, $porEstado);
+    }
+
+    public function test_documentos_de_transporte_se_resuelven_por_slot(): void
+    {
+        if (! Schema::hasColumn('rq_mina_actividad_transportes', 'documentos')) {
+            $this->markTestSkipped('La columna documentos no existe en esta base de pruebas.');
+        }
+
+        $mineId = $this->createMine('BOROO');
+        $usuario = $this->createLogisticsUser();
+        $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
+        $transporte = RQMinaActividadTransporte::query()->findOrFail($transportId);
+        $transporte->forceFill([
+            'doc_vehiculo_path' => 'logistica/transportes/' . $transportId . '/vehiculo.pdf',
+            'documentos' => [[
+                'tipo' => 'adicional',
+                'nombre' => 'SOAT 2026',
+                'path' => 'logistica/transportes/' . $transportId . '/soat.pdf',
+                'original_name' => 'soat.pdf',
+                'uploaded_at' => now()->toDateTimeString(),
+            ]],
+        ])->save();
+
+        $service = app(LogisticaDashboardService::class);
+        $legacy = $service->transportDocumentSlot($transporte, 'legacy-vehiculo');
+        $adicional = $service->transportDocumentSlot($transporte, 'adicional-0');
+
+        $this->assertNotNull($legacy);
+        $this->assertSame('logistica/transportes/' . $transportId . '/vehiculo.pdf', $legacy['path']);
+        $this->assertSame('documentacion-vehiculo.pdf', $legacy['name']);
+        $this->assertNotNull($adicional);
+        $this->assertSame('logistica/transportes/' . $transportId . '/soat.pdf', $adicional['path']);
+        $this->assertSame('soat-2026.pdf', $adicional['name']);
+        $this->assertNull($service->transportDocumentSlot($transporte, 'adicional-5'));
+        $this->assertNull($service->transportDocumentSlot($transporte, 'slot-invalido'));
     }
 
     public function test_filtros_de_proximos_vencimientos_afectan_solo_la_tabla(): void

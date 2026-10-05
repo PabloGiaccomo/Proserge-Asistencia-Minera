@@ -55,4 +55,9 @@ class EvaluacionResidente extends Model
     {
         return $this->belongsTo(Personal::class, 'evaluador_id');
     }
+
+    public function usuarioEvaluador(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'created_by_usuario_id');
+    }
 }

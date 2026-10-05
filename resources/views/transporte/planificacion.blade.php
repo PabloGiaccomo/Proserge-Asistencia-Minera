@@ -193,13 +193,18 @@
         <div class="tr-card-head">
             <div>
                 <h2 class="tr-card-title">Requerimientos del plan</h2>
-                <p class="tr-card-subtitle">RQ Mina conserva lo requerido; la ejecucion se gestiona como servicio.</p>
+                <p class="tr-card-subtitle">RQ Mina conserva lo requerido; Logistica registra placa, documentos y recepcion. La ejecucion de pasajeros se gestiona como servicio.</p>
             </div>
-            <span class="tr-badge">{{ $requirements->count() }} requerimientos</span>
+            <div class="tr-actions">
+                <span class="tr-badge">{{ $requirements->count() }} requerimientos</span>
+                @if($selectedRq !== '')
+                    <a class="tr-btn tr-btn-soft" href="{{ route('logistica.index', ['tab' => 'servicios', 'servicio_parada_id' => $selectedRq]) }}">Atender en Logistica</a>
+                @endif
+            </div>
         </div>
         <div class="tr-table-wrap">
             <table class="tr-table">
-                <thead><tr><th>Grupo / SAIT</th><th>Tipo</th><th>Solicitado</th><th>Origen / destino</th><th>Estado</th><th>Compatibilidad</th></tr></thead>
+                <thead><tr><th>Grupo / SAIT</th><th>Tipo</th><th>Solicitado</th><th>Origen / destino</th><th>Estado</th><th>Atencion logistica</th><th>Compatibilidad</th></tr></thead>
                 <tbody>
                     @forelse($requirements as $row)
                         <tr>
@@ -207,7 +212,16 @@
                             <td>{{ $row['tipo'] }}</td>
                             <td>{{ $row['solicitado'] ?: '-' }}<br><span class="tr-muted">Unid: {{ $row['cantidad_unidades_requeridas'] ?: '-' }} · Cap: {{ $row['capacidad_requerida'] ?: '-' }}</span></td>
                             <td>{{ $row['origen'] ?: '-' }}<br><span class="tr-muted">{{ $row['destino'] ?: '-' }}</span></td>
-                            <td><span class="tr-badge">{{ $row['estado'] ?: 'REQUERIDO' }}</span></td>
+                            <td><span class="tr-badge">{{ $row['estado_logistico_label'] ?? ($row['estado'] ?: 'Requerido') }}</span></td>
+                            <td>
+                                @if($row['atendido'])
+                                    <strong>{{ $row['placas_asignadas'] ?: 'Sin placa registrada' }}</strong><br>
+                                    <span class="tr-muted">{{ $row['origen_label'] }} · Recepcion: {{ $row['recepcion_label'] }}</span><br>
+                                    <span class="tr-muted">{{ $row['fechas_uso'] !== '' ? $row['fechas_uso'] : 'Sin fechas de uso' }}</span>
+                                @else
+                                    <span class="tr-muted">Pendiente de atencion de Logistica</span>
+                                @endif
+                            </td>
                             <td>@if($row['legacy'])<span class="tr-badge tr-badge-warn">{{ $row['legacy_label'] }}</span>@else<span class="tr-badge tr-badge-ok">Estructurado</span>@endif</td>
                         </tr>
                     @empty

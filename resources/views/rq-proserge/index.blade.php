@@ -959,7 +959,7 @@
                 ${canAssignRqProserge && row.estado === 'ASIGNADO' ? `<div class="rq-assignment-actions">
                     <button type="button" class="js-rq-edit-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}" data-position="${escapeHtml(row.posicion_asignacion || 'TITULAR')}" data-type="${escapeHtml(row.tipo_asignacion || 'REGULAR')}" data-comment="${escapeHtml(row.comentario || '')}">Editar</button>
                     <button type="button" class="js-rq-replace-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}" data-position="${escapeHtml(row.posicion_asignacion || 'TITULAR')}" data-type="${escapeHtml(row.tipo_asignacion || 'REGULAR')}" data-date-start="${escapeHtml(row.fecha_inicio_iso || item.fecha_inicio_iso || '')}" data-date-end="${escapeHtml(row.fecha_fin_iso || item.fecha_fin_iso || '')}" data-comment="${escapeHtml(row.comentario || '')}">Reemplazar</button>
-                    <button type="button" class="is-danger js-rq-retire-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}">Retirar</button>
+                    <button type="button" class="is-danger js-rq-retire-assignment" data-rq-id="${escapeHtml(item.id)}" data-assignment-id="${escapeHtml(row.id || '')}" data-worker-name="${escapeHtml(row.nombre || '')}">Desasignar</button>
                 </div>` : ''}
             </div>
         `).join('');
@@ -1261,6 +1261,9 @@
             body: formData,
         });
 
+        if (response.status >= 500) {
+            throw new Error('No se pudo guardar el cambio. Comunicalo a administracion si el problema persiste.');
+        }
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || data.message || 'No se pudo guardar el cambio.');
@@ -1286,6 +1289,7 @@
     }
 
     function closeActionModal() {
+        if (actionModalContext?.submitting) return;
         actionModal?.classList.add('hidden');
         actionModal?.setAttribute('aria-hidden', 'true');
         actionModalContext = null;
@@ -1322,9 +1326,10 @@
         }
 
         if (mode === 'retire') {
-            actionModalTitle.textContent = 'Retirar asignacion';
-            actionModalText.textContent = 'Registra el motivo para retirar al trabajador sin perder trazabilidad.';
-            actionModalSubmit.textContent = 'Retirar';
+            actionModalTitle.textContent = 'Desasignar trabajador';
+            const workerName = button.dataset.workerName || button.closest('.asignacion-item')?.querySelector('strong')?.textContent || 'este trabajador';
+            actionModalText.textContent = `Confirmar retiro de ${workerName}. La asignacion se conservara en el historial.`;
+            actionModalSubmit.textContent = 'Confirmar retiro';
             modalReasonLabel.textContent = 'Motivo del retiro';
             modalReason.value = '';
         }
@@ -1428,11 +1433,12 @@
     }
 
     async function submitActionModal() {
-        if (!actionModalContext) {
+        if (!actionModalContext || actionModalContext.submitting) {
             return;
         }
 
         const context = actionModalContext;
+        context.submitting = true;
         const card = context.card;
         setModalMessage('');
         actionModalSubmit.disabled = true;
@@ -1480,13 +1486,15 @@
             }
 
             replaceRqItem(data.item);
+            context.submitting = false;
             closeActionModal();
             renderList();
             renderDetail(getSelectedItem());
         } catch (error) {
+            context.submitting = false;
             actionModalSubmit.disabled = false;
             actionModalSubmit.textContent = context.mode === 'retire'
-                ? 'Retirar'
+                ? 'Confirmar retiro'
                 : (context.mode === 'replace' ? 'Guardar reemplazo' : 'Guardar cambios');
             setModalMessage(error.message || 'No se pudo guardar el cambio.');
             if (card) {
@@ -1634,22 +1642,7 @@
         const unassignButton = event.target.closest('.js-rq-unassign');
         if (unassignButton) {
             const card = unassignButton.closest('.puesto-card');
-            unassignButton.disabled = true;
-            unassignButton.textContent = 'Quitando...';
-            setCardMessage(card, '', 'ok');
-
-            try {
-                const data = await postForm(`/rq-proserge/${encodeURIComponent(unassignButton.dataset.rqId)}/desasignar`, {
-                    rq_proserge_detalle_id: unassignButton.dataset.assignmentId,
-                });
-                replaceRqItem(data.item);
-                renderList();
-                renderDetail(getSelectedItem());
-            } catch (error) {
-                unassignButton.disabled = false;
-                unassignButton.textContent = 'Desasignar';
-                setCardMessage(card, error.message, 'error');
-            }
+            openActionModal('retire', unassignButton, card);
         }
     });
 

@@ -126,6 +126,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/dashboard/alertas', [DashboardController::class, 'alertas']);
 
         Route::get('/seguridad/usuarios', [UsuarioController::class, 'index']);
+        Route::delete('/seguridad/usuarios/{id}', [UsuarioController::class, 'destroy']);
         Route::get('/seguridad/roles', [RolController::class, 'index']);
         Route::get('/seguridad/permisos', [PermisoController::class, 'index']);
         Route::get('/seguridad/usuarios/{usuarioId}/mina-scope', [UsuarioMinaScopeController::class, 'index']);

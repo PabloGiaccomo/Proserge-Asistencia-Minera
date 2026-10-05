@@ -148,6 +148,10 @@ function initRQMinaPlanEditor(root) {
         return '<input type="text" class="rq-plan-input rq-plan-real-input" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" readonly aria-readonly="true" autocomplete="off" tabindex="-1">';
     }
 
+    function numberInput(name, value, placeholder = '', extraClass = '', min = '0') {
+        return '<input type="number" min="' + min + '" step="1" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" autocomplete="off"' + (readOnly ? ' disabled' : '') + '>';
+    }
+
     function dateInput(name, value, placeholder = '', extraClass = '') {
         return '<input type="date" class="rq-plan-input ' + extraClass + '" name="' + name + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" autocomplete="off"' + (readOnly ? ' disabled' : '') + '>';
     }
@@ -200,6 +204,7 @@ function initRQMinaPlanEditor(root) {
         }).join('');
 
         return '<div class="rq-plan-activity' + (activityCollapsed ? ' is-activity-collapsed' : '') + '" data-activity-index="' + activityIndex + '">' +
+            '<input type="hidden" name="' + prefix + '[id]" value="' + escapeHtml(activity.id || '') + '">' +
             '<input type="hidden" name="' + prefix + '[client_key]" value="' + escapeHtml(key) + '">' +
             '<div class="rq-plan-activity-head">' +
                 '<div class="rq-plan-field"><label>SAIT / Punto</label>' + input(prefix + '[sait]', activity.sait || '', 'Ej. SAIT 01', '', 'rq_mina.plan.sait') + '</div>' +
@@ -263,24 +268,71 @@ function initRQMinaPlanEditor(root) {
             '<input type="hidden" class="rq-plan-alcance-input" name="' + prefix + '[alcance]" value="' + escapeHtml(currentValue || '') + '">';
     }
 
+    /**
+     * Aviso de lectura con la atencion que ya registro Logistica. Las etiquetas
+     * vienen resueltas del modelo en el servidor: aqui solo se pinta el texto.
+     */
+    function logisticaBadgeHtml(row) {
+        const label = String(row.atencion_label || '');
+        const tone = String(row.atencion_tone || '');
+        if (label === '' || tone === '' || label === 'Requerido') {
+            return '';
+        }
+
+        const detalles = [];
+        if (row.estado_logistico_label) {
+            detalles.push('Estado: ' + row.estado_logistico_label);
+        }
+        if (row.placas_asignadas) {
+            detalles.push('Placa: ' + row.placas_asignadas);
+        }
+        if (row.recepcion_estado_label && row.recepcion_estado_label !== 'Pendiente') {
+            detalles.push('Recepcion: ' + row.recepcion_estado_label);
+        }
+
+        return '<span class="rq-plan-transport-logistica is-' + escapeHtml(tone) + '" title="Atencion registrada por Logistica">' +
+            'Logistica: ' + escapeHtml(label) +
+            (detalles.length ? ' · ' + escapeHtml(detalles.join(' · ')) : '') +
+        '</span>';
+    }
+
     function transportTemplate(groupIndex, transportIndex, row) {
         const num = transportIndex + 1;
         const prefix = 'plan_operativo[' + groupIndex + '][transportes][' + transportIndex + ']';
         const fechas = paradaFechas();
         const defaultStart = fechas.inicio;
         const defaultEnd = fechas.fin;
+        const turno = String(row.turno || '').toUpperCase();
+        const tipoTransporte = String(row.tipo_transporte || '').toUpperCase();
 
-        return '<div class="rq-plan-transport-row">' +
+        const atencionLogistica = row.atencion && row.atencion !== 'REQUERIDO';
+
+        return '<div class="rq-plan-transport-row" data-atencion-logistica="' + (atencionLogistica ? '1' : '0') + '">' +
+            // El id viaja de vuelta para actualizar el requerimiento en su lugar: asi se
+            // conservan los eventos de Logistica y la carpeta de documentos.
+            '<input type="hidden" name="' + prefix + '[id]" value="' + escapeHtml(row.id || '') + '">' +
             '<div class="rq-plan-transport-header">' +
-                '<span class="rq-plan-transport-number"><span class="rq-plan-transport-number-badge">' + num + '</span> Transporte #' + num + '</span>' +
+                '<span class="rq-plan-transport-number"><span class="rq-plan-transport-number-badge">' + num + '</span> Transporte #' + num + logisticaBadgeHtml(row) + '</span>' +
                 (readOnly ? '' : '<button type="button" class="rq-plan-transport-remove" data-remove-transport>Quitar</button>') +
             '</div>' +
             '<div class="rq-plan-transport-body">' +
-                transportField('Alcance (SAIT)', saitCheckboxesHtml(prefix, row.alcance || ''), 3) +
-                transportField('Unidad de carga', input(prefix + '[unidad_carga]', row.unidad_carga || '', 'Unidad de carga', '', 'rq_mina.plan.unidad_carga'), 2) +
-                transportField('Transporte solicitado', textarea(prefix + '[unidades_transporte]', row.unidades_transporte || '', 'Van 15, minibus 35, alquilado...', 'rq_mina.plan.unidades_transporte'), 5) +
-                transportField('Fecha inicio', dateInput(prefix + '[fecha_inicio]', row.fecha_inicio || defaultStart), 2) +
-                transportField('Fecha fin', dateInput(prefix + '[fecha_fin]', row.fecha_fin || defaultEnd), 2) +
+                transportField('Alcance (SAIT)', saitCheckboxesHtml(prefix, row.alcance || ''), 4) +
+                transportField('Unidad de carga', input(prefix + '[unidad_carga]', row.unidad_carga || '', 'Unidad de carga', '', 'rq_mina.plan.unidad_carga'), 4) +
+                transportField('Tipo de transporte', selectInput(prefix + '[tipo_transporte]', tipoTransporte, [
+                    { value: '', label: 'Sin definir' },
+                    { value: 'PERSONAL', label: 'Personal' },
+                    { value: 'CARGA', label: 'Carga' },
+                ]), 4) +
+                transportField('Turno', selectInput(prefix + '[turno]', turno, [
+                    { value: '', label: 'Ambos turnos' },
+                    { value: 'A', label: 'Turno A (dia)' },
+                    { value: 'B', label: 'Turno B (noche)' },
+                ]), 2) +
+                transportField('Unidades requeridas', numberInput(prefix + '[cantidad_unidades_requeridas]', row.cantidad_unidades_requeridas || '', '1'), 2) +
+                transportField('Capacidad por unidad', numberInput(prefix + '[capacidad_requerida]', row.capacidad_requerida || '', 'Personas'), 2) +
+                transportField('Fecha inicio', dateInput(prefix + '[fecha_inicio]', row.fecha_inicio || defaultStart), 3) +
+                transportField('Fecha fin', dateInput(prefix + '[fecha_fin]', row.fecha_fin || defaultEnd), 3) +
+                transportField('Transporte solicitado', textarea(prefix + '[unidades_transporte]', row.unidades_transporte || '', 'Van 15, minibus 35, alquilado...', 'rq_mina.plan.unidades_transporte'), 12) +
             '</div>' +
         '</div>';
     }
@@ -297,6 +349,7 @@ function initRQMinaPlanEditor(root) {
             const transports = Array.isArray(group.transportes) && group.transportes.length ? group.transportes : [];
             const groupCollapsed = collapsedGroups.has(String(groupIndex));
             const html = '<div class="rq-plan-group' + (groupCollapsed ? ' is-group-collapsed' : '') + '" data-group-index="' + groupIndex + '">' +
+                '<input type="hidden" name="' + groupPrefix + '[id]" value="' + escapeHtml(group.id || '') + '">' +
                 '<div class="rq-plan-group-head">' +
                     '<div class="rq-plan-group-main">' +
                         '<div class="rq-plan-field"><label>Area</label>' + input(groupPrefix + '[area_operativa]', group.area_operativa || '', 'C1, C2', '', 'rq_mina.plan.area_operativa') + '</div>' +
@@ -385,6 +438,10 @@ function initRQMinaPlanEditor(root) {
                 group.transportes.push({
                     alcance: fieldValue(transportEl, '[alcance]'),
                     unidad_carga: fieldValue(transportEl, '[unidad_carga]'),
+                    tipo_transporte: fieldValue(transportEl, '[tipo_transporte]'),
+                    turno: fieldValue(transportEl, '[turno]'),
+                    cantidad_unidades_requeridas: fieldValue(transportEl, '[cantidad_unidades_requeridas]'),
+                    capacidad_requerida: fieldValue(transportEl, '[capacidad_requerida]'),
                     unidades_transporte: fieldValue(transportEl, '[unidades_transporte]'),
                     fecha_inicio: fieldValue(transportEl, '[fecha_inicio]'),
                     fecha_fin: fieldValue(transportEl, '[fecha_fin]'),
@@ -471,7 +528,17 @@ function initRQMinaPlanEditor(root) {
         if (event.target.matches('[data-remove-transport]') && groupIndex >= 0) {
             if (readOnly) return;
             const rows = Array.from(groupEl.querySelectorAll('[data-remove-transport]'));
-            plan[groupIndex].transportes.splice(rows.indexOf(event.target), 1);
+            const rowIndex = rows.indexOf(event.target);
+            const rowEl = event.target.closest('[data-atencion-logistica]');
+
+            // Quitar un requerimiento ya atendido borra del plan la placa, los
+            // documentos y la recepcion que registro Logistica.
+            if (rowEl && rowEl.dataset.atencionLogistica === '1'
+                && ! window.confirm('Logistica ya tiene atencion registrada en este transporte (placa, documentos o recepcion). Si lo quitas se perdera esa informacion en el plan. ¿Deseas quitarlo de todos modos?')) {
+                return;
+            }
+
+            plan[groupIndex].transportes.splice(rowIndex, 1);
             render();
         }
     });

@@ -22,6 +22,7 @@ class PersonalMinaExamenIntento extends Model
     protected $fillable = [
         'id',
         'personal_mina_examen_id',
+        'personal_curso_registro_id',
         'numero_intento',
         'fecha_programacion',
         'fecha_realizacion',
@@ -57,5 +58,10 @@ class PersonalMinaExamenIntento extends Model
     public function usuarioRegistro(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'usuario_registro_id');
+    }
+
+    public function cursoRegistro(): BelongsTo
+    {
+        return $this->belongsTo(PersonalCursoRegistro::class, 'personal_curso_registro_id');
     }
 }

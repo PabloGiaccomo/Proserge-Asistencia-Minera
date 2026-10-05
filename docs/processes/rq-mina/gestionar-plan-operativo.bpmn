@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_gestionar_plan_operativo" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_rq_mina_gestionar_plan_operativo" name="Gestionar plan operativo" isExecutable="false">
+    <bpmn:documentation>Crea, actualiza, duplica o archiva planes dentro del rango del requerimiento y alimenta Man Power, transporte y ejecucion. | Evidencia: app/Modules/RQMina/Services/RQMinaPlanService.php; app/Modules/RQMina/Controllers/RQMinaPlanController.php; docs/rq-mina-planes.md; tests/Feature/RQMinaPlanManagementTest.php | Por confirmar: Formato definitivo y obligatoriedad de la importacion Excel del plan.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_gestionar_plan_operativo">
+    <bpmn:lane id="Lane_Planner" name="Planificador de mina">
+      <bpmn:flowNodeRef>Start_Plan</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Edit</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Action</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Available</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Archived</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Range</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Save</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Duplicate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Archive</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Plan" name="RQ Mina requiere plan">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Edit" name="Definir actividades, turnos y transporte">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Task_Range" name="Validar rango y plan editable">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:serviceTask id="Task_Save" name="Crear o actualizar plan">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Action" name="Accion posterior">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Duplicate" name="Duplicar version">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Archive" name="Archivar plan">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Available" name="Plan disponible para operacion">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_Archived" name="Plan ARCHIVADO">
+      <bpmn:documentation>RQMinaPlanService::archivePlan; no equivale a plan disponible para editar.</bpmn:documentation>
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Plan" targetRef="Task_Edit"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Edit" targetRef="Task_Range"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Range" targetRef="Task_Save"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Save" targetRef="Gateway_Action"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Gateway_Action" targetRef="Task_Duplicate" name="Duplicar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Gateway_Action" targetRef="Task_Archive" name="Archivar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Gateway_Action" targetRef="End_Available" name="Usar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_Duplicate" targetRef="End_Available"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_Archive" targetRef="End_Archived"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_gestionar_plan_operativo">
+    <bpmndi:BPMNPlane id="Plane_gestionar_plan_operativo" bpmnElement="Process_rq_mina_gestionar_plan_operativo">
+      <bpmndi:BPMNShape id="Lane_Planner_di" bpmnElement="Lane_Planner" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1470" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Plan_di" bpmnElement="Start_Plan">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Edit_di" bpmnElement="Task_Edit">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Range_di" bpmnElement="Task_Range">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Save_di" bpmnElement="Task_Save">
+        <dc:Bounds x="785" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Action_di" bpmnElement="Gateway_Action">
+        <dc:Bounds x="975" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Duplicate_di" bpmnElement="Task_Duplicate">
+        <dc:Bounds x="1165" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Archive_di" bpmnElement="Task_Archive">
+        <dc:Bounds x="1165" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Available_di" bpmnElement="End_Available">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Archived_di" bpmnElement="End_Archived">
+        <dc:Bounds x="1355" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="935" y="460" />
+        <di:waypoint x="955" y="460" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1025" y="160" />
+        <di:waypoint x="1095" y="160" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1025" y="160" />
+        <di:waypoint x="1095" y="160" />
+        <di:waypoint x="1095" y="580" />
+        <di:waypoint x="1165" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1025" y="160" />
+        <di:waypoint x="1190" y="160" />
+        <di:waypoint x="1190" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1315" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1315" y="580" />
+        <di:waypoint x="1335" y="580" />
+        <di:waypoint x="1335" y="280" />
+        <di:waypoint x="1355" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

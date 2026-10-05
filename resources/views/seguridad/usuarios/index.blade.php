@@ -123,17 +123,26 @@
                                     <td>
                                         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                                             <a href="{{ route('usuarios.show', $usuario->id) }}" class="btn btn-sm btn-outline">Ver</a>
-                                            @if($canEditUser || $canAssignRoles || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'usuarios', $toggleAction))
-                                                <a href="{{ route('usuarios.show', $usuario->id) }}#edicion" class="btn btn-sm btn-outline">Editar</a>
+                                            @if($canEditUser || $canAssignRoles)
+                                                <a href="{{ route('usuarios.edit', $usuario->id) }}" class="btn btn-sm btn-outline">Editar</a>
                                             @endif
                                             @if($canScopeUser)
                                                 <a href="{{ route('usuarios.scope', $usuario->id) }}" class="btn btn-sm btn-outline">Scope Mina</a>
                                             @endif
                                             @if($hasEstadoColumn)
                                                 @allowedDirect('usuarios', $toggleAction)
-                                                <form method="POST" action="{{ route('usuarios.toggle-estado', $usuario->id) }}">
+                                                <form method="POST" action="{{ route('usuarios.toggle-estado', $usuario->id) }}" style="display:inline;">
                                                     @csrf
                                                     <button type="submit" class="btn btn-sm btn-outline">{{ $estado === 'ACTIVO' ? 'Desactivar' : 'Activar' }}</button>
+                                                </form>
+                                                @endallowedDirect
+                                            @endif
+                                            @if(($isSuperAdmin ?? false) && (string) $usuario->id !== ($currentUserId ?? ''))
+                                                @allowedDirect('usuarios', 'eliminar')
+                                                <form method="POST" action="{{ route('usuarios.destroy', $usuario->id) }}" onsubmit="return confirm('¿Estás seguro de eliminar permanentemente a este usuario? Esta acción es irreversible y solo debe usarse para usuarios creados por error o confusión.');" style="display:inline;">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit" class="btn btn-sm btn-outline" style="color:#b91c1c; border-color:#fca5a5;">Eliminar</button>
                                                 </form>
                                                 @endallowedDirect
                                             @endif

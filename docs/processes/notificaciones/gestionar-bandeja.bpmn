@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_gestionar_bandeja" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_notificaciones_gestionar_bandeja" name="Gestionar bandeja personal" isExecutable="false">
+    <bpmn:documentation>El usuario autenticado consulta sus copias y decide leer, abrir accion, marcar todas o archivar. | Evidencia: routes/web.php; routes/api.php; app/Modules/Notificaciones/Controllers/NotificacionPageController.php; app/Modules/Notificaciones/Controllers/NotificacionController.php; app/Modules/Notificaciones/Services/NotificationInboxService.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_gestionar_bandeja">
+    <bpmn:lane id="Lane_User" name="Usuario">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Choose</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Query</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Own</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Found</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Update</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Usuario consulta bandeja">
+      <bpmn:documentation>Rutas web /notificaciones y API /api/v1/notificaciones.</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Query" name="Listar copias propias no vencidas">
+      <bpmn:documentation>app/Modules/Notificaciones/Services/NotificationInboxService.php::listForUser/ latestForHeader filtra usuario_id y evento no vencido.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Choose" name="Elegir leer, abrir o archivar">
+      <bpmn:documentation>NotificacionPageController / NotificacionController: acciones distintas, no secuencia obligatoria.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Own" name="Validar identidad y copia si es individual">
+      <bpmn:documentation>Marcar todas usa usuario_id autenticado; leer, abrir y archivar comprueban recipientId con findRecipientForCurrentUser / findRecipientForUser.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Found" name="Solicitud valida?">
+      <bpmn:documentation>En accion individual, copia propia inexistente da web 404 o API NOTIFICATION_NOT_FOUND.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Update" name="Aplicar accion elegida">
+      <bpmn:documentation>app/Modules/Notificaciones/Services/NotificationInboxService.php::markAsRead/markAllAsRead/archive; NotificacionPageController::openAction marca ACTIONED y redirige.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Bandeja actualizada">
+      <bpmn:documentation>Se devuelve respuesta o redireccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Acceso o copia rechazados">
+      <bpmn:documentation>Sesion/token faltante o recipientId ajeno/inexistente.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Query"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Query" targetRef="Choose"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Choose" targetRef="Own"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Own" targetRef="Found"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Found" targetRef="Update" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Found" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Update" targetRef="Done"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_gestionar_bandeja">
+    <bpmndi:BPMNPlane id="Plane_gestionar_bandeja" bpmnElement="Process_notificaciones_gestionar_bandeja">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="250" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Query_di" bpmnElement="Query">
+        <dc:Bounds x="405" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Choose_di" bpmnElement="Choose">
+        <dc:Bounds x="595" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Own_di" bpmnElement="Own">
+        <dc:Bounds x="785" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Found_di" bpmnElement="Found">
+        <dc:Bounds x="975" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Update_di" bpmnElement="Update">
+        <dc:Bounds x="1165" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="340" />
+        <di:waypoint x="405" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="340" />
+        <di:waypoint x="575" y="340" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="595" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="160" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="785" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="935" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="975" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1165" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1315" y="340" />
+        <di:waypoint x="1335" y="340" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

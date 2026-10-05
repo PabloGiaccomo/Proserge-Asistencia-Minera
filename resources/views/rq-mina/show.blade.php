@@ -69,7 +69,7 @@
         'NO_LLEGO' => 'No llego',
         'CON_OBSERVACION' => 'Con observacion',
     ];
-    $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'rq_mina', 'editar');
+    $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirectAny(session('user.permissions', []), 'rq_mina', ['editar', 'actualizar']);
 @endphp
 
 <div class="page-header">
@@ -87,9 +87,11 @@
                 </svg>
                 Volver
             </a>
-            <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
-                Plan operativo
-            </a>
+            @if($canEditRq)
+                <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
+                    Plan operativo
+                </a>
+            @endif
             <a href="{{ route('rq-mina.dashboard', $item['id']) }}" class="btn btn-outline">
                 Dashboard KPI
             </a>

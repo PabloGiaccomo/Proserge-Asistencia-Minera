@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_planificar_grupos_trabajo" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_man_power_planificar_grupos_trabajo" name="Crear grupo de trabajo" isExecutable="false">
+    <bpmn:documentation>Crea un grupo BORRADOR o con el estado solicitado, con integrantes iniciales opcionales; las acciones posteriores tienen diagramas propios. | Evidencia: app/Modules/ManPower/Services/GrupoTrabajoService.php; app/Modules/ManPower/Policies/ManPowerPolicy.php; routes/web.php; routes/api.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_planificar_grupos_trabajo">
+    <bpmn:lane id="Lane_User" name="Planificador operativo">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Form</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Conflict</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Valid</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Save</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Parada y fecha a planificar">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Form" name="Indicar plan, SAIT, destino e integrantes">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo: admite integrantes iniciales y supervisor que forme parte del grupo.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Validar permiso, alcance, rango y asistencia">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo: crear y manageGrupos; mina accesible; fecha dentro de RQ y plan; rechaza asistencia iniciada o cerrada, plan archivado y destino invalido.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:businessRuleTask id="Conflict" name="Verificar SAIT y distribucion sin conflictos">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo: un SAIT en grupo operativo; sin duplicado por fecha/turno ni personal en otro grupo. Revalida conflicto con assignments bloqueados dentro de la transaccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Valid" name="Grupo valido?">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo devuelve errores de negocio antes de crear o revierte excepcion.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Save" name="Guardar grupo, snapshots y detalles">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo: DB::transaction, snapshots de plan, actividades y asignaciones iniciales.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Grupo registrado">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo retorna grupo cargado.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Sin grupo nuevo">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::createGrupo: permiso, rango, conflicto o asistencia bloquean.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Form"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Form" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Check" targetRef="Conflict"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Conflict" targetRef="Valid"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Valid" targetRef="Save" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Save" targetRef="Done"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Valid" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_planificar_grupos_trabajo">
+    <bpmndi:BPMNPlane id="Plane_planificar_grupos_trabajo" bpmnElement="Process_man_power_planificar_grupos_trabajo">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="250" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Form_di" bpmnElement="Form">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="595" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Conflict_di" bpmnElement="Conflict">
+        <dc:Bounds x="785" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Valid_di" bpmnElement="Valid">
+        <dc:Bounds x="975" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Save_di" bpmnElement="Save">
+        <dc:Bounds x="1165" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="340" />
+        <di:waypoint x="595" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="785" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="935" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="975" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1165" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1315" y="340" />
+        <di:waypoint x="1335" y="340" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

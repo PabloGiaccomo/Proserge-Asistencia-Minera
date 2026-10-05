@@ -1,5 +1,14 @@
 # RQ Proserge: asignaciones y cobertura
 
+## Scope Mina
+
+- Un Scope Mina asignado limita listado, detalle y acciones a esas minas, incluso
+  para roles privilegiados.
+- El permiso `rq_proserge.administrar` no concede acceso a otras minas.
+- Sin scope, usuarios operativos no ven requerimientos. Se conserva acceso
+  global sin scope solo para roles ADMIN, GERENTE y SUPERADMIN.
+- Web y API usan la misma politica de acceso.
+
 ## Dimensiones de asignacion
 
 Cada trabajador asignado a RQ Proserge tiene dos dimensiones independientes:
@@ -105,6 +114,17 @@ Al asignar se captura:
 El snapshot permite que Man Power pueda recibir despues una asignacion trazable sin recalcular todo el contexto original.
 
 ## Retiro y reemplazo
+
+- Desasignar abre la confirmacion con el nombre del trabajador y exige motivo.
+- El endpoint legacy comparte el servicio de retiro: no permite reescribir
+  asignaciones retiradas, reemplazadas o canceladas.
+- Los errores SQL se registran internamente, sin exponerlos en la pantalla.
+- Para restauraciones con columnas de auditoria faltantes, usar exclusivamente
+  `2026_09_07_000100_repair_rq_proserge_assignment_audit_columns.php` despues
+  de respaldar y probar una copia de la BD. Agrega solo columnas faltantes
+  nullable, sin reclasificar filas ni eliminar indices, datos o historial.
+  No sustituye las demas migraciones pendientes de instalacion. Su `down`
+  conserva la auditoria. No se ejecuto esta reparacion en produccion.
 
 El retiro es logico:
 

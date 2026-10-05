@@ -31,7 +31,7 @@ Usar esta lista antes de cada nueva tarea.
 - [ ] En habilitacion minera separe estado general de accion pendiente cuando
       venga texto operativo desde Excel.
 - [ ] No deje `HABILITADO` sin examenes configurados, generados y resueltos.
-- [ ] No permita tercer intento de examen minero.
+- [ ] Permita intentos adicionales y muestre el conteo real/configurado (`3/2`).
 - [ ] Si se agotan intentos, use `NO_HABILITADO` como estado visible principal
       de la mina.
 - [ ] `NO_APLICA` cuenta como resuelto y no exige observacion obligatoria.

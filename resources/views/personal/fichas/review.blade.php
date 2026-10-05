@@ -125,6 +125,9 @@
                                 if ($type === 'select') {
                                     $value = ($field['options'][$value] ?? $value);
                                 }
+                                if ($type === 'date') {
+                                    $value = \App\Modules\Personal\Support\PersonalFichaCatalog::displayDate($value);
+                                }
                             @endphp
                             <div class="{{ $type === 'textarea' ? 'ficha-field ficha-field-wide' : 'ficha-field' }}">
                                 <span class="ficha-label">{{ $field['label'] }}</span>

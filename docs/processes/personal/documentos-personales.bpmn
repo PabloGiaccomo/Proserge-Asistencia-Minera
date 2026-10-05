@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_documentos_personales" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_personal_documentos_personales" name="Gestion de documentos personales" isExecutable="false">
+    <bpmn:documentation>Carga, revisa y clasifica documentos privados sin confundir CARGADO con APROBADO. | Evidencia: routes/web.php; app/Modules/Personal/Controllers/PersonalDocumentoController.php; app/Modules/Personal/Services/PersonalFichaService.php; app/Modules/Personal/Services/PersonalDocumentoDownloadService.php; tests/Feature/PersonalDocumentoEstadoTest.php; tests/Feature/PersonalDocumentoDownloadTest.php | Por confirmar: Documentos que bloquean contratacion y responsable de validar Vida Ley fisica.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_documentos_personales">
+    <bpmn:lane id="Lane_User" name="Trabajador o RR.HH.">
+      <bpmn:flowNodeRef>Start_Doc</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Upload</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Correct</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Action</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_NA</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_InvalidNA</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_Reviewer" name="RR.HH. revisor">
+      <bpmn:flowNodeRef>Task_Review</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Doc</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Private</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Approved</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Observed</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_CheckNA</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_NA</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_NA</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Doc" name="Documento requerido">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Upload" name="Cargar archivo">
+      <bpmn:incoming>Flow_Upload</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_Private" name="Guardar privado y estado CARGADO">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_Review" name="Revisar documento">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_Doc" name="Documento conforme?">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_Approved" name="APROBADO">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_Observed" name="Marcar OBSERVADO">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Correct" name="Pendiente de correccion">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="Gateway_Action" name="Accion documental">
+      <bpmn:documentation>PersonalFichaService::documentMatrix y updateDocumentState: NO_APLICA no exige una carga previa.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Upload</bpmn:outgoing>
+      <bpmn:outgoing>Flow_CheckNA</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:businessRuleTask id="Task_CheckNA" name="Comprobar si permite NO_APLICA">
+      <bpmn:documentation>PersonalFichaService::updateDocumentState: rechaza documento obligatorio, aplicable y sin condicion.</bpmn:documentation>
+      <bpmn:incoming>Flow_CheckNA</bpmn:incoming>
+      <bpmn:outgoing>Flow_DecideNA</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Gateway_NA" name="NO_APLICA permitido?">
+      <bpmn:documentation>PersonalFichaService::updateDocumentState; ValidationException si el documento obligatorio no admite NO_APLICA.</bpmn:documentation>
+      <bpmn:incoming>Flow_DecideNA</bpmn:incoming>
+      <bpmn:outgoing>Flow_AllowNA</bpmn:outgoing>
+      <bpmn:outgoing>Flow_RejectNA</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_NA" name="Guardar NO_APLICA">
+      <bpmn:documentation>PersonalFichaService::updateDocumentState; transaccion del registro de estado.</bpmn:documentation>
+      <bpmn:incoming>Flow_AllowNA</bpmn:incoming>
+      <bpmn:outgoing>Flow_EndNA</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_NA" name="NO_APLICA; sin carga requerida">
+      <bpmn:documentation>PersonalFichaService::documentMatrix: NO_APLICA cuenta como completo.</bpmn:documentation>
+      <bpmn:incoming>Flow_EndNA</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_InvalidNA" name="Rechazado: documento obligatorio">
+      <bpmn:documentation>PersonalFichaService::updateDocumentState lanza ValidationException antes de guardar.</bpmn:documentation>
+      <bpmn:incoming>Flow_RejectNA</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Doc" targetRef="Gateway_Action"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Upload" targetRef="Task_Private"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Private" targetRef="Task_Review"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Review" targetRef="Gateway_Doc"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Gateway_Doc" targetRef="End_Approved" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Gateway_Doc" targetRef="Task_Observed" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_Observed" targetRef="End_Correct"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Upload" sourceRef="Gateway_Action" targetRef="Task_Upload" name="Cargar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_CheckNA" sourceRef="Gateway_Action" targetRef="Task_CheckNA" name="Solicitar NO_APLICA"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_DecideNA" sourceRef="Task_CheckNA" targetRef="Gateway_NA"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_AllowNA" sourceRef="Gateway_NA" targetRef="Task_NA" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_RejectNA" sourceRef="Gateway_NA" targetRef="End_InvalidNA" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_EndNA" sourceRef="Task_NA" targetRef="End_NA"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_documentos_personales">
+    <bpmndi:BPMNPlane id="Plane_documentos_personales" bpmnElement="Process_personal_documentos_personales">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Reviewer_di" bpmnElement="Lane_Reviewer" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="670" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Doc_di" bpmnElement="Start_Doc">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Upload_di" bpmnElement="Task_Upload">
+        <dc:Bounds x="595" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Private_di" bpmnElement="Task_Private">
+        <dc:Bounds x="785" y="724" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Review_di" bpmnElement="Task_Review">
+        <dc:Bounds x="975" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Doc_di" bpmnElement="Gateway_Doc">
+        <dc:Bounds x="1165" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Approved_di" bpmnElement="End_Approved">
+        <dc:Bounds x="1355" y="742" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Observed_di" bpmnElement="Task_Observed">
+        <dc:Bounds x="1355" y="844" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Correct_di" bpmnElement="End_Correct">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Action_di" bpmnElement="Gateway_Action">
+        <dc:Bounds x="405" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CheckNA_di" bpmnElement="Task_CheckNA">
+        <dc:Bounds x="595" y="844" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_NA_di" bpmnElement="Gateway_NA">
+        <dc:Bounds x="785" y="855" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NA_di" bpmnElement="Task_NA">
+        <dc:Bounds x="975" y="844" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_NA_di" bpmnElement="End_NA">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_InvalidNA_di" bpmnElement="End_InvalidNA">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="160" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="765" y="760" />
+        <di:waypoint x="785" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="935" y="760" />
+        <di:waypoint x="955" y="760" />
+        <di:waypoint x="955" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1125" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1215" y="460" />
+        <di:waypoint x="1285" y="460" />
+        <di:waypoint x="1285" y="760" />
+        <di:waypoint x="1355" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1215" y="460" />
+        <di:waypoint x="1285" y="460" />
+        <di:waypoint x="1285" y="880" />
+        <di:waypoint x="1355" y="880" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1505" y="880" />
+        <di:waypoint x="1525" y="880" />
+        <di:waypoint x="1525" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Upload_di" bpmnElement="Flow_Upload">
+        <di:waypoint x="455" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="595" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_CheckNA_di" bpmnElement="Flow_CheckNA">
+        <di:waypoint x="455" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="525" y="880" />
+        <di:waypoint x="595" y="880" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_DecideNA_di" bpmnElement="Flow_DecideNA">
+        <di:waypoint x="745" y="880" />
+        <di:waypoint x="765" y="880" />
+        <di:waypoint x="765" y="880" />
+        <di:waypoint x="785" y="880" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AllowNA_di" bpmnElement="Flow_AllowNA">
+        <di:waypoint x="835" y="880" />
+        <di:waypoint x="905" y="880" />
+        <di:waypoint x="905" y="880" />
+        <di:waypoint x="975" y="880" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_RejectNA_di" bpmnElement="Flow_RejectNA">
+        <di:waypoint x="835" y="880" />
+        <di:waypoint x="955" y="880" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EndNA_di" bpmnElement="Flow_EndNA">
+        <di:waypoint x="1125" y="880" />
+        <di:waypoint x="1145" y="880" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

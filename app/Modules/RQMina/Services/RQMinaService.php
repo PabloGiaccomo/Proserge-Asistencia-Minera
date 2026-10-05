@@ -21,6 +21,7 @@ use App\Modules\RQProserge\Services\RQProsergeService;
 use App\Modules\RQMina\Policies\RQMinaPolicy;
 use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1222,13 +1223,20 @@ class RQMinaService
         $previousTransportes = $this->snapshotActividadTransportes($rqMina, $plan);
         $normalized = $this->normalizePlanOperativo($groups);
 
+        // El plan es dueno del requerimiento, no de la atencion logistica. El pool de
+        // reserva rescata placas, documentos, estados y recepcion de los requerimientos
+        // que ya no se reutilizan por id.
+        $logisticaReservada = $this->reservarDatosLogisticos($rqMina, $plan, $this->idsTransporteDelPayload($normalized));
+        $normalized = $this->aplicarDatosLogisticosReservados($normalized, $logisticaReservada);
+
         $this->recordTransportPlanChanges($rqMina, $previousTransportes, $normalized, $usuario);
 
-        $this->deletePlanGroups($rqMina, $plan);
+        $gruposExistentes = $this->gruposDelPlan($rqMina, $plan)->keyBy(fn ($grupo): string => $this->rowIdKey($grupo->id));
+        $gruposConservados = [];
 
         foreach ($normalized as $groupIndex => $group) {
-            $grupo = RQMinaActividadGrupo::query()->create([
-                'id' => (string) Str::uuid(),
+            $grupo = $gruposExistentes->get($this->rowIdKey($group['id'] ?? null));
+            $atributosGrupo = [
                 'rq_mina_id' => (string) $rqMina->id,
                 'rq_mina_plan_id' => (string) $plan->id,
                 'area_operativa' => $group['area_operativa'],
@@ -1236,12 +1244,25 @@ class RQMinaService
                 'nombre' => $group['nombre'],
                 'observaciones' => $group['observaciones'],
                 'orden' => $groupIndex + 1,
-            ]);
+            ];
+
+            if ($grupo) {
+                $grupo->forceFill($atributosGrupo)->save();
+            } else {
+                $grupo = RQMinaActividadGrupo::query()->create(['id' => (string) Str::uuid(), ...$atributosGrupo]);
+            }
+
+            $gruposConservados[$grupo->id] = true;
+            $grupo->load(['actividades.turnos', 'transportes']);
+            $actividadesExistentes = $grupo->actividades->keyBy(fn ($actividad): string => $this->rowIdKey($actividad->id));
+            $transportesExistentes = $grupo->transportes->keyBy(fn ($transporte): string => $this->rowIdKey($transporte->id));
 
             $actividadIdsByClientKey = [];
+            $actividadesDelGrupo = [];
+
             foreach ($group['actividades'] as $activityIndex => $activity) {
-                $actividad = RQMinaActividad::query()->create([
-                    'id' => (string) Str::uuid(),
+                $actividad = $actividadesExistentes->get($this->rowIdKey($activity['id'] ?? null));
+                $atributosActividad = [
                     'grupo_id' => (string) $grupo->id,
                     'sait' => $activity['sait'],
                     'sector' => $activity['sector'],
@@ -1253,11 +1274,24 @@ class RQMinaService
                     'supervisor_seguridad_dia' => $activity['supervisor_seguridad_dia'],
                     'supervisor_seguridad_noche' => $activity['supervisor_seguridad_noche'],
                     'orden' => $activityIndex + 1,
-                ]);
+                ];
 
-                if ($activity['client_key'] !== '') {
-                    $actividadIdsByClientKey[$activity['client_key']] = (string) $actividad->id;
+                if ($actividad) {
+                    $actividad->forceFill($atributosActividad)->save();
+                } else {
+                    $actividad = RQMinaActividad::query()->create(['id' => (string) Str::uuid(), ...$atributosActividad]);
                 }
+
+                $actividadesDelGrupo[] = (string) $actividad->id;
+
+                foreach (array_unique([(string) $activity['client_key'], (string) $activity['id']]) as $clave) {
+                    if ($clave !== '') {
+                        $actividadIdsByClientKey[$clave] = (string) $actividad->id;
+                    }
+                }
+
+                // Los turnos no tienen referencias externas: se reemplazan por actividad.
+                $actividad->turnos()->delete();
 
                 $turnoRows = [];
                 foreach ($activity['turnos'] as $turnIndex => $turno) {
@@ -1282,14 +1316,13 @@ class RQMinaService
                 }
             }
 
-            $transporteRows = [];
+            $transportesDelGrupo = [];
             foreach ($group['transportes'] as $transportIndex => $transporte) {
                 $actividadId = $transporte['actividad_key'] !== ''
                     ? ($actividadIdsByClientKey[$transporte['actividad_key']] ?? null)
                     : null;
 
-                $transporteRows[] = [
-                    'id' => (string) Str::uuid(),
+                $atributosRequerimiento = [
                     'grupo_id' => (string) $grupo->id,
                     'actividad_id' => $actividadId,
                     'rq_mina_plan_id' => (string) $plan->id,
@@ -1300,49 +1333,132 @@ class RQMinaService
                     'tipo_transporte' => $transporte['tipo_transporte'],
                     'capacidad_requerida' => $transporte['capacidad_requerida'],
                     'cantidad_unidades_requeridas' => $transporte['cantidad_unidades_requeridas'],
-                    'origen' => $transporte['origen'],
                     'origen_snapshot' => $transporte['origen_snapshot'],
                     'destino_snapshot' => $transporte['destino_snapshot'],
                     'unidades_transporte' => $transporte['unidades_transporte'],
-                    'placas_asignadas' => $transporte['placas_asignadas'],
                     'fecha_inicio' => $transporte['fecha_inicio'],
                     'fecha_fin' => $transporte['fecha_fin'],
                     'dias_uso' => $transporte['dias_uso'],
-                    'estado_logistico' => $transporte['estado_logistico'],
                     'indicaciones' => $transporte['indicaciones'],
                     'observaciones' => $transporte['observaciones'],
+                    'orden' => $transportIndex + 1,
+                    'updated_at' => now(),
+                ];
+
+                $existente = $transportesExistentes->get($this->rowIdKey($transporte['id'] ?? null));
+
+                if ($existente) {
+                    // Actualizar en su lugar conserva el id, y con el el historial de
+                    // eventos y la carpeta de documentos que registro Logistica.
+                    $existente->forceFill($atributosRequerimiento)->save();
+                    $transportesDelGrupo[] = (string) $existente->id;
+
+                    continue;
+                }
+
+                $nuevo = RQMinaActividadTransporte::query()->create([
+                    ...$atributosRequerimiento,
+                    'id' => (string) Str::uuid(),
+                    'created_at' => now(),
+                    'origen' => $transporte['origen'],
+                    'placas_asignadas' => $transporte['placas_asignadas'],
+                    'capacidad_camion' => $transporte['capacidad_camion'] ?? null,
+                    'estado_logistico' => $transporte['estado_logistico'],
                     'comentario_cambio' => $transporte['comentario_cambio'],
                     'incidencia_operativa' => $transporte['incidencia_operativa'],
                     'recepcion_fecha' => $transporte['recepcion_fecha'],
                     'recepcion_estado' => $transporte['recepcion_estado'],
                     'recepcion_observacion' => $transporte['recepcion_observacion'],
-                    'orden' => $transportIndex + 1,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
+                    'doc_vehiculo_path' => $transporte['doc_vehiculo_path'] ?? null,
+                    'doc_proserge_path' => $transporte['doc_proserge_path'] ?? null,
+                    'doc_mantenimiento_path' => $transporte['doc_mantenimiento_path'] ?? null,
+                    'doc_checklist_path' => $transporte['doc_checklist_path'] ?? null,
+                    'documentos' => $this->encodeTransportDocuments($transporte['documentos'] ?? []),
+                ]);
+
+                $transportesDelGrupo[] = (string) $nuevo->id;
             }
 
-            if (!empty($transporteRows)) {
-                $grupo->transportes()->insert($transporteRows);
-            }
+            // Borrar lo que el formulario ya no envia (cascade cubre turnos y eventos).
+            $this->deleteRemovedRows(RQMinaActividadTransporte::query()->where('grupo_id', (string) $grupo->id), $transportesDelGrupo);
+            $this->deleteRemovedRows(RQMinaActividad::query()->where('grupo_id', (string) $grupo->id), $actividadesDelGrupo);
         }
+
+        $planesGrupos = RQMinaActividadGrupo::query()
+            ->where('rq_mina_id', (string) $rqMina->id)
+            ->whereNotIn('id', array_keys($gruposConservados));
+
+        if ($this->isDefaultPlan($plan)) {
+            $planesGrupos->where(function ($query) use ($plan): void {
+                $query->where('rq_mina_plan_id', (string) $plan->id)->orWhereNull('rq_mina_plan_id');
+            });
+        } else {
+            $planesGrupos->where('rq_mina_plan_id', (string) $plan->id);
+        }
+
+        $planesGrupos->delete();
     }
 
-    private function deletePlanGroups(RQMina $rqMina, RQMinaPlan $plan): void
+    /**
+     * Elimina las filas que ya no vienen en el payload.
+     *
+     * @param  array<int, string>  $idsConservados
+     */
+    private function deleteRemovedRows($query, array $idsConservados): void
+    {
+        if ($idsConservados === []) {
+            $query->delete();
+
+            return;
+        }
+
+        $query->whereNotIn('id', $idsConservados)->delete();
+    }
+
+    /**
+     * Ids de transporte que el formulario reutilizara, para no rescatar sus datos
+     * desde el pool de reserva.
+     *
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, string>
+     */
+    private function idsTransporteDelPayload(array $groups): array
+    {
+        $ids = [];
+
+        foreach ($groups as $group) {
+            foreach (($group['transportes'] ?? []) as $transporte) {
+                $id = $this->rowIdKey($transporte['id'] ?? null);
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Grupos que pertenecen al plan (incluye legacy sin plan cuando es el inicial).
+     */
+    private function gruposDelPlan(RQMina $rqMina, ?RQMinaPlan $plan = null): EloquentCollection
     {
         $query = RQMinaActividadGrupo::query()
             ->where('rq_mina_id', (string) $rqMina->id)
-            ->where('rq_mina_plan_id', (string) $plan->id);
+            ->with(['actividades.turnos', 'transportes'])
+            ->orderBy('orden');
 
-        if ($this->isDefaultPlan($plan)) {
-            $query->orWhere(function ($legacyQuery) use ($rqMina): void {
-                $legacyQuery
-                    ->where('rq_mina_id', (string) $rqMina->id)
-                    ->whereNull('rq_mina_plan_id');
+        if ($plan) {
+            $query->where(function ($inner) use ($plan): void {
+                $inner->where('rq_mina_plan_id', (string) $plan->id);
+
+                if ($this->isDefaultPlan($plan)) {
+                    $inner->orWhereNull('rq_mina_plan_id');
+                }
             });
         }
 
-        $query->delete();
+        return $query->get();
     }
 
     private function isDefaultPlan(RQMinaPlan $plan): bool
@@ -1374,6 +1490,9 @@ class RQMinaService
             }
 
             $normalized[] = [
+                // Id enviado por el editor: permite actualizar en su lugar en vez de
+                // recrear la fila (y perder historial y documentos asociados).
+                'id' => $this->normalizeRowId($group['id'] ?? null),
                 'nombre' => $nombre !== '' ? $nombre : 'Grupo ' . (count($normalized) + 1),
                 'area_operativa' => $areaOperativa !== '' ? $areaOperativa : null,
                 'modulo' => $modulo !== '' ? $modulo : null,
@@ -1399,6 +1518,7 @@ class RQMinaService
             }
 
             $row = [
+                'id' => $this->normalizeRowId($item['id'] ?? null),
                 'client_key' => trim((string) ($item['client_key'] ?? $item['key'] ?? $index)),
                 'sait' => trim((string) ($item['sait'] ?? '')),
                 'sector' => trim((string) ($item['sector'] ?? '')),
@@ -1413,7 +1533,7 @@ class RQMinaService
             ];
 
             $hasText = collect($row)
-                ->except(['client_key', 'turnos'])
+                ->except(['id', 'client_key', 'turnos'])
                 ->filter(fn ($value): bool => trim((string) $value) !== '')
                 ->isNotEmpty();
 
@@ -1485,6 +1605,7 @@ class RQMinaService
             $recepcionFecha = $this->normalizeDateValue($item['recepcion_fecha'] ?? null);
 
             $row = [
+                'id' => $this->normalizeRowId($item['id'] ?? null),
                 'actividad_key' => trim((string) ($item['actividad_key'] ?? '')),
                 'alcance' => trim((string) ($item['alcance'] ?? '')),
                 'unidad_carga' => trim((string) ($item['unidad_carga'] ?? '')),
@@ -1506,10 +1627,13 @@ class RQMinaService
                 'fecha_inicio' => $fechaInicio,
                 'fecha_fin' => $fechaFin,
                 'dias_uso' => $this->calculateDiasUso($fechaInicio, $fechaFin, $item['dias_uso'] ?? null),
+                // Null cuando el formulario no envia el dato: significa "sin gestionar
+                // aun" y permite conservar el estado que ya registro Logistica.
                 'estado_logistico' => $this->normalizeTransportEnum(
                     $item['estado_logistico'] ?? null,
                     RQMinaActividadTransporte::estadosLogisticos(),
-                    RQMinaActividadTransporte::ESTADO_REQUERIDO
+                    RQMinaActividadTransporte::ESTADO_REQUERIDO,
+                    true
                 ),
                 'indicaciones' => trim((string) ($item['indicaciones'] ?? '')),
                 'observaciones' => trim((string) ($item['observaciones'] ?? '')),
@@ -1519,13 +1643,14 @@ class RQMinaService
                 'recepcion_estado' => $this->normalizeTransportEnum(
                     $item['recepcion_estado'] ?? null,
                     RQMinaActividadTransporte::estadosRecepcion(),
-                    RQMinaActividadTransporte::RECEPCION_PENDIENTE
+                    RQMinaActividadTransporte::RECEPCION_PENDIENTE,
+                    true
                 ),
                 'recepcion_observacion' => trim((string) ($item['recepcion_observacion'] ?? '')),
             ];
 
             $hasData = collect($row)
-                ->except(['actividad_key', 'origen', 'estado_logistico', 'recepcion_estado'])
+                ->except(['id', 'actividad_key', 'origen', 'estado_logistico', 'recepcion_estado'])
                 ->filter(fn ($value): bool => trim((string) $value) !== '')
                 ->isNotEmpty();
 
@@ -1553,6 +1678,27 @@ class RQMinaService
         }
 
         return $normalized;
+    }
+
+    /**
+     * Id de fila enviado por el editor. Solo se acepta si existe en el plan, para
+     * que un id ajeno no pueda reasignar filas de otra parada o de otro plan.
+     */
+    private function normalizeRowId(mixed $value): ?string
+    {
+        $id = trim((string) $value);
+
+        return $id !== '' && Str::isUuid($id) ? $id : null;
+    }
+
+    /**
+     * Clave de comparacion de ids. Se usa en minusculas porque los ids generados
+     * con Str::uuid() van en minusculas y no conviene depender del collation de la
+     * base de datos para reconocer la misma fila.
+     */
+    private function rowIdKey(mixed $value): string
+    {
+        return Str::lower(trim((string) $value));
     }
 
     private function normalizeTransportTurno(mixed $value): ?string
@@ -1679,6 +1825,248 @@ class RQMinaService
         }
 
         return $snapshots;
+    }
+
+    /**
+     * Atencion logistica vigente de los requerimientos del plan. Se lee antes de
+     * reemplazar grupos para poder rescatarla despues del guardado.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function reservarDatosLogisticos(RQMina $rqMina, ?RQMinaPlan $plan = null, array $idsReutilizados = []): array
+    {
+        $query = RQMinaActividadGrupo::query()
+            ->where('rq_mina_id', (string) $rqMina->id)
+            ->with('transportes')
+            ->orderBy('orden');
+
+        if ($plan) {
+            $query->where(function ($inner) use ($plan): void {
+                $inner->where('rq_mina_plan_id', (string) $plan->id);
+
+                if ($this->isDefaultPlan($plan)) {
+                    $inner->orWhereNull('rq_mina_plan_id');
+                }
+            });
+        }
+
+        $reservados = [];
+
+        foreach ($query->get() as $groupIndex => $group) {
+            foreach ($group->transportes->values() as $transportIndex => $transport) {
+                // Si el formulario reenvia el id, el requerimiento se actualiza en su
+                // lugar: no hay nada que rescatar ni que reinyectar.
+                if (in_array($this->rowIdKey($transport->id), $idsReutilizados, true)) {
+                    continue;
+                }
+
+                $reservados[] = [
+                    'grupo_posicion' => (int) $groupIndex,
+                    'grupo_nombre' => mb_strtolower(trim((string) ($group->nombre ?? ''))),
+                    'transporte_posicion' => (int) $transportIndex,
+                    'firma' => $this->transportSignature((string) ($transport->alcance ?? ''), (string) ($transport->unidad_carga ?? '')),
+                    'datos' => [
+                        'origen' => $transport->origen,
+                        'placas_asignadas' => $transport->placas_asignadas,
+                        'capacidad_camion' => $transport->capacidad_camion,
+                        'estado_logistico' => $transport->estado_logistico,
+                        'indicaciones' => $transport->indicaciones,
+                        'comentario_cambio' => $transport->comentario_cambio,
+                        'incidencia_operativa' => $transport->incidencia_operativa,
+                        'recepcion_fecha' => $transport->recepcion_fecha?->toDateString(),
+                        'recepcion_estado' => $transport->recepcion_estado,
+                        'recepcion_observacion' => $transport->recepcion_observacion,
+                        'doc_vehiculo_path' => $transport->doc_vehiculo_path,
+                        'doc_proserge_path' => $transport->doc_proserge_path,
+                        'doc_mantenimiento_path' => $transport->doc_mantenimiento_path,
+                        'doc_checklist_path' => $transport->doc_checklist_path,
+                        'documentos' => is_array($transport->documentos) ? $transport->documentos : [],
+                    ],
+                ];
+            }
+        }
+
+        return $reservados;
+    }
+
+    /**
+     * Reinyecta la atencion logistica reservada sobre el plan nuevo. Solo completa
+     * campos que el formulario de RQ Mina no gestiona o que vienen vacios.
+     *
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<int, array<string, mixed>>  $reservados
+     * @return array<int, array<string, mixed>>
+     */
+    private function aplicarDatosLogisticosReservados(array $groups, array $reservados): array
+    {
+        $usados = [];
+        $firmasNuevas = $this->contarFirmasPorGrupo($groups);
+        $firmasReservadas = [];
+
+        foreach ($reservados as $reservado) {
+            $firma = (string) $reservado['firma'];
+            if ($firma === '') {
+                continue;
+            }
+
+            $posicion = (int) $reservado['grupo_posicion'];
+            $firmasReservadas[$posicion][$firma] = ($firmasReservadas[$posicion][$firma] ?? 0) + 1;
+        }
+
+        foreach ($groups as $groupIndex => $group) {
+            foreach (($group['transportes'] ?? []) as $transportIndex => $transporte) {
+                $firma = $this->transportSignature(
+                    (string) ($transporte['alcance'] ?? ''),
+                    (string) ($transporte['unidad_carga'] ?? '')
+                );
+                $candidato = $this->buscarReservaLogistica(
+                    $reservados,
+                    $usados,
+                    (int) $groupIndex,
+                    (string) ($group['nombre'] ?? ''),
+                    (int) $transportIndex,
+                    $firma,
+                    $firma !== ''
+                        && ($firmasNuevas[$groupIndex][$firma] ?? 0) === 1
+                        && ($firmasReservadas[$groupIndex][$firma] ?? 0) === 1
+                );
+
+                if ($candidato !== null) {
+                    $usados[$candidato] = true;
+
+                    foreach ($reservados[$candidato]['datos'] as $field => $value) {
+                        if ($this->transportValueIsEmpty($transporte[$field] ?? null)) {
+                            $groups[$groupIndex]['transportes'][$transportIndex][$field] = $value;
+                        }
+                    }
+                }
+
+                $estado = $groups[$groupIndex]['transportes'][$transportIndex]['estado_logistico'] ?? null;
+                $recepcion = $groups[$groupIndex]['transportes'][$transportIndex]['recepcion_estado'] ?? null;
+
+                $groups[$groupIndex]['transportes'][$transportIndex]['estado_logistico'] = $this->transportValueIsEmpty($estado)
+                    ? RQMinaActividadTransporte::ESTADO_REQUERIDO
+                    : $estado;
+                $groups[$groupIndex]['transportes'][$transportIndex]['recepcion_estado'] = $this->transportValueIsEmpty($recepcion)
+                    ? RQMinaActividadTransporte::RECEPCION_PENDIENTE
+                    : $recepcion;
+            }
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Devuelve el indice de la reserva mas parecida al requerimiento nuevo.
+     * Los niveles priorizan posicion y contenido para no copiar datos de un
+     * requerimiento distinto.
+     */
+    private function buscarReservaLogistica(
+        array $reservados,
+        array $usados,
+        int $grupoPosicion,
+        string $grupoNombre,
+        int $transportePosicion,
+        string $firma,
+        bool $firmaConfiable
+    ): ?int {
+        $mejor = null;
+        $mejorNivel = 99;
+        $nombreNormalizado = mb_strtolower(trim($grupoNombre));
+
+        foreach ($reservados as $index => $reservado) {
+            if (isset($usados[$index])) {
+                continue;
+            }
+
+            $mismoGrupo = $reservado['grupo_posicion'] === $grupoPosicion
+                || ($nombreNormalizado !== '' && $reservado['grupo_nombre'] === $nombreNormalizado);
+            $mismaPosicion = $reservado['transporte_posicion'] === $transportePosicion;
+            $mismaFirma = $reservado['firma'] !== '' && $reservado['firma'] === $firma;
+
+            // Cuando la firma es unica en ambos lados identifica el requerimiento
+            // aunque se haya movido de lugar; si es ambigua solo se confia en la
+            // posicion para no cruzar placas ni documentos entre requerimientos.
+            $nivel = match (true) {
+                $mismoGrupo && $mismaPosicion && $mismaFirma => 0,
+                $firmaConfiable && $mismoGrupo && $mismaFirma => 1,
+                $mismoGrupo && $mismaPosicion => 2,
+                default => null,
+            };
+
+            if ($nivel === null || $nivel >= $mejorNivel) {
+                continue;
+            }
+
+            $mejor = $index;
+            $mejorNivel = $nivel;
+        }
+
+        return $mejor;
+    }
+
+    /**
+     * Cuenta cuantas veces aparece cada firma dentro de un mismo grupo para
+     * detectar requerimientos repetidos y evitar cruces de datos.
+     *
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, array<string, int>>
+     */
+    private function contarFirmasPorGrupo(array $groups): array
+    {
+        $firmas = [];
+
+        foreach ($groups as $groupIndex => $group) {
+            foreach (($group['transportes'] ?? []) as $transporte) {
+                $firma = $this->transportSignature(
+                    (string) ($transporte['alcance'] ?? ''),
+                    (string) ($transporte['unidad_carga'] ?? '')
+                );
+
+                if ($firma === '') {
+                    continue;
+                }
+
+                $firmas[$groupIndex][$firma] = ($firmas[$groupIndex][$firma] ?? 0) + 1;
+            }
+        }
+
+        return $firmas;
+    }
+
+    private function transportSignature(string $alcance, string $unidadCarga): string
+    {
+        $alcance = mb_strtolower(trim($alcance));
+        $unidadCarga = mb_strtolower(trim($unidadCarga));
+
+        if ($alcance === '' && $unidadCarga === '') {
+            return '';
+        }
+
+        return $alcance . '|' . $unidadCarga;
+    }
+
+    private function transportValueIsEmpty(mixed $value): bool
+    {
+        if (is_array($value)) {
+            return $value === [];
+        }
+
+        return $value === null || trim((string) $value) === '';
+    }
+
+    private function encodeTransportDocuments(mixed $documents): ?string
+    {
+        if (is_string($documents)) {
+            $documents = json_decode($documents, true);
+        }
+
+        $clean = collect(is_array($documents) ? $documents : [])
+            ->filter(fn ($document): bool => is_array($document) && trim((string) ($document['path'] ?? '')) !== '')
+            ->values()
+            ->all();
+
+        return $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
     }
 
     private function normalizedTransportSnapshots(array $groups): array

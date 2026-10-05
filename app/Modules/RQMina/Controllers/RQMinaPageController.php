@@ -6,6 +6,7 @@ use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\RQMina;
+use App\Models\RQMinaActividadTransporte;
 use App\Models\RQMinaDetalleCambio;
 use App\Models\RQMinaFieldOption;
 use App\Models\RQProsergeDetalle;
@@ -971,9 +972,15 @@ class RQMinaPageController extends WebPageController
                     'actividad_key' => (string) ($transporte->actividad_id ?? ''),
                     'alcance' => (string) ($transporte->alcance ?? ''),
                     'unidad_carga' => (string) ($transporte->unidad_carga ?? ''),
+                    'fecha' => $transporte->fecha?->toDateString() ?? '',
+                    'turno' => (string) ($transporte->turno ?? ''),
+                    'tipo_transporte' => (string) ($transporte->tipo_transporte ?? ''),
+                    'capacidad_requerida' => (string) ($transporte->capacidad_requerida ?? ''),
+                    'cantidad_unidades_requeridas' => (string) ($transporte->cantidad_unidades_requeridas ?? ''),
                     'origen' => (string) ($transporte->origen ?? ''),
                     'unidades_transporte' => (string) ($transporte->unidades_transporte ?? ''),
                     'placas_asignadas' => (string) ($transporte->placas_asignadas ?? ''),
+                    'capacidad_camion' => (string) ($transporte->capacidad_camion ?? ''),
                     'fecha_inicio' => $transporte->fecha_inicio?->toDateString() ?? '',
                     'fecha_fin' => $transporte->fecha_fin?->toDateString() ?? '',
                     'dias_uso' => (string) ($transporte->dias_uso ?? ''),
@@ -984,6 +991,18 @@ class RQMinaPageController extends WebPageController
                     'recepcion_fecha' => $transporte->recepcion_fecha?->toDateString() ?? '',
                     'recepcion_estado' => (string) ($transporte->recepcion_estado ?? ''),
                     'recepcion_observacion' => (string) ($transporte->recepcion_observacion ?? ''),
+                    // Solo etiquetas de lectura: la vista las muestra para que RQ Mina
+                    // sepa que Logistica ya trabaja este requerimiento y no lo borre
+                    // sin advertirlo. No se reenvian al guardar.
+                    'atencion' => $transporte->estadoAtencion(),
+                    'atencion_label' => RQMinaActividadTransporte::estadoAtencionLabel($transporte->estadoAtencion()),
+                    'atencion_tone' => RQMinaActividadTransporte::estadoAtencionTone($transporte->estadoAtencion()),
+                    'estado_logistico_label' => $transporte->estado_logistico
+                        ? RQMinaActividadTransporte::estadoLogisticoLabel((string) $transporte->estado_logistico)
+                        : '',
+                    'recepcion_estado_label' => $transporte->recepcion_estado
+                        ? RQMinaActividadTransporte::recepcionEstadoLabel((string) $transporte->recepcion_estado)
+                        : '',
                 ])->values()->all(),
             ])
             ->values()
@@ -1070,6 +1089,9 @@ class RQMinaPageController extends WebPageController
             }
 
             $normalized[] = [
+                // El id permite actualizar la fila en su lugar al guardar, en vez de
+                // recrearla y perder historial de eventos y documentos de Logistica.
+                'id' => trim((string) ($group['id'] ?? '')),
                 'area_operativa' => $areaOperativa,
                 'modulo' => $modulo,
                 'nombre' => $nombre !== '' ? $nombre : 'Grupo ' . ((int) $groupIndex + 1),
@@ -1091,6 +1113,7 @@ class RQMinaPageController extends WebPageController
             }
 
             $row = [
+                'id' => trim((string) ($activity['id'] ?? '')),
                 'client_key' => trim((string) ($activity['client_key'] ?? $activityIndex)),
                 'sait' => trim((string) ($activity['sait'] ?? '')),
                 'sector' => trim((string) ($activity['sector'] ?? '')),
@@ -1105,7 +1128,7 @@ class RQMinaPageController extends WebPageController
             ];
 
             $hasContent = collect($row)
-                ->except(['client_key', 'turnos'])
+                ->except(['id', 'client_key', 'turnos'])
                 ->filter(fn ($value): bool => trim((string) $value) !== '')
                 ->isNotEmpty();
 
@@ -1160,11 +1183,22 @@ class RQMinaPageController extends WebPageController
                 continue;
             }
 
+            // Los campos de estructura (turno, tipo, cantidad y capacidad requerida)
+            // alimentan a Logistica y a Transporte operativo; el resto de columnas
+            // logisticas las administra Logistica y no se sobrescriben aqui.
             $row = [
+                'id' => trim((string) ($transporte['id'] ?? '')),
                 'actividad_key' => trim((string) ($transporte['actividad_key'] ?? '')),
                 'alcance' => trim((string) ($transporte['alcance'] ?? '')),
                 'unidad_carga' => trim((string) ($transporte['unidad_carga'] ?? '')),
+                'fecha' => trim((string) ($transporte['fecha'] ?? '')),
+                'turno' => trim((string) ($transporte['turno'] ?? '')),
+                'tipo_transporte' => trim((string) ($transporte['tipo_transporte'] ?? '')),
+                'capacidad_requerida' => trim((string) ($transporte['capacidad_requerida'] ?? '')),
+                'cantidad_unidades_requeridas' => trim((string) ($transporte['cantidad_unidades_requeridas'] ?? '')),
                 'origen' => trim((string) ($transporte['origen'] ?? '')),
+                'origen_snapshot' => trim((string) ($transporte['origen_snapshot'] ?? '')),
+                'destino_snapshot' => trim((string) ($transporte['destino_snapshot'] ?? '')),
                 'unidades_transporte' => trim((string) ($transporte['unidades_transporte'] ?? '')),
                 'placas_asignadas' => trim((string) ($transporte['placas_asignadas'] ?? '')),
                 'fecha_inicio' => trim((string) ($transporte['fecha_inicio'] ?? '')),
@@ -1172,6 +1206,7 @@ class RQMinaPageController extends WebPageController
                 'dias_uso' => trim((string) ($transporte['dias_uso'] ?? '')),
                 'estado_logistico' => trim((string) ($transporte['estado_logistico'] ?? '')),
                 'indicaciones' => trim((string) ($transporte['indicaciones'] ?? '')),
+                'observaciones' => trim((string) ($transporte['observaciones'] ?? '')),
                 'comentario_cambio' => trim((string) ($transporte['comentario_cambio'] ?? '')),
                 'incidencia_operativa' => trim((string) ($transporte['incidencia_operativa'] ?? '')),
                 'recepcion_fecha' => trim((string) ($transporte['recepcion_fecha'] ?? '')),
@@ -1180,7 +1215,7 @@ class RQMinaPageController extends WebPageController
             ];
 
             $hasData = collect($row)
-                ->except(['actividad_key', 'estado_logistico', 'recepcion_estado'])
+                ->except(['id', 'actividad_key', 'estado_logistico', 'recepcion_estado'])
                 ->filter(fn ($value): bool => trim((string) $value) !== '')
                 ->isNotEmpty();
 

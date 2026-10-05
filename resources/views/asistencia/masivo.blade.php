@@ -1,78 +1,64 @@
 @extends('layouts.app')
 
-@section('title', 'Asistencia - Marcación Masiva')
+@section('title', 'Marcación masiva - Proserge')
 
 @section('content')
-<div class="page-header">
-    <div class="page-header-content">
-        <div>
-            <h1 class="page-title">Marcación Masiva</h1>
-            <p class="page-subtitle">{{ $grupo['nombre'] ?? '' }}</p>
-        </div>
-        <div class="page-actions">
-            <a href="{{ route('asistencia.show', $grupo['id']) }}" class="btn btn-outline">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"></line>
-                    <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-                Volver
-            </a>
-        </div>
-    </div>
-</div>
+<div class="attendance-ops-page">
+    @if($grupo)
+        <header class="ops-page-header">
+            <div><p class="ops-eyebrow">Acción de grupo</p><h1>Marcación masiva</h1><p>{{ $grupo['servicio'] }} · {{ \Carbon\Carbon::parse($grupo['fecha'])->format('d/m/Y') }} · {{ count($grupo['integrantes']) }} integrantes</p></div>
+            <div class="ops-page-actions"><a href="{{ route('asistencia.show', $grupo['grupo_id']) }}" class="ops-btn secondary"><svg viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver</a></div>
+        </header>
 
-@if($grupo)
-<form action="{{ route('asistencia.marcar-masivo-post', $grupo['id']) }}" method="POST" class="form">
-    @csrf
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Seleccionar Personal</h3>
-        </div>
-        <div class="card-body">
-            <div class="form-group">
-                <label>Tipo de Marcación</label>
-                <select name="tipo" id="tipo" class="form-control" required>
-                    <option value="entrada">Entrada</option>
-                    <option value="salida">Salida</option>
-                </select>
+        <form action="{{ route('asistencia.marcar-masivo-post', $grupo['grupo_id']) }}" method="POST" class="ops-panel attendance-form-panel">
+            @csrf
+            <div class="ops-panel-head"><div><h2>Estado común</h2><p>El mismo estado se aplicará únicamente a las personas seleccionadas.</p></div></div>
+            <div class="attendance-form-grid compact-grid">
+                <div class="ops-field"><label for="bulk-state">Estado</label><select name="estado" id="bulk-state" required>@foreach(['PRESENTE' => 'Presente', 'TARDANZA' => 'Tardanza', 'AUSENTE' => 'Ausente', 'JUSTIFICADO' => 'Justificado', 'NO_CORRESPONDE' => 'No corresponde'] as $value => $label)<option value="{{ $value }}" @selected(old('estado', 'PRESENTE') === $value)>{{ $label }}</option>@endforeach</select></div>
+                <div class="ops-field"><label for="bulk-time">Hora</label><input type="time" name="hora_marcado" id="bulk-time" value="{{ old('hora_marcado', now()->format('H:i')) }}"></div>
+                <div class="ops-field wide attendance-reason-field"><label for="bulk-reason">Motivo</label><input type="text" name="motivo_estado" id="bulk-reason" value="{{ old('motivo_estado') }}" placeholder="Obligatorio para justificado o no corresponde"></div>
             </div>
-            <div class="form-group">
-                <label for="hora">Hora</label>
-                <input type="time" name="hora" id="hora" class="form-control" value="{{ date('H:i') }}">
+
+            <div class="attendance-select-head">
+                <div><strong>Seleccionar personal</strong><span id="selected-count">0 seleccionados</span></div>
+                <label class="attendance-check-all"><input type="checkbox" id="select-all-attendance"> Seleccionar todos</label>
             </div>
-            
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" id="selectAll"> Seleccionar Todos
-                </label>
-            </div>
-            
-            <div class="personal-list">
-                @foreach($grupo['personal'] as $persona)
-                <div class="personal-item">
-                    <label>
-                        <input type="checkbox" name="trabajadores[]" value="{{ $persona['id'] }}">
-                        {{ $persona['nombre'] ?? 'Sin nombre' }}
+            <div class="attendance-person-grid">
+                @foreach($grupo['integrantes'] as $person)
+                    <label class="attendance-person-option">
+                        <input type="checkbox" name="grupo_trabajo_detalle_ids[]" value="{{ $person['grupo_trabajo_detalle_id'] }}" @checked(in_array($person['grupo_trabajo_detalle_id'], old('grupo_trabajo_detalle_ids', []), true))>
+                        <span><strong>{{ $person['nombre_completo'] }}</strong><small>{{ $person['dni'] ?: 'Sin documento' }} · {{ $person['puesto'] ?: 'Sin puesto' }}</small></span>
+                        <span class="ops-status neutral">{{ ucfirst(strtolower(str_replace('_', ' ', $person['estado_asistencia']))) }}</span>
                     </label>
-                </div>
                 @endforeach
             </div>
-        </div>
-    </div>
-
-    <div class="form-actions">
-        <a href="{{ route('asistencia.show', $grupo['id']) }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Marcar Seleccionados</button>
-    </div>
-</form>
+            <div class="attendance-form-actions"><a href="{{ route('asistencia.show', $grupo['grupo_id']) }}" class="ops-btn secondary">Cancelar</a><button type="submit" class="ops-btn primary">Guardar seleccionados</button></div>
+        </form>
+    @else
+        <section class="ops-panel"><div class="ops-empty">El grupo no existe o no se encuentra dentro de tu alcance.</div></section>
+    @endif
+</div>
+@endsection
 
 @push('scripts')
 <script>
-document.getElementById('selectAll').addEventListener('change', function() {
-    const checkboxes = document.querySelectorAll('input[name="trabajadores[]"]');
-    checkboxes.forEach(cb => cb.checked = this.checked);
-});
+(() => {
+    const all = document.getElementById('select-all-attendance');
+    const boxes = [...document.querySelectorAll('input[name="grupo_trabajo_detalle_ids[]"]')];
+    const count = document.getElementById('selected-count');
+    const state = document.getElementById('bulk-state');
+    const reason = document.getElementById('bulk-reason');
+    const syncCount = () => {
+        const selected = boxes.filter(box => box.checked).length;
+        if (count) count.textContent = `${selected} seleccionados`;
+        if (all) all.checked = boxes.length > 0 && selected === boxes.length;
+    };
+    all?.addEventListener('change', () => { boxes.forEach(box => box.checked = all.checked); syncCount(); });
+    boxes.forEach(box => box.addEventListener('change', syncCount));
+    const syncReason = () => { if (reason && state) reason.required = ['JUSTIFICADO', 'NO_CORRESPONDE'].includes(state.value); };
+    state?.addEventListener('change', syncReason);
+    syncCount();
+    syncReason();
+})();
 </script>
 @endpush
-@endif
-@endsection

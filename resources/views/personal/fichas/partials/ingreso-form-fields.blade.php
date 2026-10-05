@@ -47,7 +47,148 @@
 @endphp
 
 @once
-    
+    <style>
+        [data-uppercase="1"],
+        input[data-uppercase="1"],
+        textarea[data-uppercase="1"] {
+            text-transform: uppercase;
+        }
+
+        .signature-pad {
+            touch-action: none !important;
+        }
+
+        .signature-pad.is-invalid {
+            border-color: #dc2626 !important;
+            border-style: solid !important;
+            background: #fff5f5 !important;
+        }
+
+        .ficha-family-table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        @media (min-width: 641px) {
+            .ficha-family-check-text {
+                display: none !important;
+            }
+            .mobile-del-label {
+                display: none !important;
+            }
+            .desktop-del-icon {
+                display: inline !important;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .ficha-family-table-container {
+                overflow-x: visible !important;
+            }
+
+            .ficha-family-responsive,
+            .ficha-family-responsive tbody {
+                display: block !important;
+                width: 100% !important;
+                min-width: 0 !important;
+            }
+
+            .ficha-family-responsive thead {
+                display: none !important;
+            }
+
+            .ficha-family-responsive tbody {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 14px !important;
+            }
+
+            .ficha-family-row-card {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 10px !important;
+                padding: 14px !important;
+                border: 1px solid #dbe3ef !important;
+                border-radius: 10px !important;
+                background: #f8fafc !important;
+                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+            }
+
+            .ficha-family-row-card td {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 4px !important;
+                padding: 0 !important;
+                border: none !important;
+                text-align: left !important;
+            }
+
+            .ficha-family-row-card td[data-label]::before {
+                content: attr(data-label);
+                font-size: 11px;
+                font-weight: 700;
+                color: #475569;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+            }
+
+            .ficha-family-row-card td.ficha-family-check-cell {
+                flex-direction: row !important;
+                align-items: center !important;
+                gap: 8px !important;
+                padding: 4px 0 !important;
+                text-align: left !important;
+            }
+
+            .ficha-family-row-card td.ficha-family-check-cell::before {
+                display: none !important;
+            }
+
+            .ficha-family-row-card .ficha-check-label {
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 8px !important;
+                cursor: pointer;
+            }
+
+            .ficha-family-row-card .ficha-family-check-text {
+                display: inline !important;
+                font-size: 13px !important;
+                font-weight: 600 !important;
+                color: #334155 !important;
+            }
+
+            .ficha-family-row-card .ficha-family-check-text-readonly::before {
+                content: attr(data-label) ': ';
+                font-weight: 700;
+                color: #475569;
+            }
+
+            .ficha-family-row-card td.ficha-family-action-cell {
+                margin-top: 4px !important;
+                padding-top: 10px !important;
+                border-top: 1px dashed #cbd5e1 !important;
+            }
+
+            .ficha-family-row-card .btn-remove-family {
+                width: 100% !important;
+                padding: 8px 12px !important;
+                border-color: #fca5a5 !important;
+                color: #b91c1c !important;
+                background: #fef2f2 !important;
+                font-weight: 600 !important;
+                justify-content: center !important;
+            }
+
+            .ficha-family-row-card .desktop-del-icon {
+                display: none !important;
+            }
+
+            .ficha-family-row-card .mobile-del-label {
+                display: inline !important;
+            }
+        }
+    </style>
 @endonce
 
 <div class="ingreso-form-stack">
@@ -77,7 +218,29 @@
                         $options = $field['options'] ?? [];
                         $isWide = in_array($type, ['textarea', 'hidden'], true);
                         $isRequired = (bool) ($field['required'] ?? false);
-                        $uppercase = !in_array($type, ['email', 'hidden'], true);
+                        $isNumeric = in_array($key, [
+                            'numero_documento',
+                            'numero_cuenta',
+                            'cci',
+                            'empleador_ruc',
+                            'quinta_otra_empresa_ruc',
+                            'anio_experiencia',
+                            'anio_egreso',
+                            'quinta_fecha_dia',
+                            'quinta_fecha_mes',
+                            'quinta_fecha_anio',
+                            'quinta_ejercicio_anio',
+                        ], true);
+                        $isTel = in_array($key, ['telefono', 'telefono_alterno'], true) || $type === 'tel';
+                        $uppercase = !in_array($type, ['email', 'hidden'], true) && !$isNumeric && !$isTel && $key !== 'remuneracion';
+                        $inputMode = match (true) {
+                            $key === 'remuneracion' => 'decimal',
+                            $isNumeric => 'numeric',
+                            $isTel => 'tel',
+                            $type === 'email' => 'email',
+                            default => null,
+                        };
+                        $inputType = $isTel ? 'tel' : $type;
                         if ($key === 'puesto') {
                             $options = [];
                         }
@@ -135,7 +298,12 @@
                         </label>
 
                         @if($readonly)
-                            <div class="ficha-input ingreso-readonly">{{ $value !== '' ? $value : '-' }}</div>
+                            @php
+                                $readonlyValue = $type === 'date'
+                                    ? \App\Modules\Personal\Support\PersonalFichaCatalog::displayDate($value)
+                                    : $value;
+                            @endphp
+                            <div class="ficha-input ingreso-readonly">{{ $readonlyValue !== '' ? $readonlyValue : '-' }}</div>
                         @elseif($key === 'puesto')
                             <input
                                 id="field_{{ $key }}"
@@ -180,10 +348,11 @@
                             <input
                                 id="field_{{ $key }}"
                                 class="ficha-input"
-                                type="{{ $type === 'tel' ? 'text' : $type }}"
+                                type="{{ $inputType }}"
                                 name="fields[{{ $key }}]"
                                 value="{{ $value }}"
                                 data-ficha-key="{{ $key }}"
+                                @if($inputMode) inputmode="{{ $inputMode }}" @endif
                                 data-uppercase="{{ $uppercase ? '1' : '0' }}"
                                 {{ $fieldDisabled ? 'disabled' : '' }}
                                 {{ (!$fieldDisabled && $isRequired) ? 'required' : '' }}>
@@ -212,8 +381,8 @@
             @endif
         </div>
         <div class="ficha-card-body">
-            <div class="ficha-batch-table-wrap">
-                <table class="ficha-batch-table">
+            <div class="ficha-family-table-container ficha-batch-table-wrap">
+                <table class="ficha-batch-table ficha-family-responsive">
                     <thead>
                         <tr>
                             <th>Parentesco</th>
@@ -228,59 +397,70 @@
                     </thead>
                     <tbody data-family-body>
                         @foreach($familyRows as $index => $familiar)
-                            <tr data-family-row>
-                                <td>
+                            <tr data-family-row class="ficha-family-row-card">
+                                <td data-label="Parentesco">
                                     @if($readonly)
                                         {{ $familiar['parentesco'] ?? '-' }}
                                     @else
-                                        <input class="ficha-input" name="familiares[{{ $index }}][parentesco]" value="{{ $familiar['parentesco'] ?? '' }}" data-uppercase="1">
+                                        <input class="ficha-input" name="familiares[{{ $index }}][parentesco]" value="{{ $familiar['parentesco'] ?? '' }}" data-uppercase="1" placeholder="Ej: Conyuge, Hijo(a)">
                                     @endif
                                 </td>
-                                <td>
+                                <td data-label="Apellidos y nombres">
                                     @if($readonly)
                                         {{ $familiar['nombres_apellidos'] ?? '-' }}
                                     @else
-                                        <input class="ficha-input" name="familiares[{{ $index }}][nombres_apellidos]" value="{{ $familiar['nombres_apellidos'] ?? '' }}" data-uppercase="1">
+                                        <input class="ficha-input" name="familiares[{{ $index }}][nombres_apellidos]" value="{{ $familiar['nombres_apellidos'] ?? '' }}" data-uppercase="1" placeholder="Nombres completos">
                                     @endif
                                 </td>
-                                <td>
+                                <td data-label="Fecha de nacimiento">
                                     @if($readonly)
-                                        {{ $familiar['fecha_nacimiento'] ?? '-' }}
+                                        {{ \App\Modules\Personal\Support\PersonalFichaCatalog::displayDate($familiar['fecha_nacimiento'] ?? '') ?: '-' }}
                                     @else
-                                        <input class="ficha-input" type="date" name="familiares[{{ $index }}][fecha_nacimiento]" value="{{ $familiar['fecha_nacimiento'] ?? '' }}">
+                                        <input class="ficha-input" type="date" name="familiares[{{ $index }}][fecha_nacimiento]">
                                     @endif
                                 </td>
-                                <td>
+                                <td data-label="N° Documento (DNI)">
                                     @if($readonly)
                                         {{ $familiar['numero_documento'] ?? '-' }}
                                     @else
                                         <input type="hidden" name="familiares[{{ $index }}][tipo_documento]" value="{{ $familiar['tipo_documento'] ?? 'DNI' }}">
-                                        <input class="ficha-input" name="familiares[{{ $index }}][numero_documento]" value="{{ $familiar['numero_documento'] ?? '' }}">
+                                        <input class="ficha-input" name="familiares[{{ $index }}][numero_documento]" value="{{ $familiar['numero_documento'] ?? '' }}" inputmode="numeric" placeholder="8 digitos">
                                     @endif
                                 </td>
-                                <td>
+                                <td data-label="Telefono">
                                     @if($readonly)
                                         {{ $familiar['telefono'] ?? '-' }}
                                     @else
-                                        <input class="ficha-input" name="familiares[{{ $index }}][telefono]" value="{{ $familiar['telefono'] ?? '' }}">
+                                        <input class="ficha-input" type="tel" inputmode="tel" name="familiares[{{ $index }}][telefono]" value="{{ $familiar['telefono'] ?? '' }}" placeholder="9 digitos">
                                     @endif
                                 </td>
-                                <td style="text-align:center;">
+                                <td data-label="Vive conmigo" class="ficha-family-check-cell" style="text-align:center;">
                                     @if($readonly)
-                                        {{ !empty($familiar['vive_con_trabajador']) ? 'Si' : 'No' }}
+                                        <span class="ficha-family-check-text-readonly">{{ !empty($familiar['vive_con_trabajador']) ? 'Si' : 'No' }}</span>
                                     @else
-                                        <input type="checkbox" name="familiares[{{ $index }}][vive_con_trabajador]" value="1" @checked(!empty($familiar['vive_con_trabajador']))>
+                                        <label class="ficha-check-label">
+                                            <input type="checkbox" name="familiares[{{ $index }}][vive_con_trabajador]" value="1" @checked(!empty($familiar['vive_con_trabajador']))>
+                                            <span class="ficha-family-check-text">Vive conmigo</span>
+                                        </label>
                                     @endif
                                 </td>
-                                <td style="text-align:center;">
+                                <td data-label="Estudia" class="ficha-family-check-cell" style="text-align:center;">
                                     @if($readonly)
-                                        {{ !empty($familiar['estudia']) ? 'Si' : 'No' }}
+                                        <span class="ficha-family-check-text-readonly">{{ !empty($familiar['estudia']) ? 'Si' : 'No' }}</span>
                                     @else
-                                        <input type="checkbox" name="familiares[{{ $index }}][estudia]" value="1" @checked(!empty($familiar['estudia']))>
+                                        <label class="ficha-check-label">
+                                            <input type="checkbox" name="familiares[{{ $index }}][estudia]" value="1" @checked(!empty($familiar['estudia']))>
+                                            <span class="ficha-family-check-text">Estudia</span>
+                                        </label>
                                     @endif
                                 </td>
                                 @if(!$readonly)
-                                    <td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>
+                                    <td class="ficha-family-action-cell">
+                                        <button type="button" class="btn btn-outline btn-sm btn-remove-family" data-remove-family>
+                                            <span class="desktop-del-icon">X</span>
+                                            <span class="mobile-del-label">Eliminar familiar</span>
+                                        </button>
+                                    </td>
                                 @endif
                             </tr>
                         @endforeach
@@ -380,10 +560,13 @@
                         </ul>
                     </div>
                     <div class="signature-pad-wrap">
-                        <canvas class="signature-pad" data-signature-pad></canvas>
-                        <input type="hidden" name="firma_base64" value="{{ $firmaActual }}" data-signature-input>
+                        <canvas class="signature-pad" data-signature-pad data-required="{{ $formMode === 'public' ? '1' : '0' }}" style="touch-action: none;"></canvas>
+                        <input type="hidden" name="firma_base64" value="{{ $firmaActual }}" data-signature-input data-required="{{ $formMode === 'public' ? '1' : '0' }}">
                         <div class="ficha-actions-bar" style="justify-content:flex-start;">
                             <button type="button" class="btn btn-outline btn-sm" data-clear-signature>Limpiar firma</button>
+                        </div>
+                        <div class="ficha-error" data-signature-error style="display:none;margin-top:6px;font-size:12px;color:#dc2626;font-weight:600;">
+                            Debes realizar tu firma dentro del recuadro antes de enviar la ficha.
                         </div>
                         @error('firma_base64') <span class="ficha-error">{{ $message }}</span> @enderror
                     </div>
@@ -427,33 +610,60 @@
             @include('personal.fichas.partials.conditional-fields-script')
             <script>
         document.addEventListener('DOMContentLoaded', function () {
-            document.querySelectorAll('[data-uppercase="1"]').forEach(function (input) {
-                input.addEventListener('input', function () {
-                    const start = input.selectionStart;
-                    const end = input.selectionEnd;
-                    input.value = input.value.toLocaleUpperCase('es-PE');
-                    if (start !== null && end !== null) {
-                        input.setSelectionRange(start, end);
+            const normalizeUppercase = function (el) {
+                if (el && typeof el.value === 'string') {
+                    const upper = el.value.toLocaleUpperCase('es-PE');
+                    if (el.value !== upper) {
+                        el.value = upper;
                     }
-                });
-            });
+                }
+            };
+
+            document.addEventListener('blur', function (event) {
+                if (event.target && event.target.matches && event.target.matches('[data-uppercase="1"]')) {
+                    normalizeUppercase(event.target);
+                }
+            }, true);
 
             document.querySelectorAll('[data-add-family]').forEach(function (button) {
                 button.addEventListener('click', function () {
                     const body = button.closest('.ficha-section')?.querySelector('[data-family-body]');
                     if (!body) return;
-                    const index = body.querySelectorAll('[data-family-row]').length;
+                    let maxIndex = -1;
+                    body.querySelectorAll('[name*="familiares["]').forEach(function (el) {
+                        const m = el.name.match(/familiares\[(\d+)\]/);
+                        if (m) {
+                            maxIndex = Math.max(maxIndex, parseInt(m[1], 10));
+                        }
+                    });
+                    const index = maxIndex + 1;
                     const row = document.createElement('tr');
                     row.setAttribute('data-family-row', '');
+                    row.className = 'ficha-family-row-card';
                     row.innerHTML = `
-                        <td><input class="ficha-input" name="familiares[${index}][parentesco]" data-uppercase="1"></td>
-                        <td><input class="ficha-input" name="familiares[${index}][nombres_apellidos]" data-uppercase="1"></td>
-                        <td><input class="ficha-input" type="date" name="familiares[${index}][fecha_nacimiento]"></td>
-                        <td><input type="hidden" name="familiares[${index}][tipo_documento]" value="DNI"><input class="ficha-input" name="familiares[${index}][numero_documento]"></td>
-                        <td><input class="ficha-input" name="familiares[${index}][telefono]"></td>
-                        <td style="text-align:center;"><input type="checkbox" name="familiares[${index}][vive_con_trabajador]" value="1"></td>
-                        <td style="text-align:center;"><input type="checkbox" name="familiares[${index}][estudia]" value="1"></td>
-                        <td><button type="button" class="btn btn-outline btn-sm" data-remove-family>X</button></td>
+                        <td data-label="Parentesco"><input class="ficha-input" name="familiares[${index}][parentesco]" data-uppercase="1" placeholder="Ej: Conyuge, Hijo(a)"></td>
+                        <td data-label="Apellidos y nombres"><input class="ficha-input" name="familiares[${index}][nombres_apellidos]" data-uppercase="1" placeholder="Nombres completos"></td>
+                        <td data-label="Fecha de nacimiento"><input class="ficha-input" type="date" name="familiares[${index}][fecha_nacimiento]"></td>
+                        <td data-label="N° Documento (DNI)"><input type="hidden" name="familiares[${index}][tipo_documento]" value="DNI"><input class="ficha-input" name="familiares[${index}][numero_documento]" inputmode="numeric" placeholder="8 digitos"></td>
+                        <td data-label="Telefono"><input class="ficha-input" type="tel" inputmode="tel" name="familiares[${index}][telefono]" placeholder="9 digitos"></td>
+                        <td data-label="Vive conmigo" class="ficha-family-check-cell" style="text-align:center;">
+                            <label class="ficha-check-label">
+                                <input type="checkbox" name="familiares[${index}][vive_con_trabajador]" value="1">
+                                <span class="ficha-family-check-text">Vive conmigo</span>
+                            </label>
+                        </td>
+                        <td data-label="Estudia" class="ficha-family-check-cell" style="text-align:center;">
+                            <label class="ficha-check-label">
+                                <input type="checkbox" name="familiares[${index}][estudia]" value="1">
+                                <span class="ficha-family-check-text">Estudia</span>
+                            </label>
+                        </td>
+                        <td class="ficha-family-action-cell">
+                            <button type="button" class="btn btn-outline btn-sm btn-remove-family" data-remove-family>
+                                <span class="desktop-del-icon">X</span>
+                                <span class="mobile-del-label">Eliminar familiar</span>
+                            </button>
+                        </td>
                     `;
                     body.appendChild(row);
                 });
@@ -467,75 +677,147 @@
             });
 
             document.querySelectorAll('[data-signature-pad]').forEach(function (canvas) {
-                const input = canvas.closest('.signature-pad-wrap')?.querySelector('[data-signature-input]');
-                const clear = canvas.closest('.signature-pad-wrap')?.querySelector('[data-clear-signature]');
+                const wrap = canvas.closest('.signature-pad-wrap');
+                const input = wrap?.querySelector('[data-signature-input]');
+                const clear = wrap?.querySelector('[data-clear-signature]');
+                const errorBox = wrap?.querySelector('[data-signature-error]');
                 if (!input) return;
                 const ctx = canvas.getContext('2d');
                 let drawing = false;
                 let hasSignature = Boolean(input.value);
+                let lastWidth = 0;
+                let lastHeight = 0;
+
+                const clearError = function () {
+                    canvas.classList.remove('is-invalid');
+                    if (errorBox) errorBox.style.display = 'none';
+                };
+
+                const showError = function () {
+                    canvas.classList.add('is-invalid');
+                    if (errorBox) errorBox.style.display = 'block';
+                };
+
+                const validateSignature = function () {
+                    const isRequired = input.dataset.required === '1' || canvas.dataset.required === '1';
+                    if (isRequired && !hasSignature && !input.value) {
+                        showError();
+                        canvas.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        return false;
+                    }
+                    clearError();
+                    return true;
+                };
+
+                const form = canvas.closest('form');
+                if (form) {
+                    form._validateSignature = validateSignature;
+                }
 
                 const resize = function () {
-                    const ratio = Math.max(window.devicePixelRatio || 1, 1);
                     const rect = canvas.getBoundingClientRect();
-                    const current = input.value;
-                    canvas.width = Math.max(rect.width, 1) * ratio;
-                    canvas.height = Math.max(rect.height, 180) * ratio;
+                    const w = Math.round(rect.width);
+                    const h = Math.round(rect.height) || 220;
+
+                    if (w <= 0 || h <= 0) return;
+
+                    // Do not wipe canvas when virtual keyboard opens/closes
+                    if (w === lastWidth && h === lastHeight) {
+                        return;
+                    }
+
+                    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                    const currentData = input.value || (hasSignature ? canvas.toDataURL('image/png') : null);
+
+                    lastWidth = w;
+                    lastHeight = h;
+
+                    canvas.width = w * ratio;
+                    canvas.height = h * ratio;
                     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
                     ctx.lineWidth = 2.4;
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
                     ctx.strokeStyle = '#0f172a';
-                    if (current) {
+
+                    if (currentData) {
                         const img = new Image();
                         img.onload = function () {
-                            ctx.drawImage(img, 0, 0, rect.width, rect.height || 180);
+                            ctx.drawImage(img, 0, 0, w, h);
                         };
-                        img.src = current;
+                        img.src = currentData;
                     }
                 };
 
                 const point = function (event) {
-                    const source = event.touches?.[0] || event.changedTouches?.[0] || event;
                     const rect = canvas.getBoundingClientRect();
-                    return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+                    return {
+                        x: event.clientX - rect.left,
+                        y: event.clientY - rect.top
+                    };
                 };
 
                 const start = function (event) {
                     event.preventDefault();
+                    clearError();
+                    if (event.pointerId !== undefined) {
+                        try {
+                            canvas.setPointerCapture(event.pointerId);
+                        } catch (e) {}
+                    }
                     drawing = true;
                     hasSignature = true;
                     const p = point(event);
                     ctx.beginPath();
                     ctx.moveTo(p.x, p.y);
                 };
+
                 const move = function (event) {
                     if (!drawing) return;
                     event.preventDefault();
                     const p = point(event);
                     ctx.lineTo(p.x, p.y);
                     ctx.stroke();
-                    input.value = canvas.toDataURL('image/png');
                 };
+
                 const stop = function (event) {
                     if (!drawing) return;
-                    event?.preventDefault?.();
+                    event.preventDefault();
                     drawing = false;
+                    if (event.pointerId !== undefined) {
+                        try {
+                            if (canvas.hasPointerCapture && canvas.hasPointerCapture(event.pointerId)) {
+                                canvas.releasePointerCapture(event.pointerId);
+                            }
+                        } catch (e) {}
+                    }
                     input.value = canvas.toDataURL('image/png');
+                    clearError();
                 };
 
                 canvas.addEventListener('pointerdown', start);
                 canvas.addEventListener('pointermove', move);
-                window.addEventListener('pointerup', stop);
+                canvas.addEventListener('pointerup', stop);
+                canvas.addEventListener('pointercancel', stop);
+
                 clear?.addEventListener('click', function () {
+                    ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.restore();
                     input.value = '';
                     hasSignature = false;
+                    clearError();
                 });
+
                 window.addEventListener('resize', resize);
+                window.addEventListener('orientationchange', function () {
+                    setTimeout(resize, 120);
+                });
                 resize();
 
-                canvas.closest('form')?.addEventListener('submit', function (event) {
-                    if (!hasSignature && input.hasAttribute('required')) {
+                form?.addEventListener('submit', function (event) {
+                    if (!validateSignature()) {
                         event.preventDefault();
                     }
                 });
@@ -543,11 +825,7 @@
 
             document.querySelectorAll('form[data-ingreso-submit]').forEach(function (form) {
                 form.addEventListener('submit', function () {
-                    const button = form.querySelector('button[type="submit"]');
-                    if (button) {
-                        button.disabled = true;
-                        button.textContent = button.dataset.loadingText || 'Enviando...';
-                    }
+                    form.querySelectorAll('[data-uppercase="1"]').forEach(normalizeUppercase);
                 });
             });
         });

@@ -14,7 +14,7 @@ class StoreEvaluacionSupervisorRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'evaluador_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
+            'evaluador_id' => ['nullable', 'string', 'size:36', 'exists:personal,id'],
             'evaluado_id' => ['required', 'string', 'size:36', 'exists:personal,id'],
             'fecha' => ['required', 'date'],
             'mina_id' => ['nullable', 'string', 'size:36', 'exists:minas,id'],

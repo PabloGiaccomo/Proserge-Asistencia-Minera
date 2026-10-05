@@ -4,15 +4,20 @@ namespace App\Modules\Logistica\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\Personal;
+use App\Models\RQMinaActividadTransporte;
+use App\Models\Usuario;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
+use App\Support\Rbac\MinaScopeAccess;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class LogisticaPageController extends WebPageController
 {
@@ -31,6 +36,7 @@ class LogisticaPageController extends WebPageController
         $canAccessLogistica = PermissionMatrix::allows($permissions, 'logistica', 'ver');
         $canViewEpps = PermissionMatrix::allows($permissions, 'epps', 'ver');
         $canViewHerramientas = PermissionMatrix::allows($permissions, 'herramientas', 'ver');
+        $canViewServicios = PermissionMatrix::allowsDirect($permissions, 'logistica', 'ver_logistica_servicios');
 
         if (! $canAccessLogistica && ! $canViewEpps && ! $canViewHerramientas) {
             abort(403, 'No tienes permiso para ver Logistica.');
@@ -41,14 +47,18 @@ class LogisticaPageController extends WebPageController
             $query['tab'] = 'herramientas';
         }
 
-        $data = $canViewEpps
-            ? $this->service->pageData($query)
-            : [
+        // Servicios y alquileres no depende del permiso de EPP: se arma un
+        // contexto minimo con paradas y requerimientos de transporte.
+        $data = match (true) {
+            $canViewEpps => $this->service->pageData($query),
+            $canViewServicios || $canViewHerramientas => $this->service->serviciosPageData($query),
+            default => [
                 'activeTab' => 'herramientas',
                 'filters' => [],
                 'options' => [],
                 'metrics' => [],
-            ];
+            ],
+        };
 
         $data['canViewEpps'] = $canViewEpps;
         $data['canViewHerramientas'] = $canViewHerramientas || $canViewEpps;
@@ -91,6 +101,8 @@ class LogisticaPageController extends WebPageController
     public function updateTransport(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
+        $transporte = RQMinaActividadTransporte::query()->with('grupo.rqMina:id,mina_id')->findOrFail($id);
+        $this->assertTransportAccess($usuario, $transporte);
 
         $validated = $request->validate([
             'origen' => ['nullable', 'string', 'in:EMPRESA,ALQUILADO,OTRO'],
@@ -115,6 +127,8 @@ class LogisticaPageController extends WebPageController
             'documentos' => ['nullable', 'array'],
             'documentos.*.nombre' => ['required_with:documentos.*.archivo', 'string', 'max:200'],
             'documentos.*.archivo' => ['required_with:documentos.*.nombre', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'documentos_eliminar' => ['nullable', 'array'],
+            'documentos_eliminar.*' => ['integer', 'min:0'],
         ]);
 
         $data = $validated;
@@ -183,11 +197,58 @@ class LogisticaPageController extends WebPageController
             $data['documentos_nuevos'] = $uploadedDocs;
         }
 
-        $this->service->updateTransportRequirement($id, $data, $usuario);
+        try {
+            $this->service->updateTransportRequirement($id, $data, $usuario);
+        } catch (InvalidArgumentException $exception) {
+            return back()
+                ->withInput()
+                ->with('error', $exception->getMessage());
+        }
+
+        $mensaje = (string) $request->input('panel', '') === 'recepcion'
+            ? 'Recepcion del transporte registrada.'
+            : 'Requerimiento de transporte actualizado.';
 
         return redirect()
-            ->route('logistica.index', ['tab' => 'servicios'])
-            ->with('success', 'Requerimiento de transporte actualizado.');
+            ->route('logistica.index', [
+                'tab' => 'servicios',
+                'servicio_parada_id' => (string) ($transporte->grupo?->rq_mina_id ?? ''),
+            ])
+            ->with('success', $mensaje);
+    }
+
+    /**
+     * Descarga un documento del transporte atendido. Los slots legacy-* apuntan a
+     * los campos historicos y adicional-N a los documentos cargados con nombre.
+     */
+    public function downloadTransportDocument(Request $request, string $id, string $slot): BinaryFileResponse
+    {
+        $usuario = $this->requireAuthenticatedUser();
+        $transporte = RQMinaActividadTransporte::query()->with('grupo.rqMina:id,mina_id')->find($id);
+
+        if (! $transporte) {
+            abort(404, 'Requerimiento de transporte no encontrado.');
+        }
+
+        $this->assertTransportAccess($usuario, $transporte);
+        $document = $this->service->transportDocumentSlot($transporte, $slot);
+
+        if ($document === null || ! Storage::disk('local')->exists($document['path'])) {
+            abort(404, 'El documento de transporte solicitado no esta disponible.');
+        }
+
+        return Storage::disk('local')->download($document['path'], $document['name']);
+    }
+
+    private function assertTransportAccess(Usuario $usuario, RQMinaActividadTransporte $transporte): void
+    {
+        $minaId = (string) ($transporte->grupo?->rqMina?->mina_id ?? '');
+
+        if (MinaScopeAccess::allows($usuario, $minaId)) {
+            return;
+        }
+
+        abort(403, 'No tienes acceso a la mina de este requerimiento de transporte.');
     }
 
     private function workerFilterChip(string $value): ?array

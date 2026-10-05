@@ -1,68 +1,31 @@
 @extends('layouts.app')
 
-@section('title', 'Faltas - Corregir')
+@section('title', 'Corregir falta - Proserge')
 
 @section('content')
-<div class="page-header">
-    <div class="page-header-content">
-        <div>
-            <h1 class="page-title">Corregir Falta</h1>
-            <p class="page-subtitle">Falta #{{ $item['id'] ?? '' }}</p>
-        </div>
-        <div class="page-actions">
-            <a href="{{ route('faltas.show', $item['id']) }}" class="btn btn-outline">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"></line>
-                    <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-                Volver
-            </a>
-        </div>
-    </div>
+<div class="attendance-ops-page absence-ops-page">
+    @if($item)
+        <header class="ops-page-header">
+            <div><p class="ops-eyebrow">Regularización de asistencia</p><h1>Corregir falta</h1><p>{{ $item->trabajador_nombre ?: 'Trabajador sin nombre' }} · {{ \Carbon\Carbon::parse($item->fecha)->format('d/m/Y') }}</p></div>
+            <div class="ops-page-actions"><a href="{{ route('faltas.show', $item->id) }}" class="ops-btn secondary"><svg viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver</a></div>
+        </header>
+
+        <form action="{{ route('faltas.corregir-post', $item->id) }}" method="POST" class="ops-panel attendance-form-panel">
+            @csrf
+            <div class="ops-panel-head"><div><h2>Confirmar asistencia real</h2><p>La falta quedará como corregida y la asistencia origen pasará a presente.</p></div></div>
+            <div class="absence-correction-context">
+                <div><span>Trabajador</span><strong>{{ $item->trabajador_nombre ?: 'Sin nombre' }}</strong><small>{{ $item->trabajador_documento ?: 'Sin documento' }}</small></div>
+                <div><span>Destino</span><strong>{{ $item->destino_nombre ?: 'Sin destino identificado' }}</strong><small>{{ ucfirst(strtolower((string) ($item->destino_tipo ?: 'Sin tipo'))) }}</small></div>
+                <div><span>Motivo original</span><strong>{{ ucfirst(strtolower((string) ($item->motivo ?: 'Ausencia'))) }}</strong><small>{{ $item->descripcion ?: 'Sin detalle' }}</small></div>
+            </div>
+            <div class="attendance-form-grid">
+                <div class="ops-field"><label for="correction-time">Hora real de ingreso</label><input type="time" name="hora_marcado" id="correction-time" value="{{ old('hora_marcado') }}"></div>
+                <div class="ops-field wide"><label for="correction-reason">Motivo de la corrección</label><textarea name="motivo_correccion" id="correction-reason" rows="4" minlength="5" maxlength="1000" required placeholder="Ejemplo: el trabajador marcó tarde y no fue registrado en el cierre">{{ old('motivo_correccion') }}</textarea></div>
+            </div>
+            <div class="attendance-form-actions"><a href="{{ route('faltas.show', $item->id) }}" class="ops-btn secondary">Cancelar</a><button type="submit" class="ops-btn primary">Aplicar corrección</button></div>
+        </form>
+    @else
+        <section class="ops-panel"><div class="ops-empty">La falta no existe o no se encuentra dentro de tu alcance.</div></section>
+    @endif
 </div>
-
-@if($item)
-<form action="{{ route('faltas.corregir-post', $item['id']) }}" method="POST" class="form">
-    @csrf
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Datos de la Corrección</h3>
-        </div>
-        <div class="card-body">
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <span class="detail-label">Trabajador</span>
-                    <span class="detail-value">{{ $item['trabajador']['nombre'] ?? $item['trabajador_nombre'] ?? '-' }}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Fecha Original</span>
-                    <span class="detail-value">{{ $item['fecha'] ?? '-' }}</span>
-                </div>
-            </div>
-            
-            <div class="form-group" style="margin-top: 16px;">
-                <label for="asistencia_tipo">Tipo de Corrección</label>
-                <select name="asistencia_tipo" id="asistencia_tipo" class="form-control" required>
-                    <option value="entrada">Marcar Entrada</option>
-                    <option value="salida">Marcar Salida</option>
-                    <option value="completa">Marcar Completa</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="hora">Hora de Asistencia</label>
-                <input type="time" name="hora" id="hora" class="form-control" value="08:00">
-            </div>
-            <div class="form-group">
-                <label for="justificacion">Justificación</label>
-                <textarea name="justificacion" id="justificacion" class="form-control" rows="3" placeholder="Explicar la corrección..."></textarea>
-            </div>
-        </div>
-    </div>
-
-    <div class="form-actions">
-        <a href="{{ route('faltas.show', $item['id']) }}" class="btn btn-outline">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Aplicar Corrección</button>
-    </div>
-</form>
-@endif
 @endsection

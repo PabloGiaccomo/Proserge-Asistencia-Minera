@@ -96,11 +96,15 @@ Trabajadores nuevos:
 - Un trabajador-mina solo puede ser `HABILITADO` cuando la mina tiene examenes
   configurados, estos fueron generados para el trabajador y todos quedaron
   resueltos, vigentes, convalidados o `NO_APLICA`.
-- Si el trabajador agota intentos o desaprueba el ultimo intento requerido,
-  debe mostrarse como `NO_HABILITADO` para esa mina. No debe quedar visible como
-  `OBSERVADO` por ese motivo.
+- Al alcanzar o superar el maximo configurado con resultado desaprobado, debe
+  mostrarse como `NO_HABILITADO` para esa mina, pero puede registrar nuevos
+  intentos. El conteo conserva ambos valores, por ejemplo `3/2`.
 - Convalidaciones son sugeridas por el sistema y confirmadas por el usuario; no
   se aplican automaticamente.
+- Los cursos y EMO del historial global pertenecen al trabajador. Un resultado
+  confirmado se refleja automaticamente en cada asignacion minera activa que
+  tenga como requisito el mismo `examen_id`, incluso si la mina se asigna
+  despues. Esta propagacion exacta no se considera convalidacion.
 - Documentos tienen estado propio y pueden estar pendientes, cargados,
   observados, aprobados o no aplicar.
 - Contratos antiguos y cerrados son solo lectura.

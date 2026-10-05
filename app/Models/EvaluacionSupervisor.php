@@ -44,6 +44,11 @@ class EvaluacionSupervisor extends Model
         return $this->belongsTo(Personal::class, 'evaluador_id');
     }
 
+    public function usuarioEvaluador(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'created_by_usuario_id');
+    }
+
     public function evaluado(): BelongsTo
     {
         return $this->belongsTo(Personal::class, 'evaluado_id');

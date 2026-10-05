@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ciclo_examen_intento" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_habilitacion_minera_ciclo_examen_intento" name="Programar y resolver examen" isExecutable="false">
+    <bpmn:documentation>Programar, completar un intento pendiente o registrar resultado; distinguir no asistencia de desaprobacion y recalcular la asignacion. | Evidencia: app/Modules/Personal/Services/PersonalMinaHabilitacionService.php::registerAttempt; app/Modules/Personal/Services/PersonalMinaHabilitacionService.php::completeScheduledAttempt; app/Models/PersonalMinaExamenIntento.php; tests/Feature/PersonalMinaExamenesMinerosTest.php | Por confirmar: Tratamiento operativo definitivo de examenes criticos desaprobados.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_ciclo_examen_intento">
+    <bpmn:lane id="Lane_User" name="SSOMA/RR.HH.">
+      <bpmn:flowNodeRef>Start_Exam</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Register</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Exam</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Validate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Result</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Approve</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Fail</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Recalc</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Pending</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Absent</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Exam" name="Examen pendiente">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Register" name="Programar o registrar resultado">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Task_Validate" name="Validar nota, fechas y precio snapshot">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Gateway_Result" name="Resultado">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Pending</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Absent</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Approve" name="Guardar APROBADO/VIGENTE">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Fail" name="Guardar DESAPROBADO y contar N/max">
+      <bpmn:documentation>PersonalMinaHabilitacionService::applyAttemptToWorkerExam y registerAttempt; no bloquear intentos adicionales.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Recalc" name="Recalcular asignacion minera">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:incoming>Flow_PendingCalc</bpmn:incoming>
+      <bpmn:incoming>Flow_AbsentCalc</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Exam" name="Historial actualizado">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_Pending" name="Guardar PENDIENTE o PROGRAMADO">
+      <bpmn:documentation>PersonalMinaHabilitacionService::applyAttemptToWorkerExam: resultado pendiente con fecha -&gt; PROGRAMADO; sin fecha -&gt; PENDIENTE.</bpmn:documentation>
+      <bpmn:incoming>Flow_Pending</bpmn:incoming>
+      <bpmn:outgoing>Flow_PendingCalc</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Absent" name="NO_ASISTIO; examen PROGRAMADO">
+      <bpmn:documentation>PersonalMinaHabilitacionService::applyAttemptToWorkerExam: RESULTADO_NO_ASISTIO -&gt; ESTADO_PROGRAMADO.</bpmn:documentation>
+      <bpmn:incoming>Flow_Absent</bpmn:incoming>
+      <bpmn:outgoing>Flow_AbsentCalc</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Exam" targetRef="Task_Register"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Register" targetRef="Task_Validate"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Validate" targetRef="Gateway_Result"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Gateway_Result" targetRef="Task_Approve" name="Aprobado"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Gateway_Result" targetRef="Task_Fail" name="DESAPROBADO"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_Approve" targetRef="Task_Recalc"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_Fail" targetRef="Task_Recalc"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_Recalc" targetRef="End_Exam"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Pending" sourceRef="Gateway_Result" targetRef="Task_Pending" name="Pendiente"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Absent" sourceRef="Gateway_Result" targetRef="Task_Absent" name="NO_ASISTIO"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PendingCalc" sourceRef="Task_Pending" targetRef="Task_Recalc"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_AbsentCalc" sourceRef="Task_Absent" targetRef="Task_Recalc"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_ciclo_examen_intento">
+    <bpmndi:BPMNPlane id="Plane_ciclo_examen_intento" bpmnElement="Process_habilitacion_minera_ciclo_examen_intento">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="540" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="610" width="1470" height="540" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Exam_di" bpmnElement="Start_Exam">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Register_di" bpmnElement="Task_Register">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Validate_di" bpmnElement="Task_Validate">
+        <dc:Bounds x="595" y="664" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Result_di" bpmnElement="Gateway_Result">
+        <dc:Bounds x="785" y="675" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Approve_di" bpmnElement="Task_Approve">
+        <dc:Bounds x="975" y="664" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Fail_di" bpmnElement="Task_Fail">
+        <dc:Bounds x="975" y="784" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Recalc_di" bpmnElement="Task_Recalc">
+        <dc:Bounds x="1165" y="664" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Exam_di" bpmnElement="End_Exam">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Pending_di" bpmnElement="Task_Pending">
+        <dc:Bounds x="975" y="904" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Absent_di" bpmnElement="Task_Absent">
+        <dc:Bounds x="975" y="1024" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="700" />
+        <di:waypoint x="595" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="700" />
+        <di:waypoint x="765" y="700" />
+        <di:waypoint x="765" y="700" />
+        <di:waypoint x="785" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="700" />
+        <di:waypoint x="905" y="700" />
+        <di:waypoint x="905" y="700" />
+        <di:waypoint x="975" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="835" y="700" />
+        <di:waypoint x="905" y="700" />
+        <di:waypoint x="905" y="820" />
+        <di:waypoint x="975" y="820" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1125" y="700" />
+        <di:waypoint x="1145" y="700" />
+        <di:waypoint x="1145" y="700" />
+        <di:waypoint x="1165" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1125" y="820" />
+        <di:waypoint x="1145" y="820" />
+        <di:waypoint x="1145" y="700" />
+        <di:waypoint x="1165" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1315" y="700" />
+        <di:waypoint x="1335" y="700" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Pending_di" bpmnElement="Flow_Pending">
+        <di:waypoint x="835" y="700" />
+        <di:waypoint x="905" y="700" />
+        <di:waypoint x="905" y="940" />
+        <di:waypoint x="975" y="940" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Absent_di" bpmnElement="Flow_Absent">
+        <di:waypoint x="835" y="700" />
+        <di:waypoint x="905" y="700" />
+        <di:waypoint x="905" y="1060" />
+        <di:waypoint x="975" y="1060" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PendingCalc_di" bpmnElement="Flow_PendingCalc">
+        <di:waypoint x="1125" y="940" />
+        <di:waypoint x="1145" y="940" />
+        <di:waypoint x="1145" y="700" />
+        <di:waypoint x="1165" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AbsentCalc_di" bpmnElement="Flow_AbsentCalc">
+        <di:waypoint x="1125" y="1060" />
+        <di:waypoint x="1145" y="1060" />
+        <di:waypoint x="1145" y="700" />
+        <di:waypoint x="1165" y="700" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

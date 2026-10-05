@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_reubicar_pasajero" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_logistica_operativa_reubicar_pasajero" name="Reubicar pasajero entre servicios" isExecutable="false">
+    <bpmn:documentation>Retira de origen y agrega a destino PERSONAL de la misma fecha y turno. Riesgo de retiro parcial ante errores de negocio posteriores. | Evidencia: app/Modules/Transporte/Services/TransportePlanningService.php; app/Models/TransporteServicioPasajero.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_reubicar_pasajero">
+    <bpmn:lane id="Lane_User" name="Usuario autorizado / Logistica">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Select</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Partial</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Valid</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Retire</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Add</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Added</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Solicitar reubicacion">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Select" name="Elegir pasajero, destino y motivo">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Comprobar destino y pasajero activo">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero: destino PERSONAL, misma fecha y turno; origen contiene pasajero ASIGNADO, lockForUpdate.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Valid" name="Contexto valido?">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero: TRANSPORTE_RELOCATION_INVALID o TRANSPORTE_PASSENGER_NOT_FOUND.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Retire" name="Marcar origen REUBICADO">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero llama retirePasajero dentro de DB::transaction.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Add" name="Intentar asignar al destino">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero llama addPasajeros; este valida permiso, candidato y capacidad. Devuelve errores como array, no siempre lanza excepcion.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Added" name="Destino acepto pasajero?">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::addPasajeros puede devolver ok=false; reubicarPasajero devuelve ese array desde la transaccion, sin lanzar excepcion.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="Done" name="Reubicacion registrada">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero, cuando addPasajeros devuelve ok=true.</bpmn:documentation>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Partial" name="Error tras retiro: revisar origen y destino">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero: si addPasajeros devuelve error de negocio, el retiro previo puede quedar confirmado. Requiere correccion funcional; no afirmar rollback.</bpmn:documentation>
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Sin traslado">
+      <bpmn:documentation>app/Modules/Transporte/Services/TransportePlanningService.php::reubicarPasajero: validacion inicial falla antes de retirar.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Select"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Select" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Check" targetRef="Valid"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Valid" targetRef="Retire" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Valid" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Retire" targetRef="Add"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Add" targetRef="Added"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Added" targetRef="Done" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Added" targetRef="Partial" name="No"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_reubicar_pasajero">
+    <bpmndi:BPMNPlane id="Plane_reubicar_pasajero" bpmnElement="Process_logistica_operativa_reubicar_pasajero">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Select_di" bpmnElement="Select">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Valid_di" bpmnElement="Valid">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Retire_di" bpmnElement="Retire">
+        <dc:Bounds x="975" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Add_di" bpmnElement="Add">
+        <dc:Bounds x="1165" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Added_di" bpmnElement="Added">
+        <dc:Bounds x="1355" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Partial_di" bpmnElement="Partial">
+        <dc:Bounds x="1545" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1125" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1315" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1405" y="460" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1475" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1405" y="460" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1475" y="280" />
+        <di:waypoint x="1545" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

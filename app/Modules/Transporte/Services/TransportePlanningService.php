@@ -514,6 +514,18 @@ class TransportePlanningService
                 'destino' => $item->destino_snapshot,
                 'solicitado' => $item->unidades_transporte,
                 'estado' => $item->estado_logistico,
+                'estado_logistico_label' => RQMinaActividadTransporte::estadoLogisticoLabel($item->estado_logistico),
+                'estado_logistico_tone' => RQMinaActividadTransporte::estadoLogisticoTone($item->estado_logistico),
+                'atendido' => $item->estaAtendido(),
+                'placas_asignadas' => $item->placas_asignadas,
+                'origen_label' => RQMinaActividadTransporte::origenLabel($item->origen),
+                'recepcion_estado' => $item->recepcion_estado,
+                'recepcion_label' => RQMinaActividadTransporte::recepcionEstadoLabel($item->recepcion_estado),
+                'fechas_uso' => trim(sprintf(
+                    '%s - %s',
+                    $item->fecha_inicio?->format('d/m/Y') ?? '',
+                    $item->fecha_fin?->format('d/m/Y') ?? ''
+                ), ' -'),
                 'legacy' => !$item->rq_mina_plan_id || !$item->tipo_transporte,
                 'legacy_label' => (!$item->rq_mina_plan_id || !$item->tipo_transporte) ? 'TRANSPORTE LEGACY SIN ESTRUCTURA COMPLETA' : null,
             ])->values()->all();

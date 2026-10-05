@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_cancelar_grupos_dia" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_man_power_cancelar_grupos_dia" name="Cancelar grupos del dia" isExecutable="false">
+    <bpmn:documentation>Cancela grupos no cancelados del SAIT, fecha y plan seleccionados cuando ninguno tiene asistencia; retira integrantes y pasajeros activos. | Evidencia: app/Modules/ManPower/Services/GrupoTrabajoService.php; app/Modules/ManPower/Policies/ManPowerPolicy.php; routes/web.php; routes/api.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_cancelar_grupos_dia">
+    <bpmn:lane id="Lane_User" name="Planificador operativo">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Request</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Attendance</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Valid</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Retire</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Cancel</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Dia de grupos preparados">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Request" name="Seleccionar parada, fecha, plan y SAIT">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Validar permiso, mina, plan y SAIT">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: editar/actualizar, manageGrupos y canAccessMina; actividad pertenece al plan.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:businessRuleTask id="Attendance" name="Bloquear grupos y comprobar asistencia">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: lockForUpdate; si no hay grupos o alguno tiene asistencia, devuelve error sin cancelar.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Valid" name="Cancelacion permitida?">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: requiere al menos un grupo y ninguna asistencia registrada.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Retire" name="Retirar integrantes y pasajeros activos">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: markDetalleRetired y retireActivePassengerForDetail por cada detalle activo en transaccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Cancel" name="Marcar grupos CANCELADO">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: estado CANCELADO y updated_by_id dentro de la misma transaccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Resumen de cancelacion">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups devuelve grupos_cancelados e integrantes_retirados.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Sin cancelacion">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::cancelDayGroups: error de permiso, contexto o asistencia.</bpmn:documentation>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Request"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Request" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Check" targetRef="Attendance"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Attendance" targetRef="Valid"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Valid" targetRef="Retire" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Retire" targetRef="Cancel"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Cancel" targetRef="Done"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Valid" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_cancelar_grupos_dia">
+    <bpmndi:BPMNPlane id="Plane_cancelar_grupos_dia" bpmnElement="Process_man_power_cancelar_grupos_dia">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1660" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="250" width="1660" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Request_di" bpmnElement="Request">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="595" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Attendance_di" bpmnElement="Attendance">
+        <dc:Bounds x="785" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Valid_di" bpmnElement="Valid">
+        <dc:Bounds x="975" y="315" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Retire_di" bpmnElement="Retire">
+        <dc:Bounds x="1165" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Cancel_di" bpmnElement="Cancel">
+        <dc:Bounds x="1355" y="304" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="340" />
+        <di:waypoint x="595" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="765" y="340" />
+        <di:waypoint x="785" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="935" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="955" y="340" />
+        <di:waypoint x="975" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1165" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1315" y="340" />
+        <di:waypoint x="1335" y="340" />
+        <di:waypoint x="1335" y="340" />
+        <di:waypoint x="1355" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1505" y="340" />
+        <di:waypoint x="1525" y="340" />
+        <di:waypoint x="1525" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1025" y="340" />
+        <di:waypoint x="1095" y="340" />
+        <di:waypoint x="1095" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -4,6 +4,7 @@
 
 @section('content')
 @php
+    $errors = $errors ?? new \Illuminate\Support\ViewErrorBag();
     $fichaSentSuccessfully = str_contains((string) session('success'), 'Ficha enviada correctamente');
 @endphp
 <style>
@@ -176,6 +177,31 @@
         to {
             transform: rotate(360deg);
         }
+    }
+
+    [data-uppercase="1"],
+    input[data-uppercase="1"],
+    textarea[data-uppercase="1"] {
+        text-transform: uppercase;
+    }
+
+    .signature-pad {
+        touch-action: none !important;
+    }
+
+    .ficha-file-compress-hint {
+        font-size: 12px;
+        margin-top: 5px;
+        font-weight: 600;
+        display: block;
+    }
+
+    .ficha-file-compress-hint.is-loading {
+        color: #0f766e;
+    }
+
+    .ficha-file-compress-hint.is-success {
+        color: #15803d;
     }
 
     @media (max-width: 760px) {
@@ -404,28 +430,298 @@
         };
 
         form.addEventListener('input', scheduleSave, true);
-        form.addEventListener('change', scheduleSave, true);
-        form.addEventListener('submit', function (event) {
-            if (form.dataset.submitting === '1') {
-                event.preventDefault();
+
+        let activeCompressions = 0;
+        let submitPending = false;
+
+        const updateFileHint = function (input, text, type) {
+            let hint = input.nextElementSibling;
+            if (!hint || !hint.matches('[data-file-compress-hint]')) {
+                hint = document.createElement('span');
+                hint.setAttribute('data-file-compress-hint', '');
+                hint.className = 'ficha-file-compress-hint';
+                input.insertAdjacentElement('afterend', hint);
+            }
+            hint.textContent = text;
+            hint.className = 'ficha-file-compress-hint ' + (type === 'loading' ? 'is-loading' : (type === 'success' ? 'is-success' : ''));
+            hint.style.display = text ? 'block' : 'none';
+        };
+
+        const compressImageFile = function (file) {
+            return new Promise(function (resolve) {
+                if (!file) {
+                    return resolve(file);
+                }
+
+                const isImage = (file.type && file.type.indexOf('image/') === 0)
+                    || /\.(jpe?g|png|webp)$/i.test(file.name);
+
+                if (!isImage) {
+                    return resolve(file);
+                }
+
+                if (file.type === 'image/svg+xml' || file.type === 'image/gif') {
+                    return resolve(file);
+                }
+
+                const maxDimension = 1920;
+                const quality = 0.82;
+                const objectUrl = URL.createObjectURL(file);
+                const img = new Image();
+
+                img.onload = function () {
+                    URL.revokeObjectURL(objectUrl);
+                    let width = img.naturalWidth || img.width;
+                    let height = img.naturalHeight || img.height;
+
+                    if (file.size <= 1.2 * 1024 * 1024 && width <= maxDimension && height <= maxDimension) {
+                        return resolve(file);
+                    }
+
+                    if (width > maxDimension || height > maxDimension) {
+                        if (width > height) {
+                            height = Math.round((height * maxDimension) / width);
+                            width = maxDimension;
+                        } else {
+                            width = Math.round((width * maxDimension) / height);
+                            height = maxDimension;
+                        }
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    canvas.toBlob(function (blob) {
+                        if (!blob || blob.size >= file.size) {
+                            return resolve(file);
+                        }
+
+                        const baseName = file.name.replace(/\.[^.]+$/, '');
+                        const fileName = (baseName || 'foto') + '.jpg';
+                        let compressedFile;
+                        try {
+                            compressedFile = new File([blob], fileName, {
+                                type: 'image/jpeg',
+                                lastModified: Date.now()
+                            });
+                        } catch (e) {
+                            blob.name = fileName;
+                            blob.lastModifiedDate = new Date();
+                            compressedFile = blob;
+                        }
+
+                        resolve(compressedFile);
+                    }, 'image/jpeg', quality);
+                };
+
+                img.onerror = function () {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve(file);
+                };
+
+                img.src = objectUrl;
+            });
+        };
+
+        const processFileInput = function (input) {
+            const file = input.files && input.files[0];
+            if (!file) {
+                updateFileHint(input, '', '');
+                delete input.dataset.compressed;
+                delete input.dataset.compressing;
+                return Promise.resolve();
+            }
+
+            const isImage = (file.type && file.type.indexOf('image/') === 0)
+                || /\.(jpe?g|png|webp)$/i.test(file.name);
+
+            if (!isImage) {
+                updateFileHint(input, '', '');
+                input.dataset.compressed = '1';
+                delete input.dataset.compressing;
+                return Promise.resolve();
+            }
+
+            const origKb = Math.round(file.size / 1024);
+            if (file.size <= 1.2 * 1024 * 1024) {
+                updateFileHint(input, '✓ Foto lista (' + origKb + ' KB)', 'success');
+                input.dataset.compressed = '1';
+                delete input.dataset.compressing;
+                return Promise.resolve();
+            }
+
+            const token = Date.now() + '-' + Math.random().toString(36).slice(2);
+            input._compressToken = token;
+            input.dataset.compressing = '1';
+            delete input.dataset.compressed;
+
+            activeCompressions++;
+            updateFileHint(input, '⏳ Optimizando foto de ' + (origKb > 1024 ? (origKb / 1024).toFixed(1) + ' MB' : origKb + ' KB') + '...', 'loading');
+
+            return compressImageFile(file).then(function (compressedFile) {
+                if (input._compressToken !== token) {
+                    return;
+                }
+
+                if (compressedFile && compressedFile !== file) {
+                    try {
+                        const dt = new DataTransfer();
+                        dt.items.add(compressedFile);
+                        input.files = dt.files;
+                        const newKb = Math.round(compressedFile.size / 1024);
+                        updateFileHint(input, '✓ Foto optimizada de ' + (origKb > 1024 ? (origKb / 1024).toFixed(1) + ' MB' : origKb + ' KB') + ' a ' + newKb + ' KB', 'success');
+                    } catch (e) {
+                        updateFileHint(input, '✓ Archivo seleccionado (' + origKb + ' KB)', 'success');
+                    }
+                } else {
+                    updateFileHint(input, '✓ Archivo listo (' + origKb + ' KB)', 'success');
+                }
+
+                input.dataset.compressed = '1';
+            }).catch(function () {
+                updateFileHint(input, '✓ Archivo seleccionado (' + origKb + ' KB)', 'success');
+                input.dataset.compressed = '1';
+            }).finally(function () {
+                if (input._compressToken === token) {
+                    delete input.dataset.compressing;
+                }
+                activeCompressions = Math.max(0, activeCompressions - 1);
+                if (activeCompressions === 0 && submitPending) {
+                    submitPending = false;
+                    triggerFinalSubmit();
+                }
+            });
+        };
+
+        const showSubmitStatus = function (title, message) {
+            const status = form.querySelector('[data-ingreso-submit-status]');
+            if (status) {
+                status.hidden = false;
+                const statusTitle = status.querySelector('strong');
+                const statusText = status.querySelector('p');
+                if (statusTitle) statusTitle.textContent = title;
+                if (statusText) statusText.textContent = message;
+                status.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        };
+
+        const hideSubmitStatus = function () {
+            const status = form.querySelector('[data-ingreso-submit-status]');
+            if (status) {
+                status.hidden = true;
+            }
+        };
+
+        const setSubmitButtonState = function (disabled, text) {
+            const button = form.querySelector('button[type="submit"]');
+            if (button) {
+                button.disabled = disabled;
+                button.textContent = text || button.dataset.defaultText || 'Enviar ficha';
+            }
+        };
+
+        const initialSubmitButton = form.querySelector('button[type="submit"]');
+        if (initialSubmitButton) {
+            initialSubmitButton.dataset.defaultText = initialSubmitButton.textContent.trim();
+        }
+
+        const triggerFinalSubmit = function () {
+            if (!form.checkValidity()) {
+                hideSubmitStatus();
+                setSubmitButtonState(false);
+                form.reportValidity();
                 return;
             }
+
+            if (typeof form._validateSignature === 'function' && !form._validateSignature()) {
+                hideSubmitStatus();
+                setSubmitButtonState(false);
+                return;
+            }
+
+            form.querySelectorAll('[data-uppercase="1"]').forEach(function (el) {
+                if (el && typeof el.value === 'string') {
+                    const upper = el.value.toLocaleUpperCase('es-PE');
+                    if (el.value !== upper) el.value = upper;
+                }
+            });
 
             writeDraft();
             form.dataset.submitting = '1';
 
-            const status = form.querySelector('[data-ingreso-submit-status]');
-            if (status) {
-                status.hidden = false;
-                status.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            showSubmitStatus('Enviando ficha...', 'Primero se guardan tus datos y luego los archivos. No cierres esta ventana hasta ver la confirmacion.');
+            setSubmitButtonState(true, form.querySelector('button[type="submit"]')?.dataset.loadingText || 'Enviando ficha...');
 
-            const button = form.querySelector('button[type="submit"]');
-            if (button) {
-                button.disabled = true;
-                button.textContent = button.dataset.loadingText || 'Enviando ficha...';
+            HTMLFormElement.prototype.submit.call(form);
+        };
+
+        form.addEventListener('change', function (event) {
+            scheduleSave();
+            if (event.target && event.target.type === 'file') {
+                delete event.target.dataset.compressed;
+                delete event.target.dataset.compressing;
+                processFileInput(event.target);
             }
         }, true);
+
+        form.addEventListener('submit', function (event) {
+            if (form.dataset.submitting === '1') {
+                return;
+            }
+
+            if (!form.checkValidity()) {
+                return;
+            }
+
+            if (typeof form._validateSignature === 'function' && !form._validateSignature()) {
+                event.preventDefault();
+                return;
+            }
+
+            if (activeCompressions > 0) {
+                event.preventDefault();
+                submitPending = true;
+                showSubmitStatus('Optimizando fotos...', 'Estamos reduciendo el peso de tus fotos para que suban rapido. Espera unos segundos...');
+                setSubmitButtonState(true, 'Optimizando fotos...');
+                return;
+            }
+
+            const pendingFiles = [];
+            form.querySelectorAll('input[type="file"]').forEach(function (inp) {
+                if (inp.dataset.compressed === '1') return;
+                const f = inp.files && inp.files[0];
+                if (f && ((f.type && f.type.indexOf('image/') === 0) || /\.(jpe?g|png|webp)$/i.test(f.name)) && f.size > 1.2 * 1024 * 1024) {
+                    pendingFiles.push(inp);
+                }
+            });
+
+            if (pendingFiles.length > 0) {
+                event.preventDefault();
+                submitPending = true;
+                showSubmitStatus('Optimizando fotos...', 'Estamos reduciendo el peso de tus fotos para que suban rapido. Espera unos segundos...');
+                setSubmitButtonState(true, 'Optimizando fotos...');
+                pendingFiles.forEach(processFileInput);
+                return;
+            }
+
+            form.querySelectorAll('[data-uppercase="1"]').forEach(function (el) {
+                if (el && typeof el.value === 'string') {
+                    const upper = el.value.toLocaleUpperCase('es-PE');
+                    if (el.value !== upper) el.value = upper;
+                }
+            });
+
+            writeDraft();
+            form.dataset.submitting = '1';
+
+            showSubmitStatus('Enviando ficha...', 'Primero se guardan tus datos y luego los archivos. No cierres esta ventana hasta ver la confirmacion.');
+            setSubmitButtonState(true, form.querySelector('button[type="submit"]')?.dataset.loadingText || 'Enviando ficha...');
+        });
     })();
 </script>
 @endpush

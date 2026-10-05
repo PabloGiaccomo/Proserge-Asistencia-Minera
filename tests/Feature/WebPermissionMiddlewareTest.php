@@ -943,6 +943,309 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertJsonPath('code', 'USUARIO_MINA_SCOPE_OK');
     }
 
+    public function test_usuarios_show_is_read_only_and_hides_edit_options_without_permission(): void
+    {
+        $viewerRoleId = $this->createPermissionRole('USUARIO_READONLY_TEST', [
+            'usuarios' => ['ver'],
+        ]);
+        $editorRoleId = $this->createPermissionRole('USUARIO_EDITOR_FULL_TEST', [
+            'usuarios' => ['ver', 'editar'],
+        ]);
+
+        $viewerUserId = $this->createPermissionUser($viewerRoleId, 'usuario-viewer');
+        $editorUserId = $this->createPermissionUser($editorRoleId, 'usuario-editor');
+        $targetUserId = $this->createPermissionUser($viewerRoleId, 'usuario-target');
+
+        $this
+            ->withSession($this->sessionForPermissionUser($viewerUserId))
+            ->get(route('usuarios.show', $targetUserId))
+            ->assertOk()
+            ->assertDontSee('Editar Usuario')
+            ->assertDontSee('Eliminar Usuario')
+            ->assertDontSee('action="' . route('usuarios.update', $targetUserId) . '"', false)
+            ->assertDontSee('action="' . route('usuarios.password', $targetUserId) . '"', false);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($viewerUserId))
+            ->get(route('usuarios.index'))
+            ->assertOk()
+            ->assertSee(route('usuarios.show', $targetUserId), false)
+            ->assertDontSee(route('usuarios.edit', $targetUserId), false);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($editorUserId))
+            ->get(route('usuarios.show', $targetUserId))
+            ->assertOk()
+            ->assertSee(route('usuarios.edit', $targetUserId), false);
+    }
+
+    public function test_usuarios_edit_route_requires_edit_permission(): void
+    {
+        $viewerRoleId = $this->createPermissionRole('USUARIO_EDIT_DENIED_TEST', [
+            'usuarios' => ['ver'],
+        ]);
+        $editorRoleId = $this->createPermissionRole('USUARIO_EDIT_ALLOWED_TEST', [
+            'usuarios' => ['ver', 'editar'],
+        ]);
+
+        $viewerUserId = $this->createPermissionUser($viewerRoleId, 'usuario-edit-denied');
+        $editorUserId = $this->createPermissionUser($editorRoleId, 'usuario-edit-allowed');
+        $targetUserId = $this->createPermissionUser($viewerRoleId, 'usuario-target');
+
+        $this
+            ->withSession($this->sessionForPermissionUser($viewerUserId))
+            ->get(route('usuarios.edit', $targetUserId))
+            ->assertForbidden();
+
+        $this
+            ->withSession($this->sessionForPermissionUser($editorUserId))
+            ->get(route('usuarios.edit', $targetUserId))
+            ->assertOk()
+            ->assertSee('Editar Usuario')
+            ->assertSee('Credenciales y permisos base');
+    }
+
+    public function test_eliminar_usuario_is_restricted_to_superadmin(): void
+    {
+        $adminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $adminRoleId,
+            'nombre' => 'ADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+
+        $targetRoleId = $this->createPermissionRole('USUARIO_DISPOSABLE_TEST', [
+            'inicio' => ['ver'],
+        ]);
+
+        $adminUserId = $this->createPermissionUser($adminRoleId, 'admin-deleter');
+        $targetUserId = $this->createPermissionUser($targetRoleId, 'target-disposable');
+
+        $this
+            ->withSession($this->sessionForPermissionUser($adminUserId))
+            ->delete(route('usuarios.destroy', $targetUserId))
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('usuarios', ['id' => $targetUserId]);
+    }
+
+    public function test_eliminar_usuario_blocks_self_deletion_and_last_admin(): void
+    {
+        $superAdminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $superAdminRoleId,
+            'nombre' => 'SUPERADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+
+        $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'self-superadmin');
+
+        $this
+            ->withSession($this->sessionForPermissionUser($superAdminUserId))
+            ->delete(route('usuarios.destroy', $superAdminUserId))
+            ->assertRedirect(route('usuarios.index'))
+            ->assertSessionHas('error', 'No puedes eliminar tu propia cuenta de usuario.');
+
+        $this->assertDatabaseHas('usuarios', ['id' => $superAdminUserId]);
+
+        $adminProtection = app(AdminProtectionService::class);
+        $userModel = \App\Models\Usuario::query()->findOrFail($superAdminUserId);
+
+        DB::table('usuarios')->where('id', '!=', $superAdminUserId)->update(['estado' => 'INACTIVO']);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $adminProtection->assertUserDeleteAllowed($userModel);
+    }
+
+    public function test_eliminar_usuario_blocks_deletion_with_transactional_dependencies(): void
+    {
+        $superAdminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $superAdminRoleId,
+            'nombre' => 'SUPERADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+
+        $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'superadmin-dep');
+        $targetRoleId = $this->createPermissionRole('DEP_ROLE_TEST', ['inicio' => ['ver']]);
+        $targetUserId = $this->createPermissionUser($targetRoleId, 'target-with-activity');
+
+        $personalId = $this->createPermissionPersonal('dep-worker');
+        $this->createPermissionBloqueo($personalId, $targetUserId);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($superAdminUserId))
+            ->delete(route('usuarios.destroy', $targetUserId))
+            ->assertRedirect(route('usuarios.index'))
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseHas('usuarios', ['id' => $targetUserId]);
+    }
+
+    public function test_eliminar_usuario_successfully_removes_accidental_user(): void
+    {
+        $superAdminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $superAdminRoleId,
+            'nombre' => 'SUPERADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+
+        $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'superadmin-cleaner');
+        $targetRoleId = $this->createPermissionRole('ACCIDENTAL_TEST', ['inicio' => ['ver']]);
+        $disposableUserId = $this->createPermissionUser($targetRoleId, 'accidental-user');
+
+        DB::table('usuario_roles')->insert([
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $disposableUserId,
+            'rol_id' => $targetRoleId,
+            'tipo' => 'area',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->createApiTokenForUser($disposableUserId);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($superAdminUserId))
+            ->delete(route('usuarios.destroy', $disposableUserId))
+            ->assertRedirect(route('usuarios.index'))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('usuarios', ['id' => $disposableUserId]);
+        $this->assertDatabaseMissing('usuario_roles', ['usuario_id' => $disposableUserId]);
+        $this->assertDatabaseMissing('auth_tokens', ['usuario_id' => $disposableUserId]);
+    }
+
+    public function test_usuario_scope_empty_and_sync(): void
+    {
+        $scopeRoleId = $this->createPermissionRole('USUARIO_SCOPE_SYNC_TEST', [
+            'usuarios' => ['ver', 'scope'],
+        ]);
+        $targetRoleId = $this->createPermissionRole('USUARIO_SCOPE_TARGET_TEST', [
+            'inicio' => ['ver'],
+        ]);
+
+        $scopeUserId = $this->createPermissionUser($scopeRoleId, 'scope-manager');
+        $targetUserId = $this->createPermissionUser($targetRoleId, 'scope-target');
+
+        $minaId = (string) Str::uuid();
+        DB::table('minas')->insert([
+            'id' => $minaId,
+            'nombre' => 'MINA_SCOPE_' . Str::upper(Str::random(4)),
+            'estado' => 'ACTIVO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('usuario_mina_scope')->insert([
+            'id' => (string) Str::uuid(),
+            'usuario_id' => $targetUserId,
+            'mina_id' => $minaId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($scopeUserId))
+            ->put(route('usuarios.scope-update', $targetUserId), [
+                'mina_ids' => [],
+            ])
+            ->assertRedirect(route('usuarios.show', $targetUserId))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('usuario_mina_scope', ['usuario_id' => $targetUserId]);
+
+        $this
+            ->withSession($this->sessionForPermissionUser($scopeUserId))
+            ->get(route('usuarios.scope', $targetUserId))
+            ->assertOk()
+            ->assertSee('Scope Vacío (Acceso Local)')
+            ->assertSee('Marcar todas')
+            ->assertSee('Desmarcar todas');
+    }
+
+    public function test_api_eliminar_usuario_endpoints(): void
+    {
+        $superAdminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $superAdminRoleId,
+            'nombre' => 'SUPERADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+        $adminRoleId = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $adminRoleId,
+            'nombre' => 'ADMIN',
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'usuarios' => ['ver', 'eliminar'],
+            ])),
+            'estado' => 'ACTIVO',
+        ]);
+        $targetRoleId = $this->createPermissionRole('API_DISP_ROLE_TEST', ['inicio' => ['ver']]);
+
+        $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'api-super-cleaner');
+        $adminUserId = $this->createPermissionUser($adminRoleId, 'api-admin-deleter');
+        $targetUserId = $this->createPermissionUser($targetRoleId, 'api-target-user');
+        $disposableUserId = $this->createPermissionUser($targetRoleId, 'api-disposable-user');
+
+        $adminToken = $this->createApiTokenForUser($adminUserId);
+        $superAdminToken = $this->createApiTokenForUser($superAdminUserId);
+
+        // 1. Non-superadmin blocked
+        $this
+            ->withToken($adminToken)
+            ->deleteJson('/api/v1/seguridad/usuarios/' . $targetUserId)
+            ->assertForbidden()
+            ->assertJsonPath('code', 'USUARIOS_DELETE_SUPERADMIN_ONLY');
+
+        // 2. Self-deletion blocked
+        $this
+            ->withToken($superAdminToken)
+            ->deleteJson('/api/v1/seguridad/usuarios/' . $superAdminUserId)
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'USUARIOS_SELF_DELETE_FORBIDDEN');
+
+        // 3. Successful accidental user deletion
+        $this
+            ->withToken($superAdminToken)
+            ->deleteJson('/api/v1/seguridad/usuarios/' . $disposableUserId)
+            ->assertOk()
+            ->assertJsonPath('code', 'USUARIOS_DELETED');
+
+        $this->assertDatabaseMissing('usuarios', ['id' => $disposableUserId]);
+
+        // 4. API sync empty scope
+        $scopeRoleId = $this->createPermissionRole('API_SCOPE_SYNC_ROLE', [
+            'usuarios' => ['ver', 'scope'],
+        ]);
+        $scopeUserId = $this->createPermissionUser($scopeRoleId, 'api-scope-manager');
+        $scopeToken = $this->createApiTokenForUser($scopeUserId);
+
+        $this
+            ->withToken($scopeToken)
+            ->putJson('/api/v1/seguridad/usuarios/' . $targetUserId . '/mina-scope', [
+                'mina_ids' => [],
+            ])
+            ->assertOk()
+            ->assertJsonPath('code', 'USUARIO_MINA_SCOPE_SYNC_OK');
+    }
+
     public function test_roles_edit_button_and_route_require_edit_or_update_permission(): void
     {
         $viewerRoleId = $this->createPermissionRole('ROL_VIEWER_ONLY_TEST', [

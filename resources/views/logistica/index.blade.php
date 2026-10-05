@@ -561,12 +561,19 @@
             <div class="lgt-card">
                 <div class="lgt-card-header">
                     <h2>Servicios y alquileres</h2>
-                    <p>Atención logística de transportes solicitados desde RQ Mina.</p>
+                    <p>Transportes solicitados desde RQ Mina: asigna la unidad, registra la recepción y adjunta documentos.</p>
                 </div>
 
                 <div class="lgt-card-body">
                     @php
-                        $selectedParadaId = request('servicio_parada_id', '');
+                        $selectedParadaId = (string) request('servicio_parada_id', '');
+                    $servicioEstado = (string) request('servicio_estado', '');
+                    $servicioRecepcion = (string) request('servicio_recepcion', '');
+                    $servicioDesde = (string) request('servicio_desde', '');
+                    $servicioHasta = (string) request('servicio_hasta', '');
+                    $servicioBuscar = (string) request('servicio_q', '');
+                    $servicioEstadosOpciones = \App\Models\RQMinaActividadTransporte::estadosLogisticosLabels();
+                    $servicioRecepcionesOpciones = \App\Models\RQMinaActividadTransporte::estadosRecepcionLabels();
                     @endphp
 
                     {{-- Explorador visual de paradas --}}
@@ -647,6 +654,45 @@
                         </div>
                     </div>
 
+                    <form class="lgt-servicio-filtros" method="GET" action="{{ url('/logistica') }}">
+                        <input type="hidden" name="tab" value="servicios">
+                        <input type="hidden" name="servicio_parada_id" id="lgtServicioParadaId" value="{{ $selectedParadaId }}">
+                        <label>
+                            <span>Estado logístico</span>
+                            <select name="servicio_estado">
+                                <option value="">Todos</option>
+                                @foreach($servicioEstadosOpciones as $value => $label)
+                                    <option value="{{ $value }}" @selected($servicioEstado === $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <label>
+                            <span>Recepción</span>
+                            <select name="servicio_recepcion">
+                                <option value="">Todas</option>
+                                @foreach($servicioRecepcionesOpciones as $value => $label)
+                                    <option value="{{ $value }}" @selected($servicioRecepcion === $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <label>
+                            <span>Requerido desde</span>
+                            <input type="date" name="servicio_desde" value="{{ $servicioDesde }}">
+                        </label>
+                        <label>
+                            <span>Requerido hasta</span>
+                            <input type="date" name="servicio_hasta" value="{{ $servicioHasta }}">
+                        </label>
+                        <label>
+                            <span>Placa, proveedor o detalle</span>
+                            <input type="search" name="servicio_q" value="{{ $servicioBuscar }}" placeholder="ABC-123, proveedor...">
+                        </label>
+                        <div class="lgt-servicio-filtros-actions">
+                            <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Actualizar lista</button>
+                            <a class="lgt-service-btn lgt-service-btn-ghost" href="{{ url('/logistica') }}?tab=servicios">Limpiar</a>
+                        </div>
+                    </form>
+
                     @php
                         $filteredRows = $servicePreviewRows->filter(function ($row) use ($selectedParadaId) {
                             return $selectedParadaId !== '' && (string) data_get($row, 'rq_mina_id') === $selectedParadaId;
@@ -655,22 +701,27 @@
 
                     <div class="lgt-servicios-empty" id="lgtServiceEmptyPrompt" @if($selectedParadaId !== '') hidden @endif>
                             <span class="lgt-servicios-empty-icon">🚛</span>
-                            <p>Selecciona una parada de la lista para ver sus requerimientos de transporte y gestionar la atención logística.</p>
+                            <p>Selecciona una parada de la lista para ver sus requerimientos de transporte. Usa los filtros y <strong>Actualizar lista</strong> para traer todos los requerimientos de esa parada.</p>
                     </div>
 
                     <div class="lgt-empty" id="lgtServiceEmptyNoRows" @if($selectedParadaId === '' || $filteredRows->isNotEmpty()) hidden @endif>No hay transportes solicitados para esta parada.</div>
 
                     @if($servicePreviewRows->isNotEmpty())
+                        <div class="lgt-servicio-resumen" @if($selectedParadaId === '') hidden @endif>
+                            <span><strong>{{ $filteredRows->count() }}</strong> requerimiento(s) de la parada seleccionada</span>
+                            <span>· <strong>{{ $servicePreviewRows->count() }}</strong> cargado(s) con los filtros actuales</span>
+                        </div>
+
                         <div class="lgt-service-grid" id="lgtServiceGrid" @if($selectedParadaId === '' || $filteredRows->isEmpty()) hidden @endif>
                             @foreach($servicePreviewRows as $row)
                                 @php
-                                    $isCompletado = data_get($row, 'origen') !== '' || data_get($row, 'estado') !== 'REQUERIDO' || data_get($row, 'fecha_inicio') !== '';
+                                    $atendido = (bool) data_get($row, 'atendido');
+                                    $estadoTone = (string) (data_get($row, 'estado_tone') ?: 'warning');
+                                    $estadoLabel = (string) (data_get($row, 'estado_label') ?: 'Requerido');
                                     $rowParadaId = (string) data_get($row, 'rq_mina_id');
                                     $selectedParada = $paradasCol->firstWhere('id', $rowParadaId);
                                     $paradaActiva = $selectedParada && data_get($selectedParada, 'estado') !== 'FINALIZADA';
-                                    $tieneEntrega = data_get($row, 'recepcion_estado') !== 'PENDIENTE';
-                                    $puedeHacerCambios = $tieneEntrega && $paradaActiva;
-                                    $cardClass = $isCompletado ? 'is-completado' : 'is-pendiente';
+                                    $cardClass = $atendido ? ($paradaActiva ? 'is-completado' : 'is-cerrado') : 'is-pendiente';
                                     $rowVisible = $selectedParadaId !== '' && $rowParadaId === $selectedParadaId;
                                 @endphp
 
@@ -680,8 +731,8 @@
                                             <strong>{{ $resolve($row, ['parada']) }}</strong>
                                             <span>{{ $resolve($row, ['grupo']) }} · {{ $resolve($row, ['alcance']) }}</span>
                                         </div>
-                                        <b class="lgt-status {{ $isCompletado ? 'is-ok' : 'is-warning' }}">
-                                            {{ $isCompletado ? 'Atendido' : 'Pendiente' }}
+                                        <b class="lgt-status is-{{ $estadoTone }}">
+                                            {{ $estadoLabel }}
                                         </b>
                                     </header>
 
@@ -689,6 +740,23 @@
                                         <div>
                                             <span>Unidad de carga</span>
                                             <strong>{{ $resolve($row, ['unidad_carga']) }}</strong>
+                                        </div>
+                                        <div>
+                                            <span>Tipo y turno</span>
+                                            <strong>{{ data_get($row, 'tipo_transporte_label') ?: 'Sin definir' }} · {{ data_get($row, 'turno_label') ?: 'Ambos turnos' }}</strong>
+                                        </div>
+                                        <div>
+                                            <span>Requerido</span>
+                                            <strong>
+                                                @if((int) data_get($row, 'cantidad_unidades_requeridas') > 0)
+                                                    {{ (int) data_get($row, 'cantidad_unidades_requeridas') }} unidad(es)
+                                                @else
+                                                    Sin definir por RQ Mina
+                                                @endif
+                                                @if((int) data_get($row, 'capacidad_requerida') > 0)
+                                                    · {{ (int) data_get($row, 'capacidad_requerida') }} por unidad
+                                                @endif
+                                            </strong>
                                         </div>
                                         <div>
                                             <span>Transporte solicitado</span>
@@ -700,8 +768,16 @@
                                         </div>
                                     </div>
 
+                                    {{-- Consulta para usuarios sin permiso de actualizar: ven la atencion registrada --}}
+                                    @if(!$canUpdateTransportes && $atendido)
+                                        @include('logistica.partials.servicio-atencion', ['row' => $row])
+                                        @if(!$paradaActiva)
+                                            <p class="lgt-service-completar-hint">La parada figura finalizada: el requerimiento queda en consulta.</p>
+                                        @endif
+                                    @endif
+
                                     @if($canUpdateTransportes)
-                                        @if(!$isCompletado)
+                                        @if(!$atendido)
                                             <div class="lgt-service-completar-panel">
                                                 <p class="lgt-service-completar-hint">Este requerimiento aún no ha sido atendido. Completa los datos del transporte asignado.</p>
                                                 <button type="button" class="lgt-service-btn lgt-service-btn-primary" data-toggle-panel="completar-{{ $loop->index }}">
@@ -758,33 +834,21 @@
 
                                         @else
                                             <div class="lgt-service-completado-actions">
-                                                <div class="lgt-service-summary">
-                                                    <div class="lgt-service-summary-item">
-                                                        <span class="lgt-service-summary-label">Origen</span>
-                                                        <span class="lgt-service-summary-value">{{ data_get($row, 'origen_label') ?: (data_get($row, 'origen') ?: 'Sin definir') }}</span>
-                                                    </div>
-                                                    <div class="lgt-service-summary-item">
-                                                        <span class="lgt-service-summary-label">Placas asignadas</span>
-                                                        <span class="lgt-service-summary-value">{{ data_get($row, 'placas_asignadas') ?: 'Sin asignar' }}</span>
-                                                    </div>
-                                                    <div class="lgt-service-summary-item">
-                                                        <span class="lgt-service-summary-label">Estado</span>
-                                                        <span class="lgt-service-summary-value">{{ data_get($row, 'estado_label') }}</span>
-                                                    </div>
-                                                    <div class="lgt-service-summary-item">
-                                                        <span class="lgt-service-summary-label">Recepción</span>
-                                                        <span class="lgt-service-summary-value">{{ data_get($row, 'recepcion_estado_label') ?: 'Pendiente' }}</span>
-                                                    </div>
-                                                </div>
+                                                @include('logistica.partials.servicio-atencion', ['row' => $row])
 
                                                 <div class="lgt-service-actions-group">
                                                     <button type="button" class="lgt-service-btn lgt-service-btn-primary" data-toggle-panel="entrega-{{ $loop->index }}">
-                                                        📦 Registrar entrega
+                                                        📦 Registrar entrega y documentos
                                                     </button>
-                                                    @if($puedeHacerCambios)
-                                                    <button type="button" class="lgt-service-btn lgt-service-btn-outline" data-toggle-panel="cambio-{{ $loop->index }}">
-                                                        ✏️ Hacer cambios
+                                                    <button type="button" class="lgt-service-btn lgt-service-btn-outline" data-toggle-panel="recepcion-{{ $loop->index }}">
+                                                        📥 Registrar recepción
                                                     </button>
+                                                    @if($paradaActiva)
+                                                        <button type="button" class="lgt-service-btn lgt-service-btn-outline" data-toggle-panel="cambio-{{ $loop->index }}">
+                                                            ✏️ Hacer cambios
+                                                        </button>
+                                                    @else
+                                                        <span class="lgt-service-completar-hint">Parada finalizada: el requerimiento queda como consulta.</span>
                                                     @endif
                                                 </div>
 
@@ -836,16 +900,16 @@
                                                                 @if(data_get($row, $legacy['field']))
                                                                     <div class="lgt-file-info">
                                                                         <span class="lgt-file-info-label">{{ $legacy['label'] }}</span>
-                                                                        <span class="lgt-file-loaded">✓ Documento cargado</span>
+                                                                        <a class="lgt-service-doc-link" target="_blank" href="{{ route('logistica.transportes.documento', ['id' => $row['id'], 'slot' => 'legacy-' . str_replace(['doc_', '_path'], '', $legacy['field'])]) }}">✓ Descargar</a>
                                                                     </div>
                                                                 @endif
                                                             @endforeach
 
                                                             {{-- Documentos dinámicos existentes --}}
-                                                            @foreach($existingDocs as $doc)
+                                                            @foreach($existingDocs as $docIndex => $doc)
                                                                 <div class="lgt-file-info">
                                                                     <span class="lgt-file-info-label">{{ $doc['nombre'] ?? 'Documento' }}</span>
-                                                                    <span class="lgt-file-loaded">✓ {{ $doc['path'] ? basename($doc['path']) : 'Documento cargado' }}</span>
+                                                                    <a class="lgt-service-doc-link" target="_blank" href="{{ route('logistica.transportes.documento', ['id' => $row['id'], 'slot' => 'adicional-' . $docIndex]) }}">✓ Descargar</a>
                                                                 </div>
                                                             @endforeach
 
@@ -908,6 +972,42 @@
                                                         <div class="lgt-service-form-actions">
                                                             <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="entrega-{{ $loop->index }}">Cancelar</button>
                                                             <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar entrega</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+
+                                                {{-- Panel registrar recepcion --}}
+                                                <div class="lgt-service-form-panel" id="panel-recepcion-{{ $loop->index }}" hidden>
+                                                    <form method="POST" action="{{ route('logistica.transportes.update', $row['id']) }}" class="lgt-service-form-inline">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <div class="lgt-service-form-grid">
+                                                            <div class="lgt-service-form-divider wide">
+                                                                <span>Recepción de la unidad</span>
+                                                            </div>
+
+                                                            <label>
+                                                                <span>Resultado de la recepción</span>
+                                                                <select name="recepcion_estado">
+                                                                    @foreach($servicioRecepcionesOpciones as $value => $label)
+                                                                        <option value="{{ $value }}" @selected(data_get($row, 'recepcion_estado') === $value)>{{ $label }}</option>
+                                                                    @endforeach
+                                                                </select>
+                                                            </label>
+                                                            <label>
+                                                                <span>Fecha de recepción</span>
+                                                                <input type="date" name="recepcion_fecha" value="{{ data_get($row, 'recepcion_fecha') }}">
+                                                            </label>
+                                                            <label class="wide">
+                                                                <span>Observación de la recepción</span>
+                                                                <textarea name="recepcion_observacion" rows="2" placeholder="Faltantes, estado del vehículo, hora de llegada...">{{ data_get($row, 'recepcion_observacion') }}</textarea>
+                                                            </label>
+                                                        </div>
+                                                        <input type="hidden" name="panel" value="recepcion">
+                                                        <input type="hidden" name="estado_logistico" value="{{ data_get($row, 'estado') ?: 'REQUERIDO' }}">
+                                                        <div class="lgt-service-form-actions">
+                                                            <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="recepcion-{{ $loop->index }}">Cancelar</button>
+                                                            <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar recepción</button>
                                                         </div>
                                                     </form>
                                                 </div>
@@ -1177,6 +1277,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (serviceEmptyNoRows) {
                 serviceEmptyNoRows.hidden = selectedId === '' || visibleRows > 0;
+            }
+
+            var hiddenParada = document.getElementById('lgtServicioParadaId');
+            if (hiddenParada) {
+                hiddenParada.value = selectedId;
             }
 
             if (updateUrl && window.history && window.history.replaceState) {

@@ -22,7 +22,6 @@ use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -121,8 +120,6 @@ class PersonalPageController extends WebPageController
 
             return $this->exportService->download($request->query(), 'personal_web_' . now()->format('Ymd_His') . '.xlsx');
         }
-
-        $this->runIndexMaintenance();
 
         $filters = $this->extractIndexFilters($request);
         $perPage = $this->resolvePerPage($request);
@@ -275,21 +272,6 @@ class PersonalPageController extends WebPageController
         $perPage = (int) ($request->query('per_page', 25));
 
         return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 25;
-    }
-
-    private function runIndexMaintenance(): void
-    {
-        try {
-            if (Cache::add('personal:index:expire_stale_links', true, now()->addMinutes(10))) {
-                $this->fichaService->expireStaleLinks();
-            }
-
-            if (Cache::add('personal:index:sync_expired_contracts', true, now()->addMinutes(30))) {
-                $this->service->syncExpiredContractClosures($this->requireAuthenticatedUser());
-            }
-        } catch (Throwable $exception) {
-            report($exception);
-        }
     }
 
     public function exportForm(Request $request): View

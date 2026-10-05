@@ -10,11 +10,16 @@ use App\Models\PersonalMinaExamenIntento;
 use App\Models\PersonalMina;
 use App\Modules\Personal\Services\PersonalMinaExcelImportService;
 use App\Modules\Personal\Services\PersonalMinaHabilitacionService;
+use App\Modules\Personal\Services\PersonalMinaDashboardService;
+use App\Modules\Personal\Services\PersonalMinaImportPreviewStore;
+use App\Modules\Personal\Services\MineRequirementSyncService;
+use App\Modules\Personal\Services\MiningExamCatalogAuditService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -23,13 +28,152 @@ class PersonalMinaHabilitacionController extends WebPageController
     public function __construct(
         private readonly PersonalMinaHabilitacionService $service,
         private readonly PersonalMinaExcelImportService $excelImport,
+        private readonly PersonalMinaDashboardService $dashboardService,
+        private readonly PersonalMinaImportPreviewStore $importPreviewStore,
     )
     {
+    }
+
+    public function bulkPreview(Request $request, \App\Modules\Personal\Services\PersonalMinaBulkPreviewService $preview): View
+    {
+        $this->assertMiningPermission('importar');
+        $rows = null;
+        $token = null;
+        if ($request->isMethod('post')) {
+            $request->validate(['archivo' => ['required', 'file', 'mimes:xlsx', 'max:10240']]);
+            try {
+                $source = $preview->read($request->file('archivo')->getRealPath());
+                $rows = $preview->plan($source);
+                $token = (string) \Illuminate\Support\Str::uuid();
+                $this->importPreviewStore->store(['token'=>$token,'kind'=>'cursos','source'=>$source,'rows'=>$rows,
+                    'fingerprint'=>app(\App\Modules\Personal\Services\PersonalCursoBulkService::class)->fingerprint($rows)],
+                    $this->requireAuthenticatedUser()->id);
+            } catch (ValidationException $exception) {
+                throw $exception;
+            } catch (\PhpOffice\PhpSpreadsheet\Exception $exception) {
+                report($exception);
+                throw ValidationException::withMessages(['archivo' => 'No se pudo leer el Excel. Verifique que no este danado ni protegido.']);
+            }
+        }
+
+        $report = $rows !== null ? $preview->report($rows) : null;
+
+        $canViewManagement = $this->canMiningPermission('ver');
+        $canConfigure = $this->canMiningPermission('configurar');
+        $canCreateExam = $canViewManagement && $this->canMiningPermission(['crear', 'configurar']);
+        $canEditExam = $canViewManagement && $this->canMiningPermission(['editar', 'configurar']);
+
+        return view('personal.habilitacion-minera.bulk-preview', compact('rows', 'report', 'token', 'canConfigure', 'canViewManagement', 'canCreateExam', 'canEditExam'));
+    }
+
+    public function bulkConfirm(Request $request, \App\Modules\Personal\Services\PersonalCursoBulkService $bulk): RedirectResponse
+    {
+        $this->assertMiningPermission('importar');
+        $validated = $request->validate(['token'=>['required','uuid'], 'confirmar'=>['accepted']]);
+        $user = $this->requireAuthenticatedUser();
+        $preview = $this->importPreviewStore->retrieve($validated['token'], $user->id);
+        abort_unless($preview && ($preview['kind'] ?? '') === 'cursos', 422, 'La revision vencio. Cargue nuevamente el archivo.');
+        foreach ($preview['rows'] as $row) {
+            if (($row['disposition'] ?? '') === 'changes') {
+                $this->assertMiningPermission($row['type'] === 'Programacion' ? 'programar' : 'registrar');
+            }
+        }
+        $summary = $bulk->apply($preview, $user);
+        $this->importPreviewStore->delete($validated['token'], $user->id);
+        return redirect()->route('personal.habilitacion-minera.bulk-preview')
+            ->with('success', 'Carga confirmada. '.collect($summary)->map(fn ($n, $key) => ucfirst($key).': '.$n)->implode(' · '));
+    }
+
+    public function bulkRecheck(Request $request, \App\Modules\Personal\Services\PersonalMinaBulkPreviewService $preview): View
+    {
+        $this->assertMiningPermission('importar');
+        $validated = $request->validate(['token' => ['required', 'uuid']]);
+        $userId = (string) $this->requireAuthenticatedUser()->id;
+        $old = $this->importPreviewStore->retrieve($validated['token'], $userId);
+        abort_unless($old && ($old['kind'] ?? '') === 'cursos' && isset($old['source']), 422, 'La revision vencio. Cargue nuevamente el archivo.');
+
+        return $this->renderRecheckedBulkPreview($preview, $old, $validated['token'], $userId);
+    }
+
+    public function bulkConfigureRequirement(Request $request, \App\Modules\Personal\Services\PersonalMinaBulkPreviewService $preview): View
+    {
+        $this->assertMiningPermission('configurar');
+        $this->assertMiningPermission('importar');
+        $validated = $request->validate([
+            'token' => ['required', 'uuid'],
+            'mina_id' => ['required', 'uuid'],
+            'examen_id' => ['required', 'uuid'],
+            'confirmar' => ['accepted'],
+            'obligatorio' => ['nullable', 'boolean'],
+            'permite_no_aplica' => ['nullable', 'boolean'],
+            'permite_convalidacion_mina' => ['nullable', 'boolean'],
+        ]);
+        $user = $this->requireAuthenticatedUser();
+        $old = $this->importPreviewStore->retrieve($validated['token'], (string) $user->id);
+        abort_unless($old && ($old['kind'] ?? '') === 'cursos' && isset($old['source']), 422, 'La revision vencio. Cargue nuevamente el archivo.');
+
+        $currentRows = $preview->plan($old['source']);
+        $missing = collect($currentRows)->contains(fn (array $row): bool =>
+            ($row['mina_id'] ?? null) === $validated['mina_id']
+            && ($row['examen_id'] ?? null) === $validated['examen_id']
+            && count($row['issues']) === 1
+            && in_array('El curso o EMO no esta configurado como requisito activo para la mina indicada.', $row['issues'], true));
+        abort_unless($missing, 422, 'El requisito ya cambio o no corresponde a este archivo. Revise de nuevo.');
+
+        $this->service->storeRequirementDeferred([
+            'mina_id' => $validated['mina_id'],
+            'examen_id' => $validated['examen_id'],
+            'obligatorio' => (bool) ($validated['obligatorio'] ?? true),
+            'permite_no_aplica' => (bool) ($validated['permite_no_aplica'] ?? false),
+            'permite_convalidacion_mina' => (bool) ($validated['permite_convalidacion_mina'] ?? false),
+        ], $user);
+        session()->flash('success', 'Requisito configurado. La habilitacion de la mina se actualiza en segundo plano.');
+
+        return $this->renderRecheckedBulkPreview($preview, $old, $validated['token'], (string) $user->id);
+    }
+
+    private function renderRecheckedBulkPreview(\App\Modules\Personal\Services\PersonalMinaBulkPreviewService $preview, array $old, string $oldToken, string $userId): View
+    {
+        $rows = $preview->plan($old['source']);
+        $token = (string) \Illuminate\Support\Str::uuid();
+        $this->importPreviewStore->store([
+            'token' => $token,
+            'kind' => 'cursos',
+            'source' => $old['source'],
+            'rows' => $rows,
+            'fingerprint' => app(\App\Modules\Personal\Services\PersonalCursoBulkService::class)->fingerprint($rows),
+        ], $userId);
+        $this->importPreviewStore->delete($oldToken, $userId);
+        $report = $preview->report($rows);
+
+        $canViewManagement = $this->canMiningPermission('ver');
+        $canConfigure = $this->canMiningPermission('configurar');
+        $canCreateExam = $canViewManagement && $this->canMiningPermission(['crear', 'configurar']);
+        $canEditExam = $canViewManagement && $this->canMiningPermission(['editar', 'configurar']);
+
+        return view('personal.habilitacion-minera.bulk-preview', compact('rows', 'report', 'token', 'canConfigure', 'canViewManagement', 'canCreateExam', 'canEditExam'));
     }
 
     public function index(Request $request): View
     {
         $this->assertMiningPermission('ver');
+
+        $allowedViews = array_filter([
+            'worker',
+            'dashboard',
+            $this->canMiningPermission('ver_matriz') ? 'matrix' : null,
+            $this->canMiningPermission('ver_vencimientos') ? 'expiring' : null,
+            $this->canMiningPermission('ver_programados') ? 'scheduled' : null,
+        ]);
+        $requestedView = in_array((string) $request->input('vista'), $allowedViews, true)
+            ? (string) $request->input('vista')
+            : 'worker';
+        $partial = $request->ajax();
+        $needsWorker = $requestedView === 'worker';
+        $needsMatrix = $requestedView === 'matrix';
+        $needsDashboard = $requestedView === 'dashboard';
+        $needsExpiring = $requestedView === 'expiring';
+        $needsScheduled = $requestedView === 'scheduled';
 
         $filters = [
             'mina_id' => $request->input('mina_id', ''),
@@ -45,34 +189,85 @@ class PersonalMinaHabilitacionController extends WebPageController
         $filters['per_page'] = $this->service->perPageFromFilters($filters);
         $allowedWorkerLimits = [10, 20, 50, 80, 200];
         $filters['worker_limit'] = in_array($filters['worker_limit'], $allowedWorkerLimits, true) ? $filters['worker_limit'] : 20;
-        $selectedWorker = $this->service->findWorker($filters['worker_id']);
+        $selectedWorker = $needsWorker ? $this->service->findWorker($filters['worker_id']) : null;
         $upcomingExpirationDays = 60;
         $scheduledExamDays = 60;
+        $dashboardFilters = [
+            'mina_id' => $request->input('dashboard_mina_id', ''),
+            'estado_habilitacion' => $request->input('dashboard_estado_habilitacion', ''),
+            'estado_examen' => '',
+        ];
 
         $canViewPrices = $this->canMiningPermission(['ver_historial_precios', 'configurar']);
+        $workers = $needsWorker
+            ? $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit'], $filters['worker_page'])
+            : new LengthAwarePaginator([], 0, $filters['worker_limit'], 1);
+        $assignments = $needsMatrix
+            ? $this->service->listGroupedByWorker($filters)
+            : new LengthAwarePaginator([], 0, $filters['per_page'], 1);
+        $requirements = ($needsWorker || $needsMatrix)
+            ? $this->service->listRequirements($filters['mina_id'] ?: null)
+            : collect();
+        $mines = ($needsWorker || $needsMatrix || $needsDashboard) ? $this->service->activeMines() : collect();
 
         return view('personal.habilitacion-minera.index', [
             'filters' => $filters,
-            'assignments' => $this->service->listGroupedByWorker($filters),
-            'requirements' => $this->service->listRequirements($filters['mina_id'] ?: null),
-            'exams' => $this->service->listMiningExams(),
-            'allExams' => $this->service->listAllMiningExams(),
-            'priceHistory' => $canViewPrices ? $this->service->listPriceHistory() : collect(),
-            'mines' => $this->service->activeMines(),
-            'workers' => $this->service->workerOptions($filters['trabajador'] ?: null, $filters['worker_limit'], $filters['worker_page']),
-            'workersTotal' => $this->service->workerOptionsTotal($filters['trabajador'] ?: null),
+            'assignments' => $assignments,
+            'requirements' => $requirements,
+            'exams' => !$partial ? $this->service->listMiningExams() : collect(),
+            'allExams' => !$partial ? $this->service->listAllMiningExams() : collect(),
+            'priceHistory' => !$partial && $canViewPrices ? $this->service->listPriceHistory() : collect(),
+            'mines' => $mines,
+            'workers' => $workers,
+            'workersTotal' => $workers->total(),
             'selectedWorker' => $selectedWorker,
+            'mineBoard' => $needsWorker ? $this->service->mineStatusBoardFor($selectedWorker) : [],
             'upcomingExpirationDays' => $upcomingExpirationDays,
-            'upcomingExpirations' => $this->service->upcomingExamExpirations($upcomingExpirationDays),
+            'upcomingExpirations' => $needsExpiring ? $this->service->upcomingExamExpirations($upcomingExpirationDays) : collect(),
             'scheduledExamDays' => $scheduledExamDays,
-            'scheduledExams' => $this->service->scheduledExamAttempts($scheduledExamDays),
+            'scheduledExams' => $needsScheduled ? $this->service->scheduledExamAttempts($scheduledExamDays) : collect(),
             'stateOptions' => $this->service->habilitationStateOptions(),
             'examStateOptions' => $this->service->examStateOptions(),
             'attemptResultOptions' => $this->service->attemptResultOptions(),
             'importPreview' => session('habilitacion_mina_import_preview'),
             'importPreviewOpen' => (bool) session('habilitacion_mina_import_modal_open', false),
             'service' => $this->service,
+            'miningDashboard' => $needsDashboard ? $this->dashboardService->dashboard($dashboardFilters) : $this->dashboardService->emptyDashboard(),
+            'dashboardFilters' => $dashboardFilters,
+            'requirementSyncs' => !$partial && $needsWorker && $this->canMiningPermission('configurar')
+                ? app(MineRequirementSyncService::class)->statusesByMine()
+                : collect(),
         ]);
+    }
+
+    public function dashboardExamWorkers(Request $request): JsonResponse
+    {
+        $this->assertMiningPermission('ver');
+        $validated = $request->validate([
+            'examen_nombre' => ['required', 'string', 'max:191'],
+            'estado_examen' => ['required', 'string', 'in:PENDIENTE,PROGRAMADO,POR_VENCER,VENCIDO,OBSERVADO,DESAPROBADO'],
+            'mina_id' => ['nullable', 'string', 'size:36'],
+            'estado_habilitacion' => ['nullable', 'string', 'in:HABILITADO,EN_PROCESO'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $workers = $this->dashboardService->examWorkers($validated);
+
+        return response()->json([
+            'items' => collect($workers->items())->map(fn ($row): array => [
+                'nombre' => $row->nombre_completo,
+                'documento' => $row->dni ?: $row->numero_documento,
+                'mina' => $row->mina,
+                'estado' => $row->estado,
+                'fecha_programacion' => $this->formatDashboardDate($row->fecha_programacion),
+                'fecha_realizacion' => $this->formatDashboardDate($row->fecha_realizacion),
+                'fecha_vencimiento' => $this->formatDashboardDate($row->fecha_vencimiento),
+            ])->values(),
+            'pagination' => [
+                'current_page' => $workers->currentPage(),
+                'last_page' => $workers->lastPage(),
+                'total' => $workers->total(),
+            ],
+        ])->header('Cache-Control', 'private, no-store, max-age=0');
     }
 
     public function storeExam(Request $request): RedirectResponse
@@ -219,7 +414,7 @@ class PersonalMinaHabilitacionController extends WebPageController
         ]);
 
         try {
-            $this->service->storeRequirement($validated, $this->requireAuthenticatedUser());
+            $this->service->storeRequirementDeferred($validated, $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
@@ -229,7 +424,14 @@ class PersonalMinaHabilitacionController extends WebPageController
 
         return redirect()
             ->route('personal.habilitacion-minera.index', ['mina_id' => $validated['mina_id']])
-            ->with('success', 'Requisito registrado correctamente.');
+            ->with('success', 'Requisito registrado. Las habilitaciones de la mina se estan actualizando.');
+    }
+
+    public function catalogAudit(MiningExamCatalogAuditService $audit): JsonResponse
+    {
+        $this->assertMiningPermission('configurar');
+
+        return response()->json($audit->report())->header('Cache-Control', 'private, no-store');
     }
 
     public function assign(Request $request): RedirectResponse
@@ -318,8 +520,8 @@ class PersonalMinaHabilitacionController extends WebPageController
         $requirement = MinaRequisito::query()->find($requirementId);
         abort_if(!$requirement, 404);
 
-        $requirement = $this->service->deactivateRequirement($requirement, $this->requireAuthenticatedUser());
-        $message = 'Examen quitado de la mina correctamente.';
+        $requirement = $this->service->deactivateRequirementDeferred($requirement, $this->requireAuthenticatedUser());
+        $message = 'Examen quitado de la mina. Las habilitaciones se estan actualizando.';
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -439,6 +641,16 @@ class PersonalMinaHabilitacionController extends WebPageController
             ->with('success', 'Examen marcado como no aplica.');
     }
 
+    public function convalidationOptions(string $workerExamId): JsonResponse
+    {
+        $this->assertMiningPermission('convalidar');
+
+        $workerExam = PersonalMinaExamen::query()->findOrFail($workerExamId);
+
+        return response()->json($this->service->convalidationOptions($workerExam))
+            ->header('Cache-Control', 'private, no-store, max-age=0');
+    }
+
     public function convalidate(Request $request, string $workerExamId): RedirectResponse
     {
         $this->assertMiningPermission('convalidar');
@@ -489,13 +701,20 @@ class PersonalMinaHabilitacionController extends WebPageController
 
         try {
             $preview = $this->excelImport->preview($validated['archivo']);
+            $userId = (string) $this->requireAuthenticatedUser()->id;
+            $previousToken = (string) session('habilitacion_mina_import_preview.token', '');
+            $displayPreview = $this->importPreviewStore->store($preview, $userId);
+            if ($previousToken !== '' && $previousToken !== ($preview['token'] ?? '')) {
+                $this->importPreviewStore->delete($previousToken, $userId);
+            }
         } catch (\Throwable $exception) {
+            report($exception);
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
-                ->with('error', 'No se pudo analizar el Excel: ' . $exception->getMessage());
+                ->with('error', 'No se pudo analizar el Excel. Revisa el archivo o comunicalo a administracion si el problema persiste.');
         }
 
-        session(['habilitacion_mina_import_preview' => $preview]);
+        session(['habilitacion_mina_import_preview' => $displayPreview]);
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
@@ -507,22 +726,49 @@ class PersonalMinaHabilitacionController extends WebPageController
     {
         $this->assertMiningPermission('importar');
 
-        $preview = session('habilitacion_mina_import_preview');
-        if (!$preview || ($request->input('token') && $request->input('token') !== ($preview['token'] ?? null))) {
+        $displayPreview = session('habilitacion_mina_import_preview');
+        $token = (string) $request->input('token', $displayPreview['token'] ?? '');
+        if (!$displayPreview || $token === '' || $token !== ($displayPreview['token'] ?? null)) {
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
                 ->with('error', 'No hay una vista previa de importacion vigente.');
         }
 
-        try {
-            $result = $this->excelImport->confirm($preview, $this->requireAuthenticatedUser());
-        } catch (\Throwable $exception) {
+        if (!$request->boolean('confirmar_reemplazo')) {
             return redirect()
                 ->route('personal.habilitacion-minera.index', $request->query())
-                ->with('error', 'No se pudo confirmar la importacion: ' . $exception->getMessage())
+                ->with('error', 'Confirma que revisaste las desactivaciones y el reemplazo del catálogo antes de continuar.')
                 ->with('habilitacion_mina_import_modal_open', true);
         }
 
+        $user = $this->requireAuthenticatedUser();
+        $preview = $this->importPreviewStore->retrieve($token, (string) $user->id);
+        if (!$preview) {
+            session()->forget('habilitacion_mina_import_preview');
+
+            return redirect()
+                ->route('personal.habilitacion-minera.index', $request->query())
+                ->with('error', 'La vista previa vencio. Vuelve a analizar el Excel antes de confirmar.');
+        }
+
+        try {
+            $result = $this->excelImport->confirm($preview, $user);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->importPreviewStore->delete($token, (string) $user->id);
+            session()->forget('habilitacion_mina_import_preview');
+
+            return redirect()
+                ->route('personal.habilitacion-minera.index', $request->query())
+                ->with('error', $exception->errors()['archivo'][0] ?? 'El catálogo cambió. Analiza nuevamente el Master.');
+        } catch (\Throwable $exception) {
+            report($exception);
+            return redirect()
+                ->route('personal.habilitacion-minera.index', $request->query())
+                ->with('error', 'No se pudo confirmar la importacion. No se aplicaron cambios parciales.')
+                ->with('habilitacion_mina_import_modal_open', true);
+        }
+
+        $this->importPreviewStore->delete($token, (string) $user->id);
         session()->forget('habilitacion_mina_import_preview');
 
         return redirect()
@@ -545,6 +791,19 @@ class PersonalMinaHabilitacionController extends WebPageController
     private function assertMiningPermission(string|array $actions): void
     {
         abort_unless($this->canMiningPermission($actions), 403, 'No tienes permiso para realizar esta accion.');
+    }
+
+    private function formatDashboardDate($date): ?string
+    {
+        if (!$date) {
+            return null;
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::parse($date)->format('d/m/Y');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function canMiningPermission(string|array $actions): bool

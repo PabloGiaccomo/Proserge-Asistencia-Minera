@@ -324,6 +324,25 @@ class PersonalFichaCatalog
         ];
     }
 
+    /**
+     * Fecha para mostrar en vistas: dia/mes/anio (dd/mm/aaaa).
+     * No modifica el dato guardado; los formularios siguen usando ISO.
+     */
+    public static function displayDate(mixed $value): string
+    {
+        $text = trim((string) $value);
+
+        if ($text === '') {
+            return '';
+        }
+
+        try {
+            return \Illuminate\Support\Carbon::parse($text)->format('d/m/Y');
+        } catch (\Throwable) {
+            return $text;
+        }
+    }
+
     public static function stateLabel(?string $state): string
     {
         $state = strtoupper(trim((string) $state));

@@ -3,6 +3,7 @@
 namespace App\Modules\Evaluaciones\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\AsistenciaDetalle;
 use App\Modules\Evaluaciones\Requests\StoreEvaluacionDiariaRequest;
 use App\Modules\Evaluaciones\Requests\UpdateEvaluacionDesempenoRequest;
 use App\Modules\Evaluaciones\Services\EvaluacionDesempenoService;
@@ -28,14 +29,48 @@ class EvaluacionDesempenoPageController extends WebPageController
     {
         $user = $this->requireAuthenticatedUser();
         $filters = $request->validate([
-            'tipo' => ['nullable', 'string', 'in:desempeno,supervisores,residentes'],
+            'tipo' => ['nullable', 'string', 'in:desempeno,supervisores,residentes,dashboard'],
             'fecha' => ['nullable', 'date'],
+            'desde' => ['nullable', 'date_format:Y-m-d'],
+            'hasta' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:desde'],
+            'mina' => ['nullable', 'string', 'max:36'],
+            'cargo' => ['nullable', 'string', 'max:191'],
+            'evaluacion_tipo' => ['nullable', 'in:desempeno,supervisores,residentes'],
         ]);
         $type = $filters['tipo'] ?? $this->typeFromRoute($request);
         $date = $filters['fecha'] ?? now()->toDateString();
+        if ($request->filled('asistencia_detalle_id')) {
+            abort_unless($type === 'desempeno', 422, 'Selecciona la evaluación diaria para abrir esta asistencia.');
+            $detail = $this->validatedDailyDetail($request);
+            abort_unless($detail->asistencia->fecha->toDateString() === $date, 422, 'La asistencia no corresponde a la fecha seleccionada.');
+        }
         $data = $this->pageService->build($user, $type, $date);
 
         abort_if($data['availableTypes']->isEmpty(), 403, 'No tienes acceso a evaluaciones.');
+
+        $residentId = $request->query('residente_id', '');
+        $residentMonth = $request->query('periodo_mes', '');
+        $residentId = is_string($residentId) ? $residentId : '';
+        $residentMonth = is_string($residentMonth) ? $residentMonth : '';
+        $data['residentSelection'] = ['id' => $residentId, 'month' => $residentMonth];
+        $data['residentAvailability'] = $data['activeType'] === 'residentes'
+            && $residentId !== '' && $residentMonth !== ''
+            ? $this->performanceService->residentAvailability($user, $residentId, $residentMonth)
+            : null;
+
+        if ($data['activeType'] === 'dashboard') {
+            $dashboardFilters = ['desde' => $filters['desde'] ?? now()->startOfMonth()->toDateString(),
+                'hasta' => $filters['hasta'] ?? now()->toDateString(), 'mina' => $filters['mina'] ?? '', 'cargo' => $filters['cargo'] ?? '',
+                'evaluacion_tipo' => $filters['evaluacion_tipo'] ?? ''];
+            if ($dashboardFilters['hasta'] < $dashboardFilters['desde']) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['hasta' => 'La fecha final debe ser igual o posterior a la inicial.']);
+            }
+            $data['dashboardFilters'] = $dashboardFilters;
+            $data['dashboard'] = app(\App\Modules\Evaluaciones\Services\EvaluacionesDashboardService::class)->build($user, $dashboardFilters);
+            if ($request->header('X-Evaluation-Dashboard') === '1') {
+                return view('evaluaciones.partials.dashboard', $data);
+            }
+        }
 
         return view('evaluaciones.index', [
             ...$data,
@@ -57,22 +92,34 @@ class EvaluacionDesempenoPageController extends WebPageController
             $request->validated(),
         );
 
-        return $this->resultRedirect($result, 'desempeno', 'Evaluación diaria registrada correctamente.');
+        if (($result['ok'] ?? false) !== true) {
+            return back()->withInput()->withErrors(['evaluacion' => $result['message'] ?? 'No se pudo guardar la evaluación.']);
+        }
+
+        return redirect()->route('evaluaciones.index', [
+            'tipo' => 'desempeno',
+            'fecha' => $result['item']->fecha->toDateString(),
+        ])->with('success', 'Evaluación diaria registrada correctamente.');
     }
 
     public function searchPersonal(Request $request): JsonResponse
     {
-        $this->requireAuthenticatedUser();
+        $user = $this->requireAuthenticatedUser();
         $filters = $request->validate([
+            'tipo' => ['required', 'string', 'in:supervisores,residentes'],
             'q' => ['nullable', 'string', 'max:191'],
             'id' => ['nullable', 'string', 'size:36'],
+            'mina_id' => ['nullable', 'string', 'size:36', 'exists:minas,id'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:20'],
         ]);
 
         return response()->json([
             'data' => $this->pageService->searchPersonal(
+                $user,
+                $filters['tipo'],
                 (string) ($filters['q'] ?? ''),
                 $filters['id'] ?? null,
+                $filters['mina_id'] ?? null,
                 (int) ($filters['limit'] ?? 12),
             ),
         ]);
@@ -91,10 +138,6 @@ class EvaluacionDesempenoPageController extends WebPageController
             'capacitaciones_recomendadas' => ['nullable', 'string', 'max:3000'],
         ]);
         $user = $this->requireAuthenticatedUser();
-
-        if (!$user->personal_id) {
-            return back()->withInput()->withErrors(['evaluacion' => 'Tu cuenta debe estar vinculada a Personal.']);
-        }
 
         $result = $this->supervisorService->create($user, [
             ...$payload,
@@ -122,10 +165,6 @@ class EvaluacionDesempenoPageController extends WebPageController
         ]);
         $user = $this->requireAuthenticatedUser();
 
-        if (!$user->personal_id) {
-            return back()->withInput()->withErrors(['evaluacion' => 'Tu cuenta debe estar vinculada a Personal.']);
-        }
-
         $result = $this->performanceService->createResidente($user, [
             ...$payload,
             'fecha' => $payload['periodo_mes'].'-01',
@@ -140,9 +179,39 @@ class EvaluacionDesempenoPageController extends WebPageController
         return redirect()->route('evaluaciones.index', ['tipo' => 'desempeno', 'evaluacion' => $id]);
     }
 
-    public function create(): RedirectResponse
+    public function create(Request $request): RedirectResponse
     {
+        if ($request->filled('asistencia_detalle_id')) {
+            $detail = $this->validatedDailyDetail($request);
+
+            return redirect()->route('evaluaciones.index', [
+                'tipo' => 'desempeno',
+                'fecha' => $detail->asistencia->fecha->toDateString(),
+                'asistencia_detalle_id' => $detail->id,
+            ]);
+        }
+
         return redirect()->route('evaluaciones.index', ['tipo' => 'desempeno']);
+    }
+
+    private function validatedDailyDetail(Request $request): AsistenciaDetalle
+    {
+        $validated = $request->validate([
+            'asistencia_detalle_id' => ['required', 'string', 'size:36'],
+        ]);
+        $detail = AsistenciaDetalle::query()
+            ->with(['asistencia', 'trabajador'])
+            ->find($validated['asistencia_detalle_id']);
+        $availability = $this->performanceService->dailyAvailability($this->requireAuthenticatedUser(), $detail);
+
+        if (!$availability['ok']) {
+            $code = $availability['code'] ?? '';
+            $status = in_array($code, ['EVAL_FORBIDDEN', 'EVAL_ATTENDANCE_OWNER_REQUIRED'], true)
+                ? 403 : ($code === 'EVAL_DUPLICATED' ? 409 : 422);
+            abort($status, $availability['message'] ?? 'No se puede abrir esta evaluación.');
+        }
+
+        return $detail;
     }
 
     public function edit(string $id): RedirectResponse

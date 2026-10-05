@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_evaluacion_residente" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_evaluaciones_evaluacion_residente" name="Evaluacion mensual de residente" isExecutable="false">
+    <bpmn:documentation>Gerencia o administrador autorizado evalua al residente por mes, sin mina ni parada y sin duplicar periodo. | Evidencia: app/Modules/Evaluaciones/Services/EvaluacionDesempenoService.php::createResidente; app/Modules/Evaluaciones/Policies/EvaluacionesPolicy.php; app/Models/EvaluacionResidente.php; tests/Unit/ResidentEvaluationTemplateTest.php; docs/evaluaciones.md | Por confirmar: Que roles del sistema equivalen formalmente a Gerencia.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_evaluacion_residente">
+    <bpmn:lane id="Lane_Management" name="Gerencia o admin autorizado">
+      <bpmn:flowNodeRef>Start_Resident</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Find</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Score</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Saved</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Duplicate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Period</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Authorize</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Allowed</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Calc</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Period</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Period</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Resident" name="Periodo mensual a evaluar">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Find" name="Seleccionar residente y mes">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Task_Authorize" name="Validar permiso, Gerencia y residente">
+      <bpmn:documentation>EvaluacionesPolicy::isManagementActor: ADMIN/SUPERADMIN, rol que contiene GERENTE u override. canEvaluateResidentTarget exige permiso y puesto con RESIDENTE. createResidente permite actor sin Personal solo si isPrivileged.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Gateway_Allowed" name="Actor y destino autorizados?">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_Score" name="Calificar KPI, costos, seguridad, calidad y liderazgo">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_Calc" name="Calcular sobre 20 y guardar">
+      <bpmn:documentation>EvaluacionDesempenoService::createResidente; ResidentEvaluationTemplate::calculate, periodo startOfMonth, destino null, actor autenticado, REGISTRADA. No depende de mina, grupo o asistencia.</bpmn:documentation>
+      <bpmn:incoming>Flow_PeriodYes</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Saved" name="Residente evaluado">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_Duplicate" name="Acceso o identidad rechazados">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:businessRuleTask id="Task_Period" name="Normalizar mes y buscar duplicado">
+      <bpmn:documentation>EvaluacionDesempenoService::createResidente: residente_id + periodo_mes. Comprueba exists antes de create, no una transaccion con bloqueo en este metodo.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_PeriodCheck</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Gateway_Period" name="Periodo disponible?">
+      <bpmn:documentation>EvaluacionDesempenoService::createResidente: EVAL_RESIDENT_DUPLICATED.</bpmn:documentation>
+      <bpmn:incoming>Flow_PeriodCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_PeriodYes</bpmn:outgoing>
+      <bpmn:outgoing>Flow_PeriodNo</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_Period" name="Rechazado: residente y mes repetidos">
+      <bpmn:documentation>EvaluacionDesempenoService::createResidente.</bpmn:documentation>
+      <bpmn:incoming>Flow_PeriodNo</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Resident" targetRef="Task_Find"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Find" targetRef="Task_Authorize"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Authorize" targetRef="Gateway_Allowed"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Gateway_Allowed" targetRef="Task_Score" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_Score" targetRef="Task_Period"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_Calc" targetRef="End_Saved"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Gateway_Allowed" targetRef="End_Duplicate" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PeriodCheck" sourceRef="Task_Period" targetRef="Gateway_Period"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PeriodYes" sourceRef="Gateway_Period" targetRef="Task_Calc" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PeriodNo" sourceRef="Gateway_Period" targetRef="End_Period" name="No"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_evaluacion_residente">
+    <bpmndi:BPMNPlane id="Plane_evaluacion_residente" bpmnElement="Process_evaluaciones_evaluacion_residente">
+      <bpmndi:BPMNShape id="Lane_Management_di" bpmnElement="Lane_Management" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1850" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1850" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Resident_di" bpmnElement="Start_Resident">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Find_di" bpmnElement="Task_Find">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Authorize_di" bpmnElement="Task_Authorize">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Allowed_di" bpmnElement="Gateway_Allowed">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Score_di" bpmnElement="Task_Score">
+        <dc:Bounds x="975" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Calc_di" bpmnElement="Task_Calc">
+        <dc:Bounds x="1545" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Saved_di" bpmnElement="End_Saved">
+        <dc:Bounds x="1735" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Duplicate_di" bpmnElement="End_Duplicate">
+        <dc:Bounds x="975" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Period_di" bpmnElement="Task_Period">
+        <dc:Bounds x="1165" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Period_di" bpmnElement="Gateway_Period">
+        <dc:Bounds x="1355" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Period_di" bpmnElement="End_Period">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1125" y="160" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1695" y="460" />
+        <di:waypoint x="1715" y="460" />
+        <di:waypoint x="1715" y="160" />
+        <di:waypoint x="1735" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="280" />
+        <di:waypoint x="975" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PeriodCheck_di" bpmnElement="Flow_PeriodCheck">
+        <di:waypoint x="1315" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PeriodYes_di" bpmnElement="Flow_PeriodYes">
+        <di:waypoint x="1405" y="460" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1545" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PeriodNo_di" bpmnElement="Flow_PeriodNo">
+        <di:waypoint x="1405" y="460" />
+        <di:waypoint x="1475" y="460" />
+        <di:waypoint x="1475" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

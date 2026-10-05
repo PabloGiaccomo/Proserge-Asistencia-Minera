@@ -92,11 +92,11 @@ modificaciones del modulo:
   regularizacion.
 - El master Excel no debe sobrescribir cargo, contrato, estado laboral,
   supervisor ni datos sensibles sin confirmacion explicita.
-- Priorizar `NO_HABILITADO` como estado visible cuando un trabajador desaprueba
-  el ultimo intento o agota intentos.
-- No permitir tercer intento de examen.
-- Bloquear o mostrar gris otra mina si requiere un examen que el trabajador ya
-  desaprobo sin intentos disponibles.
+- Priorizar `NO_HABILITADO` cuando supera el maximo configurado desaprobando,
+  sin bloquear nuevos intentos.
+- Contabilizar y reportar intentos adicionales sobre el maximo configurado.
+- Permitir asignar otra mina aunque exista una desaprobacion; sus requisitos
+  conservan el estado operativo correspondiente.
 - No permitir `HABILITADO` sin examenes configurados, generados y resueltos.
 - Convalidacion debe ser sugerida y confirmada, no automatica.
 - `NO_APLICA` debe contar como resuelto y no exigir observacion obligatoria.

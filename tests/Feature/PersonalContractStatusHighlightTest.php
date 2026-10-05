@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Personal\Services\PersonalService;
+use App\Modules\Personal\Services\PersonalFichaService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
@@ -14,6 +15,27 @@ use Tests\TestCase;
 class PersonalContractStatusHighlightTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_entrar_a_personal_no_ejecuta_mantenimiento_masivo(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $fichas = \Mockery::mock(PersonalFichaService::class)->makePartial();
+        $fichas->shouldNotReceive('expireStaleLinks');
+        $this->app->instance(PersonalFichaService::class, $fichas);
+
+        $personal = \Mockery::mock(PersonalService::class)->makePartial();
+        $personal->shouldNotReceive('syncExpiredContractClosures');
+        $this->app->instance(PersonalService::class, $personal);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('personal.index'))
+            ->assertOk();
+
+        \Illuminate\Support\Facades\Artisan::call('schedule:list');
+        $schedule = \Illuminate\Support\Facades\Artisan::output();
+        $this->assertStringContainsString('personal:expire-stale-links', $schedule);
+        $this->assertStringContainsString('personal:sync-expired-contracts', $schedule);
+    }
 
     public function test_listado_resalta_columna_contrato_segun_estado_documental(): void
     {

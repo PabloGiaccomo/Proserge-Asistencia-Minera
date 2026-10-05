@@ -13,6 +13,345 @@ class EvaluacionesWebTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_error_de_validacion_diaria_conserva_formulario_y_notas(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        [$mineId, $detailId] = $this->createClosedAttendance($userId, $personalId);
+        $this->assignScope($userId, $mineId);
+        $url = route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21']);
+        $session = $this->sessionFor($userId);
+
+        $this->withSession($session)->from($url)->post(route('evaluaciones.desempeno.store'), [
+            'asistencia_detalle_id' => $detailId,
+            'desempeno_trabajo' => 4,
+            'orden_limpieza' => 3,
+            'seguridad_trabajo' => 2,
+            'compromiso' => 1,
+            'respuesta_emocional' => 4,
+            'tuvo_incidencia' => '1',
+            'descripcion_incidencia' => '',
+            'observaciones' => 'Revisar herramientas',
+        ])->assertRedirect($url)->assertSessionHasErrors('descripcion_incidencia');
+
+        $this->withSession($session)->get($url)->assertOk()
+            ->assertSee('value="'.$detailId.'"', false)
+            ->assertSee('name="desempeno_trabajo" value="4" checked', false)
+            ->assertSee('Revisar herramientas')
+            ->assertSee('aria-invalid="true"', false);
+    }
+
+    public function test_fallo_del_promedio_revierte_evaluacion_diaria(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        [, $detailId, $workerId] = $this->createClosedAttendance($userId, $personalId);
+        $average = \Mockery::mock(\App\Modules\Evaluaciones\Services\PromedioDesempenoService::class);
+        $average->shouldReceive('refreshForTrabajador')->once()->with($workerId)->andThrow(new \RuntimeException('average failed'));
+        $this->app->instance(\App\Modules\Evaluaciones\Services\PromedioDesempenoService::class, $average);
+
+        try {
+            app(\App\Modules\Evaluaciones\Services\EvaluacionDesempenoService::class)->createDaily(
+                \App\Models\Usuario::findOrFail($userId), [
+                    'asistencia_detalle_id' => $detailId, 'desempeno_trabajo' => 3,
+                    'orden_limpieza' => 3, 'seguridad_trabajo' => 3,
+                    'compromiso' => 3, 'respuesta_emocional' => 3,
+                ],
+            );
+            $this->fail('Se esperaba un error de recalculo.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('average failed', $exception->getMessage());
+        }
+
+        $this->assertDatabaseMissing('evaluacion_desempeno', ['asistencia_detalle_id' => $detailId]);
+        $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $workerId]);
+    }
+
+    public function test_residente_requiere_capacidad_gerencial_explicita_independiente_del_nombre_del_rol(): void
+    {
+        [$operationsId] = $this->createUser(['evaluaciones' => ['evaluar_residentes']], 'OPERACIONES_EVAL');
+        [$managerId, , $roleId] = $this->createUser([
+            'evaluaciones' => ['evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+        $policy = app(\App\Modules\Evaluaciones\Policies\EvaluacionesPolicy::class);
+
+        $this->assertFalse($policy->canEvaluateType(\App\Models\Usuario::findOrFail($operationsId), 'residentes'));
+        $this->assertTrue($policy->canEvaluateType(\App\Models\Usuario::findOrFail($managerId), 'residentes'));
+        DB::table('roles')->where('id', $roleId)->update(['nombre' => 'COORDINACION_AUTORIZADA']);
+        $this->assertTrue($policy->canEvaluateType(\App\Models\Usuario::findOrFail($managerId), 'residentes'));
+    }
+
+    public function test_residente_y_mes_se_validan_antes_de_mostrar_calificaciones(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+        $residentId = $this->createPersonal('RESIDENTE A EVALUAR');
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $base = route('evaluaciones.residentes');
+        $session = $this->sessionFor($userId);
+
+        $this->withSession($session)->get($base)->assertOk()->assertDontSee('Indicadores KPIs');
+        $this->withSession($session)->get($base.'?'.http_build_query(['residente_id' => $residentId, 'periodo_mes' => '2026-09']))
+            ->assertOk()->assertSee('Indicadores KPIs');
+        $this->withSession($session)->get($base.'?'.http_build_query(['residente_id' => $residentId, 'periodo_mes' => '2026-13']))
+            ->assertOk()->assertDontSee('Indicadores KPIs');
+
+        DB::table('evaluacion_residente')->insert([
+            'id' => (string) Str::uuid(), 'fecha' => '2026-09-01', 'periodo_mes' => '2026-09-01',
+            'residente_id' => $residentId, 'evaluador_id' => null, 'total' => 15,
+            'indicadores_kpi' => 1, 'costos_servicio' => 2, 'eventos_seguridad' => 4,
+            'reportes_calidad' => 4, 'liderazgo_gestion' => 4, 'innovacion' => 0,
+        ]);
+        $this->withSession($session)->get($base.'?'.http_build_query(['residente_id' => $residentId, 'periodo_mes' => '2026-09']))
+            ->assertOk()->assertSee('ya cuenta con una evaluación')->assertDontSee('Indicadores KPIs');
+    }
+
+    public function test_selector_residente_descarta_parametros_no_escalares(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.residentes', [
+                'residente_id' => ['id'], 'periodo_mes' => ['2026-09'],
+            ]))
+            ->assertOk()
+            ->assertDontSee('Indicadores KPIs');
+    }
+
+    public function test_residente_guarda_mes_normalizado_y_rechaza_duplicado_y_datos_manipulados(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+        $residentId = $this->createPersonal('RESIDENTE VALIDO');
+        $otherId = $this->createPersonal('TRABAJADOR NO RESIDENTE');
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $selection = route('evaluaciones.residentes', ['residente_id' => $residentId, 'periodo_mes' => '2026-09']);
+        $session = $this->sessionFor($userId);
+        $payload = [
+            'residente_id' => $residentId, 'periodo_mes' => '2026-09',
+            'indicadores_kpi_items' => ['REPORTE_ASISTENCIA'],
+            'costos_servicio_items' => ['COSTOS_MENSUALES'],
+            'eventos_seguridad_respuesta' => 'SI', 'reportes_calidad_respuesta' => 'SI',
+            'liderazgo_gestion_innovacion' => 4, 'comentarios' => 'Evaluación mensual.',
+        ];
+
+        $this->withSession($session)->from($selection)->post(route('evaluaciones.residentes.store'), [
+            ...$payload, 'residente_id' => $otherId,
+        ])->assertSessionHasErrors('evaluacion');
+        $this->withSession($session)->from($selection)->post(route('evaluaciones.residentes.store'), [
+            ...$payload, 'periodo_mes' => '2026-13',
+        ])->assertSessionHasErrors('periodo_mes');
+        $this->withSession($session)->from($selection)->post(route('evaluaciones.residentes.store'), $payload)
+            ->assertSessionHasNoErrors()->assertRedirect(route('evaluaciones.index', ['tipo' => 'residentes']));
+        $this->assertDatabaseHas('evaluacion_residente', [
+            'residente_id' => $residentId, 'periodo_mes' => '2026-09-01',
+        ]);
+        $this->withSession($session)->from($selection)->post(route('evaluaciones.residentes.store'), $payload)
+            ->assertSessionHasErrors('evaluacion');
+        $this->assertSame(1, DB::table('evaluacion_residente')->where('residente_id', $residentId)->count());
+
+        $existing = (array) DB::table('evaluacion_residente')->where('residente_id', $residentId)->first();
+        try {
+            DB::table('evaluacion_residente')->insert([...$existing, 'id' => (string) Str::uuid()]);
+            $this->fail('El indice unico debio rechazar la segunda evaluacion.');
+        } catch (\Illuminate\Database\QueryException $exception) {
+            $this->assertSame(1062, (int) ($exception->errorInfo[1] ?? 0));
+        }
+    }
+
+    public function test_error_del_formulario_residente_conserva_seleccion_y_respuestas(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+        $residentId = $this->createPersonal('RESIDENTE PARA CORREGIR');
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $url = route('evaluaciones.residentes', ['residente_id' => $residentId, 'periodo_mes' => '2026-09']);
+        $session = $this->sessionFor($userId);
+
+        $this->withSession($session)->from($url)->post(route('evaluaciones.residentes.store'), [
+            'residente_id' => $residentId, 'periodo_mes' => '2026-09',
+            'indicadores_kpi_items' => ['REPORTE_ASISTENCIA'],
+            'costos_servicio_items' => ['COSTOS_MENSUALES'],
+            'eventos_seguridad_respuesta' => 'SI', 'reportes_calidad_respuesta' => 'NO',
+            'liderazgo_gestion_innovacion' => 3, 'comentarios' => '',
+        ])->assertRedirect($url)->assertSessionHasErrors('comentarios');
+
+        $this->withSession($session)->get($url)->assertOk()
+            ->assertSee('Indicadores KPIs')
+            ->assertSee('name="eventos_seguridad_respuesta" value="SI" checked', false)
+            ->assertSee('name="liderazgo_gestion_innovacion" value="3" checked', false)
+            ->assertSee('value="'.$residentId.'"', false);
+    }
+
+    public function test_solicitud_directa_de_residente_sin_capacidad_no_muestra_formulario(): void
+    {
+        [$userId] = $this->createUser(['evaluaciones' => ['ver_residentes', 'evaluar_residentes']], 'OPERACIONES_EVAL');
+        $residentId = $this->createPersonal('RESIDENTE AJENO');
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.residentes', ['residente_id' => $residentId, 'periodo_mes' => '2026-09']))
+            ->assertForbidden();
+    }
+
+    public function test_colision_de_unicidad_residente_se_traduce_a_error_de_dominio(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'DIRECCION_EVAL');
+        $residentId = $this->createPersonal('RESIDENTE EN CARRERA');
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $model = \App\Models\EvaluacionResidente::class;
+        $model::creating(function ($evaluation): void {
+            DB::table('evaluacion_residente')->insert([
+                ...$evaluation->getAttributes(),
+                'id' => (string) Str::uuid(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+
+        try {
+            $result = app(\App\Modules\Evaluaciones\Services\EvaluacionDesempenoService::class)->createResidente(
+                \App\Models\Usuario::findOrFail($userId), [
+                    'residente_id' => $residentId, 'fecha' => '2026-09-15',
+                    'indicadores_kpi_items' => ['REPORTE_ASISTENCIA'],
+                    'costos_servicio_items' => ['COSTOS_MENSUALES'],
+                    'eventos_seguridad_respuesta' => 'SI',
+                    'reportes_calidad_respuesta' => 'SI',
+                    'liderazgo_gestion_innovacion' => 4,
+                ],
+            );
+            $this->assertFalse($result['ok']);
+            $this->assertSame('EVAL_RESIDENT_DUPLICATED', $result['code']);
+            $this->assertSame(1, DB::table('evaluacion_residente')->where('residente_id', $residentId)->count());
+        } finally {
+            $model::flushEventListeners();
+        }
+    }
+
+    public function test_migracion_no_altera_evaluaciones_residentes_duplicadas_historicas(): void
+    {
+        $residentId = $this->createPersonal('RESIDENTE HISTORICO');
+        foreach (['2026-09-01', '2026-09-15'] as $date) {
+            DB::table('evaluacion_residente')->insert([
+                'id' => (string) Str::uuid(), 'fecha' => $date, 'periodo_mes' => $date,
+                'residente_id' => $residentId, 'evaluador_id' => null, 'total' => 10,
+                'indicadores_kpi' => 1, 'costos_servicio' => 2, 'eventos_seguridad' => 0,
+                'reportes_calidad' => 0, 'liderazgo_gestion' => 4, 'innovacion' => 3,
+            ]);
+        }
+
+        $migration = require database_path('migrations/2026_09_28_000100_enforce_unique_resident_evaluation_period.php');
+        try {
+            $migration->up();
+            $this->fail('La migracion debio detenerse ante duplicados historicos.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('duplicadas por mes', $exception->getMessage());
+        }
+        $this->assertSame(['2026-09-01', '2026-09-15'], DB::table('evaluacion_residente')
+            ->where('residente_id', $residentId)->orderBy('periodo_mes')->pluck('periodo_mes')->all());
+    }
+
+    public function test_disponibilidad_diaria_se_calcula_antes_de_abrir_el_formulario(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['ver_desempeno', 'evaluar_desempeno']]);
+        [$mineId, $detailId] = $this->createClosedAttendance($userId, $personalId);
+        $this->assignScope($userId, $mineId);
+        $session = $this->sessionFor($userId);
+
+        $this->withSession($session)->get(route('evaluaciones.index', ['fecha' => '2026-08-21']))
+            ->assertOk()->assertSee('Evaluar')->assertSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+        $this->withSession($session)->get(route('evaluaciones.desempeno.create', ['asistencia_detalle_id' => $detailId]))
+            ->assertRedirect(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21', 'asistencia_detalle_id' => $detailId]));
+
+        DB::table('asistencia_detalle')->where('id', $detailId)->update(['estado' => 'TARDANZA']);
+        $this->withSession($session)->get(route('evaluaciones.index', ['fecha' => '2026-08-21']))
+            ->assertOk()->assertSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+    }
+
+    public function test_detalle_ya_evaluado_se_muestra_sin_formulario_y_rechaza_url_directa(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['ver_desempeno', 'evaluar_desempeno']]);
+        [$mineId, $detailId] = $this->createClosedAttendance($userId, $personalId);
+        $this->assignScope($userId, $mineId);
+        $this->withSession($this->sessionFor($userId))->post(route('evaluaciones.desempeno.store'), [
+            'asistencia_detalle_id' => $detailId, 'desempeno_trabajo' => 3, 'orden_limpieza' => 3,
+            'seguridad_trabajo' => 3, 'compromiso' => 3, 'respuesta_emocional' => 3,
+        ])->assertSessionHasNoErrors();
+
+        $reopened = $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.index', ['fecha' => '2026-08-21']));
+        $reopened->assertOk()->assertSee('Evaluado')->assertDontSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+        $this->assertSame('evaluated', $reopened->viewData('dailyPending')->first()['workers']->first()['status']);
+        $this->withSession($this->sessionFor($userId))->get(route('evaluaciones.desempeno.create', ['asistencia_detalle_id' => $detailId]))
+            ->assertStatus(409);
+
+        DB::table('asistencia_encabezado')->where('id', DB::table('asistencia_detalle')->where('id', $detailId)->value('asistencia_id'))
+            ->update(['estado' => 'REGISTRADO']);
+        $reopened = $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.index', ['fecha' => '2026-08-21']));
+        $reopened->assertOk()->assertDontSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+        $this->assertSame('evaluated', $reopened->viewData('dailyPending')->first()['workers']->first()['status']);
+    }
+
+    public function test_detalle_no_evaluable_no_ofrece_formulario(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['ver_desempeno', 'evaluar_desempeno']]);
+        [$mineId, $detailId, $workerId] = $this->createClosedAttendance($userId, $personalId);
+        $this->assignScope($userId, $mineId);
+        $session = $this->sessionFor($userId);
+        $cases = [
+            ['estado' => 'REGISTRADO', 'detail' => 'PRESENTE'],
+            ['estado' => 'CERRADO', 'detail' => 'AUSENTE'],
+            ['estado' => 'CERRADO', 'detail' => 'PRESENTE', 'self' => true],
+        ];
+
+        foreach ($cases as $case) {
+            DB::table('asistencia_encabezado')->where('id', DB::table('asistencia_detalle')->where('id', $detailId)->value('asistencia_id'))
+                ->update(['estado' => $case['estado']]);
+            DB::table('asistencia_detalle')->where('id', $detailId)->update([
+                'estado' => $case['detail'],
+                'trabajador_id' => !empty($case['self']) ? $personalId : $workerId,
+            ]);
+            $this->withSession($session)->get(route('evaluaciones.index', ['fecha' => '2026-08-21']))
+                ->assertOk()->assertSee('No evaluable')->assertDontSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+            $this->withSession($session)->get(route('evaluaciones.desempeno.create', ['asistencia_detalle_id' => $detailId]))
+                ->assertStatus(422);
+            $this->withSession($session)->get(route('evaluaciones.index', [
+                'tipo' => 'desempeno', 'fecha' => '2026-08-21', 'asistencia_detalle_id' => $detailId,
+            ]))->assertStatus(422);
+        }
+    }
+
+    public function test_actor_ajeno_no_puede_abrir_evaluacion_por_url(): void
+    {
+        [$ownerId, $ownerPersonalId] = $this->createUser(['evaluaciones' => ['ver_desempeno', 'evaluar_desempeno']]);
+        [$mineId, $detailId] = $this->createClosedAttendance($ownerId, $ownerPersonalId);
+        [$otherId] = $this->createUser(['evaluaciones' => ['ver_desempeno', 'evaluar_desempeno']]);
+        $this->assignScope($otherId, $mineId);
+
+        $this->withSession($this->sessionFor($otherId))
+            ->get(route('evaluaciones.desempeno.create', ['asistencia_detalle_id' => $detailId]))
+            ->assertStatus(403);
+    }
+
+    public function test_permiso_de_solo_lectura_no_abre_formulario_diario(): void
+    {
+        [$userId, $personalId] = $this->createUser(['evaluaciones' => ['ver_desempeno']]);
+        [$mineId, $detailId] = $this->createClosedAttendance($userId, $personalId);
+        $this->assignScope($userId, $mineId);
+
+        $this->withSession($this->sessionFor($userId))->get(route('evaluaciones.index', ['fecha' => '2026-08-21']))
+            ->assertOk()->assertSee('No evaluable')->assertDontSee('name="asistencia_detalle_id" value="'.$detailId.'"', false);
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.desempeno.create', ['asistencia_detalle_id' => $detailId]))
+            ->assertForbidden();
+    }
+
     public function test_rol_solo_desempeno_entra_directo_sin_otras_pestanas(): void
     {
         [$userId, $personalId] = $this->createUser([
@@ -49,7 +388,7 @@ class EvaluacionesWebTest extends TestCase
                 'respuesta_emocional' => 4,
                 'observaciones' => 'Buen trabajo diario',
             ])
-            ->assertRedirect(route('evaluaciones.index', ['tipo' => 'desempeno']));
+            ->assertRedirect(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-08-21']));
 
         $this->assertDatabaseHas('evaluacion_desempeno', [
             'asistencia_detalle_id' => $detailId,
@@ -128,7 +467,7 @@ class EvaluacionesWebTest extends TestCase
         $this->withSession($session)
             ->get(route('evaluaciones.index', ['tipo' => 'supervisores']))
             ->assertOk()
-            ->assertSee('Evaluación realizada por residentes')
+            ->assertSee('Evaluación de supervisores')
             ->assertDontSee('Nueva evaluación de supervisor')
             ->assertDontSee('Seguimiento mensual');
 
@@ -248,13 +587,14 @@ class EvaluacionesWebTest extends TestCase
                 'evaluar_supervisores',
                 'ver_residentes',
                 'evaluar_residentes',
+                'administrar',
             ],
         ]);
         [$mineId] = $this->createClosedAttendance($userId, $personalId);
-        $candidateId = $this->createPersonal('SUPERVISOR EVALUADO BUSCABLE');
+        $candidateId = $this->createPersonal('SUPERVISOR EVALUADO BUSCABLE', true);
         $residentWithoutMineId = $this->createPersonal('RESIDENTE BUSCABLE SIN MINA');
         $this->assignScope($userId, $mineId);
-        DB::table('personal')->where('id', $residentWithoutMineId)->update(['estado' => 'CESADO']);
+        DB::table('personal')->where('id', $residentWithoutMineId)->update(['estado' => 'CESADO', 'puesto' => 'RESIDENTE DE OPERACIONES']);
 
         $this->withSession($this->sessionFor($userId))
             ->get(route('evaluaciones.index', ['tipo' => 'supervisores']))
@@ -266,7 +606,7 @@ class EvaluacionesWebTest extends TestCase
             ->assertSee('Buscar por nombre, DNI o puesto');
 
         $this->withSession($this->sessionFor($userId))
-            ->getJson(route('evaluaciones.personal.buscar', ['q' => 'SUPERVISOR EVALUADO']))
+            ->getJson(route('evaluaciones.personal.buscar', ['tipo' => 'supervisores', 'mina_id' => $mineId, 'q' => 'SUPERVISOR EVALUADO']))
             ->assertOk()
             ->assertJsonPath('data.0.id', $candidateId)
             ->assertJsonPath('data.0.nombre', 'SUPERVISOR EVALUADO BUSCABLE');
@@ -278,7 +618,7 @@ class EvaluacionesWebTest extends TestCase
             ->assertDontSee('Unidad minera');
 
         $this->withSession($this->sessionFor($userId))
-            ->getJson(route('evaluaciones.personal.buscar', ['q' => 'RESIDENTE BUSCABLE']))
+            ->getJson(route('evaluaciones.personal.buscar', ['tipo' => 'residentes', 'q' => 'RESIDENTE BUSCABLE']))
             ->assertOk()
             ->assertJsonPath('data.0.id', $residentWithoutMineId)
             ->assertJsonPath('data.0.estado', 'CESADO');
@@ -321,14 +661,225 @@ class EvaluacionesWebTest extends TestCase
         ]);
     }
 
-    private function createUser(array $permissions): array
+    public function test_admin_sin_personal_evalua_supervisor_y_residente_sin_parada(): void
+    {
+        [$userId, , $roleId] = $this->createUser(['evaluaciones' => ['evaluar_supervisores', 'evaluar_residentes', 'administrar']]);
+        DB::table('usuarios')->where('id', $userId)->update(['personal_id' => null]);
+        $candidate = $this->createPersonal('SUPERVISOR SIN PARADA', true);
+        $resident = $this->createPersonal('RESIDENTE SIN PARADA');
+        DB::table('personal')->where('id', $resident)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $mine = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mine, 'nombre' => 'MINA EVAL SIN PARADA', 'unidad_minera' => 'UM PRUEBA', 'estado' => 'ACTIVO']);
+        $email = DB::table('usuarios')->where('id', $userId)->value('email');
+        foreach (['supervisores', 'residentes'] as $type) {
+            $this->withSession($this->sessionFor($userId))->get(route('evaluaciones.index', ['tipo' => $type]))
+                ->assertOk()->assertSee($email)->assertSee('está evaluando.');
+        }
+        $session = [...$this->sessionFor($userId), '_token' => 'eval-csrf'];
+        $this->withSession($session)->post(route('evaluaciones.supervisores.store'), [
+            '_token' => 'eval-csrf', 'mina_id' => $mine, 'evaluado_id' => $candidate,
+            'evaluador_id' => $candidate, 'fecha' => '2026-09-16', 'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+        ])->assertSessionHasNoErrors()->assertRedirect(route('evaluaciones.index', ['tipo' => 'supervisores']));
+        $this->withSession($session)->post(route('evaluaciones.residentes.store'), [
+            '_token' => 'eval-csrf', 'residente_id' => $resident, 'periodo_mes' => '2026-09',
+            'indicadores_kpi_items' => ['REPORTE_ASISTENCIA'], 'costos_servicio_items' => ['COSTOS_MENSUALES'],
+            'eventos_seguridad_respuesta' => 'SI', 'reportes_calidad_respuesta' => 'SI',
+            'liderazgo_gestion_innovacion' => 4, 'comentarios' => 'Revision mensual sin parada.',
+        ])->assertSessionHasNoErrors()->assertRedirect(route('evaluaciones.index', ['tipo' => 'residentes']));
+        $this->assertDatabaseHas('evaluacion_supervisor', ['evaluado_id' => $candidate, 'evaluador_id' => null, 'created_by_usuario_id' => $userId, 'grupo_trabajo_id' => null]);
+        $this->assertDatabaseHas('evaluacion_residente', ['residente_id' => $resident, 'evaluador_id' => null, 'created_by_usuario_id' => $userId, 'destino_id' => null]);
+        [$otherId] = $this->createUser(['evaluaciones' => ['evaluar_supervisores', 'evaluar_residentes', 'administrar']]);
+        DB::table('usuarios')->where('id', $otherId)->update(['personal_id' => null]);
+        $service = app(\App\Modules\Evaluaciones\Services\EvaluacionesPageService::class);
+        $other = \App\Models\Usuario::findOrFail($otherId);
+        $data = $service->build($other, 'supervisores', '2026-09-16');
+        $this->assertFalse($data['supervisorHistory']->contains('evaluado_id', $candidate));
+        $this->assertFalse($data['residentHistory']->contains('residente_id', $resident));
+    }
+
+    public function test_permiso_de_lectura_no_permite_evaluar_aunque_sea_administrador(): void
+    {
+        [$userId] = $this->createUser(['evaluaciones' => ['ver_supervisores', 'administrar']]);
+        DB::table('usuarios')->where('id', $userId)->update(['personal_id' => null]);
+        $result = app(\App\Modules\Evaluaciones\Services\EvaluacionSupervisorService::class)->create(
+            \App\Models\Usuario::findOrFail($userId), ['destino_tipo' => 'MINA', 'destino_id' => (string) Str::uuid()]);
+        $this->assertFalse($result['ok']);
+        $this->assertSame('EVAL_FORBIDDEN', $result['code']);
+    }
+
+    public function test_permiso_explicito_habilita_evaluar_supervisores_sin_rol_residente(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_supervisores', 'evaluar_supervisores'],
+        ], 'OPERACIONES_EVALUACIONES_TEST', 'COORDINADOR DE OPERACIONES');
+
+        $actor = \App\Models\Usuario::findOrFail($userId);
+
+        $this->assertTrue(app(\App\Modules\Evaluaciones\Policies\EvaluacionesPolicy::class)
+            ->canEvaluateType($actor, 'supervisores'));
+    }
+
+    public function test_permiso_permite_evaluar_supervisor_sin_vinculo_con_su_mina(): void
+    {
+        [$userId] = $this->createUser([
+            'evaluaciones' => ['ver_supervisores', 'evaluar_supervisores'],
+        ], 'OPERACIONES_RESIDENTE_TEST', 'RESIDENTE DE OPERACIONES');
+        $mineId = (string) Str::uuid();
+        $otherMineId = (string) Str::uuid();
+        DB::table('minas')->insert([
+            ['id' => $mineId, 'nombre' => 'MINA DEL RESIDENTE', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO'],
+            ['id' => $otherMineId, 'nombre' => 'MINA AJENA', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO'],
+        ]);
+        $supervisor = $this->createPersonal('SUPERVISOR DEL AMBITO', true);
+        $outsideSupervisor = $this->createPersonal('SUPERVISOR FUERA DEL AMBITO', true);
+        foreach ([[$supervisor, $mineId], [$outsideSupervisor, $otherMineId]] as [$personalId, $personalMineId]) {
+            DB::table('personal_mina')->insert([
+                'id' => (string) Str::uuid(),
+                'personal_id' => $personalId,
+                'mina_id' => $personalMineId,
+                'estado' => 'EN_PROCESO',
+                'estado_habilitacion' => 'EN_PROCESO',
+                'activo' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $service = app(\App\Modules\Evaluaciones\Services\EvaluacionSupervisorService::class);
+        $actor = \App\Models\Usuario::findOrFail($userId);
+        $payload = [
+            'destino_tipo' => 'MINA',
+            'destino_id' => $mineId,
+            'mina_id' => $mineId,
+            'fecha' => '2026-09-25',
+            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+        ];
+
+        $allowed = $service->create($actor, [...$payload, 'evaluado_id' => $supervisor]);
+        $outside = $service->create($actor, [...$payload, 'evaluado_id' => $outsideSupervisor]);
+
+        $this->assertTrue($allowed['ok']);
+        $this->assertTrue($outside['ok']);
+        $invalidMine = $service->create($actor, [
+            ...$payload, 'destino_id' => (string) Str::uuid(), 'evaluado_id' => $outsideSupervisor,
+        ]);
+        $this->assertFalse($invalidMine['ok']);
+        $this->assertSame('EVAL_SUP_CONTEXT_INVALID', $invalidMine['code']);
+        $this->withSession($this->sessionFor($userId))
+            ->getJson(route('evaluaciones.personal.buscar', ['tipo' => 'supervisores', 'q' => 'SUPERVISOR FUERA']))
+            ->assertOk()->assertJsonPath('data.0.id', $outsideSupervisor);
+    }
+
+    public function test_usuario_con_permiso_sin_ficha_personal_evalua_supervisor(): void
+    {
+        [$userId] = $this->createUser(['evaluaciones' => ['evaluar_supervisores']], 'DIRECCION_SUPERVISORES');
+        DB::table('usuarios')->where('id', $userId)->update(['personal_id' => null]);
+        $mineId = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mineId, 'nombre' => 'MINA SUPERVISORES', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        $supervisorId = $this->createPersonal('SUPERVISOR SIN VINCULO', true);
+
+        $result = app(\App\Modules\Evaluaciones\Services\EvaluacionSupervisorService::class)->create(
+            \App\Models\Usuario::findOrFail($userId), [
+                'evaluado_id' => $supervisorId, 'fecha' => '2026-09-26',
+                'mina_id' => $mineId, 'destino_tipo' => 'MINA', 'destino_id' => $mineId,
+                'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            ],
+        );
+
+        $this->assertTrue($result['ok']);
+        $this->assertDatabaseHas('evaluacion_supervisor', [
+            'evaluado_id' => $supervisorId, 'evaluador_id' => null, 'created_by_usuario_id' => $userId,
+        ]);
+    }
+
+    public function test_solo_gerencia_o_administracion_evalua_residentes(): void
+    {
+        [$operationsId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes'],
+        ], 'OPERACIONES_GERENCIA_TEST', 'JEFE DE OPERACIONES');
+        [$managerId] = $this->createUser([
+            'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+        ], 'GERENTE_EVALUACIONES_TEST', 'GERENTE GENERAL');
+
+        $policy = app(\App\Modules\Evaluaciones\Policies\EvaluacionesPolicy::class);
+
+        $this->assertFalse($policy->canEvaluateType(\App\Models\Usuario::findOrFail($operationsId), 'residentes'));
+        $this->assertTrue($policy->canEvaluateType(\App\Models\Usuario::findOrFail($managerId), 'residentes'));
+    }
+
+    public function test_dashboard_filtra_y_respeta_propiedad_y_tipo_sin_recargar_layout(): void
+    {
+        [$id, $person] = $this->createUser(['evaluaciones' => ['ver_supervisores', 'administrar']]);
+        $mine = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mine, 'nombre' => 'MINA DASHBOARD', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        $worker = $this->createPersonal('PERSONA DASHBOARD', true);
+        DB::table('personal')->where('id', $worker)->update(['puesto' => 'SUPERVISOR PRUEBA']);
+        foreach ([['2026-09-10', 80, $id], ['2026-09-11', 100, $id], ['2026-08-01', 20, $id], ['2026-09-10', 10, null]] as [$date, $score, $owner]) {
+            DB::table('evaluacion_supervisor')->insert(['id' => (string) Str::uuid(), 'evaluado_id' => $worker, 'evaluador_id' => null,
+                'fecha' => $date, 'mina_id' => $mine, 'resultado_final' => $score, 'created_by_usuario_id' => $owner]);
+        }
+        $filters = ['desde' => '2026-09-01', 'hasta' => '2026-09-30', 'mina' => $mine, 'cargo' => 'SUPERVISOR PRUEBA'];
+        $service = app(\App\Modules\Evaluaciones\Services\EvaluacionesDashboardService::class);
+        $actor = \App\Models\Usuario::findOrFail($id);
+        $data = $service->build($actor, $filters);
+        $this->assertSame(2, $data['total']);
+        $this->assertSame(1, $data['people']);
+        $this->assertCount(1, $data['summary']);
+        $this->assertEquals(90, $data['summary'][0]['average']);
+        $this->assertSame(['supervisores' => 'Supervisores'], $data['types']);
+        $this->assertSame(2, $service->build($actor, [...$filters, 'evaluacion_tipo' => 'supervisores'])['total']);
+        $this->assertSame(0, $service->build($actor, [...$filters, 'evaluacion_tipo' => 'residentes'])['total']);
+        $this->assertSame(0, $service->build($actor, [...$filters, 'mina' => 'sin_mina'])['total']);
+        $this->assertSame(1, $service->build($actor, [...$filters, 'desde' => '2026-09-10', 'hasta' => '2026-09-10'])['total']);
+        $this->withSession($this->sessionFor($id))->withHeader('X-Evaluation-Dashboard', '1')
+            ->get(route('evaluaciones.index', ['tipo' => 'dashboard', ...$filters]))->assertOk()
+            ->assertSee('Distribución por tipo')->assertSee('90 / 100')->assertDontSee('<!DOCTYPE html>', false);
+        $this->withSession($this->sessionFor($id))->withHeader('X-Evaluation-Dashboard', '1')
+            ->get(route('evaluaciones.index', ['tipo' => 'dashboard', ...$filters, 'evaluacion_tipo' => 'supervisores']))->assertOk()
+            ->assertSee('Bloque A: Competencias Técnicas (Asociadas al Cargo)')
+            ->assertSee('Bloque B: Desempeño en SSOMA')->assertSee('Bloque C: Habilidades blandas');
+        $this->withSession($this->sessionFor($id))->getJson(route('evaluaciones.index', ['tipo' => 'dashboard', 'desde' => '2026-09-30', 'hasta' => '2026-09-01']))
+            ->assertStatus(422);
+        DB::table('roles')->where('id', $actor->rol_id)->update(['permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+            'evaluaciones' => ['ver_supervisores', 'evaluar_residentes', 'administrar'],
+        ]))]);
+        $actor = $actor->fresh();
+        $residentWorker = $this->createPersonal('RESIDENTE DASHBOARD');
+        DB::table('personal')->where('id', $residentWorker)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $created = app(\App\Modules\Evaluaciones\Services\EvaluacionDesempenoService::class)->createResidente($actor, [
+            'residente_id' => $residentWorker, 'fecha' => '2026-09-01', 'indicadores_kpi_items' => ['REPORTE_ASISTENCIA'],
+            'costos_servicio_items' => ['COSTOS_MENSUALES'], 'eventos_seguridad_respuesta' => 'SI',
+            'reportes_calidad_respuesta' => 'SI', 'liderazgo_gestion_innovacion' => 4, 'comentarios' => 'Prueba de filtro por tipo.',
+        ]);
+        $this->assertTrue($created['ok']);
+        $allFilters = [...$filters, 'mina' => '', 'cargo' => ''];
+        $this->assertSame(3, $service->build($actor, $allFilters)['total']);
+        $this->assertNull($service->build($actor, $allFilters)['details']);
+        $residentData = $service->build($actor, [...$allFilters, 'evaluacion_tipo' => 'residentes']);
+        $this->assertSame(1, $residentData['total']);
+        $this->assertSame('residentes', $residentData['details']['type']);
+        $this->assertSame(1, $residentData['details']['total']);
+        $this->assertSame('Residentes', $residentData['summary'][0]['label']);
+        $this->assertCount(1, $residentData['summary']);
+        $supervisorData = $service->build($actor, [...$allFilters, 'evaluacion_tipo' => 'supervisores']);
+        $this->assertSame(2, $supervisorData['total']);
+        $this->assertSame([
+            'Aporte ponderado por bloque · puntos de 100',
+            'Bloque A: Competencias Técnicas (Asociadas al Cargo) · escala 1 a 5',
+            'Bloque B: Desempeño en SSOMA · escala 1 a 5',
+            'Bloque C: Habilidades blandas · escala 1 a 5',
+        ], array_column($supervisorData['details']['charts'], 'title'));
+    }
+
+    private function createUser(array $permissions, ?string $roleName = null, string $position = 'ENCARGADO DE ASISTENCIA'): array
     {
         $roleId = (string) Str::uuid();
-        $personalId = $this->createPersonal('ENCARGADO DE ASISTENCIA', true);
+        $personalId = $this->createPersonal($position, true);
+        DB::table('personal')->where('id', $personalId)->update(['puesto' => $position]);
         $userId = (string) Str::uuid();
         DB::table('roles')->insert([
             'id' => $roleId,
-            'nombre' => 'EVALUADOR_'.Str::upper(Str::random(6)),
+            'nombre' => $roleName ?: 'EVALUADOR_'.Str::upper(Str::random(6)),
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections($permissions)),
             'estado' => 'ACTIVO',
         ]);

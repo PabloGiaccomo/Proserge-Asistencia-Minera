@@ -175,6 +175,46 @@ class PersonalFichaSensitiveDataPermissionTest extends TestCase
         $response->assertSee('00298765432100112233');
     }
 
+    public function test_fecha_de_nacimiento_se_muestra_como_dia_mes_anio(): void
+    {
+        $fichaId = $this->createFicha('91001122', ['fecha_nacimiento' => '1990-01-15']);
+        $fichaSession = $this->sessionForPermissions([
+            'personal' => ['ver', 'ver_ficha'],
+        ]);
+
+        $this->withSession($fichaSession)
+            ->get(route('personal.fichas.review', $fichaId))
+            ->assertOk()
+            ->assertSee('15/01/1990')
+            ->assertDontSee('1990-01-15');
+
+        $ingresoId = $this->createIngreso('91003344', ['fecha_nacimiento' => '1985-12-03']);
+        DB::table('personal_ingresos')->where('id', $ingresoId)->update([
+            'familiares_json' => json_encode([[
+                'nombres_apellidos' => 'FAMILIAR PRUEBA',
+                'parentesco' => 'Hijo 1',
+                'fecha_nacimiento' => '2015-01-01',
+                'tipo_documento' => 'DNI',
+                'numero_documento' => '99998888',
+                'telefono' => '999888777',
+                'vive_con_trabajador' => true,
+                'estudia' => true,
+                'contacto_emergencia' => false,
+            ]]),
+        ]);
+        $ingresoSession = $this->sessionForPermissions([
+            'personal_ingresos' => ['ver'],
+        ]);
+
+        $this->withSession($ingresoSession)
+            ->get(route('personal.ingresos.show', $ingresoId))
+            ->assertOk()
+            ->assertSee('03/12/1985')
+            ->assertSee('01/01/2015')
+            ->assertDontSee('1985-12-03')
+            ->assertDontSee('2015-01-01');
+    }
+
     public function test_ficha_pdf_is_forbidden_without_sensitive_permission(): void
     {
         $fichaId = $this->createFicha('11223344');

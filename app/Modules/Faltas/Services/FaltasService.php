@@ -6,6 +6,7 @@ use App\Models\Falta;
 use App\Models\Usuario;
 use App\Modules\Faltas\Policies\FaltaPolicy;
 use App\Support\Rbac\PermissionMatrix;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -25,7 +26,24 @@ class FaltasService
 
         $query = Falta::query()
             ->leftJoin('asistencia_encabezado as ae', 'ae.id', '=', 'faltas.asistencia_encabezado_id')
-            ->select('faltas.*', DB::raw('ae.grupo_trabajo_id as grupo_trabajo_id'));
+            ->leftJoin('personal as p', 'p.id', '=', 'faltas.trabajador_id')
+            ->leftJoin('minas as m', function ($join): void {
+                $join->on('m.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'MINA');
+            })
+            ->leftJoin('talleres as t', function ($join): void {
+                $join->on('t.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'TALLER');
+            })
+            ->leftJoin('oficinas as o', function ($join): void {
+                $join->on('o.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'OFICINA');
+            })
+            ->select(
+                'faltas.*',
+                DB::raw('ae.grupo_trabajo_id as grupo_trabajo_id'),
+                DB::raw('p.nombre_completo as trabajador_nombre'),
+                DB::raw('COALESCE(p.numero_documento, p.dni) as trabajador_documento'),
+                DB::raw('p.puesto as trabajador_puesto'),
+                DB::raw('COALESCE(m.nombre, t.nombre, o.nombre) as destino_nombre'),
+            );
 
         if (!empty($filters['destino_tipo'])) {
             $query->where('faltas.destino_tipo', strtoupper((string) $filters['destino_tipo']));
@@ -59,6 +77,17 @@ class FaltasService
             $query->where('faltas.motivo', strtoupper((string) $filters['motivo']));
         }
 
+        if (!empty($filters['buscar'])) {
+            $search = trim((string) $filters['buscar']);
+            $query->where(function ($nested) use ($search): void {
+                $nested->where('p.nombre_completo', 'like', "%{$search}%")
+                    ->orWhere('p.numero_documento', 'like', "%{$search}%")
+                    ->orWhere('p.dni', 'like', "%{$search}%")
+                    ->orWhere('faltas.descripcion', 'like', "%{$search}%")
+                    ->orWhere('faltas.observaciones', 'like', "%{$search}%");
+            });
+        }
+
         if (!$this->isPrivileged($usuario)) {
             $scopeMinaIds = $usuario->scopesMina()->pluck('mina_id');
             $query->where(function ($q) use ($scopeMinaIds): void {
@@ -74,7 +103,24 @@ class FaltasService
     {
         $falta = Falta::query()
             ->leftJoin('asistencia_encabezado as ae', 'ae.id', '=', 'faltas.asistencia_encabezado_id')
-            ->select('faltas.*', DB::raw('ae.grupo_trabajo_id as grupo_trabajo_id'))
+            ->leftJoin('personal as p', 'p.id', '=', 'faltas.trabajador_id')
+            ->leftJoin('minas as m', function ($join): void {
+                $join->on('m.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'MINA');
+            })
+            ->leftJoin('talleres as t', function ($join): void {
+                $join->on('t.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'TALLER');
+            })
+            ->leftJoin('oficinas as o', function ($join): void {
+                $join->on('o.id', '=', 'faltas.destino_id')->where('faltas.destino_tipo', '=', 'OFICINA');
+            })
+            ->select(
+                'faltas.*',
+                DB::raw('ae.grupo_trabajo_id as grupo_trabajo_id'),
+                DB::raw('p.nombre_completo as trabajador_nombre'),
+                DB::raw('COALESCE(p.numero_documento, p.dni) as trabajador_documento'),
+                DB::raw('p.puesto as trabajador_puesto'),
+                DB::raw('COALESCE(m.nombre, t.nombre, o.nombre) as destino_nombre'),
+            )
             ->where('faltas.id', $id)
             ->first();
 
@@ -155,6 +201,44 @@ class FaltasService
         return $result?->toArray() ?? [];
     }
 
+    public function dashboard(Collection $items): array
+    {
+        $active = $items->filter(fn (Falta $item): bool => strtoupper((string) $item->estado) === 'ACTIVA');
+
+        return [
+            'summary' => [
+                'total' => $items->count(),
+                'active' => $active->count(),
+                'corrected' => $items->filter(fn (Falta $item): bool => strtoupper((string) $item->estado) === 'CORREGIDA')->count(),
+                'annulled' => $items->filter(fn (Falta $item): bool => strtoupper((string) $item->estado) === 'ANULADA')->count(),
+                'workers' => $active->pluck('trabajador_id')->filter()->unique()->count(),
+            ],
+            'by_state' => $items->countBy(fn (Falta $item): string => strtoupper((string) ($item->estado ?: 'ACTIVA')))
+                ->map(fn ($total, $state) => ['state' => $state, 'total' => (int) $total])
+                ->sortByDesc('total')->values()->all(),
+            'trend' => $items->groupBy(fn (Falta $item): string => Carbon::parse($item->fecha)->toDateString())
+                ->sortKeys()
+                ->map(fn (Collection $day, string $date) => [
+                    'date' => $date,
+                    'label' => Carbon::parse($date)->format('d/m'),
+                    'total' => $day->count(),
+                    'active' => $day->filter(fn (Falta $item): bool => strtoupper((string) $item->estado) === 'ACTIVA')->count(),
+                ])->values()->all(),
+            'top_workers' => $active->groupBy('trabajador_id')
+                ->map(fn (Collection $workerItems) => [
+                    'id' => $workerItems->first()->trabajador_id,
+                    'name' => $workerItems->first()->trabajador_nombre ?: 'Trabajador sin nombre',
+                    'document' => $workerItems->first()->trabajador_documento,
+                    'total' => $workerItems->count(),
+                ])->sortByDesc('total')->take(8)->values()->all(),
+            'by_destination' => $active->groupBy(fn (Falta $item): string => $item->destino_nombre ?: ($item->destino_tipo ?: 'Sin destino'))
+                ->map(fn (Collection $destinationItems, string $name) => [
+                    'name' => $name,
+                    'total' => $destinationItems->count(),
+                ])->sortByDesc('total')->values()->all(),
+        ];
+    }
+
     public function corregir(Usuario $usuario, string $id, array $payload): array
     {
         $falta = $this->findForUser($usuario, $id);
@@ -170,7 +254,7 @@ class FaltasService
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
     }
 
-    public function anularPorId(Usuario $usuario, string $id): array
+    public function anularPorId(Usuario $usuario, string $id, string $reason): array
     {
         $falta = $this->findForUser($usuario, $id);
         
@@ -178,7 +262,7 @@ class FaltasService
             return ['success' => false, 'message' => 'Falta no encontrada'];
         }
         
-        $result = $this->anular($usuario, $falta, []);
+        $result = $this->anular($usuario, $falta, ['motivo_anulacion' => $reason]);
         
         return $result['ok'] ?? false
             ? ['success' => true, 'message' => 'Falta anulada']

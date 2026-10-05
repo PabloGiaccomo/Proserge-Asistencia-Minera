@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_crear_editar_enviar_requerimiento" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_rq_mina_crear_editar_enviar_requerimiento" name="Ciclo de RQ Mina" isExecutable="false">
+    <bpmn:documentation>Mapa breve: crear BORRADOR, editar y enviar son operaciones con permisos y momentos distintos. Consultar los BPMN de detalle. | Evidencia: app/Modules/RQMina/Services/RQMinaService.php; app/Modules/RQMina/Policies/RQMinaPolicy.php; routes/web.php; routes/api.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_crear_editar_enviar_requerimiento">
+    <bpmn:lane id="Lane_User" name="Solicitante de mina">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Choice</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Edit</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Send</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Draft</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Edited</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Sent</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Create</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Necesidad de RQ Mina">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::create</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Create" name="Crear BORRADOR">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::create; transaccion y detalle inicial.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Choice" name="Accion posterior">
+      <bpmn:documentation>routes/web.php: editar y enviar son acciones separadas, no obligatorias al crear.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Edit" name="Editar si corresponde">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::update, updateGeneral; puede repetirse y sincroniza si ya esta ENVIADO.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Send" name="Solicitar envio">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::send; requiere permiso especifico.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="Draft" name="BORRADOR conservado">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::create finaliza sin envio.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Edited" name="RQ editado">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::update finaliza una edicion independiente.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Sent" name="Envio procesado">
+      <bpmn:documentation>app/Modules/RQMina/Services/RQMinaService.php::send marca ENVIADO y llama sincronizacion.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Create"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Create" targetRef="Choice"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Choice" targetRef="Edit" name="Editar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Choice" targetRef="Send" name="Enviar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Choice" targetRef="Draft" name="Guardar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Edit" targetRef="Edited"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Send" targetRef="Sent"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_crear_editar_enviar_requerimiento">
+    <bpmndi:BPMNPlane id="Plane_crear_editar_enviar_requerimiento" bpmnElement="Process_rq_mina_crear_editar_enviar_requerimiento">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1310" height="420" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="490" width="1310" height="420" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Create_di" bpmnElement="Create">
+        <dc:Bounds x="405" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Choice_di" bpmnElement="Choice">
+        <dc:Bounds x="595" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Edit_di" bpmnElement="Edit">
+        <dc:Bounds x="785" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Send_di" bpmnElement="Send">
+        <dc:Bounds x="785" y="244" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Draft_di" bpmnElement="Draft">
+        <dc:Bounds x="785" y="382" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Edited_di" bpmnElement="Edited">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sent_di" bpmnElement="Sent">
+        <dc:Bounds x="975" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="580" />
+        <di:waypoint x="405" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="580" />
+        <di:waypoint x="575" y="580" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="595" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="645" y="160" />
+        <di:waypoint x="715" y="160" />
+        <di:waypoint x="715" y="160" />
+        <di:waypoint x="785" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="645" y="160" />
+        <di:waypoint x="715" y="160" />
+        <di:waypoint x="715" y="280" />
+        <di:waypoint x="785" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="645" y="160" />
+        <di:waypoint x="715" y="160" />
+        <di:waypoint x="715" y="400" />
+        <di:waypoint x="785" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="935" y="160" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="935" y="280" />
+        <di:waypoint x="955" y="280" />
+        <di:waypoint x="955" y="280" />
+        <di:waypoint x="975" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

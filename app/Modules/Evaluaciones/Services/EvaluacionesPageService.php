@@ -8,10 +8,8 @@ use App\Models\EvaluacionDesempeno;
 use App\Models\EvaluacionResidente;
 use App\Models\EvaluacionSupervisor;
 use App\Models\Mina;
-use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
-use App\Modules\Personal\Services\PersonalService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -19,7 +17,8 @@ class EvaluacionesPageService
 {
     public function __construct(
         private readonly EvaluacionesPolicy $policy,
-        private readonly PersonalService $personalService,
+        private readonly EvaluationCandidateService $candidates,
+        private readonly EvaluacionDesempenoService $performanceService,
     ) {
     }
 
@@ -29,16 +28,18 @@ class EvaluacionesPageService
             ->mapWithKeys(fn (string $type): array => [$type => $this->policy->canViewType($usuario, $type)])
             ->all();
         $availableTypes = collect($access)->filter()->keys()->values();
+        if ($availableTypes->isNotEmpty()) $availableTypes->push('dashboard');
         $activeType = $availableTypes->contains($requestedType) ? $requestedType : (string) $availableTypes->first();
 
         $mineIds = $this->accessibleMineIds($usuario);
         $mines = Mina::query()
             ->activeOperational()
-            ->when(!$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('id', $mineIds))
+            ->when($activeType !== 'supervisores' && !$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('id', $mineIds))
             ->orderBy('nombre')
             ->get(['id', 'nombre', 'unidad_minera']);
 
         return [
+            'evaluatorName' => $usuario->personal?->nombre_completo ?: $usuario->email,
             'access' => $access,
             'canEvaluate' => [
                 'desempeno' => $this->policy->canEvaluateType($usuario, 'desempeno'),
@@ -50,33 +51,23 @@ class EvaluacionesPageService
             'activeType' => $activeType,
             'selectedDate' => $date,
             'mines' => $mines,
-            'dailyPending' => $access['desempeno'] ? $this->dailyPending($usuario, $date) : collect(),
-            'dailyHistory' => $access['desempeno'] ? $this->dailyHistory($usuario, $mineIds) : collect(),
-            'supervisorHistory' => $access['supervisores'] ? $this->supervisorHistory($usuario, $mineIds) : collect(),
-            'residentHistory' => $access['residentes'] ? $this->residentHistory($usuario) : collect(),
+            'dailyPending' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyPending($usuario, $date) : collect(),
+            'dailyHistory' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyHistory($usuario, $mineIds) : collect(),
+            'supervisorHistory' => $access['supervisores'] && $activeType !== 'dashboard' ? $this->supervisorHistory($usuario, $mineIds) : collect(),
+            'residentHistory' => $access['residentes'] && $activeType !== 'dashboard' ? $this->residentHistory($usuario) : collect(),
         ];
     }
 
-    public function searchPersonal(string $search, ?string $personalId = null, int $limit = 12): Collection
+    public function searchPersonal(
+        Usuario $usuario,
+        string $type,
+        string $search,
+        ?string $personalId = null,
+        ?string $mineId = null,
+        int $limit = 12,
+    ): Collection
     {
-        if ($personalId) {
-            $items = Personal::query()
-                ->whereKey($personalId)
-                ->get(['id', 'nombre_completo', 'dni', 'numero_documento', 'puesto', 'estado']);
-        } elseif (mb_strlen(trim($search)) >= 2) {
-            $items = $this->personalService
-                ->searchSelector(trim($search), false, $limit);
-        } else {
-            return collect();
-        }
-
-        return $items->map(fn (Personal $personal): array => [
-            'id' => (string) $personal->id,
-            'nombre' => (string) $personal->nombre_completo,
-            'documento' => (string) ($personal->numero_documento ?: $personal->dni),
-            'puesto' => (string) ($personal->puesto ?: 'Sin puesto registrado'),
-            'estado' => (string) ($personal->estado ?: 'SIN ESTADO'),
-        ])->values();
+        return $this->candidates->search($usuario, $type, $search, $personalId, $mineId, $limit);
     }
 
     private function dailyPending(Usuario $usuario, string $date): Collection
@@ -92,7 +83,6 @@ class EvaluacionesPageService
                 'detalle.trabajador:id,nombre_completo,dni,numero_documento,puesto',
             ])
             ->whereDate('fecha', $date)
-            ->where('estado', 'CERRADO')
             ->when(!$this->policy->canEvaluateOthers($usuario), function ($query) use ($usuario): void {
                 $query->where(function ($ownerQuery) use ($usuario): void {
                     $ownerQuery->where('supervisor_id', $usuario->personal_id)
@@ -109,11 +99,20 @@ class EvaluacionesPageService
             ->flip();
 
         return $headers->map(function (AsistenciaEncabezado $header) use ($usuario, $evaluatedDetailIds): array {
-            $workers = $header->detalle
-                ->filter(fn (AsistenciaDetalle $detail): bool => in_array($detail->estado, AsistenciaDetalle::ESTADOS_REAL, true))
-                ->reject(fn (AsistenciaDetalle $detail): bool => (string) $detail->trabajador_id === (string) $usuario->personal_id)
-                ->reject(fn (AsistenciaDetalle $detail): bool => $evaluatedDetailIds->has($detail->id))
-                ->values();
+            $markedByUser = $header->detalle->contains(fn (AsistenciaDetalle $detail): bool => (string) $detail->marcado_por_id === (string) $usuario->id);
+            $workers = $header->detalle->map(function (AsistenciaDetalle $detail) use ($usuario, $evaluatedDetailIds, $markedByUser, $header): array {
+                $detail->setRelation('asistencia', $header);
+                $availability = $this->performanceService->dailyAvailability(
+                    $usuario, $detail, $evaluatedDetailIds->has($detail->id), $markedByUser,
+                );
+
+                return [
+                    'detail' => $detail,
+                    'status' => $evaluatedDetailIds->has($detail->id)
+                        ? 'evaluated'
+                        : ($availability['ok'] ? 'available' : 'ineligible'),
+                ];
+            })->values();
 
             return [
                 'attendance' => $header,
@@ -141,9 +140,8 @@ class EvaluacionesPageService
     private function supervisorHistory(Usuario $usuario, Collection $mineIds): Collection
     {
         return EvaluacionSupervisor::query()
-            ->with(['evaluador:id,nombre_completo', 'evaluado:id,nombre_completo,puesto', 'mina:id,nombre'])
-            ->when(!$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('mina_id', $mineIds))
-            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $query->where('evaluador_id', $usuario->personal_id))
+            ->with(['evaluador:id,nombre_completo', 'usuarioEvaluador:id,email', 'evaluado:id,nombre_completo,puesto', 'mina:id,nombre'])
+            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $this->policy->ownedBy($query, $usuario))
             ->orderByDesc('fecha')
             ->limit(20)
             ->get();
@@ -152,8 +150,8 @@ class EvaluacionesPageService
     private function residentHistory(Usuario $usuario): Collection
     {
         return EvaluacionResidente::query()
-            ->with(['evaluador:id,nombre_completo', 'residente:id,nombre_completo,puesto'])
-            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $query->where('evaluador_id', $usuario->personal_id))
+            ->with(['evaluador:id,nombre_completo', 'usuarioEvaluador:id,email', 'residente:id,nombre_completo,puesto'])
+            ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $this->policy->ownedBy($query, $usuario))
             ->orderByDesc('periodo_mes')
             ->orderByDesc('fecha')
             ->limit(20)

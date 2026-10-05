@@ -1,13 +1,20 @@
 @extends('layouts.app')
 
 @section('title', 'Evaluaciones - Proserge')
+@push('styles')
+<link rel="stylesheet" href="{{ asset('css/evaluations-dashboard.css') }}?v={{ filemtime(public_path('css/evaluations-dashboard.css')) }}">
+@endpush
+@push('scripts')
+<script src="{{ asset('js/evaluations-dashboard.js') }}?v={{ filemtime(public_path('js/evaluations-dashboard.js')) }}" defer></script>
+@endpush
 
 @section('content')
 @php
     $typeLabels = [
         'desempeno' => ['Evaluación diaria', 'Técnicos y personal operativo'],
-        'supervisores' => ['Supervisores', 'Evaluación realizada por residentes'],
+        'supervisores' => ['Supervisores', 'Evaluación de supervisores'],
         'residentes' => ['Residentes', 'Seguimiento mensual'],
+        'dashboard' => ['Dashboard', 'Analisis de evaluaciones'],
     ];
     $scoreCriteria = [
         'desempeno_trabajo' => 'Desempeño en el trabajo',
@@ -45,6 +52,12 @@
         </nav>
     @endif
 
+    @if(in_array($activeType, ['supervisores', 'residentes'], true) && $canEvaluate[$activeType])
+        <div class="eval-alert" role="status" style="background:#eef8f6;border:1px solid #cbe6e0;color:#175b50;overflow-wrap:anywhere">
+            <strong>{{ $evaluatorName }}</strong> está evaluando.
+        </div>
+    @endif
+
     @if($errors->any())
         <div class="eval-alert eval-alert-error" role="alert">
             {{ $errors->first() }}
@@ -56,17 +69,17 @@
             <div class="eval-section-heading">
                 <div>
                     <h2>Evaluaciones pendientes del día</h2>
-                    <p>{{ $canEvaluateOthers ? 'Asistencias cerradas pendientes de evaluación, incluidas las registradas por otros responsables.' : 'Solo aparecen asistencias cerradas que registraste como encargado.' }}</p>
+                    <p>{{ $canEvaluateOthers ? 'Asistencias pendientes de evaluación, incluidas las registradas por otros responsables.' : 'Asistencias que registraste como encargado.' }} Consulta quién ya fue evaluado y qué asistencias aún no están listas.</p>
                 </div>
-                <span class="eval-count">{{ $dailyPending->sum(fn ($group) => $group['workers']->count()) }} pendientes</span>
+                <span class="eval-count">{{ $dailyPending->sum(fn ($group) => $group['workers']->where('status', 'available')->count()) }} pendientes</span>
             </div>
 
             @if(!$user->personal_id)
                 <div class="eval-empty">Tu cuenta debe estar vinculada a un trabajador para identificar quién realiza la evaluación.</div>
             @elseif($dailyPending->isEmpty())
                 <div class="eval-empty">
-                    <strong>No tienes evaluaciones pendientes para esta fecha.</strong>
-                    <span>{{ $canEvaluateOthers ? 'El personal aparecerá aquí cuando su asistencia haya sido cerrada.' : 'Cuando cierres una asistencia, el personal que trabajó aparecerá aquí.' }}</span>
+                    <strong>No hay asistencias para esta fecha.</strong>
+                    <span>El personal aparecerá aquí cuando se registre su asistencia.</span>
                 </div>
             @else
                 <div class="eval-attendance-list">
@@ -85,19 +98,26 @@
                             </div>
 
                             <div class="eval-worker-list">
-                                @foreach($group['workers'] as $detail)
-                                    <details class="eval-worker" {{ old('asistencia_detalle_id') === $detail->id ? 'open' : '' }}>
+                                @foreach($group['workers'] as $worker)
+                                    @php($detail = $worker['detail'])
+                                    @php($canOpen = $worker['status'] === 'available')
+                                    @if($canOpen)
+                                    <details class="eval-worker" {{ old('asistencia_detalle_id', request('asistencia_detalle_id')) === $detail->id ? 'open' : '' }}>
                                         <summary>
+                                    @else
+                                    <div class="eval-worker"><div class="eval-worker-static">
+                                    @endif
                                             <span>
-                                                <strong>{{ $detail->trabajador->nombre_completo }}</strong>
-                                                <small>{{ $detail->trabajador->puesto ?: 'Puesto sin definir' }} &middot; {{ $detail->estado }}</small>
+                                                <strong>{{ $detail->trabajador?->nombre_completo ?? 'Trabajador no disponible' }}</strong>
+                                                <small>{{ $detail->trabajador?->puesto ?: 'Puesto sin definir' }} &middot; {{ $detail->estado }}</small>
                                             </span>
-                                            @if($canEvaluate['desempeno'])
+                                            @if($canOpen)
                                                 <span class="eval-worker-action">Evaluar</span>
+                                            @else
+                                                <span class="eval-worker-status">{{ $worker['status'] === 'evaluated' ? 'Evaluado' : 'No evaluable' }}</span>
                                             @endif
+                                    @if($canOpen)
                                         </summary>
-
-                                        @if($canEvaluate['desempeno'])
                                             <form method="POST" action="{{ route('evaluaciones.desempeno.store') }}" class="eval-form eval-score-form">
                                                 @csrf
                                                 <input type="hidden" name="asistencia_detalle_id" value="{{ $detail->id }}">
@@ -110,16 +130,19 @@
 
                                                 <div class="eval-score-grid">
                                                     @foreach($scoreCriteria as $field => $label)
-                                                        <fieldset class="eval-score-field">
+                                                        <fieldset class="eval-score-field {{ $errors->has($field) && old('asistencia_detalle_id') === $detail->id ? 'eval-has-error' : '' }}">
                                                             <legend>{{ $label }}</legend>
                                                             <div class="eval-score-options">
                                                                 @foreach(range(1, 4) as $score)
                                                                     <label>
-                                                                        <input type="radio" name="{{ $field }}" value="{{ $score }}" required>
+                                                                        <input type="radio" name="{{ $field }}" value="{{ $score }}" @checked((string) old('asistencia_detalle_id') === (string) $detail->id && (string) old($field) === (string) $score) required>
                                                                         <span>{{ $score }}</span>
                                                                     </label>
                                                                 @endforeach
                                                             </div>
+                                                            @if(old('asistencia_detalle_id') === $detail->id)
+                                                                @error($field)<small class="eval-field-error">{{ $message }}</small>@enderror
+                                                            @endif
                                                         </fieldset>
                                                     @endforeach
                                                 </div>
@@ -127,24 +150,33 @@
                                                 <div class="eval-total" aria-live="polite"><span>Total</span><strong data-score-total>0 / 20</strong></div>
 
                                                 <label class="eval-check">
-                                                    <input type="checkbox" name="tuvo_incidencia" value="1" data-incident-toggle>
+                                                    <input type="checkbox" name="tuvo_incidencia" value="1" data-incident-toggle @checked(old('asistencia_detalle_id') === $detail->id && old('tuvo_incidencia'))>
                                                     <span>Se registró una incidencia durante la jornada</span>
                                                 </label>
-                                                <div class="eval-field is-hidden" data-incident-field>
-                                                    <label>Descripción de la incidencia</label>
-                                                    <textarea name="descripcion_incidencia" rows="3" placeholder="Describe qué ocurrió y las acciones tomadas"></textarea>
+                                                <div class="eval-field {{ old('asistencia_detalle_id') === $detail->id && old('tuvo_incidencia') ? '' : 'is-hidden' }}" data-incident-field>
+                                                    <label for="incidencia-{{ $detail->id }}">Descripción de la incidencia</label>
+                                                    <textarea id="incidencia-{{ $detail->id }}" name="descripcion_incidencia" rows="3" placeholder="Describe qué ocurrió y las acciones tomadas" @if(old('asistencia_detalle_id') === $detail->id && old('tuvo_incidencia')) required @endif @if($errors->has('descripcion_incidencia') && old('asistencia_detalle_id') === $detail->id) aria-invalid="true" @endif>{{ old('asistencia_detalle_id') === $detail->id ? old('descripcion_incidencia') : '' }}</textarea>
+                                                    @if(old('asistencia_detalle_id') === $detail->id)
+                                                        @error('descripcion_incidencia')<small class="eval-field-error">{{ $message }}</small>@enderror
+                                                    @endif
                                                 </div>
                                                 <div class="eval-field">
                                                     <label>Observaciones</label>
-                                                    <textarea name="observaciones" rows="3" placeholder="Comentario adicional sobre el desempeño"></textarea>
+                                                    <textarea name="observaciones" rows="3" placeholder="Comentario adicional sobre el desempeño" @if($errors->has('observaciones') && old('asistencia_detalle_id') === $detail->id) aria-invalid="true" @endif>{{ old('asistencia_detalle_id') === $detail->id ? old('observaciones') : '' }}</textarea>
+                                                    @if(old('asistencia_detalle_id') === $detail->id)
+                                                        @error('observaciones')<small class="eval-field-error">{{ $message }}</small>@enderror
+                                                    @endif
                                                 </div>
 
                                                 <div class="eval-actions">
+                                                    <button type="button" class="btn btn-outline" data-eval-cancel>Cancelar</button>
                                                     <button type="submit" class="btn btn-primary">Guardar evaluación</button>
                                                 </div>
                                             </form>
-                                        @endif
                                     </details>
+                                    @else
+                                    </div></div>
+                                    @endif
                                 @endforeach
                             </div>
                         </article>
@@ -163,13 +195,13 @@
         @if($canEvaluate['supervisores'])
             <section class="eval-section">
                 <div class="eval-section-heading">
-                    <div><h2>Nueva evaluación de supervisor</h2><p>El residente registra la evaluación dentro de su unidad minera.</p></div>
+                    <div><h2>Nueva evaluación de supervisor</h2><p>Evaluación por unidad minera, sin requerir asignación a una parada.</p></div>
                 </div>
                 <form method="POST" action="{{ route('evaluaciones.supervisores.store') }}" class="eval-form">
                     @csrf
                     <div class="eval-form-grid eval-form-grid-3">
                         <div class="eval-field"><label>Unidad minera</label><select name="mina_id" required data-mine-select><option value="">Seleccionar mina</option>@foreach($mines as $mine)<option value="{{ $mine->id }}">{{ $mine->nombre }}</option>@endforeach</select></div>
-                        @include('evaluaciones.partials.person-search', ['name' => 'evaluado_id', 'label' => 'Supervisor evaluado'])
+                        @include('evaluaciones.partials.person-search', ['name' => 'evaluado_id', 'label' => 'Supervisor evaluado', 'evaluationType' => 'supervisores'])
                         <div class="eval-field"><label>Fecha</label><input type="date" name="fecha" value="{{ now()->toDateString() }}" required></div>
                     </div>
 
@@ -200,25 +232,36 @@
             <div class="eval-section-heading"><div><h2>Evaluaciones de supervisores</h2><p>Registros disponibles dentro de tu alcance.</p></div></div>
             @include('evaluaciones.partials.supervisor-history', ['items' => $supervisorHistory])
         </section>
+    @elseif($activeType === 'dashboard')
+        @include('evaluaciones.partials.dashboard')
     @elseif($activeType === 'residentes')
         @if($canEvaluate['residentes'])
             <section class="eval-section">
                 <div class="eval-section-heading"><div><h2>Nueva evaluación mensual</h2><p>Seguimiento consolidado del residente por periodo.</p></div></div>
-                <form method="POST" action="{{ route('evaluaciones.residentes.store') }}" class="eval-form">
-                    @csrf
+                <form method="GET" action="{{ route('evaluaciones.residentes') }}" class="eval-form">
                     <div class="eval-form-grid">
-                        @include('evaluaciones.partials.person-search', ['name' => 'residente_id', 'label' => 'Residente evaluado'])
-                        <div class="eval-field"><label>Mes evaluado</label><input type="month" name="periodo_mes" value="{{ now()->format('Y-m') }}" required></div>
+                        @include('evaluaciones.partials.person-search', ['name' => 'residente_id', 'label' => 'Residente evaluado', 'evaluationType' => 'residentes', 'selectedId' => $residentSelection['id']])
+                        <div class="eval-field"><label for="resident-month">Mes evaluado</label><input id="resident-month" type="month" name="periodo_mes" value="{{ old('periodo_mes', $residentSelection['month'] ?: now()->format('Y-m')) }}" required></div>
                     </div>
+                    <div class="eval-actions"><button class="btn btn-primary" type="submit">Continuar</button></div>
+                </form>
+                @if($residentAvailability && !$residentAvailability['ok'])
+                    <div class="eval-alert" role="status">{{ $residentAvailability['message'] }}</div>
+                @elseif($residentAvailability && $residentAvailability['ok'])
+                <form method="POST" action="{{ route('evaluaciones.residentes.store') }}" class="eval-form eval-resident-form">
+                    @csrf
+                    <input type="hidden" name="residente_id" value="{{ $residentSelection['id'] }}">
+                    <input type="hidden" name="periodo_mes" value="{{ $residentSelection['month'] }}">
                     <div class="eval-resident-grid" data-resident-evaluation>
                         <fieldset class="eval-choice-panel" data-resident-multi>
                             <legend>Indicadores KPIs</legend>
                             <p>Marca los reportes o entregables cumplidos.</p>
                             <div class="eval-check-list">
                                 @foreach($residentTemplate['kpis'] as $value => $label)
-                                    <label><input type="checkbox" name="indicadores_kpi_items[]" value="{{ $value }}" {{ $value === 'NINGUNO' ? 'data-none-option' : '' }}><span>{{ $label }}</span></label>
+                                    <label><input type="checkbox" name="indicadores_kpi_items[]" value="{{ $value }}" @checked(in_array($value, old('indicadores_kpi_items', []), true)) {{ $value === 'NINGUNO' ? 'data-none-option' : '' }}><span>{{ $label }}</span></label>
                                 @endforeach
                             </div>
+                            @error('indicadores_kpi_items')<small class="eval-field-error">{{ $message }}</small>@enderror
                         </fieldset>
 
                         <fieldset class="eval-choice-panel" data-resident-multi>
@@ -226,36 +269,40 @@
                             <p>Cada elemento seleccionado suma 2 puntos.</p>
                             <div class="eval-check-list">
                                 @foreach($residentTemplate['costs'] as $value => $label)
-                                    <label><input type="checkbox" name="costos_servicio_items[]" value="{{ $value }}" {{ $value === 'NINGUNO' ? 'data-none-option' : '' }}><span>{{ $label }}</span></label>
+                                    <label><input type="checkbox" name="costos_servicio_items[]" value="{{ $value }}" @checked(in_array($value, old('costos_servicio_items', []), true)) {{ $value === 'NINGUNO' ? 'data-none-option' : '' }}><span>{{ $label }}</span></label>
                                 @endforeach
                             </div>
+                            @error('costos_servicio_items')<small class="eval-field-error">{{ $message }}</small>@enderror
                         </fieldset>
 
                         <fieldset class="eval-choice-panel">
                             <legend>Eventos de seguridad</legend>
                             <div class="eval-segmented-options">
                                 @foreach($residentTemplate['binary'] as $value => $label)
-                                    <label><input type="radio" name="eventos_seguridad_respuesta" value="{{ $value }}" required><span>{{ $label }}</span></label>
+                                    <label><input type="radio" name="eventos_seguridad_respuesta" value="{{ $value }}" @checked(old('eventos_seguridad_respuesta') === $value) required><span>{{ $label }}</span></label>
                                 @endforeach
                             </div>
+                            @error('eventos_seguridad_respuesta')<small class="eval-field-error">{{ $message }}</small>@enderror
                         </fieldset>
 
                         <fieldset class="eval-choice-panel">
                             <legend>Reportes de calidad</legend>
                             <div class="eval-segmented-options">
                                 @foreach($residentTemplate['binary'] as $value => $label)
-                                    <label><input type="radio" name="reportes_calidad_respuesta" value="{{ $value }}" required><span>{{ $label }}</span></label>
+                                    <label><input type="radio" name="reportes_calidad_respuesta" value="{{ $value }}" @checked(old('reportes_calidad_respuesta') === $value) required><span>{{ $label }}</span></label>
                                 @endforeach
                             </div>
+                            @error('reportes_calidad_respuesta')<small class="eval-field-error">{{ $message }}</small>@enderror
                         </fieldset>
 
                         <fieldset class="eval-choice-panel">
                             <legend>Liderazgo, gestión e innovación</legend>
                             <div class="eval-segmented-options eval-segmented-options-4">
                                 @foreach(range(1, 4) as $score)
-                                    <label><input type="radio" name="liderazgo_gestion_innovacion" value="{{ $score }}" required><span>{{ $score }}</span></label>
+                                    <label><input type="radio" name="liderazgo_gestion_innovacion" value="{{ $score }}" @checked((string) old('liderazgo_gestion_innovacion') === (string) $score) required><span>{{ $score }}</span></label>
                                 @endforeach
                             </div>
+                            @error('liderazgo_gestion_innovacion')<small class="eval-field-error">{{ $message }}</small>@enderror
                         </fieldset>
 
                         <div class="eval-resident-total">
@@ -263,9 +310,10 @@
                             <strong data-resident-total>0 / 20</strong>
                         </div>
                     </div>
-                    <div class="eval-field"><label>Comentario</label><textarea name="comentarios" rows="4" placeholder="Fortalezas, alertas y acuerdos de mejora" required></textarea></div>
+                    <div class="eval-field"><label>Comentario</label><textarea name="comentarios" rows="4" placeholder="Fortalezas, alertas y acuerdos de mejora" required>{{ old('comentarios') }}</textarea>@error('comentarios')<small class="eval-field-error">{{ $message }}</small>@enderror</div>
                     <div class="eval-actions"><button class="btn btn-primary" type="submit">Guardar evaluación mensual</button></div>
                 </form>
+                @endif
             </section>
         @endif
 
@@ -280,17 +328,31 @@
 <script>
 document.querySelectorAll('.eval-score-form').forEach((form) => {
     const output = form.querySelector('[data-score-total]');
-    form.addEventListener('change', () => {
+    const calculate = () => {
         const total = [...form.querySelectorAll('.eval-score-field input:checked')]
             .reduce((sum, input) => sum + Number(input.value), 0);
         output.textContent = `${total} / 20`;
-    });
+    };
+    form.addEventListener('change', calculate);
+    calculate();
 
     const toggle = form.querySelector('[data-incident-toggle]');
     const field = form.querySelector('[data-incident-field]');
-    toggle?.addEventListener('change', () => {
+    const syncIncident = () => {
         field.classList.toggle('is-hidden', !toggle.checked);
         field.querySelector('textarea').required = toggle.checked;
+    };
+    toggle?.addEventListener('change', syncIncident);
+    if (toggle) syncIncident();
+
+    form.querySelector('[data-eval-cancel]')?.addEventListener('click', () => {
+        form.closest('details').open = false;
+    });
+    form.addEventListener('submit', () => {
+        if (!form.reportValidity()) return;
+        const submit = form.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        submit.textContent = 'Guardando...';
     });
 });
 
@@ -301,6 +363,10 @@ document.querySelectorAll('[data-eval-person-search]').forEach((search) => {
     const clear = search.querySelector('[data-eval-person-clear]');
     const help = search.querySelector('[data-eval-person-help]');
     const searchUrl = search.dataset.searchUrl;
+    const evaluationType = search.dataset.evaluationType;
+    const mineInput = search.dataset.mineSource
+        ? search.closest('form')?.querySelector(search.dataset.mineSource)
+        : null;
     let timer = null;
     let requestNumber = 0;
 
@@ -344,6 +410,8 @@ document.querySelectorAll('[data-eval-person-search]').forEach((search) => {
     };
 
     const fetchPeople = async (parameters) => {
+        parameters.tipo = evaluationType;
+        if (mineInput?.value) parameters.mina_id = mineInput.value;
         const currentRequest = ++requestNumber;
         try {
             const response = await fetch(`${searchUrl}?${new URLSearchParams(parameters)}`, {
@@ -371,6 +439,11 @@ document.querySelectorAll('[data-eval-person-search]').forEach((search) => {
         input.setCustomValidity('');
         clearTimeout(timer);
         const query = input.value.trim();
+        if (mineInput && !mineInput.value) {
+            closeResults();
+            help.textContent = 'Selecciona primero la unidad minera.';
+            return;
+        }
         if (query.length < 2) {
             closeResults();
             return;
@@ -392,6 +465,17 @@ document.querySelectorAll('[data-eval-person-search]').forEach((search) => {
         help.classList.remove('is-selected');
         closeResults();
         input.focus();
+    });
+
+    mineInput?.addEventListener('change', () => {
+        input.value = '';
+        hidden.value = '';
+        input.classList.remove('is-selected');
+        clear.classList.remove('is-visible');
+        help.textContent = mineInput.value
+            ? 'Escribe al menos 2 caracteres y selecciona un supervisor de esta mina.'
+            : 'Selecciona primero la unidad minera.';
+        closeResults();
     });
 
     search.closest('form')?.addEventListener('submit', (event) => {
@@ -443,6 +527,12 @@ document.querySelectorAll('[data-resident-evaluation]').forEach((evaluation) => 
     });
 
     evaluation.addEventListener('change', calculate);
+    calculate();
+    form.addEventListener('submit', () => {
+        const submit = form.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        submit.textContent = 'Guardando...';
+    });
 });
 </script>
 @endpush

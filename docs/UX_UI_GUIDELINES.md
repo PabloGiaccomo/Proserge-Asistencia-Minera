@@ -86,8 +86,8 @@ La misma informacion no siempre debe verse igual para todas las areas.
   muestra como tarea pendiente, mientras la habilitacion sigue `EN_PROCESO`.
 - Cuando se agotan intentos, mostrar `NO_HABILITADO` como estado visible de la
   mina, con motivo claro. No usar `OBSERVADO` para ese caso.
-- Minas bloqueadas por desaprobacion de un examen requerido deben verse grises o
-  bloqueadas, con motivo legible.
+- Una desaprobacion debe mostrar claramente `NO_HABILITADO` y el conteo de
+  intentos, sin ocultar el registro de nuevos intentos ni bloquear otra mina.
 - `NO_APLICA` debe ser una accion directa, sin obligar observacion. La
   observacion puede quedar disponible como opcional.
 - Convalidacion debe verse como sugerencia que el usuario confirma, no como

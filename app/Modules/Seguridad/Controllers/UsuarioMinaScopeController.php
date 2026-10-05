@@ -49,11 +49,11 @@ class UsuarioMinaScopeController extends Controller
         }
 
         $payload = $request->validate([
-            'mina_ids' => ['required', 'array'],
-            'mina_ids.*' => ['string', 'size:36'],
+            'mina_ids' => ['nullable', 'array'],
+            'mina_ids.*' => ['string', 'size:36', 'exists:minas,id'],
         ]);
 
-        $minaIds = collect($payload['mina_ids'])
+        $minaIds = collect($payload['mina_ids'] ?? [])
             ->map(fn (string $id) => trim($id))
             ->filter(fn (string $id) => $id !== '')
             ->unique()
@@ -75,12 +75,16 @@ class UsuarioMinaScopeController extends Controller
             }
         });
 
+        $count = $minaIds->count();
+
         return ApiResponse::success(
             data: [
                 'usuario_id' => $usuarioId,
                 'mina_ids' => $minaIds,
             ],
-            message: 'Scope por mina actualizado',
+            message: $count === 0
+                ? 'Scope por mina actualizado: sin minas asignadas (alcance restringido a operaciones de su mina asignada)'
+                : 'Scope por mina actualizado',
             code: 'USUARIO_MINA_SCOPE_SYNC_OK',
         );
     }

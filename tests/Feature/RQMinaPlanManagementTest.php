@@ -256,6 +256,118 @@ class RQMinaPlanManagementTest extends TestCase
         ]);
     }
 
+    public function test_guardar_plan_conserva_la_atencion_logistica_registrada(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->plannerRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $usuario = Usuario::query()->with('rol')->findOrFail($usuarioId);
+        $rq = $this->createRQMina($minaId, $usuarioId, '2026-04-01', '2026-04-30');
+        $planService = app(RQMinaPlanService::class);
+        $rqService = app(RQMinaService::class);
+        $plan = $planService->ensureDefaultPlan($rq, $usuario);
+        $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
+
+        // RQ Mina reenvia el plan sin los datos que administra Logistica.
+        $actualizado = $rqService->updatePlanOperativo($usuario, $rq->fresh(), [
+            [
+                'nombre' => 'Grupo operativo',
+                'area_operativa' => 'C1',
+                'modulo' => 'MOLIENDA',
+                'actividades' => [['sait' => 'SAIT-100']],
+                'transportes' => [[
+                    'alcance' => 'SAIT-100',
+                    'unidad_carga' => 'Grua 80T',
+                    'unidades_transporte' => 'Van 15, minibus 35',
+                    'tipo_transporte' => 'CARGA',
+                    'turno' => 'B',
+                    'cantidad_unidades_requeridas' => 2,
+                    'capacidad_requerida' => 12,
+                    'fecha_inicio' => '2026-04-05',
+                    'fecha_fin' => '2026-04-07',
+                ]],
+            ],
+        ], null, (string) $plan->id);
+
+        $this->assertNotNull($actualizado);
+
+        $grupoNuevo = DB::table('rq_mina_actividad_grupos')->where('rq_mina_plan_id', (string) $plan->id)->first();
+        $transporte = DB::table('rq_mina_actividad_transportes')->where('grupo_id', $grupoNuevo->id)->first();
+
+        // Datos de Logistica conservados
+        $this->assertSame(RQMinaActividadTransporte::ESTADO_ASIGNADO, $transporte->estado_logistico);
+        $this->assertSame('ABC-123', $transporte->placas_asignadas);
+        $this->assertSame('ALQUILADO', $transporte->origen);
+        $this->assertSame('Cambio validado', $transporte->comentario_cambio);
+        $this->assertSame('Incidencia fuente', $transporte->incidencia_operativa);
+        $this->assertSame(RQMinaActividadTransporte::RECEPCION_RECIBIDO, $transporte->recepcion_estado);
+        $this->assertSame('Retorno conforme', $transporte->recepcion_observacion);
+        $this->assertSame('2026-04-30', (string) $transporte->recepcion_fecha);
+
+        // Estructura nueva enviada por RQ Mina
+        $this->assertSame('CARGA', $transporte->tipo_transporte);
+        $this->assertSame('B', $transporte->turno);
+        $this->assertSame(2, (int) $transporte->cantidad_unidades_requeridas);
+        $this->assertSame(12, (int) $transporte->capacidad_requerida);
+
+        if (Schema::hasColumn('rq_mina_actividad_transportes', 'documentos')) {
+            $this->assertNotNull($transporte->documentos);
+        }
+    }
+
+    public function test_guardar_plan_con_ids_reutiliza_las_filas_y_conserva_el_historial(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->plannerRoleId);
+        $this->assignMinaScope($usuarioId, $minaId);
+        $usuario = Usuario::query()->with('rol')->findOrFail($usuarioId);
+        $rq = $this->createRQMina($minaId, $usuarioId, '2026-04-01', '2026-04-30');
+        $planService = app(RQMinaPlanService::class);
+        $rqService = app(RQMinaService::class);
+        $plan = $planService->ensureDefaultPlan($rq, $usuario);
+        $estructura = $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
+        $this->createTransportEvent((string) $rq->id, $estructura['transporte_id'], $usuarioId);
+
+        // El editor ya devuelve el id de cada fila: guardar no debe recrear el
+        // requerimiento, para no perder el historial ni la carpeta de documentos.
+        $rqService->updatePlanOperativo($usuario, $rq->fresh(), [
+            [
+                'id' => $estructura['grupo_id'],
+                'nombre' => 'Grupo operativo',
+                'area_operativa' => 'C1',
+                'modulo' => 'MOLIENDA',
+                'actividades' => [[
+                    'id' => $estructura['actividad_id'],
+                    'client_key' => $estructura['actividad_id'],
+                    'sait' => 'SAIT-100',
+                ]],
+                'transportes' => [[
+                    'id' => $estructura['transporte_id'],
+                    'actividad_key' => $estructura['actividad_id'],
+                    'alcance' => 'SAIT-100',
+                    'unidad_carga' => 'Grua 80T',
+                    'unidades_transporte' => 'Van 15',
+                ]],
+            ],
+        ], null, (string) $plan->id);
+
+        $this->assertSame($estructura['grupo_id'], (string) DB::table('rq_mina_actividad_grupos')
+            ->where('rq_mina_plan_id', (string) $plan->id)->value('id'));
+        $this->assertSame($estructura['actividad_id'], (string) DB::table('rq_mina_actividades')
+            ->where('grupo_id', $estructura['grupo_id'])->value('id'));
+        $this->assertSame([$estructura['transporte_id']], DB::table('rq_mina_actividad_transportes')
+            ->where('grupo_id', $estructura['grupo_id'])->pluck('id')->all());
+
+        $transporte = RQMinaActividadTransporte::query()->findOrFail($estructura['transporte_id']);
+        $this->assertSame('ABC-123', $transporte->placas_asignadas);
+        $this->assertSame(RQMinaActividadTransporte::ESTADO_ASIGNADO, $transporte->estado_logistico);
+
+        if (Schema::hasTable('rq_mina_actividad_transporte_eventos')) {
+            $this->assertSame(1, DB::table('rq_mina_actividad_transporte_eventos')
+                ->where('transporte_id', $estructura['transporte_id'])->count());
+        }
+    }
+
     public function test_duplicar_copia_estructura_desplaza_fechas_y_limpia_ejecucion(): void
     {
         $minaId = $this->createMina();

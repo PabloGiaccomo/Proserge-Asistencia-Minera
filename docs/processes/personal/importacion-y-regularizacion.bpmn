@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_importacion_y_regularizacion" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_personal_importacion_y_regularizacion" name="Importacion y regularizacion: mapa" isExecutable="false">
+    <bpmn:documentation>Son entradas distintas: Excel muta por lotes; registrar antiguo crea una persona; regularizar existente conserva su identidad. | Evidencia: app/Modules/Personal/Services/ImportPersonalService.php; app/Modules/Personal/Services/PersonalAntiguoService.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_importacion_y_regularizacion">
+    <bpmn:lane id="Lane_User" name="RR.HH. autorizado">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Kind</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>EndExcel</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>EndOld</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>EndRegular</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Excel</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Old</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Regular</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Solicitud sobre Personal">
+      <bpmn:documentation>app/Modules/Personal/Services/ImportPersonalService.php::import; app/Modules/Personal/Services/PersonalAntiguoService.php::create y regularizeExisting.</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:exclusiveGateway id="Kind" name="Operacion solicitada">
+      <bpmn:documentation>Las rutas y servicios distinguen archivo, alta historica y regularizacion de existente.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Excel" name="Importar Excel por lotes">
+      <bpmn:documentation>app/Modules/Personal/Services/ImportPersonalService.php::import: detecta formato y aplica cambios.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Old" name="Registrar trabajador antiguo">
+      <bpmn:documentation>app/Modules/Personal/Services/PersonalAntiguoService.php::create: valida documento unico y crea Personal, ficha y posible contrato.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Regular" name="Regularizar trabajador existente">
+      <bpmn:documentation>app/Modules/Personal/Services/PersonalAntiguoService.php::regularizeExisting: lockForUpdate, preserva identidad y devuelve advertencias.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndExcel" name="Resumen de importacion">
+      <bpmn:documentation>app/Modules/Personal/Services/ImportPersonalService.php::import</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndOld" name="Trabajador historico registrado">
+      <bpmn:documentation>app/Modules/Personal/Services/PersonalAntiguoService.php::create</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndRegular" name="Regularizacion revisada">
+      <bpmn:documentation>app/Modules/Personal/Services/PersonalAntiguoService.php::regularizeExisting</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Kind"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Kind" targetRef="Excel" name="Archivo"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Kind" targetRef="Old" name="Alta antigua"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Kind" targetRef="Regular" name="Existente"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Excel" targetRef="EndExcel"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Old" targetRef="EndOld"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Regular" targetRef="EndRegular"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_importacion_y_regularizacion">
+    <bpmndi:BPMNPlane id="Plane_importacion_y_regularizacion" bpmnElement="Process_personal_importacion_y_regularizacion">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1310" height="420" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="490" width="1310" height="420" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Kind_di" bpmnElement="Kind">
+        <dc:Bounds x="405" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Excel_di" bpmnElement="Excel">
+        <dc:Bounds x="595" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Old_di" bpmnElement="Old">
+        <dc:Bounds x="595" y="664" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Regular_di" bpmnElement="Regular">
+        <dc:Bounds x="595" y="784" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndExcel_di" bpmnElement="EndExcel">
+        <dc:Bounds x="785" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndOld_di" bpmnElement="EndOld">
+        <dc:Bounds x="785" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndRegular_di" bpmnElement="EndRegular">
+        <dc:Bounds x="785" y="382" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="455" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="525" y="580" />
+        <di:waypoint x="595" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="455" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="525" y="700" />
+        <di:waypoint x="595" y="700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="455" y="160" />
+        <di:waypoint x="525" y="160" />
+        <di:waypoint x="525" y="820" />
+        <di:waypoint x="595" y="820" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="745" y="580" />
+        <di:waypoint x="765" y="580" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="785" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="745" y="700" />
+        <di:waypoint x="765" y="700" />
+        <di:waypoint x="765" y="280" />
+        <di:waypoint x="785" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="745" y="820" />
+        <di:waypoint x="765" y="820" />
+        <di:waypoint x="765" y="400" />
+        <di:waypoint x="785" y="400" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

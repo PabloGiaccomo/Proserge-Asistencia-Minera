@@ -157,6 +157,15 @@ El scheduler ejecuta:
 
 - 02:10: limpieza de notificaciones vencidas.
 - 07:30: alertas de herramientas por parada.
+- Cada minuto: ausencias por horario de asistencia.
+- 00:10: sincronizacion de vigencias de habilitacion minera.
+- Cada minuto: sincronizacion por lotes de requisitos agregados o quitados de minas (`habilitacion-minera:sincronizar-requisitos`). Antes de habilitar la configuracion de requisitos, aplicar `2026_10_05_000100_create_mina_requisito_syncs.php` y comprobar que este cron corre. Si el cron no corre, las minas quedan en `Actualizando habilitaciones` y los estados conservadores `EN_PROCESO` no se recalculan.
+- Cada 10 minutos: vencimiento de enlaces temporales de ficha de Personal.
+- Cada 30 minutos: conciliacion de contratos vencidos y estados laborales de Personal.
+
+La entrada a Personal ya no ejecuta estas dos ultimas tareas. Verificar que el
+cron `schedule:run` funcione en produccion antes de desplegar esta mejora; si
+no corre, enlaces y contratos vencidos no se actualizaran automaticamente.
 
 Comprobar manualmente:
 

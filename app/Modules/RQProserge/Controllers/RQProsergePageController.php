@@ -153,7 +153,8 @@ class RQProsergePageController extends WebPageController
         try {
             $result = $this->service->assignPersonal($usuario, $rq, $payload);
         } catch (Throwable $e) {
-            return response()->json(['error' => 'Error tecnico al asignar personal.', 'detail' => $e->getMessage()], 500);
+            report($e);
+            return response()->json(['error' => 'No se pudo asignar personal. Comunicalo a administracion si el problema persiste.'], 500);
         }
 
         if (($result['ok'] ?? false) === false) {
@@ -249,7 +250,8 @@ class RQProsergePageController extends WebPageController
         try {
             $result = $this->service->replaceAssignment($usuario, $rq, $detalleId, $payload);
         } catch (Throwable $e) {
-            return response()->json(['error' => 'Error tecnico al reemplazar personal.', 'detail' => $e->getMessage()], 500);
+            report($e);
+            return response()->json(['error' => 'No se pudo reemplazar personal. Comunicalo a administracion si el problema persiste.'], 500);
         }
 
         if (($result['ok'] ?? false) === false) {

@@ -70,6 +70,7 @@ class PermissionCatalog
         'evaluar_supervisores',
         'ver_residentes',
         'evaluar_residentes',
+        'habilitar_evaluacion_residentes',
         'dashboards',
         'crear',
         'editar',
@@ -237,6 +238,7 @@ class PermissionCatalog
             'evaluar_supervisores',
             'ver_residentes',
             'evaluar_residentes',
+            'habilitar_evaluacion_residentes',
             'dashboards',
             'crear',
             'editar',
@@ -397,6 +399,7 @@ class PermissionCatalog
             'evaluar_supervisores' => 'Evaluar supervisores',
             'ver_residentes' => 'Ver evaluaciones de residentes',
             'evaluar_residentes' => 'Evaluar residentes',
+            'habilitar_evaluacion_residentes' => 'Ámbito gerencial para evaluar residentes',
             'dashboards' => 'Dashboard',
             'crear' => 'Crear',
             'editar' => 'Editar',
@@ -464,6 +467,12 @@ class PermissionCatalog
         $allLogisticsTabs = array_values(self::logisticsTabActions());
 
         return [
+            [
+                'nombre' => 'SUPERADMIN',
+                'descripcion' => 'Superadministrador con acceso total y control de bajas de cuentas.',
+                'estado' => 'ACTIVO',
+                'permisos' => $full,
+            ],
             [
                 'nombre' => 'ADMIN',
                 'descripcion' => 'Administrador general con acceso total al sistema.',

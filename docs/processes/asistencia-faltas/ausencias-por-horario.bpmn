@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ausencias_por_horario" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_asistencia_faltas_ausencias_por_horario" name="Marcar ausencias por horario" isExecutable="false">
+    <bpmn:documentation>Seleccionar grupos PROGRAMADO de hoy sin asistencia cerrada. Por grupo: comprobar horario vencido y jornada actual. En transaccion: bloquear y revalidar; marcar pendientes AUSENTE. Recalcular metricas si hubo cambios; reportar errores y continuar. Informar cantidades; devolver FAILURE si hubo errores | Evidencia: routes/console.php; app/Console/Commands/AsistenciaAusentesPorHorarioCommand.php::handle; app/Modules/Asistencia/Services/AsistenciaService.php::marcarAusentesPorHorario</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_ausencias_por_horario">
+    <bpmn:lane id="Lane_Auto" name="Proceso automatico / Sistema">
+      <bpmn:flowNodeRef>Start_Timer</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_0</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_1</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_2</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_3</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_4</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Run</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Timer" name="* * * * *">
+      <bpmn:documentation>routes/console.php. Expresion del scheduler Laravel; diagrama descriptivo no ejecutable. Zona horaria efectiva depende de configuracion y despliegue.</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="Start_Timer_timer"><bpmn:timeCycle>* * * * *</bpmn:timeCycle></bpmn:timerEventDefinition>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_0" name="Seleccionar grupos PROGRAMADO de hoy sin asistencia cerrada">
+      <bpmn:documentation>AsistenciaAusentesPorHorarioCommand::handle; jornada en display_timezone, lotes de 100, scheduler withoutOverlapping.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_1" name="Por grupo: comprobar horario vencido y jornada actual">
+      <bpmn:documentation>app/Modules/Asistencia/Services/AsistenciaService.php::marcarAusentesPorHorario: devuelve cero si no cumple; no es un cierre de asistencia.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_2" name="En transaccion: bloquear y revalidar; marcar pendientes AUSENTE">
+      <bpmn:documentation>app/Modules/Asistencia/Services/AsistenciaService.php::marcarAusentesPorHorario: lockForUpdate; omite grupo cancelado, encabezado CERRADO, distribucion vacia o sin pendientes. Guarda origen SISTEMA, actor null y motivo. No sobrescribe marcas resueltas. Excepcion revierte esta transaccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_3" name="Recalcular metricas si hubo cambios; reportar errores y continuar">
+      <bpmn:documentation>app/Modules/Asistencia/Services/AsistenciaService.php::marcarAusentesPorHorario: metricas tras commit. Command::handle captura Throwable por grupo y continua. Un error de metricas no revierte marcas ya confirmadas.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_4" name="Informar cantidades; devolver FAILURE si hubo errores">
+      <bpmn:documentation>AsistenciaAusentesPorHorarioCommand::handle; SUCCESS solo cuando failed=0.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Run" name="Ejecucion finalizada; consultar resumen">
+      <bpmn:documentation>app/Console/Commands/AsistenciaAusentesPorHorarioCommand.php::handle; app/Modules/Asistencia/Services/AsistenciaService.php::marcarAusentesPorHorario</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start_Timer" targetRef="Task_0"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Task_0" targetRef="Task_1"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_1" targetRef="Task_2"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_2" targetRef="Task_3"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_3" targetRef="Task_4"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_4" targetRef="End_Run"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_ausencias_por_horario">
+    <bpmndi:BPMNPlane id="Plane_ausencias_por_horario" bpmnElement="Process_asistencia_faltas_ausencias_por_horario">
+      <bpmndi:BPMNShape id="Lane_Auto_di" bpmnElement="Lane_Auto" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Timer_di" bpmnElement="Start_Timer">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_0_di" bpmnElement="Task_0">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_1_di" bpmnElement="Task_1">
+        <dc:Bounds x="595" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_2_di" bpmnElement="Task_2">
+        <dc:Bounds x="785" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_3_di" bpmnElement="Task_3">
+        <dc:Bounds x="975" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_4_di" bpmnElement="Task_4">
+        <dc:Bounds x="1165" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Run_di" bpmnElement="End_Run">
+        <dc:Bounds x="1355" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="595" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="160" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="765" y="160" />
+        <di:waypoint x="785" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="935" y="160" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="955" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1125" y="160" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1315" y="160" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1335" y="160" />
+        <di:waypoint x="1355" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

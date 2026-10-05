@@ -56,7 +56,7 @@ class RQProsergePolicy
 
     public function canAccessMina(Usuario $usuario, string $minaId): bool
     {
-        if ($this->isPrivileged($usuario)) {
+        if ($this->hasUnrestrictedMinaAccess($usuario)) {
             return true;
         }
 
@@ -66,16 +66,15 @@ class RQProsergePolicy
             ->exists();
     }
 
-    private function isRrhhOrPrivileged(Usuario $usuario): bool
+    public function hasUnrestrictedMinaAccess(Usuario $usuario): bool
     {
-        return PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'ver');
-    }
+        // An explicit mine scope takes precedence over role-level privileges.
+        if ($usuario->scopesMina()->exists()) {
+            return false;
+        }
 
-    private function isPrivileged(Usuario $usuario): bool
-    {
         $rol = strtoupper((string) optional($usuario->rol)->nombre);
 
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'administrar');
+        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
     }
 }

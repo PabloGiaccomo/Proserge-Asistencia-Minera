@@ -45,8 +45,9 @@ Preguntas respondidas:
   encontrados quedan pendientes para registro manual o regularizacion.
 - Estados del Excel que son tareas pendientes, como `PROGRAMAR EMO`, se
   interpretan como `EN_PROCESO` mas accion pendiente.
-- Si se agotan intentos o se desaprueba el ultimo intento, la mina debe mostrarse
-  como `NO_HABILITADO`.
+- Si se alcanza o supera el maximo configurado con resultado desaprobado, la
+  mina se muestra `NO_HABILITADO`, pero se permiten nuevos intentos y se cuenta
+  el exceso (`3/2`, `4/2`, etc.).
 - `NO_APLICA` cuenta como requisito resuelto y no exige observacion obligatoria.
 - La convalidacion es sugerida y confirmada por usuario, no automatica.
 - El precio del intento aplica por prioridad: fecha de registro del intento,

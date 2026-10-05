@@ -214,12 +214,34 @@ legacy, pero la forma recomendada es usar `asistencia_detalle_id` o
 
 ## Limitaciones pendientes
 
-- Las vistas Blade de asistencia todavia funcionan como pantallas base y no
-  consumen todo el nuevo resource.
 - El dashboard final de parada no se construyo en esta iteracion.
 - No se normalizaron los turnos de `rq_mina_actividad_turnos`.
 - No se eliminaron columnas legacy.
 - No se ejecuto backfill real.
+
+## Dashboard operativo de asistencia y faltas
+
+La vista web de Asistencia consume datos reales de grupos, distribuciones y
+marcaciones. El periodo predeterminado es el mes actual y puede filtrarse por
+fechas, turno, estado, mina, supervisor o texto. Presenta cobertura, presentes,
+ausentes, tardanzas, pendientes de marcacion, cierre de grupos, evolucion diaria
+y comparacion por mina. La tabla operativa enlaza al detalle del grupo.
+
+Las vistas web de detalle, marcacion individual y marcacion masiva usan
+`AsistenciaService` y `AsistenciaGrupoResource`; ya no simulan resultados ni
+usan nombres de campos antiguos. Cerrar y reabrir pasan por las mismas reglas
+transaccionales de la API.
+
+Faltas incorpora filtros, indicadores, tendencia, reincidencias, contexto del
+trabajador y destino, y diferencia el origen automatico desde Asistencia del
+registro manual. Corregir exige motivo y actualiza la asistencia origen; anular
+exige motivo y conserva el registro historico.
+
+Validacion de esta vista:
+
+- pruebas web, API y Mi Asistencia: 39 casos y 192 aserciones;
+- compilacion Blade y Vite;
+- revision visual en 1440x900 y 390x844 sin desborde de pagina.
 # Mi Asistencia y responsables de Man Power
 
 - La cuenta operativa se vincula al trabajador mediante `usuarios.personal_id`.

@@ -14,6 +14,7 @@
 @import "./modules/personal-fichas.css";
 @import "./modules/personal-import.css";
 @import "./modules/personal-regularization.css";
+@import "./modules/mining-dashboard.css";
 
 @theme {
     /* Color primario - Turquesa */
@@ -5552,6 +5553,26 @@ body.notif-panel-open {
 .lgt-file-hint { display:block; font-size:10px; color:#94a3b8; font-weight:400; margin-top:2px; }
 .lgt-file-loaded { display:inline-flex; align-items:center; gap:4px; margin-top:3px; font-size:11px; font-weight:600; color:#0f766e; background:#ecfeff; padding:2px 8px; border-radius:4px; }
 .lgt-service-form-inline { margin:0; }
+.lgt-status.is-danger { background:#fee2e2; color:#991b1b; }
+.lgt-status.is-muted { background:#f1f5f9; color:#64748b; }
+.lgt-service-card.is-cerrado { border-left:3px solid #94a3b8; }
+.lgt-servicio-filtros { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end; margin:0 0 14px; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+.lgt-servicio-filtros label { display:flex; flex-direction:column; gap:5px; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; }
+.lgt-servicio-filtros input, .lgt-servicio-filtros select { border:1px solid #cbd5e1; border-radius:8px; padding:9px 10px; font:inherit; font-size:13px; background:#fff; color:#0f172a; }
+.lgt-servicio-filtros-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.lgt-servicio-resumen { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:0 0 12px; font-size:12px; color:#475569; }
+.lgt-servicio-resumen strong { color:#0f172a; }
+.lgt-service-docs { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; }
+.lgt-service-doc-link { display:inline-flex; align-items:center; gap:6px; border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:6px 12px; font-size:11px; font-weight:700; color:#0f766e; text-decoration:none; }
+.lgt-service-doc-link:hover { background:#ecfeff; }
+.lgt-service-summary-item.is-wide { grid-column:span 2; }
+.lgt-service-history { margin:10px 0 0; }
+.lgt-service-history > summary { cursor:pointer; font-size:11px; font-weight:700; color:#0f766e; }
+.lgt-service-history-list { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:6px; }
+.lgt-service-history-list li { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; border-left:2px solid #cbd5e1; padding:2px 0 2px 10px; font-size:11px; color:#334155; }
+.lgt-service-history-date { font-weight:700; color:#0f172a; white-space:nowrap; }
+.lgt-service-history-text { flex:1 1 320px; }
+.lgt-service-history-user { color:#64748b; white-space:nowrap; }
 
 /* === FROM: resources/views/personal/antiguo/regularizar.blade.php === */
 .legacy-regularize-page {
@@ -7308,17 +7329,26 @@ body.notif-panel-open {
 
     .mine-tile.ok {
         border-color: #86efac;
+        border-left-width: 4px;
         background: #f0fdf4;
     }
 
     .mine-tile.warn {
         border-color: #fde68a;
+        border-left-width: 4px;
         background: #fffbeb;
     }
 
     .mine-tile.info {
         border-color: #93c5fd;
+        border-left-width: 4px;
         background: #eff6ff;
+    }
+
+    .mine-tile.danger {
+        border-color: #fca5a5;
+        border-left-width: 4px;
+        background: #fef2f2;
     }
 
     .mine-tile.neutral {
@@ -7348,6 +7378,11 @@ body.notif-panel-open {
         color: #64748b;
         font-size: 12px;
         line-height: 1.35;
+    }
+
+    .mine-attempts-exceeded {
+        color: #9a4d00;
+        font-weight: 700;
     }
 
     .mine-action-hint {
@@ -11916,6 +11951,12 @@ body.notif-panel-open {
 .rq-plan-transport-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(135deg,#f8fafc,#f1f5f9); border-bottom:1px solid #eef2f7; }
 .rq-plan-transport-number { font-size:12px; font-weight:700; color:#1e293b; display:inline-flex; align-items:center; gap:8px; }
 .rq-plan-transport-number-badge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; background:#0f766e; color:#fff; border-radius:6px; font-size:11px; font-weight:800; line-height:1; }
+.rq-plan-transport-logistica { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:3px 10px; font-size:10px; font-weight:700; border:1px solid #cbd5e1; background:#f8fafc; color:#475569; }
+.rq-plan-transport-logistica.is-ok { border-color:#bbf7d0; background:#f0fdf4; color:#166534; }
+.rq-plan-transport-logistica.is-info { border-color:#bae6fd; background:#f0f9ff; color:#075985; }
+.rq-plan-transport-logistica.is-warning { border-color:#fde68a; background:#fffbeb; color:#92400e; }
+.rq-plan-transport-logistica.is-danger { border-color:#fecaca; background:#fef2f2; color:#991b1b; }
+.rq-plan-transport-logistica.is-muted { border-color:#e2e8f0; background:#f8fafc; color:#64748b; }
 .rq-plan-transport-body { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:14px; padding:14px; align-items:start; }
 .rq-plan-transport-field { min-width:0; }
 .rq-plan-transport-field.span-2 { grid-column:span 2; }

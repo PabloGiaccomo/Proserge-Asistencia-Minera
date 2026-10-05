@@ -3,7 +3,7 @@
 namespace App\Modules\Evaluaciones\Services;
 
 use App\Models\EvaluacionSupervisor;
-use App\Models\GrupoTrabajo;
+use App\Models\Mina;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
 use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
@@ -26,7 +26,7 @@ class EvaluacionSupervisorService
         $query = EvaluacionSupervisor::query();
 
         if (!$this->policy->canViewOthers($usuario)) {
-            $query->where('evaluador_id', $usuario->personal_id);
+            $this->policy->ownedBy($query, $usuario);
         }
 
         if (!empty($filters['destino_tipo'])) {
@@ -53,9 +53,7 @@ class EvaluacionSupervisorService
             $query->where('grupo_trabajo_id', $filters['grupo_trabajo_id']);
         }
 
-        return $query->orderByDesc('fecha')->get()->filter(
-            fn (EvaluacionSupervisor $item): bool => $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)
-        )->values();
+        return $query->orderByDesc('fecha')->get();
     }
 
     public function find(Usuario $usuario, string $id): ?EvaluacionSupervisor
@@ -67,28 +65,33 @@ class EvaluacionSupervisorService
         }
 
         if (!$this->policy->canViewType($usuario, 'supervisores')
-            || (!$this->policy->canViewOthers($usuario) && (string) $item->evaluador_id !== (string) $usuario->personal_id)
+            || (!$this->policy->canViewOthers($usuario) && !$this->policy->owns($usuario, $item))
         ) {
             return null;
         }
 
-        return $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id) ? $item : null;
+        return $item;
     }
 
     public function create(Usuario $usuario, array $payload): array
     {
-        if (!$this->policy->canEvaluateType($usuario, 'supervisores')
-            || !$this->policy->canAccessDestino($usuario, $payload['destino_tipo'], $payload['destino_id'])
-        ) {
+        if (!$this->policy->canEvaluateType($usuario, 'supervisores')) {
             return $this->forbidden();
         }
 
-        if (!$usuario->personal_id) {
-            return $this->businessError('EVAL_EVALUATOR_NOT_LINKED', 'La cuenta debe estar vinculada a Personal para identificar al evaluador.');
+        if (strtoupper((string) $payload['destino_tipo']) === 'MINA'
+            && !Mina::query()->whereKey($payload['destino_id'])->exists()) {
+            return $this->businessError('EVAL_SUP_CONTEXT_INVALID', 'Selecciona una unidad minera válida.');
         }
 
-        if (!$this->isEvaluadoInContext($payload)) {
-            return $this->businessError('EVAL_SUP_CONTEXT_INVALID', 'Evaluado no pertenece al contexto operativo indicado');
+        if (!$this->policy->canEvaluateSupervisorTarget(
+            $usuario,
+            (string) $payload['evaluado_id'],
+            (string) $payload['destino_tipo'],
+            (string) $payload['destino_id'],
+            $payload['grupo_trabajo_id'] ?? null,
+        )) {
+            return $this->businessError('EVAL_SUP_CONTEXT_INVALID', 'Selecciona un trabajador registrado como supervisor.');
         }
 
         if ($this->hasDuplicate($payload)) {
@@ -124,9 +127,7 @@ class EvaluacionSupervisorService
 
     public function update(Usuario $usuario, EvaluacionSupervisor $item, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])
-            || !$this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)
-        ) {
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])) {
             return $this->forbidden();
         }
 
@@ -168,20 +169,6 @@ class EvaluacionSupervisorService
             ->where('evaluado_id', $payload['evaluado_id'])
             ->where('grupo_trabajo_id', $payload['grupo_trabajo_id'])
             ->whereDate('fecha', $payload['fecha'])
-            ->exists();
-    }
-
-    private function isEvaluadoInContext(array $payload): bool
-    {
-        if (empty($payload['grupo_trabajo_id'])) {
-            return true;
-        }
-
-        return GrupoTrabajo::query()
-            ->where('id', $payload['grupo_trabajo_id'])
-            ->whereHas('detalle', function ($q) use ($payload): void {
-                $q->where('personal_id', $payload['evaluado_id']);
-            })
             ->exists();
     }
 

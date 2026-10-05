@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ingreso_publico" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_personal_ingreso_publico" name="Ingreso publico de colaborador" isExecutable="false">
+    <bpmn:documentation>Recibe una ficha publica con clave diaria, la revisa y la acepta o marca como contrato no firmado. | Evidencia: routes/web.php; app/Modules/Personal/Controllers/PublicPersonalIngresoController.php; app/Modules/Personal/Controllers/PersonalIngresoController.php; app/Modules/Personal/Services/PersonalIngresoService.php; tests/Feature/PersonalIngresoPublicFlowTest.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_ingreso_publico">
+    <bpmn:lane id="Lane_Worker" name="Trabajador o postulante">
+      <bpmn:flowNodeRef>Start_Form</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Key</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_RRHH" name="RR.HH.">
+      <bpmn:flowNodeRef>Task_Review</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Gateway_Accept</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Accepted</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>End_Pending</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Task_Store</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_Accept</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Task_NotSigned</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Form" name="Abre ficha publica">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Key" name="Validar clave y completar ficha">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_Store" name="Guardar ingreso RECIBIDA">
+      <bpmn:documentation>PersonalIngresoService::storeSubmission</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_Review" name="Revisar ingreso">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_Accept" name="Accion de revision">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Accept" name="Crear o vincular Personal">
+      <bpmn:documentation>PersonalIngresoService::accept</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Accepted" name="Ingreso ACEPTADA">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_NotSigned" name="Incorporar a Personal; CONTRATO_NO_FIRMADO">
+      <bpmn:documentation>PersonalIngresoService::markContractNotSigned -&gt; persistIntoPersonal(..., true). No es un rechazo de ingreso ni omite la incorporacion a Personal.</bpmn:documentation>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Pending" name="En Personal; contrato no firmado">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Form" targetRef="Task_Key"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Key" targetRef="Task_Store"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Store" targetRef="Task_Review"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Review" targetRef="Gateway_Accept"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Gateway_Accept" targetRef="Task_Accept" name="Aceptar"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_Accept" targetRef="End_Accepted"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Gateway_Accept" targetRef="Task_NotSigned" name="No firma"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_NotSigned" targetRef="End_Pending"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_ingreso_publico">
+    <bpmndi:BPMNPlane id="Plane_ingreso_publico" bpmnElement="Process_personal_ingreso_publico">
+      <bpmndi:BPMNShape id="Lane_Worker_di" bpmnElement="Lane_Worker" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1470" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_RRHH_di" bpmnElement="Lane_RRHH" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1470" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="670" width="1470" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Form_di" bpmnElement="Start_Form">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Key_di" bpmnElement="Task_Key">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Store_di" bpmnElement="Task_Store">
+        <dc:Bounds x="595" y="724" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Review_di" bpmnElement="Task_Review">
+        <dc:Bounds x="785" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Accept_di" bpmnElement="Gateway_Accept">
+        <dc:Bounds x="975" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Accept_di" bpmnElement="Task_Accept">
+        <dc:Bounds x="1165" y="724" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Accepted_di" bpmnElement="End_Accepted">
+        <dc:Bounds x="1355" y="442" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NotSigned_di" bpmnElement="Task_NotSigned">
+        <dc:Bounds x="1165" y="844" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Pending_di" bpmnElement="End_Pending">
+        <dc:Bounds x="1355" y="562" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="760" />
+        <di:waypoint x="595" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="745" y="760" />
+        <di:waypoint x="765" y="760" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="935" y="460" />
+        <di:waypoint x="955" y="460" />
+        <di:waypoint x="955" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1025" y="460" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1095" y="760" />
+        <di:waypoint x="1165" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1315" y="760" />
+        <di:waypoint x="1335" y="760" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1025" y="460" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1095" y="880" />
+        <di:waypoint x="1165" y="880" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1315" y="880" />
+        <di:waypoint x="1335" y="880" />
+        <di:waypoint x="1335" y="580" />
+        <di:waypoint x="1355" y="580" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -31,13 +31,13 @@ class RQProsergeApiTest extends TestCase
         DB::table('roles')->insert([
             [
                 'id' => $this->rolRrhhId,
-                'nombre' => 'RRHH',
+                'nombre' => 'RRHH_TEST_'.Str::random(8),
                 'permisos' => json_encode(['rq_proserge.read', 'rq_proserge.write']),
                 'estado' => 'ACTIVO',
             ],
             [
                 'id' => $this->rolPlannerId,
-                'nombre' => 'PLANNER',
+                'nombre' => 'PLANNER_TEST_'.Str::random(8),
                 'permisos' => json_encode(['rq_mina.read']),
                 'estado' => 'ACTIVO',
             ],
@@ -63,6 +63,59 @@ class RQProsergeApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('code', 'RQ_PROSERGE_SHOW_OK');
+    }
+
+    public function test_administrar_rq_no_omite_scope_en_listas_detalle_y_acciones(): void
+    {
+        [$minaId, $permitido] = $this->crearEscenarioBase();
+        [, $ajeno] = $this->crearEscenarioBase();
+        DB::table('roles')->where('id', $this->rolRrhhId)->update([
+            'permisos' => json_encode(['rq_proserge' => ['administrar' => true]]),
+        ]);
+        $userId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($userId, $minaId);
+        $usuario = Usuario::query()->findOrFail($userId);
+        $service = app(RQProsergeService::class);
+        $policy = app(\App\Modules\RQProserge\Policies\RQProsergePolicy::class);
+        $rqAjeno = \App\Models\RQProserge::query()->findOrFail($ajeno);
+
+        $this->assertSame([$permitido], $service->listForUser($usuario, [])->pluck('id')->all());
+        $this->assertSame([$permitido], $service->listOperationalForUser($usuario)->pluck('id')->all());
+        $this->assertTrue($service->listForUser($usuario, ['mina_id' => $rqAjeno->mina_id])->isEmpty());
+        $this->assertNotNull($service->findForUser($usuario, $permitido));
+        $this->assertNull($service->findForUser($usuario, $ajeno));
+        $this->assertFalse($policy->assign($usuario, $rqAjeno));
+        $this->assertFalse($policy->update($usuario, $rqAjeno));
+        $this->assertFalse($policy->unassign($usuario, $rqAjeno));
+        $this->withToken($this->crearToken($userId))->getJson('/api/v1/rq-proserge/'.$ajeno)->assertNotFound();
+
+        $this->withSession([
+            'auth_token' => 'test-token',
+            'user_id' => $userId,
+            'user' => ['id' => $userId, 'permissions' => ['rq_proserge' => ['administrar' => true]]],
+        ])->get(route('rq-proserge.index'))
+            ->assertOk()
+            ->assertViewHas('data', fn (array $data): bool => array_column($data['data'], 'id') === [$permitido]);
+
+        $usuario->rol->nombre = 'ADMIN';
+        $this->assertSame([$permitido], $service->listOperationalForUser($usuario)->pluck('id')->all());
+        $this->assertNull($service->findForUser($usuario, $ajeno));
+    }
+
+    public function test_administrar_rq_sin_scope_no_da_acceso_global_a_rrhh(): void
+    {
+        [, $rqId] = $this->crearEscenarioBase();
+        DB::table('roles')->where('id', $this->rolRrhhId)->update([
+            'permisos' => json_encode(['rq_proserge' => ['administrar' => true]]),
+        ]);
+        $usuario = Usuario::query()->findOrFail($this->crearUsuario($this->rolRrhhId));
+        $service = app(RQProsergeService::class);
+        $this->assertTrue($service->listForUser($usuario, [])->isEmpty());
+        $this->assertTrue($service->listOperationalForUser($usuario)->isEmpty());
+        $this->assertNull($service->findForUser($usuario, $rqId));
+
+        $usuario->rol->nombre = 'ADMIN';
+        $this->assertNotNull($service->findForUser($usuario, $rqId));
     }
 
     public function test_rrhh_sin_scope_no_accede(): void
@@ -387,6 +440,80 @@ class RQProsergeApiTest extends TestCase
             'motivo_retiro' => 'Desasignado desde flujo legacy.',
         ]);
         $this->assertDatabaseHas('rq_mina_detalle', ['id' => $rqMinaDetalleId, 'cantidad_atendida' => 0]);
+    }
+
+    public function test_desasignar_legacy_no_sobrescribe_asignaciones_historicas(): void
+    {
+        [$minaId, $rqId, $detalleId] = $this->crearEscenarioBase(true);
+        $userId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($userId, $minaId);
+        $token = $this->crearToken($userId);
+        $personalId = $this->crearPersonal($minaId);
+
+        foreach (['RETIRADO', 'REEMPLAZADO', 'CANCELADO'] as $estado) {
+            $assignmentId = $this->crearAsignacionProserge($rqId, $detalleId, $personalId, '2026-05-01', '2026-05-02');
+            $audit = [
+                'estado' => $estado,
+                'retirado_por_id' => $userId,
+                'retirado_at' => '2026-04-30 10:00:00',
+                'motivo_retiro' => 'Decision anterior',
+            ];
+            DB::table('rq_proserge_detalle')->where('id', $assignmentId)->update($audit);
+            $this->withToken($token)->postJson('/api/v1/rq-proserge/'.$rqId.'/desasignar', [
+                'rq_proserge_detalle_id' => $assignmentId,
+            ])->assertStatus(422)->assertJsonPath('code', 'RQ_PROSERGE_ASSIGNMENT_INACTIVE');
+            $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentId] + $audit);
+        }
+    }
+
+    public function test_retiro_web_confirma_motivo_y_conserva_historial(): void
+    {
+        [$minaId, $rqId, $detalleId] = $this->crearEscenarioBase(true);
+        $userId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($userId, $minaId);
+        $personalId = $this->crearPersonal($minaId);
+        $assignmentId = $this->crearAsignacionProserge($rqId, $detalleId, $personalId, '2026-05-01', '2026-05-02');
+        $this->withSession([
+            'auth_token' => 'test-token', 'user_id' => $userId,
+            'user' => ['id' => $userId, 'permissions' => ['rq_proserge' => ['asignar' => true]]],
+        ]);
+        $url = '/rq-proserge/'.$rqId.'/asignaciones/'.$assignmentId.'/retirar';
+        $this->postJson($url, ['motivo' => '   '])->assertUnprocessable();
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentId, 'estado' => 'ASIGNADO']);
+        $this->postJson($url, ['motivo' => 'Cambio solicitado'])->assertOk();
+        $this->postJson($url, ['motivo' => 'Segundo clic'])->assertUnprocessable();
+        $this->assertDatabaseHas('rq_proserge_detalle', [
+            'id' => $assignmentId, 'estado' => 'RETIRADO',
+            'retirado_por_id' => $userId, 'motivo_retiro' => 'Cambio solicitado',
+        ]);
+    }
+
+    public function test_error_de_base_en_retiro_web_no_expone_sql(): void
+    {
+        [$minaId, $rqId, $detalleId] = $this->crearEscenarioBase(true);
+        $userId = $this->crearUsuario($this->rolRrhhId);
+        $this->asignarScopeUsuario($userId, $minaId);
+        $personalId = $this->crearPersonal($minaId);
+        $assignmentId = $this->crearAsignacionProserge($rqId, $detalleId, $personalId, '2026-05-01', '2026-05-02');
+        $rq = \App\Models\RQProserge::query()->findOrFail($rqId);
+        $this->mock(RQProsergeService::class, function ($mock) use ($rq): void {
+            $mock->shouldReceive('findForUser')->once()->andReturn($rq);
+            $mock->shouldReceive('retireAssignment')->once()->andThrow(new \Illuminate\Database\QueryException(
+                'mysql', 'update rq_proserge_detalle set retirado_por_id = ?', ['sensitive-user'],
+                new \PDOException('Unknown column retirado_por_id'),
+            ));
+        });
+        config(['app.debug' => true]);
+        $this->withSession([
+            'auth_token' => 'test-token', 'user_id' => $userId,
+            'user' => ['id' => $userId, 'permissions' => ['rq_proserge' => ['asignar' => true]]],
+        ])->postJson('/rq-proserge/'.$rqId.'/asignaciones/'.$assignmentId.'/retirar', ['motivo' => 'Cambio solicitado'])
+            ->assertStatus(500)
+            ->assertJsonPath('code', 'RQ_PROSERGE_DATABASE_ERROR')
+            ->assertDontSee('retirado_por_id')
+            ->assertDontSee('sensitive-user')
+            ->assertDontSee('trace');
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentId, 'estado' => 'ASIGNADO']);
     }
 
     public function test_asignacion_titular_regular_captura_trazabilidad_y_cubre_titular(): void

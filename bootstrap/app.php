@@ -31,6 +31,14 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (QueryException $e, Request $request) {
+            if ($request->is('rq-proserge', 'rq-proserge/*', 'api/v1/rq-proserge', 'api/v1/rq-proserge/*')) {
+                $message = 'No se pudo completar la operacion de RQ Proserge. Comunicalo a administracion para revisar la base de datos.';
+
+                return $request->expectsJson()
+                    ? response()->json(['ok' => false, 'error' => $message, 'code' => 'RQ_PROSERGE_DATABASE_ERROR'], 500)
+                    : back()->withErrors(['rq_proserge' => $message]);
+            }
+
             if (!$request->is('mi-asistencia', 'mi-asistencia/*')) {
                 return null;
             }

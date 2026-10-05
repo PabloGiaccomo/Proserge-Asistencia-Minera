@@ -1,12 +1,14 @@
 @php
     $fieldName = $name;
-    $selectedId = (string) old($fieldName, '');
+    $selectedId = (string) old($fieldName, $selectedId ?? '');
 @endphp
 
 <div
     class="eval-field eval-person-search"
     data-eval-person-search
     data-search-url="{{ route('evaluaciones.personal.buscar') }}"
+    data-evaluation-type="{{ $evaluationType }}"
+    @if(!empty($mineSource)) data-mine-source="{{ $mineSource }}" @endif
 >
     <label for="{{ $fieldName }}_search">{{ $label }}</label>
     <div class="eval-person-search-control">

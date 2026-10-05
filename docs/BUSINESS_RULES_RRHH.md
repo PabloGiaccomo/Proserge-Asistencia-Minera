@@ -129,6 +129,10 @@ Estados de habilitacion:
 - `FINALIZADO_POR_DESAPROBACION` solo si se requiere por compatibilidad
   historica. La prioridad funcional y visible ante agotamiento de intentos es
   `NO_HABILITADO`.
+- Un examen vencido deja la asignacion en `EN_PROCESO` para regularizacion; no
+  usa `NO_HABILITADO` mientras el flujo permite continuar actualizando examenes.
+- `NO_HABILITADO` se reserva para una desaprobacion que alcanzo o supero el
+  maximo configurado de intentos. Los intentos adicionales siguen permitidos.
 
 Estados de examen:
 
@@ -152,27 +156,37 @@ Reglas:
 - Cada mina tiene requisitos/examenes configurables, no quemados en codigo.
 - Cada examen del trabajador guarda snapshot de requisito/precio/vigencia.
 - Intentos conservan historial; cambios de precio no modifican intentos previos.
-- Un examen puede tener maximo 1 o 2 intentos; nunca debe permitirse un tercer
-  intento.
+- Un examen conserva un maximo configurado de 1 o 2 intentos como referencia,
+  pero se permiten intentos adicionales y se contabilizan como `3/2`, `4/2`, etc.
 - Si desaprueba el primer intento y tiene segundo intento disponible, el examen
   sigue `EN_PROCESO`, la mina sigue `EN_PROCESO` y se habilita registrar el
   segundo intento.
-- Si desaprueba el ultimo intento o agota intentos, el examen queda
-  `DESAPROBADO` o equivalente compatible, la mina queda `NO_HABILITADO` y no
-  puede continuar para esa mina.
-- Si un examen desaprobado sin intentos disponibles tambien es requerido por
-  otra mina, esa otra mina debe mostrarse bloqueada/gris para ese trabajador,
-  no permitir asignacion y mostrar motivo operativo.
+- Si alcanza o supera el maximo configurado con resultado desaprobado, el examen
+  queda `DESAPROBADO` y la mina `NO_HABILITADO`, pero puede registrar nuevos
+  intentos y asignarse a otras minas.
+- Al registrar intentos manuales, el numero se asigna dentro de la transaccion
+  con bloqueo del examen. El indice unico evita numeros duplicados. Si falla el
+  guardado, se revierten los cambios de BD y se elimina el archivo recien subido.
 - Examen critico desaprobado puede finalizar proceso de habilitacion; si esto
   ocurre, el estado visible principal debe priorizar `NO_HABILITADO`.
 - Examen vencido puede dejar no habilitado, segun regla del servicio.
+- Un aprobado manual necesita fecha real de realizacion. Ningun resultado
+  registrado puede tener fecha de realizacion futura, tampoco al completar una
+  programacion. Tras vencer un aprobado, el trabajador puede rendir de nuevo;
+  el intento anterior permanece en el historial.
 - `NO_APLICA` debe ser explicito, no exige observacion obligatoria y cuenta como
   requisito resuelto.
 - Convalidacion debe conservar origen y no inventar datos.
 - Convalidacion debe sugerirse, no aplicarse automaticamente.
+- El Master propone habilitar convalidacion para examenes compartidos por mas de
+  una mina y deshabilitarla cuando dejan de estar compartidos. La vista previa
+  enumera ambos grupos y los cambios de permiso. Esto no convalida resultados
+  de trabajadores: cada convalidacion sigue requiriendo confirmacion posterior.
 - Convalidacion solo puede aplicarse si el examen permite convalidacion, existe
   examen equivalente aprobado o vigente en otra mina, el examen origen no esta
-  vencido, no fue desaprobado sin intentos disponibles y el usuario confirma.
+  vencido ni desaprobado y el usuario confirma.
+- El usuario debe tener permiso para convalidar; el scope de mina de otros
+  modulos no restringe esta accion de habilitacion minera.
 - No puede existir `HABILITADO` sin examenes configurados en la mina.
 - No puede existir `HABILITADO` sin examenes generados para el trabajador-mina.
 - No puede existir `HABILITADO` con examenes pendientes, vencidos,
@@ -185,6 +199,12 @@ Estados, acciones pendientes y Excel:
 - Cualquier texto del Excel que represente tarea pendiente debe separarse en
   estado general y accion siguiente.
 - El Excel master no es fuente absoluta de verdad.
+- La importacion del Master reemplaza la configuracion activa de examenes y
+  requisitos de todas las minas, no solo de la mina que se esta visualizando.
+  Los ausentes pueden desactivarse, pero conservan su historial. La vista previa
+  muestra estas desactivaciones y requiere confirmacion explicita. Si el
+  catalogo cambia entre la vista previa y la confirmacion, se rechaza la carga
+  completa y se debe analizar nuevamente el archivo.
 - El Excel master debe actualizar solo trabajadores existentes. Si trae un DNI
   que no existe, se muestra en preview como trabajador no encontrado, no se crea
   automaticamente.

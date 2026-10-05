@@ -15,6 +15,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
@@ -30,14 +31,13 @@ class PersonalMinaExcelImportService
     {
         $this->extendRuntimeLimit(600);
 
-        $spreadsheet = $this->loadSpreadsheetForPreview($file);
         $rows = [];
         $unmapped = [];
         $errors = [];
         $omitted = [];
         $examCatalog = [];
 
-        foreach ($spreadsheet->getWorksheetIterator() as $sheet) {
+        foreach ($this->loadWorksheetsForPreview($file, $omitted) as $sheet) {
             if ($sheet->getSheetState() !== 'visible') {
                 $omitted[] = [
                     'hoja' => $sheet->getTitle(),
@@ -167,7 +167,10 @@ class PersonalMinaExcelImportService
         $rows = $this->decoratePreviewRows($rows, $index);
         $examCatalog = $this->decorateExamCatalog($examCatalog, $index);
 
-        return $this->buildPreviewSummary($rows, $errors, $omitted, $unmapped, $index, $examCatalog);
+        $preview = $this->buildPreviewSummary($rows, $errors, $omitted, $unmapped, $index, $examCatalog);
+        $preview['catalog_fingerprint'] = $this->catalogFingerprint();
+
+        return $preview;
     }
 
     public function confirm(array $preview, Usuario $user): array
@@ -201,6 +204,13 @@ class PersonalMinaExcelImportService
         ];
 
         DB::transaction(function () use ($preview, $user, &$counts): void {
+            if (!isset($preview['catalog_fingerprint'])
+                || !hash_equals($preview['catalog_fingerprint'], $this->catalogFingerprint())) {
+                throw ValidationException::withMessages([
+                    'archivo' => 'El catálogo de minas, exámenes o requisitos cambió desde la revisión. Analiza nuevamente el Master antes de confirmar.',
+                ]);
+            }
+
             $workerCache = [];
             $mineCache = [];
             $examCache = [];
@@ -224,6 +234,10 @@ class PersonalMinaExcelImportService
                     continue;
                 }
 
+                $requirementsChangedBefore = $counts['examenes_mina_agregados']
+                    + $counts['examenes_mina_actualizados']
+                    + $counts['examenes_mina_reactivados'];
+
                 foreach ($catalogRow['examenes'] ?? [] as $examRow) {
                     $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache);
                     $currentExamIds[$exam->id] = true;
@@ -233,7 +247,12 @@ class PersonalMinaExcelImportService
                     $currentRequirementIds[$requirement->id] = true;
                 }
 
-                $changedMineIds[$mina->id] = true;
+                $requirementsChangedAfter = $counts['examenes_mina_agregados']
+                    + $counts['examenes_mina_actualizados']
+                    + $counts['examenes_mina_reactivados'];
+                if ($requirementsChangedAfter > $requirementsChangedBefore) {
+                    $changedMineIds[$mina->id] = true;
+                }
                 $counts['minas_catalogo_reconciliado']++;
             }
 
@@ -247,7 +266,7 @@ class PersonalMinaExcelImportService
             }
 
             foreach (array_keys($changedMineIds) as $mineId) {
-                $sync = $this->habilitation->syncMineAssignmentsAfterRequirementChanges($mineId, $user);
+                $sync = $this->habilitation->syncMineAssignmentsAfterRequirementChanges($mineId, $user, false);
                 $counts['estados_habilitacion_actualizados'] += (int) ($sync['asignaciones_recalculadas'] ?? 0);
             }
 
@@ -295,7 +314,7 @@ class PersonalMinaExcelImportService
 
                 $assignment = $this->resolveAssignmentCached($personal, $mina, $user, $counts, $assignmentCache);
                 if ($resolvedExams) {
-                    $this->habilitation->generateRequiredExams($assignment, $user);
+                    $this->habilitation->generateRequiredExams($assignment, $user, false, false);
                 }
 
                 $workerExams = PersonalMinaExamen::query()
@@ -320,7 +339,7 @@ class PersonalMinaExcelImportService
                 if ($this->applyImportedAssignmentState($personal, $mina, $row, $user)) {
                     $counts['estados_habilitacion_actualizados']++;
                 }
-                if ($this->habilitation->refreshAssignmentFromExams($assignment, $user)) {
+                if ($this->habilitation->refreshAssignmentFromExams($assignment, $user, false)) {
                     $counts['estados_habilitacion_actualizados']++;
                 }
             }
@@ -330,25 +349,97 @@ class PersonalMinaExcelImportService
         return $counts;
     }
 
-    private function loadSpreadsheetForPreview(UploadedFile $file)
+    private function catalogFingerprint(): string
     {
-        $reader = IOFactory::createReaderForFile($file->getRealPath());
-        $reader->setReadDataOnly(true);
-        $sheetNames = collect($reader->listWorksheetNames($file->getRealPath()))
-            ->reject(fn ($name) => in_array(\Illuminate\Support\Str::ascii(mb_strtolower(trim((string) $name))), ['td', 'resumen gral'], true))
-            ->values()
-            ->all();
-        if ($sheetNames) {
-            $reader->setLoadSheetsOnly($sheetNames);
+        $tables = [
+            'minas' => ['id', 'nombre', 'estado'],
+            'examenes_mineros' => ['id', 'nombre', 'activo', 'permite_convalidacion'],
+            'mina_requisitos' => ['id', 'mina_id', 'examen_id', 'nombre', 'activo', 'permite_convalidacion_mina', 'convalidar_desde_otras_minas'],
+        ];
+        $snapshot = [];
+
+        foreach ($tables as $table => $columns) {
+            $snapshot[$table] = DB::table($table)->orderBy('id')->get($columns)->all();
         }
-        $reader->setReadFilter(new class implements IReadFilter {
+
+        return hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR));
+    }
+
+    private function loadWorksheetsForPreview(UploadedFile $file, array &$omitted): \Generator
+    {
+        $path = $file->getRealPath();
+        $sheetInfo = IOFactory::createReaderForFile($path)->listWorksheetInfo($path);
+
+        foreach ($sheetInfo as $info) {
+            $sheetName = (string) ($info['worksheetName'] ?? '');
+            if (($info['sheetState'] ?? 'visible') !== 'visible') {
+                $omitted[] = ['hoja' => $sheetName, 'motivo' => 'Hoja oculta o auxiliar. No participa en la importacion.'];
+                continue;
+            }
+
+            if (in_array(\Illuminate\Support\Str::ascii(mb_strtolower(trim($sheetName))), ['td', 'resumen gral'], true)) {
+                $omitted[] = ['hoja' => $sheetName, 'motivo' => 'Hoja resumen o auxiliar.'];
+                continue;
+            }
+
+            $headerSpreadsheet = $this->previewReader($path, $sheetName, 12)->load($path);
+            try {
+                $headerSheet = $headerSpreadsheet->getSheetByName($sheetName);
+                $headerGrid = $headerSheet ? $this->sheetGrid($headerSheet) : [];
+                $headerRow = $this->detectHeaderRow($headerGrid);
+                if ($headerRow === null) {
+                    $omitted[] = ['hoja' => $sheetName, 'motivo' => 'No se detectaron columnas de trabajador/documento.'];
+                    continue;
+                }
+
+                $columns = $this->detectColumns($headerGrid, $headerRow);
+                if (!$columns['documento']) {
+                    $omitted[] = ['hoja' => $sheetName, 'motivo' => 'No se detecto columna de DNI/documento.'];
+                    continue;
+                }
+                if (empty($columns['examenes'])) {
+                    $omitted[] = ['hoja' => $sheetName, 'motivo' => 'Hoja resumen o sin examenes mineros detectados.'];
+                    continue;
+                }
+            } finally {
+                $headerSpreadsheet->disconnectWorksheets();
+                unset($headerSpreadsheet);
+                gc_collect_cycles();
+            }
+
+            $reader = $this->previewReader($path, $sheetName, 2000);
+            $spreadsheet = $reader->load($path);
+
+            try {
+                $sheet = $spreadsheet->getSheetByName($sheetName);
+                if ($sheet) {
+                    yield $sheet;
+                }
+            } finally {
+                $spreadsheet->disconnectWorksheets();
+                unset($spreadsheet, $reader);
+                gc_collect_cycles();
+            }
+        }
+    }
+
+    private function previewReader(string $path, string $sheetName, int $maxRows)
+    {
+        $reader = IOFactory::createReaderForFile($path);
+        $reader->setReadDataOnly(true);
+        $reader->setLoadSheetsOnly([$sheetName]);
+        $reader->setReadFilter(new class($maxRows) implements IReadFilter {
+            public function __construct(private readonly int $maxRows)
+            {
+            }
+
             public function readCell($columnAddress, $row, $worksheetName = ''): bool
             {
-                return $row <= 2000 && Coordinate::columnIndexFromString($columnAddress) <= 120;
+                return $row <= $this->maxRows && Coordinate::columnIndexFromString($columnAddress) <= 120;
             }
         });
 
-        return $reader->load($file->getRealPath());
+        return $reader;
     }
 
     private function extendRuntimeLimit(int $seconds): void
@@ -637,7 +728,7 @@ class PersonalMinaExcelImportService
             ->all();
 
         $allExams = ExamenMinero::query()
-            ->get(['id', 'nombre', 'activo'])
+            ->get(['id', 'nombre', 'activo', 'permite_convalidacion'])
             ->values();
         $activeExams = $allExams->where('activo', true)->values();
         $examsByName = $allExams
@@ -757,6 +848,24 @@ class PersonalMinaExcelImportService
         $workerDocs = collect($rows)->pluck('documento')->filter()->unique();
         $mineNames = collect($examCatalog)->pluck('mina')->merge(collect($rows)->pluck('mina'))->filter()->unique();
         $catalogExamRows = collect($examCatalog)->flatMap(fn ($row) => $row['examenes'] ?? []);
+        $sharedExamKeys = $this->sharedExamKeys($examCatalog);
+        $existingExamsById = collect($index['allExams'] ?? [])->keyBy('id');
+        $convalidationPlan = $catalogExamRows
+            ->unique(fn ($exam) => $this->sharedExamIdentity($exam))
+            ->map(function ($exam) use ($sharedExamKeys, $existingExamsById): array {
+                $existing = $existingExamsById->get($exam['examen_id_existente'] ?? '');
+
+                return [
+                    'nombre' => (string) ($exam['nombre'] ?? ''),
+                    'actual' => (bool) ($existing?->permite_convalidacion ?? false),
+                    'nuevo' => isset($sharedExamKeys[$this->sharedExamIdentity($exam)]),
+                ];
+            });
+        $convalidationChanges = $convalidationPlan->filter(fn ($change) => $change['actual'] !== $change['nuevo']);
+        $convalidationAllowed = $convalidationPlan->where('nuevo', true)->pluck('nombre')->sort()->values()->all();
+        $convalidationNotAllowed = $convalidationPlan->where('nuevo', false)->pluck('nombre')->sort()->values()->all();
+        $convalidationToActivate = $convalidationChanges->where('nuevo', true)->pluck('nombre')->sort()->values()->all();
+        $convalidationToDeactivate = $convalidationChanges->where('nuevo', false)->pluck('nombre')->sort()->values()->all();
         $matchedExamIds = $catalogExamRows->pluck('examen_id_existente')->filter()->unique();
         $conflicts = $this->conflicts($rows, $index);
         $missingWorkerDocs = $workerDocs->filter(fn ($doc) => !isset($index['workersByDocument'][$doc]));
@@ -778,7 +887,9 @@ class PersonalMinaExcelImportService
                 'examenes_existentes' => $catalogExamRows->where('existe', true)->pluck('examen_id_existente')->unique()->count(),
                 'examenes_catalogo_por_desactivar' => collect($index['activeExams'] ?? [])->reject(fn (ExamenMinero $exam) => $matchedExamIds->contains($exam->id))->count(),
                 'nombres_examen_por_actualizar' => $catalogExamRows->where('accion_catalogo', 'ACTUALIZAR_NOMBRE')->pluck('examen_id_existente')->unique()->count(),
-                'examenes_compartidos_convalidables' => count($this->sharedExamKeys($examCatalog)),
+                'examenes_compartidos_convalidables' => count($sharedExamKeys),
+                'examenes_convalidables_por_activar' => count($convalidationToActivate),
+                'examenes_convalidables_por_desactivar' => count($convalidationToDeactivate),
                 'examenes_agregados_a_minas' => $this->countMissingRequirements($examCatalog, $index),
                 'requisitos_obsoletos_por_desactivar' => collect($requirementsToDeactivate)->sum(fn ($row) => count($row['requisitos'] ?? [])),
                 'trabajadores_asignados_a_minas' => $this->countMissingAssignments($rows, $index),
@@ -817,6 +928,10 @@ class PersonalMinaExcelImportService
                 ->sort()
                 ->values()
                 ->all(),
+            'convalidacion_por_activar' => $convalidationToActivate,
+            'convalidacion_por_desactivar' => $convalidationToDeactivate,
+            'convalidacion_permitida' => $convalidationAllowed,
+            'convalidacion_no_permitida' => $convalidationNotAllowed,
             'nombres_examen_por_actualizar' => $catalogExamRows
                 ->where('accion_catalogo', 'ACTUALIZAR_NOMBRE')
                 ->map(fn ($exam) => [
@@ -1044,7 +1159,7 @@ class PersonalMinaExcelImportService
         }
 
         $exam->forceFill([
-            'permite_convalidacion' => true,
+            'permite_convalidacion' => $allowsConvalidation,
             'updated_by_usuario_id' => $user->id,
         ])->save();
         $counts[$allowsConvalidation ? 'examenes_convalidables_activados' : 'examenes_convalidables_desactivados']++;
@@ -1068,7 +1183,7 @@ class PersonalMinaExcelImportService
             'mina_id' => $mine->id,
             'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
             'fecha_asignacion' => Carbon::today()->toDateString(),
-        ], $user);
+        ], $user, false);
     }
 
     private function resolveAssignmentCached(Personal $personal, Mina $mine, Usuario $user, array &$counts, array &$cache): PersonalMina
@@ -1129,16 +1244,7 @@ class PersonalMinaExcelImportService
             ? $workerExam->intentos
             : PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $workerExam->id)->get();
 
-        $currentAttempts = $attempts
-            ->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)
-            ->count();
-        $nextAttempt = $currentAttempts + 1;
-        $maxAttempts = $workerExam->permite_reintento_snapshot
-            ? min(2, max(1, (int) ($workerExam->max_intentos_snapshot ?: 2)))
-            : 1;
-        if ($nextAttempt > $maxAttempts) {
-            return false;
-        }
+        $nextAttempt = ((int) ($attempts->max('numero_intento') ?? 0)) + 1;
 
         $priceSnapshot = $this->habilitation->resolveAttemptPriceSnapshot(
             $workerExam,

@@ -81,6 +81,8 @@ class UsuarioPageController extends Controller
                 'estado' => $estado,
             ],
             'hasEstadoColumn' => $this->hasEstadoColumn(),
+            'isSuperAdmin' => $this->isSuperAdmin(),
+            'currentUserId' => (string) (session('user_id') ?: session('user.id') ?: ''),
         ]);
     }
 
@@ -202,6 +204,30 @@ class UsuarioPageController extends Controller
     {
         $usuario = $this->findUsuarioOrFail($id);
 
+        $notificationPreferencesCount = NotificationPreference::query()
+            ->where('usuario_id', $usuario->id)
+            ->where('in_app_enabled', true)
+            ->count();
+        $notificationUserSetting = Schema::hasTable('notification_user_settings')
+            ? NotificationUserSetting::query()->where('usuario_id', $usuario->id)->first()
+            : null;
+
+        return view('seguridad.usuarios.show', [
+            'usuario' => $usuario,
+            'hasEstadoColumn' => $this->hasEstadoColumn(),
+            'notificationPreferencesCount' => $notificationPreferencesCount,
+            'notificationUserSetting' => $notificationUserSetting,
+            'isSuperAdmin' => $this->isSuperAdmin(),
+            'currentUserId' => (string) (session('user_id') ?: session('user.id') ?: ''),
+        ]);
+    }
+
+    public function edit(string $id): View
+    {
+        $this->assertAnyDirectPermission('usuarios', ['editar', 'actualizar', 'asignar', 'configurar']);
+
+        $usuario = $this->findUsuarioOrFail($id);
+
         $roles = $this->roleService->active();
         $roleBuckets = $this->roleBuckets($roles);
         $notificationTypes = NotificationType::query()
@@ -217,7 +243,7 @@ class UsuarioPageController extends Controller
             ? NotificationUserSetting::query()->where('usuario_id', $usuario->id)->first()
             : null;
 
-        return view('seguridad.usuarios.show', [
+        return view('seguridad.usuarios.edit', [
             'usuario' => $usuario,
             'roles' => $roles,
             'roleBuckets' => $roleBuckets,
@@ -225,6 +251,8 @@ class UsuarioPageController extends Controller
             'notificationTypes' => $notificationTypes,
             'notificationPreferences' => $notificationPreferences,
             'notificationUserSetting' => $notificationUserSetting,
+            'isSuperAdmin' => $this->isSuperAdmin(),
+            'currentUserId' => (string) (session('user_id') ?: session('user.id') ?: ''),
         ]);
     }
 
@@ -476,7 +504,111 @@ class UsuarioPageController extends Controller
             );
         });
 
-        return redirect()->route('usuarios.show', $usuario->id)->with('success', 'Scope Mina actualizado correctamente.');
+        $count = $minaIds->count();
+        $message = $count === 0
+            ? 'Scope Mina actualizado: 0 minas asignadas. El usuario operará únicamente con acceso local a su mina de adscripción.'
+            : "Scope Mina actualizado: {$count} mina(s) asignada(s) correctamente.";
+
+        return redirect()->route('usuarios.show', $usuario->id)->with('success', $message);
+    }
+
+    public function destroy(Request $request, string $id): RedirectResponse
+    {
+        $this->assertDirectPermission('usuarios', 'eliminar');
+
+        if (!$this->isSuperAdmin()) {
+            abort(403, 'La eliminación de usuarios está restringida estrictamente al rol SUPERADMIN.');
+        }
+
+        $usuario = $this->findUsuarioOrFail($id);
+
+        $currentUserId = (string) (session('user_id') ?: session('user.id') ?: '');
+        if ((string) $usuario->id === $currentUserId) {
+            return redirect()->route('usuarios.index')->with('error', 'No puedes eliminar tu propia cuenta de usuario.');
+        }
+
+        try {
+            $this->adminProtection->assertUserDeleteAllowed($usuario);
+        } catch (ValidationException $exception) {
+            return redirect()->route('usuarios.index')->with('error', $this->validationMessage($exception));
+        }
+
+        $conflicts = $this->adminProtection->getTransactionalDependencies($usuario);
+        if (!empty($conflicts)) {
+            return redirect()->route('usuarios.index')->with(
+                'error',
+                'No se puede eliminar el usuario porque registra actividad histórica en el sistema (' . implode(', ', $conflicts) . '). Para suspender su acceso, desactiva la cuenta.'
+            );
+        }
+
+        $email = $usuario->email;
+
+        DB::transaction(function () use ($usuario): void {
+            if (Schema::hasTable('usuario_roles')) {
+                DB::table('usuario_roles')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            if (Schema::hasTable('usuario_mina_scope')) {
+                DB::table('usuario_mina_scope')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            if (Schema::hasTable('notification_preferences')) {
+                DB::table('notification_preferences')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            if (Schema::hasTable('notification_user_settings')) {
+                DB::table('notification_user_settings')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            if (Schema::hasTable('notification_recipients')) {
+                DB::table('notification_recipients')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            if (Schema::hasTable('auth_tokens')) {
+                DB::table('auth_tokens')->where('usuario_id', $usuario->id)->delete();
+            }
+
+            $usuario->delete();
+        });
+
+        $this->notificationService->emit('usuario_eliminado', [
+            'actor_user_id' => session('user.id'),
+            'entity_type' => 'usuario',
+            'entity_id' => $usuario->id,
+            'title' => 'Usuario eliminado',
+            'message' => sprintf('El usuario %s fue eliminado permanentemente por el SUPERADMIN.', $email),
+            'target_user_ids' => $this->securityAudience('usuarios', ['administrar']),
+            'dedupe_key' => 'usuario_eliminado:' . $usuario->id . ':' . now()->format('YmdHi'),
+            'priority' => 'critical',
+            'category' => 'seguridad',
+        ]);
+
+        return redirect()->route('usuarios.index')->with(
+            'success',
+            "El usuario {$email} fue eliminado permanentemente. El trabajador asociado ha quedado libre para una nueva vinculación si fuera necesario."
+        );
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        $sessionRole = strtoupper(trim((string) (session('user.rol') ?? '')));
+        if ($sessionRole === 'SUPERADMIN') {
+            return true;
+        }
+
+        $sessionRoles = array_map(fn ($r) => strtoupper(trim((string) $r)), session('user.roles', []));
+        if (in_array('SUPERADMIN', $sessionRoles, true)) {
+            return true;
+        }
+
+        $userId = session('user_id') ?: session('user.id');
+        if (!$userId) {
+            return false;
+        }
+
+        $usuario = Usuario::query()->with(['rol:id,nombre', 'rolesAdicionales:id,nombre'])->find($userId);
+
+        return $this->adminProtection->isSuperAdminUser($usuario);
     }
 
     private function findUsuarioOrFail(string $id): Usuario

@@ -1,112 +1,55 @@
 @extends('layouts.app')
 
-@section('title', 'Faltas - Detalle')
+@section('title', 'Detalle de falta - Proserge')
+
+@php
+    $state = $item ? strtoupper((string) ($item->estado ?: 'ACTIVA')) : null;
+    $stateLabels = ['ACTIVA' => 'Pendiente de revisar', 'CORREGIDA' => 'Corregida', 'ANULADA' => 'Anulada'];
+    $stateClasses = ['ACTIVA' => 'danger', 'CORREGIDA' => 'success', 'ANULADA' => 'neutral'];
+@endphp
 
 @section('content')
-<div class="page-header">
-    <div class="page-header-content">
-        <div>
-            <h1 class="page-title">Detalle de Falta</h1>
-            <p class="page-subtitle">Falta #{{ $item['id'] ?? '' }}</p>
-        </div>
-        <div class="page-actions">
-            <a href="{{ route('faltas.index') }}" class="btn btn-outline">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"></line>
-                    <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-                Volver
-            </a>
-        </div>
-    </div>
-</div>
+<div class="attendance-ops-page absence-ops-page">
+    @if($item)
+        <header class="ops-page-header">
+            <div><p class="ops-eyebrow">{{ $item->destino_nombre ?: 'Falta registrada' }}</p><h1>{{ $item->trabajador_nombre ?: 'Trabajador sin nombre' }}</h1><p>{{ $item->trabajador_documento ?: 'Sin documento' }} · {{ \Carbon\Carbon::parse($item->fecha)->format('d/m/Y') }}</p></div>
+            <div class="ops-page-actions"><a href="{{ route('faltas.index') }}" class="ops-btn secondary"><svg viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver</a>@if($state === 'ACTIVA')@allowed('faltas', 'corregir')<a href="{{ route('faltas.corregir', $item->id) }}" class="ops-btn primary">Corregir asistencia</a>@endallowed@endif</div>
+        </header>
 
-@if($item)
-<div class="grid grid-2">
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Información General</h3>
-        </div>
-        <div class="card-body">
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <span class="detail-label">ID</span>
-                    <span class="detail-value">{{ $item['id'] }}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Fecha</span>
-                    <span class="detail-value">{{ $item['fecha'] ?? '-' }}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Tipo</span>
-                    <span class="detail-value">{{ $item['tipo'] ?? '-' }}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Estado</span>
-                    <span class="badge badge-{{ $item['estado'] ?? 'secondary' }}">{{ $item['estado'] ?? 'pendiente' }}</span>
-                </div>
-            </div>
-        </div>
-    </div>
+        <div class="ops-analytics-grid">
+            <section class="ops-panel absence-detail-panel">
+                <div class="ops-panel-head"><div><h2>Información de la falta</h2><p>Origen y contexto operativo.</p></div><span class="ops-status {{ $stateClasses[$state] ?? 'neutral' }}">{{ $stateLabels[$state] ?? $state }}</span></div>
+                <dl class="absence-detail-grid">
+                    <div><dt>Fecha</dt><dd>{{ \Carbon\Carbon::parse($item->fecha)->format('d/m/Y') }}</dd></div>
+                    <div><dt>Motivo</dt><dd>{{ ucfirst(strtolower((string) ($item->motivo ?: 'Ausencia'))) }}</dd></div>
+                    <div><dt>Destino</dt><dd>{{ $item->destino_nombre ?: 'Sin destino identificado' }}</dd></div>
+                    <div><dt>Origen</dt><dd>{{ $item->asistencia_detalle_id ? 'Cierre de asistencia' : 'Registro manual' }}</dd></div>
+                    <div class="wide"><dt>Detalle</dt><dd>{{ $item->descripcion ?: $item->observaciones ?: 'Sin detalle adicional.' }}</dd></div>
+                </dl>
+            </section>
 
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Trabajador</h3>
+            <section class="ops-panel absence-detail-panel">
+                <div class="ops-panel-head"><div><h2>Historial de regularización</h2><p>Acciones aplicadas sobre este registro.</p></div></div>
+                <dl class="absence-detail-grid single">
+                    <div><dt>Corrección</dt><dd>{{ $item->motivo_correccion ?: 'Sin corrección registrada' }}</dd></div>
+                    <div><dt>Fecha de corrección</dt><dd>{{ $item->corregido_at ? \Carbon\Carbon::parse($item->corregido_at)->format('d/m/Y H:i') : '-' }}</dd></div>
+                    <div><dt>Anulación</dt><dd>{{ $item->motivo_anulacion ?: 'Sin anulación registrada' }}</dd></div>
+                </dl>
+            </section>
         </div>
-        <div class="card-body">
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <span class="detail-label">Nombre</span>
-                    <span class="detail-value">{{ $item['trabajador']['nombre'] ?? $item['trabajador_nombre'] ?? '-' }}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">RUT</span>
-                    <span class="detail-value">{{ $item['trabajador']['rut'] ?? $item['trabajador_rut'] ?? '-' }}</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-@if(!empty($item['justificacion']))
-<div class="card">
-    <div class="card-header">
-        <h3 class="card-title">Justificación</h3>
-    </div>
-    <div class="card-body">
-        <p>{{ $item['justificacion'] }}</p>
-    </div>
-</div>
-@endif
-
-<div class="card">
-    <div class="card-header">
-        <h3 class="card-title">Acciones</h3>
-    </div>
-    <div class="card-body">
-        @if(($item['estado'] ?? '') == 'pendiente' && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'corregir'))
-        <a href="{{ route('faltas.corregir', $item['id']) }}" class="btn btn-primary">
-            Corregir Asistencia
-        </a>
+        @if($state === 'ACTIVA')
+            @allowed('faltas', 'anular')
+                <form action="{{ route('faltas.anular', $item->id) }}" method="POST" class="ops-panel absence-action-panel" onsubmit="return confirm('¿Confirmas que deseas anular esta falta?')">
+                    @csrf
+                    <div><h2>Anular registro</h2><p>Úsalo cuando la falta no corresponda. El registro permanecerá en el historial.</p></div>
+                    <div class="ops-field"><label for="absence-cancel-reason">Motivo de anulación</label><input id="absence-cancel-reason" name="motivo_anulacion" type="text" minlength="5" maxlength="1000" required placeholder="Explica por qué no corresponde"></div>
+                    <button class="ops-btn secondary" type="submit">Anular falta</button>
+                </form>
+            @endallowed
         @endif
-        @if(($item['estado'] ?? '') == 'pendiente' && \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'anular'))
-        <form action="{{ route('faltas.anular', $item['id']) }}" method="POST" style="display:inline; margin-left: 8px;">
-            @csrf
-            <button type="submit" class="btn btn-outline" onclick="return confirm('¿Anular esta falta?')">
-                Anular
-            </button>
-        </form>
-        @endif
-    </div>
+    @else
+        <section class="ops-panel"><div class="ops-empty">La falta no existe o no se encuentra dentro de tu alcance.</div></section>
+    @endif
 </div>
-@else
-<div class="card">
-    <div class="card-body">
-        @include('components.empty-state', [
-            'message' => 'Falta no encontrada',
-            'description' => 'La falta que buscas no existe'
-        ])
-    </div>
-</div>
-@endif
 @endsection

@@ -94,6 +94,31 @@ Las fechas se desplazan con la diferencia entre la fecha inicial del plan origen
 y la fecha inicial del plan nuevo. Si cualquier turno o transporte copiado queda
 fuera del rango nuevo, se rechaza toda la duplicacion dentro de una transaccion.
 
+## Datos de logistica y estructura del transporte
+
+Guardar el plan **actualiza cada fila en su lugar** cuando el editor reenvia su `id`
+(hidden por grupo, actividad y transporte). Un id que no pertenece al plan se
+ignora y la fila se crea nueva, de modo que un formulario no puede reasignar filas
+de otra parada. Actualizar en su lugar conserva la trazabilidad que Logistica ya
+registro: `rq_mina_actividad_transporte_eventos` sigue apuntando al mismo
+`transporte_id` y la carpeta de documentos no cambia de dueno.
+
+Si el payload **no** trae ids (payload legacy o cliente antiguo), el guardado
+conserva igualmente la atencion de Logistica: origen, placas, capacidad del
+camion, documentos, estado logistico, incidencias y recepcion. La logica vive en
+`RQMinaService::reservarDatosLogisticos()` y
+`aplicarDatosLogisticosReservados()`, que emparejan cada requerimiento nuevo por
+posicion dentro del grupo y por firma `alcance + unidad de carga`.
+
+Quitar del plan un requerimiento ya atendido borra su placa, documentos y
+recepcion. Para evitarlo sin bloquear la operacion, el editor muestra un aviso
+`Logistica: <estado>` con placa y recepcion, y pide confirmacion antes de
+quitarlo.
+
+El editor del plan registra ademas la estructura que consumen Logistica y Transporte operativo: `tipo_transporte` (`PERSONAL`/`CARGA`), `turno` (`A`, `B` o vacio = ambos turnos) y `cantidad_unidades_requeridas` / `capacidad_requerida`. Un requerimiento sin estructura se sigue mostrando como `TRANSPORTE LEGACY SIN ESTRUCTURA COMPLETA`.
+
+El editor del plan registra ademas la estructura que consumen Logistica y Transporte operativo: `tipo_transporte` (`PERSONAL`/`CARGA`), `turno` (`A`, `B` o vacio = ambos turnos) y `cantidad_unidades_requeridas` / `capacidad_requerida`. Un requerimiento sin estructura se sigue mostrando como `TRANSPORTE LEGACY SIN ESTRUCTURA COMPLETA`.
+
 ## Archivo y modo consulta
 
 Un plan archivado queda en modo consulta. Sus datos historicos siguen visibles,

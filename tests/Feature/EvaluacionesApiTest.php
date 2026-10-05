@@ -16,12 +16,15 @@ class EvaluacionesApiTest extends TestCase
 
     private string $rolVisitanteId;
 
+    private string $rolGerenteId;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->rolPlannerId = (string) Str::uuid();
         $this->rolVisitanteId = (string) Str::uuid();
+        $this->rolGerenteId = (string) Str::uuid();
 
         DB::table('roles')->insert([
             [
@@ -42,14 +45,22 @@ class EvaluacionesApiTest extends TestCase
                 ])),
                 'estado' => 'ACTIVO',
             ],
+            [
+                'id' => $this->rolGerenteId,
+                'nombre' => 'GERENTE_EVALUACIONES_API',
+                'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                    'evaluaciones' => ['ver_residentes', 'evaluar_residentes', 'habilitar_evaluacion_residentes'],
+                ])),
+                'estado' => 'ACTIVO',
+            ],
             ['id' => $this->rolVisitanteId, 'nombre' => 'VISITANTE', 'permisos' => json_encode([]), 'estado' => 'ACTIVO'],
         ]);
     }
 
     public function test_no_duplica_evaluacion_en_mismo_grupo_y_trabajador(): void
     {
-        [$minaId, $grupoId, $trabajadorId] = $this->crearContexto();
-        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        [$minaId, $grupoId, $trabajadorId, $supervisorId] = $this->crearContexto();
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -63,9 +74,9 @@ class EvaluacionesApiTest extends TestCase
 
     public function test_solo_evalua_personal_valido_del_grupo(): void
     {
-        [$minaId, $grupoId] = $this->crearContexto();
+        [$minaId, $grupoId, , $supervisorId] = $this->crearContexto();
         $otro = $this->crearPersonal($minaId, false);
-        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -75,8 +86,8 @@ class EvaluacionesApiTest extends TestCase
 
     public function test_promedios_calculan_bien(): void
     {
-        [$minaId, $grupoId, $trabajadorId] = $this->crearContexto();
-        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        [$minaId, $grupoId, $trabajadorId, $supervisorId] = $this->crearContexto();
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -91,8 +102,8 @@ class EvaluacionesApiTest extends TestCase
 
     public function test_filtros_por_destino_funcionan(): void
     {
-        [$minaId, $grupoId, $trabajadorId] = $this->crearContexto();
-        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        [$minaId, $grupoId, $trabajadorId, $supervisorId] = $this->crearContexto();
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
         $this->asignarScope($usuarioId, $minaId);
         $token = $this->crearToken($usuarioId);
 
@@ -105,12 +116,14 @@ class EvaluacionesApiTest extends TestCase
     public function test_supervisor_y_residente_respetan_reglas_acceso(): void
     {
         [$minaId, $grupoId, $trabajadorId, $supervisorId] = $this->crearContexto();
-        $usuarioId = $this->crearUsuario($this->rolPlannerId, $supervisorId);
+        $residentId = $this->crearPersonal($minaId, false);
+        DB::table('personal')->where('id', $residentId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId, $residentId);
         $token = $this->crearToken($usuarioId);
 
         $sup = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor', [
-            'evaluador_id' => $supervisorId,
-            'evaluado_id' => $trabajadorId,
+            'evaluador_id' => $residentId,
+            'evaluado_id' => $supervisorId,
             'fecha' => '2026-09-01',
             'grupo_trabajo_id' => $grupoId,
             'mina_id' => $minaId,
@@ -118,13 +131,13 @@ class EvaluacionesApiTest extends TestCase
             'destino_id' => $minaId,
             'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
         ]);
-        $sup->assertStatus(403);
+        $sup->assertStatus(201);
 
         $this->asignarScope($usuarioId, $minaId);
 
         $supOk = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor', [
-            'evaluador_id' => $supervisorId,
-            'evaluado_id' => $trabajadorId,
+            'evaluador_id' => $residentId,
+            'evaluado_id' => $supervisorId,
             'fecha' => '2026-09-01',
             'grupo_trabajo_id' => $grupoId,
             'mina_id' => $minaId,
@@ -132,9 +145,14 @@ class EvaluacionesApiTest extends TestCase
             'destino_id' => $minaId,
             'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
         ]);
-        $supOk->assertStatus(201);
+        $supOk->assertStatus(422)->assertJsonPath('code', 'EVAL_SUP_DUPLICATED');
 
-        $resOk = $this->withToken($token)->postJson('/api/v1/evaluaciones/residente', [
+        DB::table('personal')->where('id', $trabajadorId)->update(['puesto' => 'RESIDENTE DE OPERACIONES']);
+        $managerPersonalId = $this->crearPersonal($minaId, false);
+        DB::table('personal')->where('id', $managerPersonalId)->update(['puesto' => 'GERENTE GENERAL']);
+        $managerId = $this->crearUsuario($this->rolGerenteId, $managerPersonalId);
+        $managerToken = $this->crearToken($managerId);
+        $resOk = $this->withToken($managerToken)->postJson('/api/v1/evaluaciones/residente', [
             'fecha' => '2026-09-01',
             'indicadores_kpi_items' => ['REPORTE_ASISTENCIA', 'ENTREGA_INFORMES'],
             'costos_servicio_items' => ['COSTOS_MENSUALES'],

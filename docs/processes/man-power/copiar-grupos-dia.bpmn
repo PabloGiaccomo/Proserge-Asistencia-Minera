@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_copiar_grupos_dia" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_man_power_copiar_grupos_dia" name="Copiar grupos de un dia" isExecutable="false">
+    <bpmn:documentation>Copia grupos fuente a otra fecha. Por defecto reemplaza los grupos destino del SAIT; omite integrantes no elegibles y devuelve contadores. | Evidencia: app/Modules/ManPower/Services/GrupoTrabajoService.php; app/Modules/ManPower/Policies/ManPowerPolicy.php; routes/web.php; routes/api.php</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_copiar_grupos_dia">
+    <bpmn:lane id="Lane_User" name="Planificador operativo">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Request</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Valid</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Overwrite</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Cancel</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Skip</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Copy</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Dia origen preparado">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Request" name="Elegir dia destino, SAIT y sobrescritura">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: sobrescribir_destino por defecto true.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Validar permiso, RQ, plan, SAIT y origen">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: duplicar/crear, manageGrupos, resolveCopyActivity y origen no vacio.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Valid" name="Origen y contexto validos?">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: devuelve error si no hay grupos fuente o el SAIT es ajeno al plan.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:exclusiveGateway id="Overwrite" name="Sobrescribir destino?">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: true si se omite el campo.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Cancel" name="Retirar integrantes y cancelar grupos destino">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: bloquea grupos destino, marca detalles retirados, retira pasajeros y marca CANCELADO. No hay guard explicito de asistencia en este bloque; createGrupo valida despues y un fallo revierte la transaccion.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Skip" name="Omitir duplicados destino">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups: si no sobrescribe, compara fecha/turno, plan, grupo operativo, SAIT, servicio, area y horario; suma grupos_omitidos.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Copy" name="Copiar cada grupo elegible">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups llama copyGrupo/createGrupo por grupo dentro de DB::transaction; fallo lanza RuntimeException y revierte el lote.</bpmn:documentation>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Resumen de grupos e integrantes">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups devuelve copiados, reemplazados y omitidos.</bpmn:documentation>
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Copia diaria rechazada">
+      <bpmn:documentation>app/Modules/ManPower/Services/GrupoTrabajoService.php::copyDayGroups devuelve error si no hay origen o el lote falla.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Request"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Request" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Check" targetRef="Valid"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Valid" targetRef="Overwrite" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Valid" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Overwrite" targetRef="Cancel" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Overwrite" targetRef="Skip" name="No"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Cancel" targetRef="Copy"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Skip" targetRef="Copy"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Copy" targetRef="Done"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_copiar_grupos_dia">
+    <bpmndi:BPMNPlane id="Plane_copiar_grupos_dia" bpmnElement="Process_man_power_copiar_grupos_dia">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="1660" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Request_di" bpmnElement="Request">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Valid_di" bpmnElement="Valid">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Overwrite_di" bpmnElement="Overwrite">
+        <dc:Bounds x="975" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Cancel_di" bpmnElement="Cancel">
+        <dc:Bounds x="1165" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Skip_di" bpmnElement="Skip">
+        <dc:Bounds x="1165" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Copy_di" bpmnElement="Copy">
+        <dc:Bounds x="1355" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1545" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="975" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="160" />
+        <di:waypoint x="975" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1025" y="460" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1165" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1025" y="460" />
+        <di:waypoint x="1095" y="460" />
+        <di:waypoint x="1095" y="580" />
+        <di:waypoint x="1165" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1315" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1315" y="580" />
+        <di:waypoint x="1335" y="580" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1505" y="460" />
+        <di:waypoint x="1525" y="460" />
+        <di:waypoint x="1525" y="160" />
+        <di:waypoint x="1545" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

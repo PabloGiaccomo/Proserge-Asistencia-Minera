@@ -138,6 +138,12 @@
     box-shadow: 0 0 0 3px rgba(25, 211, 197, 0.12);
 }
 
+[data-uppercase="1"],
+input[data-uppercase="1"],
+textarea[data-uppercase="1"] {
+    text-transform: uppercase;
+}
+
 .ficha-input[readonly],
 .ficha-input:disabled,
 .ficha-select:disabled,
@@ -300,7 +306,13 @@
     border: 1px dashed #94a3b8;
     border-radius: 8px;
     background: #fff;
-    touch-action: none;
+    touch-action: none !important;
+}
+
+.signature-pad.is-invalid {
+    border-color: #dc2626 !important;
+    border-style: solid !important;
+    background: #fff5f5 !important;
 }
 
 .ficha-preview-image {
@@ -483,5 +495,132 @@
     .public-guide-number {
         width: 28px;
         height: 28px;
+    }
+}
+
+.ficha-family-table-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+@media (min-width: 641px) {
+    .ficha-family-check-text {
+        display: none !important;
+    }
+
+    .mobile-del-label {
+        display: none !important;
+    }
+
+    .desktop-del-icon {
+        display: inline !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .ficha-family-table-container {
+        overflow-x: visible !important;
+    }
+
+    .ficha-family-responsive,
+    .ficha-family-responsive tbody {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .ficha-family-responsive thead {
+        display: none !important;
+    }
+
+    .ficha-family-responsive tbody {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+    }
+
+    .ficha-family-row-card {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+        padding: 14px !important;
+        border: 1px solid #dbe3ef !important;
+        border-radius: 10px !important;
+        background: #f8fafc !important;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+    }
+
+    .ficha-family-row-card td {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 4px !important;
+        padding: 0 !important;
+        border: none !important;
+        text-align: left !important;
+    }
+
+    .ficha-family-row-card td[data-label]::before {
+        content: attr(data-label);
+        font-size: 11px;
+        font-weight: 700;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .ficha-family-row-card td.ficha-family-check-cell {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 8px !important;
+        padding: 4px 0 !important;
+        text-align: left !important;
+    }
+
+    .ficha-family-row-card td.ficha-family-check-cell::before {
+        display: none !important;
+    }
+
+    .ficha-family-row-card .ficha-check-label {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        cursor: pointer;
+    }
+
+    .ficha-family-row-card .ficha-family-check-text {
+        display: inline !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        color: #334155 !important;
+    }
+
+    .ficha-family-row-card .ficha-family-check-text-readonly::before {
+        content: attr(data-label) ': ';
+        font-weight: 700;
+        color: #475569;
+    }
+
+    .ficha-family-row-card td.ficha-family-action-cell {
+        margin-top: 4px !important;
+        padding-top: 10px !important;
+        border-top: 1px dashed #cbd5e1 !important;
+    }
+
+    .ficha-family-row-card .btn-remove-family {
+        width: 100% !important;
+        padding: 8px 12px !important;
+        border-color: #fca5a5 !important;
+        color: #b91c1c !important;
+        background: #fef2f2 !important;
+        font-weight: 600 !important;
+        justify-content: center !important;
+    }
+
+    .ficha-family-row-card .desktop-del-icon {
+        display: none !important;
+    }
+
+    .ficha-family-row-card .mobile-del-label {
+        display: inline !important;
     }
 }

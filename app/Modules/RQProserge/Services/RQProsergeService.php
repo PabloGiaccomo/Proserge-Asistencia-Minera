@@ -55,7 +55,7 @@ class RQProsergeService
             $query->where('rq_mina_id', $filters['rq_mina_id']);
         }
 
-        if (!$this->isPrivileged($usuario)) {
+        if (!$this->policy->hasUnrestrictedMinaAccess($usuario)) {
             $minaIds = $usuario->scopesMina()->pluck('mina_id');
             $query->whereIn('mina_id', $minaIds);
         }
@@ -206,7 +206,7 @@ class RQProsergeService
             $query->where('rq_mina_id', $filters['rq_mina_id']);
         }
 
-        if (!$this->isPrivileged($usuario)) {
+        if (!$this->policy->hasUnrestrictedMinaAccess($usuario)) {
             $minaIds = $usuario->scopesMina()->pluck('mina_id');
             $query->whereIn('mina_id', $minaIds);
         }
@@ -331,40 +331,8 @@ class RQProsergeService
 
     public function unassignPersonal(Usuario $usuario, RQProserge $rq, string $rqProsergeDetalleId): array
     {
-        if (!$this->policy->unassign($usuario, $rq)) {
-            return $this->businessError('RQ_PROSERGE_UNASSIGN_FORBIDDEN', 'No autorizado para desasignar en este RQ Proserge');
-        }
-
-        if ($blocked = $this->finishedParadaModificationError($rq)) {
-            return $blocked;
-        }
-
-        $detalle = RQProsergeDetalle::query()
-            ->where('id', $rqProsergeDetalleId)
-            ->where('rq_proserge_id', $rq->id)
-            ->first();
-
-        if (!$detalle) {
-            return $this->businessError('RQ_PROSERGE_DETALLE_NOT_FOUND', 'Asignacion no encontrada en el RQ Proserge');
-        }
-
-        $rqMinaDetalleId = $detalle->rq_mina_detalle_id;
-
-        DB::transaction(function () use ($detalle, $rqMinaDetalleId, $rq, $usuario): void {
-            $detalle->forceFill([
-                'estado' => RQProsergeDetalle::ESTADO_RETIRADO,
-                'retirado_por_id' => $usuario->id,
-                'retirado_at' => now(),
-                'motivo_retiro' => $detalle->motivo_retiro ?: 'Desasignado desde flujo legacy.',
-            ])->save();
-            $this->recalculateCantidadAtendida($rqMinaDetalleId);
-            $this->recalculateEstado($rq, $usuario);
-        });
-
-        return [
-            'ok' => true,
-            'rq' => $rq->fresh(['mina:id,nombre', 'responsableRrhh:id,email', 'rqMina:id,estado,fecha_inicio,fecha_fin', 'detalle']),
-        ];
+        // Preserve the legacy API contract while sharing the audited retirement flow.
+        return $this->retireAssignment($usuario, $rq, $rqProsergeDetalleId, 'Desasignado desde flujo legacy.');
     }
 
     public function updateAssignment(Usuario $usuario, RQProserge $rq, string $assignmentId, array $payload): array
@@ -1048,14 +1016,6 @@ class RQProsergeService
             'mina_estado' => $disponibilidad['mina_estado'] ?? null,
             'captured_at' => now()->toIso8601String(),
         ];
-    }
-
-    private function isPrivileged(Usuario $usuario): bool
-    {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
-            || PermissionMatrix::userCanDirect($usuario, 'rq_proserge', 'administrar');
     }
 
     public function createForUser(Usuario $usuario, array $payload): array

@@ -15,6 +15,7 @@ class PermissionMatrix
             'evaluar_supervisores',
             'ver_residentes',
             'evaluar_residentes',
+            'habilitar_evaluacion_residentes',
         ],
     ];
 
@@ -337,7 +338,8 @@ class PermissionMatrix
             'descargar_formato_contrato',
             'subir_contrato_firmado',
             'gestionar_lista_negra',
-            'gestionar_puestos' => [$action],
+            'gestionar_puestos',
+            'eliminar' => [$action],
             'activar',
             'desactivar',
             'rechazar',

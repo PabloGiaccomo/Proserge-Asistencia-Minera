@@ -1,0 +1,58 @@
+.mine-dashboard { display: grid; gap: 16px; }
+.mine-dashboard-filters { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)) auto auto; gap: 12px; align-items: end; padding: 18px; background: #fff; border: 1px solid #dbe4ef; }
+.mine-dashboard-filters label { display: grid; gap: 7px; color: #52657f; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+.mine-dashboard-filters select { min-height: 42px; border: 1px solid #cdd9e8; padding: 0 12px; background: #fff; color: #102442; }
+.mine-dashboard-kpis { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px; }
+.mine-dashboard-kpis article { border: 1px solid #dbe4ef; border-top: 4px solid var(--status-color); background: #fff; padding: 15px; }
+.mine-dashboard-kpis span { display: block; color: #5d6f88; font-size: 12px; font-weight: 800; }
+.mine-dashboard-kpis strong { display: block; margin-top: 7px; color: #102442; font-size: 25px; }
+.mine-exam-kpis { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 12px; }
+.mine-exam-kpis article { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 84px; padding: 15px; background: #fff; border: 1px solid #dbe4ef; border-left: 4px solid var(--status-color); }
+.mine-exam-kpis article div { display: grid; gap: 4px; }
+.mine-exam-kpis span { color: #233b5b; font-size: 12px; font-weight: 900; }
+.mine-exam-kpis small { color: #728198; font-size: 11px; line-height: 1.35; }
+.mine-exam-kpis strong { color: #102442; font-size: 25px; }
+.mine-dashboard-grid { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(480px, 1.25fr); gap: 16px; }
+.mine-dashboard-section { background: #fff; border: 1px solid #dbe4ef; padding: 20px; min-width: 0; }
+.mine-dashboard-wide { grid-column: span 1; }
+.mine-dashboard-section header { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 20px; }
+.mine-dashboard-section h2 { margin: 0; font-size: 17px; color: #102442; }
+.mine-dashboard-section p { margin: 5px 0 0; color: #667892; font-size: 13px; }
+.mine-pie-layout { display: flex; align-items: center; gap: 28px; }
+.mine-pie { width: 180px; aspect-ratio: 1; flex: 0 0 auto; border-radius: 50%; background: var(--pie-background); display: grid; place-items: center; }
+.mine-pie::before { content: ''; width: 104px; aspect-ratio: 1; border-radius: 50%; background: #fff; grid-area: 1/1; }
+.mine-pie > span { z-index: 1; grid-area: 1/1; font-size: 25px; font-weight: 900; text-align: center; color: #102442; }
+.mine-pie small { display: block; font-size: 11px; color: #708099; }
+.mine-pie-legend { display: grid; gap: 10px; flex: 1; }
+.mine-pie-legend div { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+.mine-pie-legend i { width: 10px; height: 10px; background: var(--legend-color); }
+.mine-pie-legend strong { color: #102442; }
+.mine-bar-chart { display: grid; gap: 14px; }
+.mine-bar-row { display: grid; grid-template-columns: minmax(120px, 180px) 1fr 40px; align-items: center; gap: 12px; }
+.mine-bar-row a { overflow: hidden; text-overflow: ellipsis; color: #124f78; font-weight: 800; font-size: 12px; }
+.mine-stacked-track { height: 18px; background: #e7edf4; }
+.mine-stacked-bar { display: flex; height: 18px; overflow: hidden; min-width: 2px; }
+.mine-stacked-bar span { background: var(--bar-color); min-width: 2px; }
+.mine-exam-bar-row { display: grid; grid-template-columns: minmax(180px, 260px) 1fr 38px; align-items: center; gap: 12px; margin-top: 13px; }
+.mine-exam-bar-row > div:first-child { display: grid; gap: 3px; }
+.mine-exam-bar-row strong { font-size: 12px; color: #18304f; }
+.mine-exam-bar-row small, .mine-exam-bar-row span { color: #6b7d94; font-size: 11px; }
+.mine-exam-bar-row > div:nth-child(2) { height: 14px; background: #e7edf4; }
+.mine-exam-bar-row > div:nth-child(2) span { display: block; height: 100%; background: #d58b12; }
+.mine-exam-state-filter { display: flex; flex-wrap: wrap; gap: 7px; margin: -4px 0 18px; }
+.mine-exam-state-filter button { padding: 7px 10px; border: 1px solid #cdd9e8; color: #536780; background: #fff; font-size: 11px; font-weight: 800; cursor: pointer; }
+.mine-exam-state-filter button.is-active { border-color: #16b8aa; color: #08766d; background: #e8fbf8; }
+.mine-exam-link { display: grid; gap: 3px; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.mine-exam-link:hover strong { color: #08766d; text-decoration: underline; }
+.mine-dashboard-workers { grid-column: 1 / -1; }
+.mine-dashboard-table-wrap { overflow-x: auto; border: 1px solid #dbe4ef; }
+.mine-dashboard-table-wrap table { width: 100%; min-width: 980px; border-collapse: collapse; }
+.mine-dashboard-table-wrap th { padding: 11px 13px; background: #f2f6fa; color: #52657f; text-align: left; font-size: 11px; text-transform: uppercase; }
+.mine-dashboard-table-wrap td { padding: 12px 13px; border-top: 1px solid #e2e8f0; color: #243b5a; font-size: 12px; }
+.mine-dashboard-table-wrap td:first-child { font-weight: 800; color: #102442; }
+.mine-worker-exam-state { display: inline-block; padding: 5px 8px; background: #fff3d6; color: #895907; font-weight: 800; }
+.mine-dashboard-pagination { margin-top: 14px; }
+.mine-dashboard-empty { display: grid; gap: 5px; padding: 36px; text-align: center; background: #fff; border: 1px dashed #c8d5e5; color: #657791; }
+.mine-dashboard-empty.is-compact { padding: 20px; }
+@media (max-width: 1050px) { .mine-dashboard-filters { grid-template-columns: repeat(2, minmax(180px, 1fr)); } .mine-dashboard-kpis { grid-template-columns: repeat(2, 1fr); } .mine-exam-kpis { grid-template-columns: repeat(2, 1fr); } .mine-dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .mine-dashboard-filters, .mine-dashboard-kpis, .mine-exam-kpis { grid-template-columns: 1fr; } .mine-dashboard-filters .btn { width: 100%; } .mine-pie-layout { flex-direction: column; align-items: stretch; } .mine-pie { margin: 0 auto; } .mine-bar-row { grid-template-columns: 95px 1fr 30px; } .mine-exam-bar-row { grid-template-columns: 120px 1fr 28px; } }

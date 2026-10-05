@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_cerrar_reemplazar_epp" targetNamespace="https://proserge.com/bpmn">
+  <bpmn:process id="Process_logistica_operativa_cerrar_reemplazar_epp" name="Cerrar o reemplazar entrega de EPP" isExecutable="false">
+    <bpmn:documentation>Parte de una entrega existente. Un cambio no cierra la anterior hasta confirmar la nueva entrega. | Evidencia: app/Modules/Epps/Services/EppService.php; app/Modules/Epps/Controllers/EppPageController.php; routes/web.php | Por confirmar: Criterio operativo para elegir desgaste, perdida, uso incorrecto o internamiento.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_cerrar_reemplazar_epp">
+    <bpmn:lane id="Lane_User" name="Usuario autorizado / Logistica">
+      <bpmn:flowNodeRef>Start</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Request</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>CloseEnd</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Confirm</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Done</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Reject</bpmn:flowNodeRef>
+    </bpmn:lane>
+    <bpmn:lane id="Lane_System" name="Sistema">
+      <bpmn:flowNodeRef>Validate</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Kind</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Close</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Prepare</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Check</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Valid</bpmn:flowNodeRef>
+      <bpmn:flowNodeRef>Replace</bpmn:flowNodeRef>
+    </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start" name="Seleccionar entrega existente">
+      <bpmn:documentation>app/Modules/Epps/Controllers/EppPageController.php::closeEntrega</bpmn:documentation>
+      <bpmn:outgoing>Flow_0</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Request" name="Indicar movimiento, fecha y motivo">
+      <bpmn:documentation>app/Modules/Epps/Controllers/EppPageController.php::closeEntrega: CAMBIADO, DEVUELTO, USO_INCORRECTO o PERDIDA_OLVIDO.</bpmn:documentation>
+      <bpmn:incoming>Flow_0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Validate" name="Validar permiso y datos">
+      <bpmn:documentation>routes/web.php: epps,registrar; app/Modules/Epps/Controllers/EppPageController.php::closeEntrega: valida estado y fecha. Fallos retornan sin mutacion.</bpmn:documentation>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Kind" name="Movimiento solicitado">
+      <bpmn:documentation>app/Modules/Epps/Controllers/EppPageController.php::closeEntrega distingue CAMBIADO.</bpmn:documentation>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Close" name="Cerrar si sigue ENTREGADO">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::closeEntrega: si ya cerrado retorna sin cambios; en otro caso guarda estado, motivo, fecha y actor.</bpmn:documentation>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="CloseEnd" name="Cierre procesado">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::closeEntrega; puede ser no-op si ya cerrado.</bpmn:documentation>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Prepare" name="Preparar formulario de reemplazo">
+      <bpmn:documentation>app/Modules/Epps/Controllers/EppPageController.php::closeEntrega: exige ENTREGADO; retorna withInput, no cierra ni crea entrega aun.</bpmn:documentation>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Confirm" name="Completar y confirmar nueva entrega">
+      <bpmn:documentation>app/Modules/Epps/Controllers/EppPageController.php::storeEntrega: _epp_replaces_entrega_id enlaza la solicitud. Abandonar formulario no modifica entrega anterior.</bpmn:documentation>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:businessRuleTask id="Check" name="Bloquear anterior y revalidar">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::replaceEntrega: transaccion con lockForUpdate, exige ENTREGADO y mismo trabajador.</bpmn:documentation>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="Valid" name="Reemplazo valido?">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::replaceEntrega: InvalidArgumentException ante cierre previo o trabajador distinto.</bpmn:documentation>
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Replace" name="Crear nueva y marcar anterior CAMBIADO">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::replaceEntrega: deliver y cierre anterior dentro de transaccion. Excepcion revierte ambas escrituras.</bpmn:documentation>
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Done" name="Reemplazo registrado">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::replaceEntrega devuelve nueva entrega; conserva anterior.</bpmn:documentation>
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Reject" name="Rechazo; sin reemplazo">
+      <bpmn:documentation>app/Modules/Epps/Services/EppService.php::replaceEntrega: validacion y rollback.</bpmn:documentation>
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_0" sourceRef="Start" targetRef="Request"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Request" targetRef="Validate"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Validate" targetRef="Kind"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Kind" targetRef="Close" name="Devolucion / uso incorrecto / perdida"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Close" targetRef="CloseEnd"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Kind" targetRef="Prepare" name="CAMBIADO"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Prepare" targetRef="Confirm"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Confirm" targetRef="Check"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Check" targetRef="Valid"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Valid" targetRef="Replace" name="Si"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_10" sourceRef="Replace" targetRef="Done"></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Valid" targetRef="Reject" name="No"></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_cerrar_reemplazar_epp">
+    <bpmndi:BPMNPlane id="Plane_cerrar_reemplazar_epp" bpmnElement="Process_logistica_operativa_cerrar_reemplazar_epp">
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="60" y="70" width="2040" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_System_di" bpmnElement="Lane_System" isHorizontal="true">
+        <dc:Bounds x="60" y="370" width="2040" height="300" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="215" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Request_di" bpmnElement="Request">
+        <dc:Bounds x="405" y="124" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Validate_di" bpmnElement="Validate">
+        <dc:Bounds x="595" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Kind_di" bpmnElement="Kind">
+        <dc:Bounds x="785" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Close_di" bpmnElement="Close">
+        <dc:Bounds x="975" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CloseEnd_di" bpmnElement="CloseEnd">
+        <dc:Bounds x="1165" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Prepare_di" bpmnElement="Prepare">
+        <dc:Bounds x="975" y="544" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Confirm_di" bpmnElement="Confirm">
+        <dc:Bounds x="1165" y="244" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Check_di" bpmnElement="Check">
+        <dc:Bounds x="1355" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Valid_di" bpmnElement="Valid">
+        <dc:Bounds x="1545" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Replace_di" bpmnElement="Replace">
+        <dc:Bounds x="1735" y="424" width="150" height="72" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Done_di" bpmnElement="Done">
+        <dc:Bounds x="1925" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Reject_di" bpmnElement="Reject">
+        <dc:Bounds x="1735" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0_di" bpmnElement="Flow_0">
+        <di:waypoint x="251" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="328" y="160" />
+        <di:waypoint x="405" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="555" y="160" />
+        <di:waypoint x="575" y="160" />
+        <di:waypoint x="575" y="460" />
+        <di:waypoint x="595" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="745" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="765" y="460" />
+        <di:waypoint x="785" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="975" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="1125" y="460" />
+        <di:waypoint x="1145" y="460" />
+        <di:waypoint x="1145" y="160" />
+        <di:waypoint x="1165" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="835" y="460" />
+        <di:waypoint x="905" y="460" />
+        <di:waypoint x="905" y="580" />
+        <di:waypoint x="975" y="580" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1125" y="580" />
+        <di:waypoint x="1145" y="580" />
+        <di:waypoint x="1145" y="280" />
+        <di:waypoint x="1165" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1315" y="280" />
+        <di:waypoint x="1335" y="280" />
+        <di:waypoint x="1335" y="460" />
+        <di:waypoint x="1355" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1505" y="460" />
+        <di:waypoint x="1525" y="460" />
+        <di:waypoint x="1525" y="460" />
+        <di:waypoint x="1545" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1595" y="460" />
+        <di:waypoint x="1665" y="460" />
+        <di:waypoint x="1665" y="460" />
+        <di:waypoint x="1735" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1885" y="460" />
+        <di:waypoint x="1905" y="460" />
+        <di:waypoint x="1905" y="160" />
+        <di:waypoint x="1925" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1595" y="460" />
+        <di:waypoint x="1665" y="460" />
+        <di:waypoint x="1665" y="160" />
+        <di:waypoint x="1735" y="160" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
