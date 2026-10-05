@@ -190,6 +190,9 @@ class EvaluacionesHistoricalReconciler
             if ($same && $entry['type'] === 'resident') {
                 $same = (float) $existing->total === (float) ($entry['values'][10] ?? null);
             }
+            if ($same && in_array($entry['type'], ['supervisor', 'resident'], true)) {
+                $same = json_decode((string) ($existing->source_payload ?? 'null'), true) === ($entry['values'] ?? []);
+            }
 
             if ($same) {
                 $unchanged[] = $entry;

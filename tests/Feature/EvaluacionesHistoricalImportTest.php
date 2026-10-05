@@ -4,15 +4,22 @@ namespace Tests\Feature;
 
 use App\Models\EvaluacionResidente;
 use App\Models\EvaluacionSupervisor;
+use App\Models\Usuario;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalReconciler;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalMapper;
+use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
+use App\Modules\Evaluaciones\Services\PromedioDesempenoService;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalWorkbookReader;
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class EvaluacionesHistoricalImportTest extends TestCase
@@ -27,6 +34,18 @@ class EvaluacionesHistoricalImportTest extends TestCase
         }
         $this->assertFalse(Schema::hasColumn('asistencia_historica', 'mina_id'));
         $this->assertFalse(Schema::hasColumn('asistencia_historica', 'parada_id'));
+    }
+
+    public function test_only_one_historical_batch_can_hold_confirmation_key(): void
+    {
+        $this->assertTrue(Schema::hasColumn('evaluaciones_import_lotes', 'confirmation_key'));
+        $indexes = DB::table('information_schema.statistics')
+            ->where('table_schema', DB::getDatabaseName())
+            ->where('table_name', 'evaluaciones_import_lotes')
+            ->where('column_name', 'confirmation_key')
+            ->where('non_unique', 0)
+            ->count();
+        $this->assertGreaterThan(0, $indexes);
     }
 
     public function test_historical_evaluation_can_keep_unknown_mine_and_evaluator_without_fake_ids(): void
@@ -343,13 +362,13 @@ class EvaluacionesHistoricalImportTest extends TestCase
     {
         $worker = $this->personal('30303030');
         $sourceKey = hash('sha256', 'control|EV SUPERVISORES|SUP-OLD');
+        $values = array_fill(0, 36, null);
+        $values[31] = 61;
         DB::table('evaluacion_supervisor')->insert([
             'id' => (string) Str::uuid(), 'evaluado_id' => $worker, 'evaluador_id' => null,
             'fecha' => '2025-12-17', 'mina_id' => null, 'resultado_final' => 61,
-            'source_key' => $sourceKey, 'calculo_version' => 'HISTORICA',
+            'source_key' => $sourceKey, 'calculo_version' => 'HISTORICA', 'source_payload' => json_encode($values),
         ]);
-        $values = array_fill(0, 36, null);
-        $values[31] = 61;
         $row = [
             'type' => 'supervisor', 'source_file' => 'control', 'source_sheet' => 'EV SUPERVISORES',
             'source_id' => 'SUP-OLD', 'source_row' => 2, 'dni_ref' => '30303030',
@@ -359,6 +378,180 @@ class EvaluacionesHistoricalImportTest extends TestCase
 
         $this->assertSame([], $result['proposed']);
         $this->assertCount(1, $result['unchanged']);
+    }
+
+    public function test_blocked_preview_never_writes_historical_rows(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $this->personal('41414141');
+        $files = $this->historicalBooks('99999999');
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            $this->assertTrue($preview['ok']);
+            $this->assertGreaterThan(0, $preview['counts']['blocked']);
+            $confirmation = $service->confirm($actor, $preview['lote_id'], $preview['hash']);
+            $this->assertFalse($confirmation['ok']);
+            $this->assertSame(0, DB::table('asistencia_historica')->count());
+            $this->assertSame(0, DB::table('evaluacion_desempeno')->where('origen', 'HISTORICA')->count());
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_valid_batch_confirms_once_and_closes_new_uploads(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $worker = $this->personal('42424242');
+        $files = $this->historicalBooks('42424242');
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            $this->assertTrue($preview['ok']);
+            $this->assertSame(0, $preview['counts']['blocked']);
+            $confirmed = $service->confirm($actor, $preview['lote_id'], $preview['hash']);
+            $this->assertTrue($confirmed['ok']);
+            $this->assertDatabaseHas('evaluacion_desempeno', [
+                'trabajador_id' => $worker, 'origen' => 'HISTORICA', 'mina_id' => null,
+            ]);
+            $this->assertSame(1, DB::table('asistencia_historica')->where('trabajador_id', $worker)->count());
+            $this->assertFalse($service->confirm($actor, $preview['lote_id'], $preview['hash'])['ok']);
+            $this->assertFalse($service->preview($actor, $files)['ok']);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_changed_confirmation_hash_rejects_all_writes(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $this->personal('43434343');
+        $files = $this->historicalBooks('43434343');
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            $result = $service->confirm($actor, $preview['lote_id'], str_repeat('0', 64));
+            $this->assertFalse($result['ok']);
+            $this->assertSame(0, DB::table('evaluacion_desempeno')->where('origen', 'HISTORICA')->count());
+            $this->assertDatabaseHas('evaluaciones_import_lotes', ['id' => $preview['lote_id'], 'estado' => 'PREVIEW']);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_average_failure_rolls_back_evaluations_attendance_and_confirmation(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $this->personal('44444444');
+        $files = $this->historicalBooks('44444444');
+        try {
+            $preview = app(EvaluacionesHistoricalImportService::class)->preview($actor, $files);
+            $average = Mockery::mock(PromedioDesempenoService::class);
+            $average->shouldReceive('refreshForTrabajador')->once()->andThrow(new RuntimeException('fallo de promedio'));
+            app()->instance(PromedioDesempenoService::class, $average);
+
+            try {
+                app(EvaluacionesHistoricalImportService::class)->confirm($actor, $preview['lote_id'], $preview['hash']);
+                $this->fail('Debio abortar la confirmacion.');
+            } catch (RuntimeException $exception) {
+                $this->assertSame('fallo de promedio', $exception->getMessage());
+            }
+            $this->assertSame(0, DB::table('asistencia_historica')->count());
+            $this->assertSame(0, DB::table('evaluacion_desempeno')->where('origen', 'HISTORICA')->count());
+            $this->assertDatabaseHas('evaluaciones_import_lotes', [
+                'id' => $preview['lote_id'], 'estado' => 'PREVIEW', 'confirmation_key' => null,
+            ]);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_historical_import_requires_administrar_even_when_user_can_evaluate(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator(['evaluaciones' => ['evaluar_desempeno']]);
+        $files = $this->historicalBooks('45454545');
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $this->assertSame('EVAL_HIST_FORBIDDEN', $service->preview($actor, $files)['code']);
+            $this->assertSame('EVAL_HIST_FORBIDDEN', $service->confirm($actor, (string) Str::uuid(), str_repeat('0', 64))['code']);
+            $this->assertSame(0, DB::table('evaluaciones_import_lotes')->count());
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    private function administrator(array $permissions = ['evaluaciones' => ['administrar']]): Usuario
+    {
+        $role = (string) Str::uuid();
+        $user = (string) Str::uuid();
+        DB::table('roles')->insert([
+            'id' => $role, 'nombre' => 'ADMIN_HIST_'.Str::upper(Str::random(6)),
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections($permissions)),
+            'estado' => 'ACTIVO',
+        ]);
+        DB::table('usuarios')->insert([
+            'id' => $user, 'email' => Str::lower(Str::random(8)).'@test.local',
+            'password' => bcrypt('secret123'), 'rol_id' => $role, 'estado' => 'ACTIVO',
+        ]);
+
+        return Usuario::findOrFail($user);
+    }
+
+    private function historicalBooks(string $dni): array
+    {
+        $control = new Spreadsheet();
+        $control->getActiveSheet()->setTitle('PERSONAL')->fromArray([['Id', 'DNI'], ['OLD-PERSON', $dni]], null, 'A1');
+        $control->createSheet()->setTitle('ASISTENCIA ENCABEZADO')->fromArray([['Id Asistencia', 'Fecha'], ['OLD-HEADER', '2025-04-30']], null, 'A1');
+        $control->createSheet()->setTitle('ASISTENCIA DETALLE')->fromArray([
+            ['Id Detalle', 'Fecha Marcado', 'Id Asistencia', 'DNI Empleado'],
+            ['OLD-DETAIL', '2025-04-30', 'OLD-HEADER', 'OLD-PERSON'],
+        ], null, 'A1');
+        $daily = array_fill(0, 17, null);
+        $daily[0] = 'OLD-EVAL';
+        $daily[1] = '2025-04-30';
+        $daily[13] = 'OLD-PERSON';
+        $daily[16] = 'OLD-DETAIL';
+        foreach (range(5, 9) as $index) {
+            $daily[$index] = 3;
+        }
+        $control->createSheet()->setTitle('EV DESEMPENO')->fromArray([
+            array_replace(array_fill(0, 17, ''), [1 => 'Fecha', 13 => 'DNI Empleado']), $daily,
+        ], null, 'A1');
+        $control->createSheet()->setTitle('EV SUPERVISORES')->fromArray([['Id EvSup', '', '', 'Fecha']], null, 'A1');
+        $control->createSheet()->setTitle('EV RESIDENTES')->fromArray([['Id EvRes', 'Fecha']], null, 'A1');
+
+        $consolidado = new Spreadsheet();
+        $consolidado->getActiveSheet()->setTitle('Consolidado')->fromArray([
+            array_replace(array_fill(0, 13, ''), [0 => 'DNI', 11 => 'FECHA DE EVALUACION', 12 => 'UNIDAD MINERA']),
+        ], null, 'A1');
+        $paths = [];
+        foreach (['control' => $control, 'consolidado' => $consolidado] as $name => $book) {
+            $paths[$name] = sys_get_temp_dir().DIRECTORY_SEPARATOR.'eval-import-'.Str::random(12).'.xlsx';
+            (new Xlsx($book))->save($paths[$name]);
+            $book->disconnectWorksheets();
+        }
+
+        return $paths;
     }
 
     private function personal(string $dni): string
