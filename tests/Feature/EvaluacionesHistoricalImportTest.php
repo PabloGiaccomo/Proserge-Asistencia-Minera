@@ -500,6 +500,75 @@ class EvaluacionesHistoricalImportTest extends TestCase
         }
     }
 
+    public function test_historical_upload_page_requires_permission_and_enabled_flag(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        $allowed = $this->administrator();
+        $denied = $this->administrator(['evaluaciones' => ['evaluar_desempeno']]);
+        $this->withSession($this->webSession($allowed))->get(route('evaluaciones.historico.importar'))
+            ->assertOk()->assertSee('Carga de datos históricos')->assertSee('Control de asistencia');
+        $this->withSession($this->webSession($denied))->get(route('evaluaciones.historico.importar'))->assertForbidden();
+        config()->set('evaluaciones.historical_import_enabled', false);
+        $this->withSession($this->webSession($allowed))->get(route('evaluaciones.historico.importar'))->assertStatus(409);
+    }
+
+    public function test_historical_review_filters_report_and_prevents_blocked_confirmation(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $files = $this->historicalBooks('91919191');
+        try {
+            $preview = app(EvaluacionesHistoricalImportService::class)->preview($actor, $files);
+            $this->withSession($this->webSession($actor))
+                ->get(route('evaluaciones.historico.importar', ['lote' => $preview['lote_id'], 'estado' => 'blocked']))
+                ->assertOk()->assertSee('DNI inexistente')->assertSee('Aplicar carga')->assertSee('disabled', false);
+            $this->withSession($this->webSession($actor))->post(route('evaluaciones.historico.confirmar'), [
+                'lote_id' => $preview['lote_id'], 'hash' => $preview['hash'], 'confirmacion' => '1',
+            ])->assertSessionHasErrors('importacion');
+            $this->withSession($this->webSession($actor))->get(route('evaluaciones.historico.reporte', ['lote' => $preview['lote_id']]))
+                ->assertOk()->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_historical_action_disappears_after_successful_web_confirmation(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator(['evaluaciones' => ['administrar', 'evaluar_desempeno']]);
+        $worker = $this->personal('92929292');
+        $files = $this->historicalBooks('92929292');
+        try {
+            $this->withSession($this->webSession($actor))->get(route('evaluaciones.index'))->assertSee('Cargar datos históricos');
+            $preview = app(EvaluacionesHistoricalImportService::class)->preview($actor, $files);
+            $this->withSession($this->webSession($actor))->post(route('evaluaciones.historico.confirmar'), [
+                'lote_id' => $preview['lote_id'], 'hash' => $preview['hash'], 'confirmacion' => '1',
+            ])->assertRedirect(route('evaluaciones.index'))->assertSessionHas('success');
+            $this->withSession($this->webSession($actor))->get(route('evaluaciones.index'))->assertDontSee('Cargar datos históricos');
+            $this->assertDatabaseHas('promedio_desempeno', ['trabajador_id' => $worker, 'cantidad_evaluaciones' => 1, 'promedio_total' => 15]);
+            $denied = $this->administrator(['evaluaciones' => ['evaluar_desempeno']]);
+            $this->withSession($this->webSession($denied))->get(route('evaluaciones.historico.reporte', ['lote' => $preview['lote_id']]))->assertForbidden();
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    private function webSession(Usuario $user): array
+    {
+        return ['auth_token' => 'test-token', 'user_id' => $user->id, 'user' => [
+            'id' => $user->id, 'email' => $user->email, 'rol_id' => $user->rol_id,
+            'personal_id' => $user->personal_id,
+            'rol' => $user->rol->nombre, 'name' => 'USUARIO HISTORICO',
+            'permissions' => $user->rol->permisos,
+        ]];
+    }
+
     private function administrator(array $permissions = ['evaluaciones' => ['administrar']]): Usuario
     {
         $role = (string) Str::uuid();

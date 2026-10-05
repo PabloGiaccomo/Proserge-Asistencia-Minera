@@ -2,6 +2,7 @@
 
 use App\Modules\Auth\Controllers\LoginPageController;
 use App\Modules\Evaluaciones\Controllers\EvaluacionDesempenoPageController;
+use App\Modules\Evaluaciones\Controllers\EvaluacionesHistoricalImportPageController;
 use App\Modules\Personal\Controllers\PersonalPageController;
 use App\Modules\Personal\Controllers\PersonalImportController;
 use App\Modules\Personal\Controllers\PersonalDocumentoController;
@@ -334,6 +335,10 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Evaluaciones
     Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno|ver_supervisores|evaluar_supervisores|ver_residentes|evaluar_residentes')->name('evaluaciones.index');
+    Route::get('/evaluaciones/historico/importar', [EvaluacionesHistoricalImportPageController::class, 'index'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.importar');
+    Route::post('/evaluaciones/historico/revisar', [EvaluacionesHistoricalImportPageController::class, 'preview'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.preview');
+    Route::post('/evaluaciones/historico/confirmar', [EvaluacionesHistoricalImportPageController::class, 'confirm'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.confirmar');
+    Route::get('/evaluaciones/historico/{lote}/reporte', [EvaluacionesHistoricalImportPageController::class, 'report'])->middleware('web.permission:evaluaciones,administrar')->whereUuid('lote')->name('evaluaciones.historico.reporte');
     Route::get('/evaluaciones/personal/buscar', [EvaluacionDesempenoPageController::class, 'searchPersonal'])->middleware('web.permission:evaluaciones,evaluar_desempeno|evaluar_supervisores|evaluar_residentes')->name('evaluaciones.personal.buscar');
     Route::get('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.index');
     Route::get('/evaluaciones/desempeno/create', [EvaluacionDesempenoPageController::class, 'create'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.create');

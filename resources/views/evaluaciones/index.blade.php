@@ -38,6 +38,9 @@
                 <input id="evaluation-date" type="date" name="fecha" value="{{ $selectedDate }}" onchange="this.form.submit()">
             </form>
         @endif
+        @if(\App\Support\Rbac\PermissionMatrix::userCanDirect($user, 'evaluaciones', 'administrar') && app(\App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService::class)->isOpen())
+            <a class="btn btn-outline" href="{{ route('evaluaciones.historico.importar') }}">Cargar datos históricos</a>
+        @endif
     </header>
 
     @if($availableTypes->count() > 1)
