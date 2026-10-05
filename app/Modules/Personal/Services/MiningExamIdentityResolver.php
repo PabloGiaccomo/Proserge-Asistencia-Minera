@@ -6,6 +6,7 @@ use App\Models\ExamenMinero;
 use App\Models\ExamenMineroAlias;
 use App\Models\ExamenMineroAsociacion;
 use App\Models\MinaRequisito;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -33,15 +34,17 @@ class MiningExamIdentityResolver
     public function groupIds(string $examId): array
     {
         $principal = $this->canonicalId($examId);
+
         return $this->schemaReady()
             ? array_merge([$principal], ExamenMineroAsociacion::query()->where('principal_id', $principal)->pluck('variante_id')->all())
             : [$examId];
     }
 
-    public function resolve(string $name, ?string $mineId = null): array
+    public function resolve(string $name, ?string $mineId = null, ?Collection $catalog = null): array
     {
         $key = $this->normalizedName($name);
-        $exact = ExamenMinero::query()->get(['id', 'nombre', 'activo'])
+        $catalog ??= ExamenMinero::query()->get(['id', 'nombre', 'activo']);
+        $exact = $catalog
             ->filter(fn ($exam) => $this->normalizedName($exam->nombre) === $key);
         $aliasIds = $this->schemaReady() ? ExamenMineroAlias::query()
             ->where('clave', hash('sha256', $key))
@@ -51,7 +54,7 @@ class MiningExamIdentityResolver
         $principals = array_values(array_unique(array_map(fn ($id) => $this->canonicalId($id), $ids)));
         $result = ['status' => 'missing', 'examen_id' => null, 'principal_id' => null,
             'candidates' => array_values($ids), 'match_type' => $aliasIds ? 'alias' : 'exact'];
-        if (!$principals) {
+        if (! $principals) {
             return $result;
         }
         if (count($principals) !== 1) {
@@ -65,10 +68,28 @@ class MiningExamIdentityResolver
             return array_replace($result, ['status' => 'ambiguous', 'candidates' => $configured, 'principal_id' => $principal]);
         }
         $examId = $configured[0] ?? (count($group) > 1 ? $principal : ($ids[0] ?? $principal));
-        if (!ExamenMinero::query()->whereKey($examId)->where('activo', true)->exists()) {
+        if (! $catalog->contains(fn ($exam) => $exam->id === $examId && $exam->activo)) {
             return $result;
         }
+
         return array_replace($result, ['status' => 'matched', 'examen_id' => $examId, 'principal_id' => $principal,
             'match_type' => count($group) > 1 ? 'group' : $result['match_type']]);
+    }
+
+    public function suggestions(string $name, ?Collection $catalog = null): array
+    {
+        $key = $this->normalizedName($name);
+        if ($key === '') {
+            return [];
+        }
+
+        return ($catalog ?? ExamenMinero::query()->get(['id', 'nombre', 'activo']))
+            ->map(function ($exam) use ($key): array {
+                $other = $this->normalizedName($exam->nombre);
+                $ratio = 1 - levenshtein($key, $other) / max(strlen($key), strlen($other), 1);
+
+                return ['id' => $exam->id, 'nombre' => $exam->nombre, 'similitud' => $ratio];
+            })->filter(fn ($exam) => $exam['similitud'] >= .78)
+            ->sortByDesc('similitud')->take(3)->values()->all();
     }
 }

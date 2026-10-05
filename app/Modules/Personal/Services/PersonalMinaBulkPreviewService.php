@@ -67,16 +67,6 @@ class PersonalMinaBulkPreviewService
                 $row['issues'][] = 'El nombre del Excel no coincide con Personal. Revisar la identidad; no se reemplazara el nombre.';
                 $row['categories'][] = 'identidad';
             }
-            $candidates = $examIndex->get($this->normalizedName($row['exam']), collect());
-            $active = $candidates->filter(fn ($exam) => $exam->activo);
-            $row['matched_exam'] = $active->count() === 1 ? $active->first()->nombre : null;
-            $row['examen_id'] = $active->count() === 1 ? $active->first()->id : null;
-            if ($active->count() !== 1) {
-                $row['categories'][] = 'examen';
-                $row['issues'][] = $candidates->isEmpty() ? 'Examen no encontrado en el catalogo.'
-                    : ($active->isEmpty() ? 'El examen existe, pero esta inactivo.' : 'Examen ambiguo: hay varios registros activos con ese nombre.');
-            }
-
             $mineCandidates = $mineIndex->get($this->normalizedName((string) ($row['mine'] ?? '')), collect())
                 ->map(fn (array $item) => $item[1])
                 ->unique('id')
@@ -90,6 +80,22 @@ class PersonalMinaBulkPreviewService
                     : ($mineCandidates->isEmpty()
                         ? 'Mina no encontrada o no disponible para habilitacion.'
                         : 'Mina ambigua: el nombre coincide con mas de una unidad activa.');
+            }
+            $identity = app(MiningExamIdentityResolver::class);
+            $resolved = $identity->resolve($row['exam'], $row['mina_id'], $exams);
+            $row['examen_id'] = $resolved['examen_id'];
+            $row['matched_exam'] = $exams->firstWhere('id', $resolved['examen_id'])?->nombre;
+            $row['examenes_parecidos'] = [];
+            if ($resolved['status'] !== 'matched') {
+                $candidates = $examIndex->get($this->normalizedName($row['exam']), collect());
+                $row['categories'][] = 'examen';
+                $row['issues'][] = $resolved['status'] === 'ambiguous'
+                    ? 'Examen ambiguo: hay varios registros activos con ese nombre.'
+                    : ($candidates->isEmpty() ? 'Examen no encontrado en el catalogo.' : 'El examen existe, pero esta inactivo.');
+                $row['examenes_parecidos'] = $identity->suggestions($row['exam'], $exams);
+                if ($row['examenes_parecidos']) {
+                    $row['issues'][] = 'Revisar en Organizar examenes: nombres parecidos a '.implode(', ', array_column($row['examenes_parecidos'], 'nombre')).'. No se asociaron automaticamente.';
+                }
             }
         }
         unset($row);

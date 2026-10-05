@@ -167,7 +167,19 @@ class PersonalMinaExcelImportService
         $rows = $this->decoratePreviewRows($rows, $index);
         $examCatalog = $this->decorateExamCatalog($examCatalog, $index);
 
+        $identityErrors = [];
+        foreach ($examCatalog as $catalogRow) {
+            foreach ($catalogRow['examenes'] as $examRow) {
+                if (!empty($examRow['identity_error'])) {
+                    $identityErrors[] = ['hoja' => $catalogRow['hoja'], 'fila' => null,
+                        'motivo' => $examRow['identity_error']];
+                }
+            }
+        }
+        $errors = array_merge($errors, $identityErrors);
+
         $preview = $this->buildPreviewSummary($rows, $errors, $omitted, $unmapped, $index, $examCatalog);
+        $preview['catalog_identity_errors'] = $identityErrors;
         $preview['catalog_fingerprint'] = $this->catalogFingerprint();
 
         return $preview;
@@ -204,6 +216,14 @@ class PersonalMinaExcelImportService
         ];
 
         DB::transaction(function () use ($preview, $user, &$counts): void {
+            if (!empty($preview['catalog_identity_errors'])) {
+                throw ValidationException::withMessages(['archivo' => 'Revisa los nombres ambiguos o parecidos en Organizar examenes y analiza nuevamente el Master.']);
+            }
+            ExamenMinero::query()->orderBy('id')->lockForUpdate()->get(['id']);
+            if (app(MiningExamIdentityResolver::class)->schemaReady()) {
+                DB::table('examen_minero_asociaciones')->orderBy('id')->lockForUpdate()->get();
+                DB::table('examen_minero_aliases')->orderBy('id')->lockForUpdate()->get();
+            }
             if (!isset($preview['catalog_fingerprint'])
                 || !hash_equals($preview['catalog_fingerprint'], $this->catalogFingerprint())) {
                 throw ValidationException::withMessages([
@@ -239,7 +259,7 @@ class PersonalMinaExcelImportService
                     + $counts['examenes_mina_reactivados'];
 
                 foreach ($catalogRow['examenes'] ?? [] as $examRow) {
-                    $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache);
+                    $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache, $mina->id);
                     $currentExamIds[$exam->id] = true;
                     $allowsConvalidation = isset($sharedExamKeys[$this->sharedExamIdentity($examRow)]);
                     $this->syncExamConvalidation($exam, $allowsConvalidation, $counts, $user);
@@ -285,7 +305,7 @@ class PersonalMinaExcelImportService
 
                 $resolvedExams = [];
                 foreach ($row['examenes'] ?? [] as $examRow) {
-                    $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache);
+                    $exam = $this->resolveExamCached($examRow, $counts, $user, $examCache, $mina->id);
                     if ($this->hasImportedPrice($examRow['datos'] ?? [])) {
                         $counts['precios_detectados_omitidos']++;
                     }
@@ -357,6 +377,10 @@ class PersonalMinaExcelImportService
             'mina_requisitos' => ['id', 'mina_id', 'examen_id', 'nombre', 'activo', 'permite_convalidacion_mina', 'convalidar_desde_otras_minas'],
         ];
         $snapshot = [];
+        if (app(MiningExamIdentityResolver::class)->schemaReady()) {
+            $tables['examen_minero_asociaciones'] = ['id', 'variante_id', 'principal_id'];
+            $tables['examen_minero_aliases'] = ['id', 'examen_id', 'mina_id', 'scope_key', 'nombre', 'clave'];
+        }
 
         foreach ($tables as $table => $columns) {
             $snapshot[$table] = DB::table($table)->orderBy('id')->get($columns)->all();
@@ -753,6 +777,7 @@ class PersonalMinaExcelImportService
                 'allExams' => $allExams,
             ])?->id)
             ->filter()
+            ->flatMap(fn ($id) => app(MiningExamIdentityResolver::class)->groupIds($id))
             ->unique()
             ->values();
         $workerIds = collect($workersByDocument)
@@ -811,7 +836,7 @@ class PersonalMinaExcelImportService
 
             foreach ($row['examenes'] as &$examRow) {
                 $examName = (string) ($examRow['nombre'] ?? '');
-                $matchedExam = $this->matchingExam($examName, $index);
+                $matchedExam = $this->matchingExam($examName, $index, $mine?->id);
                 $examRow['existe'] = (bool) $matchedExam;
                 $examRow['examen_id_existente'] = $matchedExam?->id;
                 $examRow['nombre_anterior'] = $matchedExam?->nombre;
@@ -828,9 +853,15 @@ class PersonalMinaExcelImportService
     private function decorateExamCatalog(array $examCatalog, array $index): array
     {
         foreach ($examCatalog as &$catalogRow) {
+            $mine = $index['minesByName'][$this->indexKey((string) ($catalogRow['mina'] ?? ''))] ?? null;
             foreach ($catalogRow['examenes'] as &$examRow) {
                 $name = (string) ($examRow['nombre'] ?? '');
-                $matchedExam = $this->matchingExam($name, $index);
+                $matchedExam = $this->matchingExam($name, $index, $mine?->id);
+                $identity = app(MiningExamIdentityResolver::class)->resolve($name, $mine?->id, $index['allExams']);
+                $examRow['identity_error'] = $identity['status'] === 'ambiguous'
+                    ? 'Examen ambiguo para '.$catalogRow['mina'].': '.$name.'. Revisa los requisitos y asociaciones.'
+                    : (!$matchedExam && $this->similarExamSuggestionsFor($name, $index)
+                        ? 'Nombre parecido sin confirmar: '.$name.'. Revisa Organizar examenes antes de crear otro curso.' : null);
                 $examRow['existe'] = (bool) $matchedExam;
                 $examRow['examen_id_existente'] = $matchedExam?->id;
                 $examRow['nombre_anterior'] = $matchedExam?->nombre;
@@ -858,7 +889,9 @@ class PersonalMinaExcelImportService
                 return [
                     'nombre' => (string) ($exam['nombre'] ?? ''),
                     'actual' => (bool) ($existing?->permite_convalidacion ?? false),
-                    'nuevo' => isset($sharedExamKeys[$this->sharedExamIdentity($exam)]),
+                    'nuevo' => $existing && $this->hasManagedIdentity($existing->id)
+                        ? (bool) $existing->permite_convalidacion
+                        : isset($sharedExamKeys[$this->sharedExamIdentity($exam)]),
                 ];
             });
         $convalidationChanges = $convalidationPlan->filter(fn ($change) => $change['actual'] !== $change['nuevo']);
@@ -1030,10 +1063,18 @@ class PersonalMinaExcelImportService
         return $cache[$key] = $this->resolveMine($name, $counts);
     }
 
-    private function resolveExam(array $examRow, array &$counts, Usuario $user): ExamenMinero
+    private function resolveExam(array $examRow, array &$counts, Usuario $user, ?string $mineId = null): ExamenMinero
     {
         $name = mb_substr(PersonalNormalizer::text($examRow['nombre'] ?? ''), 0, 191);
         $allExams = ExamenMinero::query()->get();
+        $identity = app(MiningExamIdentityResolver::class);
+        $resolved = $identity->resolve($name, $mineId, $allExams);
+        if ($resolved['status'] === 'ambiguous') {
+            throw ValidationException::withMessages(['archivo' => 'El examen '.$name.' es ambiguo para la mina de destino. Revisa Organizar examenes.']);
+        }
+        if ($resolved['status'] === 'matched' && in_array($resolved['match_type'], ['alias', 'group'], true)) {
+            return $allExams->firstWhere('id', $resolved['examen_id']);
+        }
         $exam = $allExams
             ->sortByDesc(fn (ExamenMinero $candidate) => (int) $candidate->activo)
             ->first(fn (ExamenMinero $candidate) => $this->indexKey($candidate->nombre) === $this->indexKey($name));
@@ -1069,6 +1110,10 @@ class PersonalMinaExcelImportService
             return $exam;
         }
 
+        if ($identity->suggestions($name, $allExams)) {
+            throw ValidationException::withMessages(['archivo' => 'El nombre '.$name.' se parece a un examen existente. Confirma su identidad en Organizar examenes antes de importar.']);
+        }
+
         $counts['examenes_creados']++;
 
         return $this->habilitation->storeMiningExam([
@@ -1079,14 +1124,14 @@ class PersonalMinaExcelImportService
         ], $user);
     }
 
-    private function resolveExamCached(array $examRow, array &$counts, Usuario $user, array &$cache): ExamenMinero
+    private function resolveExamCached(array $examRow, array &$counts, Usuario $user, array &$cache, ?string $mineId = null): ExamenMinero
     {
-        $key = $this->examIndexKey((string) ($examRow['nombre'] ?? ''));
+        $key = ($mineId ?? '').'|'.$this->examIndexKey((string) ($examRow['nombre'] ?? ''));
         if (isset($cache[$key])) {
             return $cache[$key];
         }
 
-        return $cache[$key] = $this->resolveExam($examRow, $counts, $user);
+        return $cache[$key] = $this->resolveExam($examRow, $counts, $user, $mineId);
     }
 
     private function resolveRequirement(Mina $mine, ExamenMinero $exam, array &$counts, bool $allowsConvalidation = false): MinaRequisito
@@ -1105,7 +1150,9 @@ class PersonalMinaExcelImportService
                 'permite_convalidacion_mina' => $allowsConvalidation,
                 'convalidar_desde_otras_minas' => $allowsConvalidation,
             ];
-            if (!$allowsConvalidation) {
+            if ($this->hasManagedIdentity($exam->id)) {
+                unset($payload['permite_convalidacion_mina'], $payload['convalidar_desde_otras_minas']);
+            } elseif (!$allowsConvalidation) {
                 $payload['fecha_inicio_convalidacion'] = null;
                 $payload['fecha_fin_convalidacion'] = null;
                 $payload['minas_origen_convalidacion_json'] = null;
@@ -1154,6 +1201,9 @@ class PersonalMinaExcelImportService
 
     private function syncExamConvalidation(ExamenMinero $exam, bool $allowsConvalidation, array &$counts, Usuario $user): void
     {
+        if ($this->hasManagedIdentity($exam->id)) {
+            return;
+        }
         if ((bool) $exam->permite_convalidacion === $allowsConvalidation) {
             return;
         }
@@ -1163,6 +1213,13 @@ class PersonalMinaExcelImportService
             'updated_by_usuario_id' => $user->id,
         ])->save();
         $counts[$allowsConvalidation ? 'examenes_convalidables_activados' : 'examenes_convalidables_desactivados']++;
+    }
+
+    private function hasManagedIdentity(string $examId): bool
+    {
+        $identity = app(MiningExamIdentityResolver::class);
+        return $identity->schemaReady() && (count($identity->groupIds($examId)) > 1
+            || DB::table('examen_minero_aliases')->whereIn('examen_id', $identity->groupIds($examId))->exists());
     }
 
     private function resolveAssignment(Personal $personal, Mina $mine, Usuario $user, array &$counts): PersonalMina
@@ -1674,8 +1731,15 @@ class PersonalMinaExcelImportService
         return preg_replace('/[^a-z0-9]+/', '', $this->normalizeHeader($value)) ?: '';
     }
 
-    private function matchingExam(string $name, array $index): ?ExamenMinero
+    private function matchingExam(string $name, array $index, ?string $mineId = null): ?ExamenMinero
     {
+        $resolved = app(MiningExamIdentityResolver::class)->resolve($name, $mineId, $index['allExams'] ?? null);
+        if ($resolved['status'] === 'ambiguous') {
+            return null;
+        }
+        if ($resolved['status'] === 'matched') {
+            return collect($index['allExams'])->firstWhere('id', $resolved['examen_id']);
+        }
         $matched = $index['examsByName'][$this->indexKey($name)]
             ?? $index['examsByCanonicalName'][$this->examIndexKey($name)]
             ?? null;
@@ -1810,7 +1874,7 @@ class PersonalMinaExcelImportService
 
                 return [$mine->id => [
                     'exam_ids' => collect($catalogRow['examenes'] ?? [])
-                    ->map(fn ($examRow) => $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index)?->id)
+                    ->map(fn ($examRow) => $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index, $mine->id)?->id)
                     ->filter()
                     ->unique()
                     ->values(),
@@ -1929,7 +1993,7 @@ class PersonalMinaExcelImportService
                 }
                 $seen[$key] = true;
 
-                $exam = $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index);
+                $exam = $this->matchingExam((string) ($examRow['nombre'] ?? ''), $index, $mine?->id);
                 if (!$mine || !$exam || !isset($index['requirementKeys'][$mine->id . '|' . $exam->id])) {
                     $count++;
                 }

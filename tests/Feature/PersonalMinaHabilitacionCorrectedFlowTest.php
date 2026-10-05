@@ -2507,7 +2507,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         ]);
     }
 
-    public function test_excel_master_reemplaza_variante_tipografica_por_el_nombre_del_archivo(): void
+    public function test_excel_master_observa_variante_tipografica_sin_crear_duplicado_ni_desactivar_original(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
         $suffix = Str::upper(Str::random(5));
@@ -2522,12 +2522,16 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
         $this->assertContains($detectedName, $preview['examenes_no_encontrados']);
         $this->assertContains($officialName, $preview['examenes_ausentes_en_excel']);
 
-        $result = $importer->confirm($preview, $actor);
+        try {
+            $importer->confirm($preview, $actor);
+            $this->fail('Una errata sin asociacion confirmada no debe crear otro curso.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->assertArrayHasKey('archivo', $exception->errors());
+        }
 
         $this->assertSame($officialName, $official->fresh()->nombre);
-        $this->assertFalse((bool) $official->fresh()->activo);
-        $this->assertSame(1, $result['examenes_catalogo_desactivados']);
-        $this->assertDatabaseHas('examenes_mineros', [
+        $this->assertTrue((bool) $official->fresh()->activo);
+        $this->assertDatabaseMissing('examenes_mineros', [
             'nombre' => $detectedName,
             'activo' => true,
         ]);

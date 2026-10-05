@@ -4,8 +4,8 @@ namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Modules\Personal\Services\MiningExamCatalogOrganizationService;
-use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -21,6 +21,7 @@ class MiningExamCatalogPageController extends WebPageController
             $request->session()->forget('mining_catalog_preview');
             $preview = null;
         }
+
         return view('personal.habilitacion-minera.catalog-organization', ['report' => $this->service->report(), 'preview' => $preview]);
     }
 
@@ -38,6 +39,7 @@ class MiningExamCatalogPageController extends WebPageController
         $preview['token'] = (string) Str::uuid();
         $preview['expires_at'] = now()->addMinutes(15)->timestamp;
         $request->session()->put('mining_catalog_preview', $preview);
+
         return redirect()->route('personal.habilitacion-minera.catalogo.index', ['revision' => 1]);
     }
 
@@ -45,11 +47,12 @@ class MiningExamCatalogPageController extends WebPageController
     {
         $request->validate(['token' => ['required', 'string'], 'confirmar' => ['required', 'accepted']]);
         $preview = $request->session()->get('mining_catalog_preview');
-        if (!$preview || $preview['expires_at'] < now()->timestamp || !hash_equals($preview['token'], $request->input('token'))) {
+        if (! $preview || $preview['expires_at'] < now()->timestamp || ! hash_equals($preview['token'], $request->input('token'))) {
             throw ValidationException::withMessages(['catalogo' => 'La revision vencio o no corresponde a esta sesion. Revisa nuevamente.']);
         }
         $this->service->confirm($preview, $this->requireAuthenticatedUser());
         $request->session()->forget('mining_catalog_preview');
+
         return redirect()->route('personal.habilitacion-minera.catalogo.index')
             ->with('success', 'Organizacion guardada con historial. No se modificaron resultados ni habilitaciones.');
     }

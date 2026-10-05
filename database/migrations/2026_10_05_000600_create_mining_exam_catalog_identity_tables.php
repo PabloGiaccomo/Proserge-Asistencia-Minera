@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('examen_minero_asociaciones')) {
+        if (! Schema::hasTable('examen_minero_asociaciones')) {
             Schema::create('examen_minero_asociaciones', function (Blueprint $table): void {
                 $table->char('id', 36)->primary();
                 $table->char('variante_id', 36)->unique();
@@ -20,7 +20,7 @@ return new class extends Migration
                 $table->foreign('principal_id', 'fk_exam_principal')->references('id')->on('examenes_mineros')->restrictOnDelete();
             });
         }
-        if (!Schema::hasTable('examen_minero_aliases')) {
+        if (! Schema::hasTable('examen_minero_aliases')) {
             Schema::create('examen_minero_aliases', function (Blueprint $table): void {
                 $table->char('id', 36)->primary();
                 $table->char('examen_id', 36)->index();
@@ -35,7 +35,7 @@ return new class extends Migration
                 $table->foreign('mina_id', 'fk_exam_alias_mine')->references('id')->on('minas')->restrictOnDelete();
             });
         }
-        if (!Schema::hasTable('examen_minero_catalogo_cambios')) {
+        if (! Schema::hasTable('examen_minero_catalogo_cambios')) {
             Schema::create('examen_minero_catalogo_cambios', function (Blueprint $table): void {
                 $table->char('id', 36)->primary();
                 $table->char('usuario_id', 36);

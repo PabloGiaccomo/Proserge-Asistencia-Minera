@@ -2,7 +2,13 @@
 
 namespace App\Modules\Personal\Services;
 
-use App\Models\{ExamenMinero, ExamenMineroAlias, ExamenMineroAsociacion, ExamenMineroCatalogoCambio, Mina, MinaRequisito, Usuario};
+use App\Models\ExamenMinero;
+use App\Models\ExamenMineroAlias;
+use App\Models\ExamenMineroAsociacion;
+use App\Models\ExamenMineroCatalogoCambio;
+use App\Models\Mina;
+use App\Models\MinaRequisito;
+use App\Models\Usuario;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -20,6 +26,7 @@ class MiningExamCatalogOrganizationService
         $report['aliases'] = $report['schema_ready'] ? ExamenMineroAlias::query()->orderBy('id')->get()->toArray() : [];
         $report['cambios'] = $report['schema_ready'] ? ExamenMineroCatalogoCambio::query()->latest()->limit(20)->get()->toArray() : [];
         $report['minas'] = Mina::query()->activeOperational()->orderBy('nombre')->get(['id', 'nombre'])->toArray();
+
         return $report;
     }
 
@@ -45,7 +52,7 @@ class MiningExamCatalogOrganizationService
         foreach ($variants as $variantId) {
             ExamenMinero::query()->findOrFail($variantId);
             if ($variantId === $principal->id || ExamenMineroAsociacion::query()->where('principal_id', $variantId)->exists()
-                || !in_array($this->identity->canonicalId($variantId), [$variantId, $principal->id], true)) {
+                || ! in_array($this->identity->canonicalId($variantId), [$variantId, $principal->id], true)) {
                 $this->invalid('No se puede crear un ciclo, mover un grupo ni reasignar una variante de otro principal.');
             }
         }
@@ -61,7 +68,7 @@ class MiningExamCatalogOrganizationService
         }
         foreach ($aliases as &$alias) {
             $alias = ['nombre' => Str::squish($alias['nombre']), 'mina_id' => $alias['mina_id'] ?? null];
-            if ($alias['mina_id'] && !Mina::query()->activeOperational()->whereKey($alias['mina_id'])->exists()) {
+            if ($alias['mina_id'] && ! Mina::query()->activeOperational()->whereKey($alias['mina_id'])->exists()) {
                 $this->invalid('La mina del nombre alternativo no esta disponible.');
             }
             $this->assertNameAvailable($alias['nombre'], $alias['mina_id'], $principal->id, $variants);
@@ -74,6 +81,7 @@ class MiningExamCatalogOrganizationService
         $payload['aliases'] = $aliases;
         $snapshot = $this->snapshot();
         $group = array_unique(array_merge($this->identity->groupIds($principal->id), $variants));
+
         return ['payload' => $payload, 'actor_id' => $actor->id, 'snapshot' => $snapshot,
             'fingerprint' => hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR)),
             'impacto' => collect($snapshot['report']['examenes'])->whereIn('id', $group)->values()->all()];
@@ -85,13 +93,14 @@ class MiningExamCatalogOrganizationService
         if (($preview['actor_id'] ?? null) !== $actor->id) {
             $this->invalid('La revision pertenece a otro usuario.');
         }
+
         return DB::transaction(function () use ($preview, $actor): array {
             ExamenMinero::query()->orderBy('id')->lockForUpdate()->get();
             ExamenMineroAsociacion::query()->orderBy('id')->lockForUpdate()->get();
             ExamenMineroAlias::query()->orderBy('id')->lockForUpdate()->get();
             MinaRequisito::query()->orderBy('id')->lockForUpdate()->get();
             $fresh = $this->preview($preview['payload'], $actor);
-            if (!hash_equals($preview['fingerprint'], $fresh['fingerprint'])) {
+            if (! hash_equals($preview['fingerprint'], $fresh['fingerprint'])) {
                 $this->invalid('El catalogo cambio despues de la revision. Revisa nuevamente antes de confirmar.');
             }
             $payload = $fresh['payload'];
@@ -116,6 +125,7 @@ class MiningExamCatalogOrganizationService
             ExamenMineroCatalogoCambio::query()->create(['id' => (string) Str::uuid(), 'usuario_id' => $actor->id,
                 'accion' => $payload['accion'], 'motivo' => $payload['motivo'],
                 'antes_json' => $fresh['snapshot'], 'despues_json' => $this->snapshot()]);
+
             return ['principal_id' => $payload['principal_id'], 'accion' => $payload['accion']];
         }, 3);
     }
@@ -140,6 +150,7 @@ class MiningExamCatalogOrganizationService
     private function snapshot(): array
     {
         $report = $this->audit->report();
+
         return ['report' => $report, 'examenes' => ExamenMinero::query()->orderBy('id')->get()->toArray(),
             'requisitos' => MinaRequisito::query()->orderBy('id')->get()->toArray(),
             'asociaciones' => ExamenMineroAsociacion::query()->orderBy('id')->get()->toArray(),
@@ -148,7 +159,7 @@ class MiningExamCatalogOrganizationService
 
     private function assertReady(): void
     {
-        if (!$this->identity->schemaReady()) {
+        if (! $this->identity->schemaReady()) {
             $this->invalid('Falta instalar la migracion de organizacion del catalogo. No se guardaron cambios.');
         }
     }

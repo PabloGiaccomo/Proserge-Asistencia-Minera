@@ -39,6 +39,7 @@ trait MiningCatalogFixtures
         $role = (string) Str::uuid();
         DB::table('roles')->insert(['id' => $role, 'nombre' => 'CATALOG_'.Str::random(8), 'estado' => 'ACTIVO',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections(['habilitacion_minera' => $configure ? ['ver', 'configurar'] : ['ver']]))]);
+
         return Usuario::query()->create(['id' => (string) Str::uuid(), 'email' => Str::random(8).'@test.local',
             'password' => bcrypt('test'), 'rol_id' => $role, 'estado' => 'ACTIVO']);
     }
