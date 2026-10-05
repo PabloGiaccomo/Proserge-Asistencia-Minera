@@ -37,6 +37,16 @@ class EvaluacionResidente extends Model
         'estado',
         'created_by_usuario_id',
         'updated_by_usuario_id',
+        'import_lote_id',
+        'source_key',
+        'source_file',
+        'source_sheet',
+        'source_row',
+        'source_id',
+        'source_evaluador',
+        'source_mina',
+        'calculo_version',
+        'source_payload',
     ];
 
     protected $casts = [
@@ -44,6 +54,7 @@ class EvaluacionResidente extends Model
         'periodo_mes' => 'date',
         'indicadores_kpi_items' => 'array',
         'costos_servicio_items' => 'array',
+        'source_payload' => 'array',
     ];
 
     public function residente(): BelongsTo

@@ -84,7 +84,7 @@ class EvaluacionesHistoricalWorkbookReader
                 $result['rows'][] = [
                     'type' => 'daily', 'source_file' => 'control', 'source_sheet' => 'EV DESEMPENO',
                     'source_row' => $line, 'source_id' => $cells[0] ?? null, 'date' => $cells[1] ?? null,
-                    'mine' => $cells[3] ?? null, 'scores' => array_slice($cells, 5, 5),
+                    'hora' => $cells[2] ?? null, 'mine' => $cells[3] ?? null, 'scores' => array_slice($cells, 5, 5),
                     'source_total' => $cells[10] ?? null, 'observaciones' => $cells[11] ?? null,
                     'evaluator_ref' => $cells[12] ?? null, 'dni_ref' => $cells[13] ?? null,
                     'tuvo_incidencia' => $cells[14] ?? null, 'descripcion_incidencia' => $cells[15] ?? null,

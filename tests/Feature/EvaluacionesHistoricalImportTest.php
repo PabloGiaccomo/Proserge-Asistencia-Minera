@@ -2,7 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\EvaluacionResidente;
+use App\Models\EvaluacionSupervisor;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalReconciler;
+use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalMapper;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalWorkbookReader;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -178,6 +181,184 @@ class EvaluacionesHistoricalImportTest extends TestCase
 
         $this->assertCount(2, $read['issues']);
         $this->assertSame([], $read['rows']);
+    }
+
+    public function test_mapper_preserves_historical_supervisor_score_even_when_current_formula_differs(): void
+    {
+        $worker = $this->personal('55667788');
+        $values = array_fill(0, 36, null);
+        foreach (range(5, 30) as $index) {
+            $values[$index] = 4;
+        }
+        $values[31] = 61;
+        $mapped = app(EvaluacionesHistoricalMapper::class)->map(['proposed' => [[
+            'type' => 'supervisor', 'trabajador_id' => $worker, 'date' => '2025-12-17',
+            'source_key' => str_repeat('a', 64), 'source_file' => 'control',
+            'source_sheet' => 'EV SUPERVISORES', 'source_row' => 2,
+            'values' => $values,
+        ]], 'blocked' => [], 'unchanged' => [], 'warnings' => []]);
+
+        $this->assertSame([], $mapped['blocked']);
+        $this->assertSame(61.0, $mapped['proposed'][0]['payload']['resultado_final']);
+        $this->assertSame('HISTORICA', $mapped['proposed'][0]['payload']['calculo_version']);
+        $this->assertSame(str_repeat('a', 64), $mapped['proposed'][0]['payload']['source_key']);
+        $this->assertSame($values, $mapped['proposed'][0]['payload']['source_payload']);
+    }
+
+    public function test_mapper_preserves_historical_resident_score(): void
+    {
+        $worker = $this->personal('66778899');
+        $values = array_fill(0, 11, null);
+        $values[2] = 'Entrega de Protocolos';
+        $values[3] = 'Presenta Costos Mensuales';
+        $values[4] = 'Si';
+        $values[5] = 'Si';
+        $values[6] = 4;
+        $values[10] = 7;
+        $mapped = app(EvaluacionesHistoricalMapper::class)->map(['proposed' => [[
+            'type' => 'resident', 'trabajador_id' => $worker, 'date' => '2025-12-15',
+            'source_key' => str_repeat('b', 64), 'source_file' => 'control',
+            'source_sheet' => 'EV RESIDENTES', 'source_row' => 2,
+            'values' => $values,
+        ]], 'blocked' => [], 'unchanged' => [], 'warnings' => []]);
+
+        $this->assertSame([], $mapped['blocked']);
+        $this->assertSame(7.0, $mapped['proposed'][0]['payload']['total']);
+        $this->assertSame('HISTORICA', $mapped['proposed'][0]['payload']['calculo_version']);
+        $this->assertSame('2025-12-01', $mapped['proposed'][0]['payload']['periodo_mes']);
+        $this->assertSame($values, $mapped['proposed'][0]['payload']['source_payload']);
+    }
+
+    public function test_mapper_rejects_historical_resident_period_already_evaluated(): void
+    {
+        $worker = $this->personal('77889900');
+        $values = array_fill(0, 11, null);
+        $values[6] = 4;
+        $values[10] = 7;
+        $mapped = app(EvaluacionesHistoricalMapper::class)->map(['proposed' => [[
+            'type' => 'resident', 'trabajador_id' => $worker, 'date' => '2025-12-15',
+            'source_key' => str_repeat('c', 64), 'values' => $values,
+        ], [
+            'type' => 'resident', 'trabajador_id' => $worker, 'date' => '2025-12-20',
+            'source_key' => str_repeat('d', 64), 'values' => $values,
+        ]], 'blocked' => [], 'unchanged' => [], 'warnings' => []]);
+
+        $this->assertCount(2, $mapped['blocked']);
+        $this->assertSame([], $mapped['proposed']);
+    }
+
+    public function test_mapper_keeps_daily_evaluation_without_operational_attendance(): void
+    {
+        $worker = $this->personal('88990011');
+        $mapped = app(EvaluacionesHistoricalMapper::class)->map(['proposed' => [[
+            'type' => 'daily', 'trabajador_id' => $worker, 'date' => '2025-04-30',
+            'source_key' => str_repeat('e', 64), 'scores' => [1, 2, 3, 4, 3],
+            'mine' => 'MINA ANTIGUA', 'evaluator_name' => 'EVALUADOR HISTORICO',
+        ]], 'blocked' => [], 'unchanged' => [], 'warnings' => []]);
+
+        $this->assertSame([], $mapped['blocked']);
+        $this->assertSame(13, $mapped['proposed'][0]['payload']['total']);
+        $this->assertSame('HISTORICA', $mapped['proposed'][0]['payload']['origen']);
+        $this->assertArrayNotHasKey('asistencia_detalle_id', $mapped['proposed'][0]['payload']);
+    }
+
+    public function test_historical_supervisor_and_resident_have_auditable_source_columns(): void
+    {
+        foreach (['evaluacion_supervisor', 'evaluacion_residente'] as $table) {
+            foreach (['import_lote_id', 'source_key', 'source_file', 'source_sheet', 'source_row', 'source_id', 'source_evaluador', 'calculo_version'] as $column) {
+                $this->assertTrue(Schema::hasColumn($table, $column), "Falta {$table}.{$column}");
+            }
+        }
+    }
+
+    public function test_historical_missing_hour_and_resident_components_can_remain_unknown(): void
+    {
+        $columns = DB::table('information_schema.columns')
+            ->where('table_schema', DB::getDatabaseName())
+            ->where(function ($query): void {
+                $query->where(fn ($q) => $q->where('table_name', 'evaluacion_desempeno')->where('column_name', 'hora'))
+                    ->orWhere(fn ($q) => $q->where('table_name', 'evaluacion_residente')->whereIn('column_name', [
+                        'indicadores_kpi', 'costos_servicio', 'eventos_seguridad', 'reportes_calidad', 'liderazgo_gestion', 'innovacion',
+                    ]));
+            })->pluck('is_nullable', 'column_name');
+
+        $this->assertCount(7, $columns);
+        foreach ($columns as $nullable) {
+            $this->assertSame('YES', $nullable);
+        }
+    }
+
+    public function test_historical_supervisor_and_resident_models_accept_provenance(): void
+    {
+        foreach ([new EvaluacionSupervisor(), new EvaluacionResidente()] as $model) {
+            $model->fill([
+                'source_key' => str_repeat('a', 64),
+                'calculo_version' => 'HISTORICA',
+                'source_payload' => ['respuesta antigua'],
+            ]);
+            $this->assertSame(str_repeat('a', 64), $model->source_key);
+            $this->assertSame('HISTORICA', $model->calculo_version);
+            $this->assertSame(['respuesta antigua'], $model->source_payload);
+        }
+    }
+
+    public function test_mapper_blocks_supervisor_answer_outside_legacy_scale(): void
+    {
+        $worker = $this->personal('99001122');
+        $values = array_fill(0, 36, null);
+        $values[5] = 8;
+        $values[31] = 61;
+        $mapped = app(EvaluacionesHistoricalMapper::class)->map(['proposed' => [[
+            'type' => 'supervisor', 'trabajador_id' => $worker, 'date' => '2025-12-17',
+            'source_key' => str_repeat('f', 64), 'values' => $values,
+        ]], 'blocked' => [], 'unchanged' => [], 'warnings' => []]);
+
+        $this->assertSame([], $mapped['proposed']);
+        $this->assertCount(1, $mapped['blocked']);
+    }
+
+    public function test_reconciler_resolves_evaluator_by_dni_without_inventing_unknown_actor(): void
+    {
+        $worker = $this->personal('10101010');
+        $evaluator = $this->personal('20202020');
+        $base = [
+            'type' => 'supervisor', 'source_file' => 'control', 'source_sheet' => 'EV SUPERVISORES',
+            'dni_ref' => 'WORKER-OLD', 'date' => '2025-12-17', 'values' => [],
+        ];
+        $manifest = app(EvaluacionesHistoricalReconciler::class)->reconcile([
+            'rows' => [
+                [...$base, 'source_id' => 'SUP-1', 'source_row' => 2, 'evaluator_ref' => 'EVALUATOR-OLD'],
+                [...$base, 'source_id' => 'SUP-2', 'source_row' => 3, 'evaluator_ref' => 'UNKNOWN-OLD'],
+            ],
+            'personal_map' => ['WORKER-OLD' => '10101010', 'EVALUATOR-OLD' => '20202020'],
+        ]);
+
+        $this->assertSame($worker, $manifest['proposed'][0]['trabajador_id']);
+        $this->assertSame($evaluator, $manifest['proposed'][0]['evaluador_id']);
+        $this->assertNull($manifest['proposed'][1]['evaluador_id']);
+        $this->assertSame('UNKNOWN-OLD', $manifest['proposed'][1]['evaluator_ref']);
+    }
+
+    public function test_reconciler_recognizes_imported_supervisor_source_without_recreating_it(): void
+    {
+        $worker = $this->personal('30303030');
+        $sourceKey = hash('sha256', 'control|EV SUPERVISORES|SUP-OLD');
+        DB::table('evaluacion_supervisor')->insert([
+            'id' => (string) Str::uuid(), 'evaluado_id' => $worker, 'evaluador_id' => null,
+            'fecha' => '2025-12-17', 'mina_id' => null, 'resultado_final' => 61,
+            'source_key' => $sourceKey, 'calculo_version' => 'HISTORICA',
+        ]);
+        $values = array_fill(0, 36, null);
+        $values[31] = 61;
+        $row = [
+            'type' => 'supervisor', 'source_file' => 'control', 'source_sheet' => 'EV SUPERVISORES',
+            'source_id' => 'SUP-OLD', 'source_row' => 2, 'dni_ref' => '30303030',
+            'date' => '2025-12-17', 'values' => $values,
+        ];
+        $result = app(EvaluacionesHistoricalReconciler::class)->reconcile(['rows' => [$row], 'personal_map' => []]);
+
+        $this->assertSame([], $result['proposed']);
+        $this->assertCount(1, $result['unchanged']);
     }
 
     private function personal(string $dni): string

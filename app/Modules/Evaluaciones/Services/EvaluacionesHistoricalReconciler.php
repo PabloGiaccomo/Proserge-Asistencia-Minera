@@ -15,12 +15,14 @@ class EvaluacionesHistoricalReconciler
         $map = $read['personal_map'] ?? [];
         $rows = $read['rows'] ?? [];
         $dniByRow = [];
+        $evaluatorDniByRow = [];
         foreach ($rows as $index => $row) {
             $dniByRow[$index] = $this->dni($row['dni_ref'] ?? null, $map);
+            $evaluatorDniByRow[$index] = $this->dni($row['evaluator_ref'] ?? null, $map);
         }
 
         $people = [];
-        foreach (array_chunk(array_values(array_unique(array_filter($dniByRow))), 500) as $chunk) {
+        foreach (array_chunk(array_values(array_unique(array_filter([...$dniByRow, ...$evaluatorDniByRow]))), 500) as $chunk) {
             foreach (DB::table('personal')->whereIn('dni', $chunk)->get(['id', 'dni', 'nombre_completo']) as $person) {
                 $people[$person->dni][] = $person;
             }
@@ -55,6 +57,8 @@ class EvaluacionesHistoricalReconciler
             $entry = [
                 ...$row, 'dni' => $dni, 'date' => $date,
                 'trabajador_id' => count($person) === 1 ? (string) $person[0]->id : null,
+                'evaluador_id' => count($people[$evaluatorDniByRow[$index] ?? ''] ?? []) === 1
+                    ? (string) $people[$evaluatorDniByRow[$index]][0]->id : null,
                 'source_key' => hash('sha256', implode('|', [
                     $row['source_file'] ?? '', $row['source_sheet'] ?? '',
                     trim((string) ($row['source_id'] ?? '')) ?: 'fila:'.($row['source_row'] ?? ''),
@@ -137,6 +141,8 @@ class EvaluacionesHistoricalReconciler
 
         $existingDaily = [];
         $existingAttendance = [];
+        $existingSupervisor = [];
+        $existingResident = [];
         foreach (array_chunk(array_values(array_unique(array_column($proposed, 'source_key'))), 500) as $keys) {
             foreach (DB::table('evaluacion_desempeno')->whereIn('source_key', $keys)->get() as $existing) {
                 $existingDaily[$existing->source_key] = $existing;
@@ -144,24 +150,45 @@ class EvaluacionesHistoricalReconciler
             foreach (DB::table('asistencia_historica')->whereIn('source_key', $keys)->get() as $existing) {
                 $existingAttendance[$existing->source_key] = $existing;
             }
+            foreach (DB::table('evaluacion_supervisor')->whereIn('source_key', $keys)->get() as $existing) {
+                $existingSupervisor[$existing->source_key] = $existing;
+            }
+            foreach (DB::table('evaluacion_residente')->whereIn('source_key', $keys)->get() as $existing) {
+                $existingResident[$existing->source_key] = $existing;
+            }
         }
 
         $newRows = [];
         foreach ($proposed as $entry) {
-            $existing = $entry['type'] === 'daily'
-                ? ($existingDaily[$entry['source_key']] ?? null)
-                : ($entry['type'] === 'attendance' ? ($existingAttendance[$entry['source_key']] ?? null) : null);
+            $existing = match ($entry['type']) {
+                'daily' => $existingDaily[$entry['source_key']] ?? null,
+                'attendance' => $existingAttendance[$entry['source_key']] ?? null,
+                'supervisor' => $existingSupervisor[$entry['source_key']] ?? null,
+                'resident' => $existingResident[$entry['source_key']] ?? null,
+                default => null,
+            };
             if (! $existing) {
                 $newRows[] = $entry;
                 continue;
             }
 
-            $same = (string) $existing->trabajador_id === $entry['trabajador_id']
+            $targetColumn = match ($entry['type']) {
+                'supervisor' => 'evaluado_id',
+                'resident' => 'residente_id',
+                default => 'trabajador_id',
+            };
+            $same = (string) $existing->{$targetColumn} === $entry['trabajador_id']
                 && substr((string) $existing->fecha, 0, 10) === $entry['date'];
             if ($same && $entry['type'] === 'daily') {
                 $same = [(int) $existing->desempeno_trabajo, (int) $existing->orden_limpieza,
                     (int) $existing->compromiso, (int) $existing->respuesta_emocional,
                     (int) $existing->seguridad_trabajo] === $entry['scores'];
+            }
+            if ($same && $entry['type'] === 'supervisor') {
+                $same = (float) $existing->resultado_final === (float) ($entry['values'][31] ?? null);
+            }
+            if ($same && $entry['type'] === 'resident') {
+                $same = (float) $existing->total === (float) ($entry['values'][10] ?? null);
             }
 
             if ($same) {

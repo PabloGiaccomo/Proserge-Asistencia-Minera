@@ -32,11 +32,22 @@ class EvaluacionSupervisor extends Model
         'estado',
         'created_by_usuario_id',
         'updated_by_usuario_id',
+        'import_lote_id',
+        'source_key',
+        'source_file',
+        'source_sheet',
+        'source_row',
+        'source_id',
+        'source_evaluador',
+        'source_mina',
+        'calculo_version',
+        'source_payload',
     ];
 
     protected $casts = [
         'respuestas' => 'array',
         'fecha' => 'date',
+        'source_payload' => 'array',
     ];
 
     public function evaluador(): BelongsTo
