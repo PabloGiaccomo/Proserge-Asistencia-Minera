@@ -395,6 +395,7 @@ class EvaluacionesWebTest extends TestCase
             'trabajador_id' => $workerId,
             'supervisor_id' => $personalId,
             'evaluado_por_usuario_id' => $userId,
+            'origen' => 'ASISTENCIA',
             'total' => 20,
             'tuvo_incidencia' => 0,
             'descripcion_incidencia' => null,

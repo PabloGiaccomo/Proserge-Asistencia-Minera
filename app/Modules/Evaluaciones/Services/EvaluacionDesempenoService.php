@@ -8,6 +8,7 @@ use App\Models\EvaluacionDesempeno;
 use App\Models\EvaluacionResidente;
 use App\Models\EvaluacionSupervisor;
 use App\Models\GrupoTrabajo;
+use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
@@ -173,6 +174,7 @@ class EvaluacionDesempenoService
                     'destino_tipo' => $attendance->destino_tipo,
                     'destino_id' => $attendance->destino_id,
                     'evaluado_por_usuario_id' => $usuario->id,
+                    'origen' => 'ASISTENCIA',
                 ]);
 
                 $this->promedios->refreshForTrabajador($detail->trabajador_id);
@@ -189,6 +191,81 @@ class EvaluacionDesempenoService
 
         if (! $item) {
             return $this->businessError('EVAL_DUPLICATED', 'Esta asistencia ya cuenta con una evaluacion para el trabajador.');
+        }
+
+        return ['ok' => true, 'item' => $item];
+    }
+
+    public function createDirect(Usuario $usuario, array $payload): array
+    {
+        if (! $this->policy->canEvaluateType($usuario, 'desempeno')) {
+            return $this->forbidden();
+        }
+
+        if ((string) $usuario->personal_id !== '' && (string) $usuario->personal_id === (string) $payload['trabajador_id']) {
+            return $this->businessError('EVAL_SELF_NOT_ALLOWED', 'No puedes evaluarte a ti mismo.');
+        }
+
+        if (! Mina::query()->activeOperational()->whereKey($payload['mina_id'])->exists()) {
+            return $this->businessError('EVAL_MINE_INVALID', 'Selecciona una mina activa.');
+        }
+
+        try {
+            $item = DB::transaction(function () use ($usuario, $payload): ?EvaluacionDesempeno {
+                $worker = Personal::query()->whereKey($payload['trabajador_id'])->lockForUpdate()->first();
+                if (! $worker) {
+                    return null;
+                }
+
+                if (EvaluacionDesempeno::query()->where('submission_key', $payload['submission_key'])->exists()) {
+                    return null;
+                }
+
+                $date = Carbon::parse($payload['fecha']);
+                $hasIncident = (bool) ($payload['tuvo_incidencia'] ?? false);
+                $created = EvaluacionDesempeno::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'fecha' => $date->toDateString(),
+                    'hora' => now()->format('H:i:s'),
+                    'mina_id' => $payload['mina_id'],
+                    'semana_parada' => null,
+                    'desempeno_trabajo' => $payload['desempeno_trabajo'],
+                    'orden_limpieza' => $payload['orden_limpieza'],
+                    'compromiso' => $payload['compromiso'],
+                    'respuesta_emocional' => $payload['respuesta_emocional'],
+                    'seguridad_trabajo' => $payload['seguridad_trabajo'],
+                    'total' => $this->calculateTotal($payload),
+                    'observaciones' => $payload['observaciones'] ?? null,
+                    'supervisor_id' => $usuario->personal_id,
+                    'trabajador_id' => $worker->id,
+                    'tuvo_incidencia' => $hasIncident,
+                    'descripcion_incidencia' => $hasIncident ? ($payload['descripcion_incidencia'] ?? null) : null,
+                    'destino_tipo' => 'MINA',
+                    'destino_id' => $payload['mina_id'],
+                    'evaluado_por_usuario_id' => $usuario->id,
+                    'origen' => 'DIRECTA',
+                    'submission_key' => $payload['submission_key'],
+                ]);
+
+                $this->promedios->refreshForTrabajador($worker->id);
+
+                return $created;
+            });
+        } catch (QueryException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) === 1062
+                && str_contains((string) ($exception->errorInfo[2] ?? ''), 'uq_eval_des_submission_key')) {
+                return $this->businessError('EVAL_DUPLICATED', 'Este envio ya fue registrado.');
+            }
+
+            throw $exception;
+        }
+
+        if (! $item) {
+            if (! Personal::query()->whereKey($payload['trabajador_id'])->exists()) {
+                return $this->businessError('EVAL_WORKER_NOT_FOUND', 'No se encontro al trabajador seleccionado.');
+            }
+
+            return $this->businessError('EVAL_DUPLICATED', 'Este envio ya fue registrado.');
         }
 
         return ['ok' => true, 'item' => $item];
