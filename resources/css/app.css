@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./modules/mining-catalog-organization.css";
 @import "./modules/man-power.css";
 @import "./modules/parada-herramientas.css";
 @import "./modules/epps.css";
