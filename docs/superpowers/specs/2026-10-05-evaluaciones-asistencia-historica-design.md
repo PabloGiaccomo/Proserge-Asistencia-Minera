@@ -111,6 +111,13 @@ entran al mismo preview pero por mapeadores independientes: se comprueban sus
 plantillas, puntuaciones, actores y unicidad mensual antes de confirmar. Un
 campo imposible de mapear bloquea la carga; no se fuerza una equivalencia.
 
+Decision confirmada el 2026-10-05: conservar el total original de supervisor y
+residente aunque difiera de la formula vigente, con marca de calculo historico
+y respuestas originales para auditoria. No bloquear solo por esa diferencia
+ni modificar las formulas nuevas. Componentes de puntaje historico que no
+consten en la fuente se mantienen desconocidos; no se fabrican valores para
+hacer coincidir un desglose nuevo con una nota antigua.
+
 ## Evaluacion diaria directa permanente
 
 Agregar una entrada discreta en la pantalla actual de Evaluaciones, usando el

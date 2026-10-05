@@ -324,6 +324,10 @@ class EvaluacionDesempenoService
             return $this->forbidden();
         }
 
+        if ($item->import_lote_id && $item->origen === 'HISTORICA') {
+            return $this->businessError('EVAL_HIST_READ_ONLY', 'Esta evaluacion conserva la nota historica. Su correccion requiere revision administrativa.');
+        }
+
         $item->fill([
             'desempeno_trabajo' => $payload['desempeno_trabajo'],
             'orden_limpieza' => $payload['orden_limpieza'],

@@ -17,8 +17,10 @@ $details = $type ? (new App\Modules\Evaluaciones\Services\EvaluacionesDetailAnal
     ]],
 ])) : null;
 echo view('evaluaciones.index', ['activeType'=>'dashboard','availableTypes'=>collect(['desempeno','supervisores','residentes','dashboard']),
+    'user'=>new App\Models\Usuario(['id'=>'00000000-0000-0000-0000-000000000001']),
     'selectedDate'=>'2026-09-16','mines'=>collect(), 'dashboardFilters'=>['desde'=>'2026-09-01','hasta'=>'2026-09-16','mina'=>'','cargo'=>'','evaluacion_tipo'=>$type],
     'dashboard'=>['types'=>['desempeno'=>'Diaria','supervisores'=>'Supervisores','residentes'=>'Residentes'],'total'=>40,'people'=>28,'summary'=>$summary,'cargos'=>collect(['SUPERVISOR']),
+        'activeFilterCount'=>1,'scoreCoverage'=>100,'scored'=>40,'unscored'=>0,
         'details'=>$details,'pie'=>'#138b80 0% 60%,#4e79bc 60% 90%,#af6b23 90% 100%',
         'months'=>[$group('2026-08',18),$group('2026-09',22)],'byMine'=>[$group('MINA DE PRUEBA',24),$group('Sin mina',4)],
         'byCargo'=>[$group('OPERARIO',24),$group('SUPERVISOR',12),$group('RESIDENTE',4)]]])->render();

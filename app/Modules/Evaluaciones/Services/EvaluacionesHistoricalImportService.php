@@ -4,9 +4,9 @@ namespace App\Modules\Evaluaciones\Services;
 
 use App\Models\AsistenciaHistorica;
 use App\Models\EvaluacionDesempeno;
+use App\Models\EvaluacionesImportLote;
 use App\Models\EvaluacionResidente;
 use App\Models\EvaluacionSupervisor;
-use App\Models\EvaluacionesImportLote;
 use App\Models\Personal;
 use App\Models\Usuario;
 use App\Support\Rbac\PermissionMatrix;
@@ -124,6 +124,9 @@ class EvaluacionesHistoricalImportService
                 }
                 if (! empty($manifest['blocked'])) {
                     return $this->error('EVAL_HIST_BLOCKED', 'Corrige todas las filas observadas antes de confirmar.');
+                }
+                if (empty($manifest['proposed'])) {
+                    return $this->error('EVAL_HIST_EMPTY', 'No hay cambios propuestos para confirmar.');
                 }
 
                 $batch->fill([

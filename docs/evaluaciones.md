@@ -142,3 +142,112 @@ El resultado se calcula sobre 20 puntos:
 - Reportes de calidad: `Si` suma 4 puntos y `No` suma 0.
 - Liderazgo, gestion e innovacion: escala de 1 a 4 puntos.
 - El comentario es obligatorio.
+
+## Carga historica unica
+
+La pantalla existente de Evaluaciones incluye `Cargar datos historicos` para
+usuarios con `evaluaciones.administrar`, mientras la carga este habilitada y no
+exista un lote confirmado. Las rutas de carga y reporte validan ese permiso en
+backend. Los permisos para evaluar diariamente no autorizan una importacion.
+
+Se cargan juntos los dos libros principales:
+
+- Control de asistencia: PERSONAL, ASISTENCIA ENCABEZADO, ASISTENCIA DETALLE,
+  EV DESEMPENO, EV SUPERVISORES y EV RESIDENTES.
+- Consolidado de evaluaciones: hoja Consolidado.
+
+Los snapshots DATA 2025 no se importan ni actualizan Personal. Son evidencia
+auxiliar para corregir documentos desconocidos antes de volver a revisar los
+libros principales. El importador nunca crea personas por nombre.
+
+El preview valida DNI de ocho digitos contra Personal. Los IDs internos del
+libro se traducen por su hoja PERSONAL. Si el mismo ID indica dos DNI, se
+bloquea la carga. No se adivinan ceros iniciales perdidos ni identidades por
+parecido. Las diferencias de nombre se muestran como advertencias ubicadas por
+DNI, hoja y fila; la identidad resuelta sigue siendo el DNI.
+
+La pantalla pagina de 50 en 50 y permite filtrar cambios propuestos, errores,
+advertencias y filas sin cambios, por tipo y por DNI/nombre/hoja/motivo. El
+reporte CSV identifica las filas y evita que sus textos se interpreten como
+formulas al abrirlos en Excel. Archivos y manifiestos permanecen en el disco
+privado `local`; el reporte solo se descarga con permiso administrativo.
+
+Las filas de asistencia antigua representan presencia efectiva. Se guardan en
+`asistencia_historica` usando Fecha Marcado, sin mina/parada y sin crear marcas
+operativas ni faltas. Una referencia incoherente de evaluacion a detalle
+antiguo se reporta para revision; no se vincula a una asistencia actual.
+
+Las evaluaciones diarias importadas tienen `origen=HISTORICA`, cinco notas 1..4
+y total calculado sobre 20. No necesitan asistencia cerrada, mina ni usuario
+autor. La fuente conserva mina y evaluador como contexto; no se asignan minas
+por coincidencia de texto. Un evaluador con DNI verificable conserva su FK a
+Personal. Los demas quedan identificados solo por la fuente.
+
+Supervisores y residentes conservan la nota original del Excel con
+`calculo_version=HISTORICA`, lote, fila, clave unica y respuestas originales.
+No se recalcula ese total con las plantillas nuevas. Supervisor admite total
+0..100 y respuestas presentes 1..5; residente admite total 0..20 y liderazgo
+1..4, con periodo normalizado al primer dia del mes. Un periodo ya evaluado o
+repetido en el libro bloquea la carga. Las horas y puntajes de componentes no
+documentados permanecen desconocidos; no se inventan ceros ni horas actuales.
+
+La conciliacion entre los libros usa DNI/fecha/cinco notas y conserva la
+multiplicidad. Control prevalece cuando ambos concilian; las filas equivalentes
+del consolidado aparecen como sin cambios. Ante diferencias se bloquea el
+grupo para revision. Un ID/fila de origen ya importado se omite solo si su
+contenido coincide; nunca se sobreescribe.
+
+Confirmar requiere cero bloqueantes, revisar el reporte y marcar la aceptacion.
+Una revision sin cambios propuestos no puede cerrar la carga. Las evaluaciones
+importadas no se recalculan mediante la edicion habitual: conservan su nota
+original y cualquier correccion requiere revision administrativa auditada.
+Se vuelve a comprobar hash, identidad, contenido y unicidad. El lote, las
+asistencias, las tres evaluaciones y los promedios se guardan en una sola
+transaccion. Se bloquean trabajadores en orden y una clave UNIQUE permite un
+solo lote definitivo, incluso entre solicitudes competidoras. Un fallo revierte
+todas las escrituras. Una repeticion no crea otra carga.
+
+Tras confirmar se retira el boton y se rechazan nuevos previews/confirmaciones
+incluso por URL directa; el reporte sigue disponible para administradores. Las
+evaluaciones cuentan desde la confirmacion en los indicadores. El historial
+sin mina se muestra a lectores con `ver_todas_evaluaciones`, no a quienes solo
+leen sus propias evaluaciones. Filtrar una mina concreta excluye esos registros.
+El filtro Origen del dashboard afecta todos sus KPI, graficos y resultados.
+Las notas antiguas se etiquetan; la reconstruccion de aportes ponderados de
+supervisor se limita a la formula vigente y muestra su cobertura de datos.
+
+### Despliegue y ensayo
+
+1. Respaldar MySQL y `storage/app/private`. Ensayar sobre una copia aislada;
+   nunca dirigir PHPUnit a datos reales. Las pruebas usan `proserge_app_test`.
+2. Desplegar los cambios y las migraciones aditivas de Evaluaciones
+   `2026_10_05_000100` a `2026_10_05_000500_guard_one_confirmed_historical_import`.
+   Revisar todas las migraciones pendientes antes de ejecutar una migracion
+   general: otros modulos pueden tener archivos de la misma fecha.
+3. Ejecutar las migraciones seleccionadas y `php artisan optimize:clear`.
+4. Habilitar `EVALUACIONES_HISTORICAL_IMPORT_ENABLED=true` en el ambiente de la
+   carga y limpiar cache de configuracion. Por defecto el flag es false.
+5. Desde Evaluaciones, revisar ambos Excel; descargar el reporte y resolver
+   todos los bloqueantes. Revisar tambien advertencias y conteos por tipo.
+   Ninguna evaluacion definitiva se escribe durante el preview.
+6. Confirmar manualmente una sola vez. Comparar guardados con cambios propuestos
+   (las filas conciliadas/sin cambios no se insertan), verificar promedios y
+   dashboard filtrando fechas antiguas y Origen = Carga historica.
+7. Poner el flag en false y limpiar cache. Comprobar que el boton desaparecio,
+   que otra carga es rechazada y que el reporte permanece protegido.
+
+Los dos archivos admiten hasta 20 MB cada uno; verificar limites PHP de subida,
+memoria y tiempo en cPanel antes del ensayo de volumen.
+El lector carga las hojas seleccionadas en memoria, no en streaming. El limite
+de subida no acota la memoria descomprimida; ensayar los libros reales en una
+copia aislada antes de habilitar el flag en produccion.
+No iniciar confirmacion durante un despliegue o reinicio del servidor.
+No se ha confirmado ningun lote
+de informacion real como parte del desarrollo.
+
+Las migraciones conservan historial en `down()`: un rollback de Laravel no
+borra la carga ni reconstruye informacion anterior. Ante un error de datos
+confirmados, cerrar el flag y aplicar un procedimiento auditado de correccion
+o restauracion desde backup; no borrar tablas ni repetir una importacion ciega.
+Mantener archivos/reportes privados hasta verificar los conteos y cerrar la
+auditoria de la carga; su eliminacion posterior debe acordarse operativamente.

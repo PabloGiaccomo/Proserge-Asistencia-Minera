@@ -10,6 +10,20 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-05-evaluaciones-asistencia-historica-design.md`
 
+## Resultado de ejecucion
+
+Tareas 1-7 implementadas. Validacion final: 88 pruebas, 510 aserciones en
+`proserge_app_test`, PHP lint, Pint del importador, compilacion Blade y controles
+Playwright de revision/dashboard en escritorio y movil. No se importaron datos
+reales ni se desplegaron cambios. Los totales de supervisor/residente se
+preservan por decision posterior del usuario, no por las formulas actuales.
+
+Limitacion respecto del plan inicial: el lector carga las hojas seleccionadas
+en memoria, no usa streaming/chunks. Ensayar volumen y limites PHP en copia
+aislada antes de habilitar la carga; no asumir que 20 MB limita la memoria
+descomprimida. La unicidad se verifica por indices y reintentos secuenciales;
+queda pendiente un ensayo de concurrencia real entre procesos.
+
 ## Global Constraints
 
 - Ejecutar este plan despues de `2026-10-05-evaluacion-diaria-directa.md`; reutilizar su campo `origen`.

@@ -8,6 +8,7 @@ use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class EvaluacionesHistoricalImportPageController extends WebPageController
@@ -20,7 +21,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         abort_unless($this->service->isOpen(), 409, 'La carga historica esta cerrada.');
         $filters = $request->validate([
             'lote' => ['nullable', 'uuid'],
-            'estado' => ['nullable', 'in:proposed,blocked,unchanged,all'],
+            'estado' => ['nullable', 'in:proposed,blocked,unchanged,warnings,all'],
             'tipo' => ['nullable', 'in:daily,attendance,supervisor,resident'],
             'q' => ['nullable', 'string', 'max:191'],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -32,18 +33,17 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         }
         $status = $filters['estado'] ?? ($manifest['blocked'] ? 'blocked' : 'proposed');
         $rows = collect();
-        foreach (['proposed', 'blocked', 'unchanged'] as $group) {
-            if ($status === 'all' || $status === $group) {
+        foreach (['proposed', 'blocked', 'unchanged', 'warnings'] as $group) {
+            if (($status === 'all' && $group !== 'warnings') || $status === $group) {
                 foreach ($manifest[$group] as $entry) {
                     $rows->push([...$entry, 'review_status' => $group]);
                 }
             }
         }
         $search = mb_strtolower(trim((string) ($filters['q'] ?? '')));
-        $rows = $rows->filter(fn ($row) =>
-            (empty($filters['tipo']) || ($row['type'] ?? '') === $filters['tipo'])
+        $rows = $rows->filter(fn ($row) => (empty($filters['tipo']) || ($row['type'] ?? '') === $filters['tipo'])
             && ($search === '' || str_contains(mb_strtolower(implode(' ', [
-                $row['dni'] ?? '', $row['name'] ?? '', $row['source_sheet'] ?? '',
+                $row['dni'] ?? '', $row['name'] ?? '', $row['personal_name'] ?? '', $row['source_sheet'] ?? '',
                 $row['source_row'] ?? '', $row['reason'] ?? '',
             ])), $search)))->values();
         $page = (int) ($filters['page'] ?? 1);
@@ -68,7 +68,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
                 'consolidado' => $request->file('consolidado')->getRealPath(),
             ]);
         } catch (\Throwable $exception) {
-            report($exception);
+            Log::warning('evaluaciones.historical_preview_failed', ['exception_class' => $exception::class]);
 
             return back()->withErrors(['importacion' => 'No se pudo revisar los libros. Verifica su formato e intenta nuevamente.']);
         }
@@ -89,7 +89,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         try {
             $result = $this->service->confirm($actor, $payload['lote_id'], $payload['hash']);
         } catch (\Throwable $exception) {
-            report($exception);
+            Log::warning('evaluaciones.historical_confirmation_failed', ['lote_id' => $payload['lote_id'], 'exception_class' => $exception::class]);
 
             return back()->withErrors(['importacion' => 'La carga no pudo completarse. No se guardaron cambios. Revisa el reporte antes de reintentar.']);
         }

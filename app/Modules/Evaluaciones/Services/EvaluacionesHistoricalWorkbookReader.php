@@ -21,6 +21,7 @@ class EvaluacionesHistoricalWorkbookReader
         foreach ($privatePaths as $source => $path) {
             if (! in_array($source, ['control', 'consolidado'], true) || ! is_readable($path)) {
                 $result['issues'][] = ['source' => $source, 'message' => 'Archivo no reconocido o ilegible.'];
+
                 continue;
             }
 
@@ -52,7 +53,13 @@ class EvaluacionesHistoricalWorkbookReader
             foreach ($this->dataRows($personal) as [$line, $cells]) {
                 $id = trim((string) ($cells[0] ?? ''));
                 if ($id !== '') {
-                    $result['personal_map'][$id] = trim((string) ($cells[1] ?? ''));
+                    $dni = trim((string) ($cells[1] ?? ''));
+                    if (array_key_exists($id, $result['personal_map']) && $result['personal_map'][$id] !== $dni) {
+                        $result['personal_map'][$id] = null;
+                        $result['issues'][] = ['source' => 'control', 'message' => "ID interno de Personal ambiguo en fila {$line}."];
+                    } else {
+                        $result['personal_map'][$id] = $dni;
+                    }
                 }
             }
         }
@@ -137,6 +144,7 @@ class EvaluacionesHistoricalWorkbookReader
         $source = $name === 'Consolidado' ? 'consolidado' : 'control';
         if (! $sheet) {
             $result['issues'][] = ['source' => $source, 'message' => "Falta la hoja {$name}."];
+
             return null;
         }
 
@@ -144,6 +152,7 @@ class EvaluacionesHistoricalWorkbookReader
             $actual = $sheet->getCell([$index + 1, 1])->getValue();
             if (PersonalNormalizer::normalizeKey((string) $actual) !== PersonalNormalizer::normalizeKey($label)) {
                 $result['issues'][] = ['source' => $source, 'message' => "Columnas inesperadas en {$name}."];
+
                 return null;
             }
         }

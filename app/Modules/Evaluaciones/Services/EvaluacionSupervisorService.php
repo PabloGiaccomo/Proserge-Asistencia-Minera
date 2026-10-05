@@ -131,6 +131,10 @@ class EvaluacionSupervisorService
             return $this->forbidden();
         }
 
+        if ($item->import_lote_id && $item->calculo_version === 'HISTORICA') {
+            return $this->businessError('EVAL_HIST_READ_ONLY', 'Esta evaluacion conserva la nota historica. Su correccion requiere revision administrativa.');
+        }
+
         $responses = SupervisorEvaluationTemplate::normalizeResponses($payload['respuestas']);
         $score = SupervisorEvaluationTemplate::calculateFinalScore($responses);
 

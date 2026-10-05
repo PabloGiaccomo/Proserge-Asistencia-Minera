@@ -57,6 +57,7 @@ class EvaluacionesHistoricalReconciler
             $entry = [
                 ...$row, 'dni' => $dni, 'date' => $date,
                 'trabajador_id' => count($person) === 1 ? (string) $person[0]->id : null,
+                'personal_name' => count($person) === 1 ? (string) $person[0]->nombre_completo : null,
                 'evaluador_id' => count($people[$evaluatorDniByRow[$index] ?? ''] ?? []) === 1
                     ? (string) $people[$evaluatorDniByRow[$index]][0]->id : null,
                 'source_key' => hash('sha256', implode('|', [
@@ -66,6 +67,7 @@ class EvaluacionesHistoricalReconciler
             ];
             if ($reason !== null) {
                 $blocked[] = [...$entry, 'reason' => $reason];
+
                 continue;
             }
 
@@ -76,7 +78,7 @@ class EvaluacionesHistoricalReconciler
 
             if (! empty($row['name']) && PersonalNormalizer::normalizeKey((string) $row['name'])
                 !== PersonalNormalizer::normalizeKey((string) $person[0]->nombre_completo)) {
-                $warnings[] = ['source_key' => $entry['source_key'], 'reason' => 'Nombre de Excel distinto al de Personal.'];
+                $warnings[] = [...$entry, 'reason' => 'Nombre de Excel distinto al de Personal.'];
             }
 
             $prepared[] = $entry;
@@ -86,6 +88,7 @@ class EvaluacionesHistoricalReconciler
         $prepared = array_values(array_filter($prepared, function (array $entry) use ($keyCounts, &$blocked): bool {
             if ($keyCounts[$entry['source_key']] > 1) {
                 $blocked[] = [...$entry, 'reason' => 'Identificador de origen repetido en el archivo.'];
+
                 return false;
             }
 
@@ -104,6 +107,7 @@ class EvaluacionesHistoricalReconciler
                 $detail = $attendanceById[(string) $entry['detail_ref']] ?? null;
                 if (! $detail || $detail['trabajador_id'] !== $entry['trabajador_id'] || $detail['date'] !== $entry['date']) {
                     $blocked[] = [...$entry, 'reason' => 'Referencia de asistencia incompatible con DNI o fecha.'];
+
                     continue;
                 }
             }
@@ -130,6 +134,7 @@ class EvaluacionesHistoricalReconciler
                     foreach ($group as $entry) {
                         $blocked[] = [...$entry, 'reason' => 'Conflicto entre libros para DNI, fecha o notas.'];
                     }
+
                     continue;
                 }
                 array_push($unchanged, ...$consolidado);
@@ -169,6 +174,7 @@ class EvaluacionesHistoricalReconciler
             };
             if (! $existing) {
                 $newRows[] = $entry;
+
                 continue;
             }
 

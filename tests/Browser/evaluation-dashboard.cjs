@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
   await page.route('**/*',r=>{ if(r.request().headers()['x-evaluation-dashboard']) requests++; return r.fulfill({contentType:'text/html',body:fixtures[new URL(r.request().url()).searchParams.get('evaluacion_tipo') || '']}); });
   await page.goto('http://127.0.0.1:8000/evaluaciones?tipo=dashboard');
   const manifest=JSON.parse(fs.readFileSync('public/build/manifest.json','utf8'));
+  await page.addStyleTag({path:'public/css/proserge-app.css'});
   await page.addStyleTag({path:'public/build/'+manifest['resources/css/app.css'].file});
   await page.addStyleTag({path:'public/css/evaluations-dashboard.css'});
   await page.addStyleTag({content:'*{transition:none!important;animation:none!important}'});

@@ -2,26 +2,30 @@
 
 namespace Tests\Feature;
 
+use App\Models\EvaluacionDesempeno;
 use App\Models\EvaluacionResidente;
 use App\Models\EvaluacionSupervisor;
 use App\Models\Usuario;
-use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalReconciler;
-use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalMapper;
-use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
-use App\Modules\Evaluaciones\Services\PromedioDesempenoService;
-use App\Modules\Evaluaciones\Services\EvaluacionesDashboardService;
-use App\Modules\Evaluaciones\Services\EvaluacionesPageService;
 use App\Modules\Evaluaciones\Services\EvaluacionDesempenoService;
+use App\Modules\Evaluaciones\Services\EvaluacionesDashboardService;
+use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
+use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalMapper;
+use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalReconciler;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalWorkbookReader;
+use App\Modules\Evaluaciones\Services\EvaluacionesPageService;
+use App\Modules\Evaluaciones\Services\EvaluacionSupervisorService;
+use App\Modules\Evaluaciones\Services\PromedioDesempenoService;
+use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Mockery;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use Mockery;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -71,7 +75,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
     {
         $legacyId = 'ABC12345';
         $worker = $this->personal('01234567');
-        $workbook = new Spreadsheet();
+        $workbook = new Spreadsheet;
         $sheet = $workbook->getActiveSheet()->setTitle('PERSONAL');
         $sheet->fromArray([['Id', 'DNI', 'Nombre Completo'], [$legacyId, '01234567', 'PERSONA HISTORICA']], null, 'A1');
         $sheet = $workbook->createSheet()->setTitle('EV DESEMPENO');
@@ -116,7 +120,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
 
     public function test_reader_rejects_wrong_columns_before_mapping_personal_data(): void
     {
-        $workbook = new Spreadsheet();
+        $workbook = new Spreadsheet;
         $sheet = $workbook->getActiveSheet()->setTitle('Consolidado');
         $sheet->fromArray([['NOMBRE', 'DNI EQUIVOCADO'], ['12345678', 'PERSONA']], null, 'A1');
         $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.'eval-hist-'.Str::random(12).'.xlsx';
@@ -312,7 +316,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
 
     public function test_historical_supervisor_and_resident_models_accept_provenance(): void
     {
-        foreach ([new EvaluacionSupervisor(), new EvaluacionResidente()] as $model) {
+        foreach ([new EvaluacionSupervisor, new EvaluacionResidente] as $model) {
             $model->fill([
                 'source_key' => str_repeat('a', 64),
                 'calculo_version' => 'HISTORICA',
@@ -596,7 +600,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
         DB::table('evaluacion_supervisor')->insert([
             'id' => (string) Str::uuid(), 'evaluado_id' => $worker, 'evaluador_id' => null,
             'fecha' => '2025-12-17', 'mina_id' => null, 'resultado_final' => 61,
-            'calculo_version' => 'HISTORICA', 'respuestas' => json_encode(array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4)),
+            'calculo_version' => 'HISTORICA', 'respuestas' => json_encode(array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 4)),
         ]);
         $data = app(EvaluacionesDashboardService::class)->build($viewer, [
             'desde' => '2025-12-01', 'hasta' => '2025-12-31', 'mina' => '', 'cargo' => '',
@@ -606,6 +610,140 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $this->assertSame(61.0, $data['summary'][0]['average']);
         $this->assertSame(0, $data['details']['charts'][0]['items'][0]['n']);
         $this->assertSame(1, $data['details']['historicalCount']);
+    }
+
+    public function test_confirmation_detects_changed_identity_since_preview(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $worker = $this->personal('95959595');
+        $files = $this->historicalBooks('95959595');
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            DB::table('personal')->where('id', $worker)->update(['dni' => '96969696']);
+            $result = $service->confirm($actor, $preview['lote_id'], $preview['hash']);
+            $this->assertSame('EVAL_HIST_STALE', $result['code']);
+            $this->assertSame(0, DB::table('asistencia_historica')->count());
+            $this->assertDatabaseHas('evaluaciones_import_lotes', ['id' => $preview['lote_id'], 'estado' => 'PREVIEW']);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_name_warning_keeps_dni_sheet_and_row_for_review(): void
+    {
+        $this->personal('98989898');
+        $result = app(EvaluacionesHistoricalReconciler::class)->reconcile(['rows' => [[
+            'type' => 'daily', 'source_file' => 'consolidado', 'source_sheet' => 'Consolidado',
+            'source_row' => 9, 'dni_ref' => '98989898', 'date' => '2025-04-30',
+            'name' => 'NOMBRE DISTINTO', 'scores' => [3, 3, 3, 3, 3],
+        ]], 'personal_map' => []]);
+        $this->assertSame('98989898', $result['warnings'][0]['dni']);
+        $this->assertSame(9, $result['warnings'][0]['source_row']);
+        $this->assertSame('PERSONA HISTORICA', $result['proposed'][0]['personal_name']);
+    }
+
+    public function test_reader_blocks_conflicting_internal_identity_mapping(): void
+    {
+        $files = $this->historicalBooks('12121212');
+        $book = IOFactory::load($files['control']);
+        $book->getSheetByName('PERSONAL')->fromArray([['OLD-PERSON', '13131313']], null, 'A3');
+        (new Xlsx($book))->save($files['control']);
+        $book->disconnectWorksheets();
+        try {
+            $read = app(EvaluacionesHistoricalWorkbookReader::class)->read($files);
+            $this->assertNotEmpty($read['issues']);
+            $this->assertNull($read['personal_map']['OLD-PERSON']);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_confirmation_persists_both_legacy_scores_with_source_evidence(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $worker = $this->personal('97979797');
+        $files = $this->historicalBooks('97979797');
+        $book = IOFactory::load($files['control']);
+        $supervisor = array_fill(0, 36, null);
+        $supervisor[0] = 'SUP-SCORE';
+        $supervisor[2] = 'OLD-PERSON';
+        $supervisor[3] = '2025-12-17';
+        foreach (range(5, 30) as $index) {
+            $supervisor[$index] = 4;
+        }
+        $supervisor[31] = 61;
+        $resident = ['RES-SCORE', '2025-12-17', 'Entrega de Protocolos', 'Presenta Costos Mensuales', 'Si', 'Si', 4, 'OLD-PERSON', null, 'Comentario historico', 7];
+        $book->getSheetByName('EV SUPERVISORES')->fromArray([$supervisor], null, 'A2');
+        $book->getSheetByName('EV RESIDENTES')->fromArray([$resident], null, 'A2');
+        (new Xlsx($book))->save($files['control']);
+        $book->disconnectWorksheets();
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            $this->assertSame(0, $preview['counts']['blocked']);
+            $this->assertTrue($service->confirm($actor, $preview['lote_id'], $preview['hash'])['ok']);
+            $this->assertDatabaseHas('evaluacion_supervisor', ['evaluado_id' => $worker, 'resultado_final' => 61, 'calculo_version' => 'HISTORICA', 'import_lote_id' => $preview['lote_id']]);
+            $this->assertDatabaseHas('evaluacion_residente', ['residente_id' => $worker, 'total' => 7, 'periodo_mes' => '2025-12-01', 'calculo_version' => 'HISTORICA', 'indicadores_kpi' => null]);
+            $this->assertSame($resident, EvaluacionResidente::query()->where('residente_id', $worker)->firstOrFail()->source_payload);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_empty_review_cannot_close_the_one_time_import(): void
+    {
+        config()->set('evaluaciones.historical_import_enabled', true);
+        Storage::fake('local');
+        $actor = $this->administrator();
+        $files = $this->historicalBooks('96969696');
+        $book = IOFactory::load($files['control']);
+        foreach (['ASISTENCIA DETALLE', 'EV DESEMPENO'] as $sheet) {
+            $book->getSheetByName($sheet)->removeRow(2);
+        }
+        (new Xlsx($book))->save($files['control']);
+        $book->disconnectWorksheets();
+        try {
+            $service = app(EvaluacionesHistoricalImportService::class);
+            $preview = $service->preview($actor, $files);
+            $this->assertSame(0, $preview['counts']['proposed']);
+            $this->assertSame(0, $preview['counts']['blocked']);
+            $result = $service->confirm($actor, $preview['lote_id'], $preview['hash']);
+            $this->assertSame('EVAL_HIST_EMPTY', $result['code']);
+            $this->assertTrue($service->isOpen());
+            $this->assertDatabaseHas('evaluaciones_import_lotes', ['id' => $preview['lote_id'], 'estado' => 'PREVIEW']);
+        } finally {
+            foreach ($files as $path) {
+                unlink($path);
+            }
+        }
+    }
+
+    public function test_normal_edit_does_not_recalculate_imported_scores(): void
+    {
+        $actor = $this->administrator(['evaluaciones' => ['administrar', 'editar']]);
+        $daily = new EvaluacionDesempeno([
+            'origen' => 'HISTORICA', 'import_lote_id' => (string) Str::uuid(), 'total' => 15,
+        ]);
+        $supervisor = new EvaluacionSupervisor([
+            'calculo_version' => 'HISTORICA', 'import_lote_id' => (string) Str::uuid(), 'resultado_final' => 61,
+        ]);
+        $result = app(EvaluacionDesempenoService::class)->update($actor, $daily, []);
+        $this->assertSame('EVAL_HIST_READ_ONLY', $result['code']);
+        $result = app(EvaluacionSupervisorService::class)->update($actor, $supervisor, []);
+        $this->assertSame('EVAL_HIST_READ_ONLY', $result['code']);
+        $this->assertSame(15, $daily->total);
+        $this->assertEquals(61, $supervisor->resultado_final);
     }
 
     private function webSession(Usuario $user): array
@@ -637,7 +775,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
 
     private function historicalBooks(string $dni): array
     {
-        $control = new Spreadsheet();
+        $control = new Spreadsheet;
         $control->getActiveSheet()->setTitle('PERSONAL')->fromArray([['Id', 'DNI'], ['OLD-PERSON', $dni]], null, 'A1');
         $control->createSheet()->setTitle('ASISTENCIA ENCABEZADO')->fromArray([['Id Asistencia', 'Fecha'], ['OLD-HEADER', '2025-04-30']], null, 'A1');
         $control->createSheet()->setTitle('ASISTENCIA DETALLE')->fromArray([
@@ -658,7 +796,7 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $control->createSheet()->setTitle('EV SUPERVISORES')->fromArray([['Id EvSup', '', '', 'Fecha']], null, 'A1');
         $control->createSheet()->setTitle('EV RESIDENTES')->fromArray([['Id EvRes', 'Fecha']], null, 'A1');
 
-        $consolidado = new Spreadsheet();
+        $consolidado = new Spreadsheet;
         $consolidado->getActiveSheet()->setTitle('Consolidado')->fromArray([
             array_replace(array_fill(0, 13, ''), [0 => 'DNI', 11 => 'FECHA DE EVALUACION', 12 => 'UNIDAD MINERA']),
         ], null, 'A1');
