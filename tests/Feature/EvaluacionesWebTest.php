@@ -79,6 +79,27 @@ class EvaluacionesWebTest extends TestCase
         $this->assertDatabaseHas('evaluacion_desempeno', ['trabajador_id' => $worker, 'origen' => 'DIRECTA']);
     }
 
+    public function test_excepcion_directa_no_expone_evaluacion_de_asistencia_fuera_del_scope(): void
+    {
+        [$ownerId, $ownerPersonalId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        [$viewerId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno', 'ver_todas_evaluaciones']]);
+        [, $detailId] = $this->createClosedAttendance($ownerId, $ownerPersonalId);
+        $item = app(\App\Modules\Evaluaciones\Services\EvaluacionDesempenoService::class)->createDaily(
+            \App\Models\Usuario::findOrFail($ownerId), [
+                'asistencia_detalle_id' => $detailId,
+                'desempeno_trabajo' => 3, 'orden_limpieza' => 3,
+                'seguridad_trabajo' => 3, 'compromiso' => 3, 'respuesta_emocional' => 3,
+            ],
+        )['item'];
+        $viewer = \App\Models\Usuario::findOrFail($viewerId);
+
+        $this->assertFalse(app(\App\Modules\Evaluaciones\Services\EvaluacionesPageService::class)
+            ->build($viewer, 'desempeno', '2026-08-21')['dailyHistory']->contains('id', $item->id));
+        $this->assertNull(app(\App\Modules\Evaluaciones\Services\EvaluacionDesempenoService::class)->find($viewer, $item->id));
+        $this->assertSame(0, app(\App\Modules\Evaluaciones\Services\EvaluacionesDashboardService::class)
+            ->build($viewer, ['desde' => '2026-08-01', 'hasta' => '2026-08-31', 'mina' => '', 'cargo' => '', 'evaluacion_tipo' => 'desempeno'])['total']);
+    }
+
     public function test_error_de_validacion_diaria_conserva_formulario_y_notas(): void
     {
         [$userId, $personalId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);

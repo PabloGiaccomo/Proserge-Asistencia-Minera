@@ -65,7 +65,7 @@ class EvaluacionDesempenoService
 
         $items = $query->orderByDesc('fecha')->get();
 
-        return $items->filter(fn (EvaluacionDesempeno $e): bool => $this->policy->canAccessDestino($usuario, $e->destino_tipo, $e->destino_id))->values();
+        return $items->filter(fn (EvaluacionDesempeno $e): bool => $this->canReadEvaluation($usuario, $e))->values();
     }
 
     public function find(Usuario $usuario, string $id): ?EvaluacionDesempeno
@@ -82,7 +82,7 @@ class EvaluacionDesempenoService
             return null;
         }
 
-        return $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id) ? $item : null;
+        return $this->canReadEvaluation($usuario, $item) ? $item : null;
     }
 
     public function create(Usuario $usuario, array $payload): array
@@ -434,6 +434,12 @@ class EvaluacionDesempenoService
             $payload['respuesta_emocional'] +
             $payload['seguridad_trabajo']
         );
+    }
+
+    private function canReadEvaluation(Usuario $usuario, EvaluacionDesempeno $item): bool
+    {
+        return ((string) $item->origen === 'DIRECTA' && (string) $item->evaluado_por_usuario_id === (string) $usuario->id)
+            || $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id);
     }
 
     private function businessError(string $code, string $message): array

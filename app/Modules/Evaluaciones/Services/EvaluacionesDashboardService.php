@@ -81,7 +81,7 @@ class EvaluacionesDashboardService
             if ($type !== 'residentes') {
                 $query->with('mina:id,nombre');
                 if (!$this->policy->isPrivileged($user)) {
-                    $query->where(function ($scope) use ($mineIds): void {
+                    $query->where(function ($scope) use ($mineIds, $type, $user): void {
                         $scope->where(function ($mine) use ($mineIds): void {
                             $mine->where(function ($destination): void {
                                 $destination->whereNull('destino_tipo')->orWhere('destino_tipo', 'MINA');
@@ -91,6 +91,9 @@ class EvaluacionesDashboardService
                         })->orWhere(function ($other): void {
                             $other->whereNotNull('destino_tipo')->where('destino_tipo', '<>', 'MINA');
                         });
+                        if ($type === 'desempeno') {
+                            $scope->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $user->id));
+                        }
                     });
                 }
             }

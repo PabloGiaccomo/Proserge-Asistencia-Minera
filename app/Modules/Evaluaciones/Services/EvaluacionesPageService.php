@@ -133,7 +133,10 @@ class EvaluacionesPageService
         return EvaluacionDesempeno::query()
             ->with(['trabajador:id,nombre_completo,puesto', 'evaluador:id,nombre_completo', 'mina:id,nombre'])
             ->when(!$canViewOthers, fn ($query) => $query->where('evaluado_por_usuario_id', $usuario->id))
-            ->when($canViewOthers && !$this->policy->isPrivileged($usuario), fn ($query) => $query->whereIn('mina_id', $mineIds))
+            ->when($canViewOthers && !$this->policy->isPrivileged($usuario), fn ($query) => $query->where(function ($scope) use ($mineIds, $usuario): void {
+                $scope->whereIn('mina_id', $mineIds)
+                    ->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $usuario->id));
+            }))
             ->orderByDesc('fecha')
             ->orderByDesc('hora')
             ->limit(20)

@@ -3,7 +3,8 @@
 ## Dashboard
 
 Pestana a la derecha de Residentes. Acceso si se puede consultar al menos un
-tipo; solo agrega registros de tipos autorizados, respeta autoria y scope mina.
+tipo; solo agrega registros de tipos autorizados, respeta autoria y scope mina,
+salvo las evaluaciones directas propias registradas fuera del scope del actor.
 No concede permisos nuevos ni cambia evaluaciones.
 
 - Filtros por fecha exacta o rango inclusivo, mina y cargo actual de Personal.
@@ -43,7 +44,7 @@ Sin `ver_todas_evaluaciones`, cada historial muestra solamente las evaluaciones
 registradas por el usuario autenticado. El permiso no habilita tipos de
 evaluacion por si mismo y conserva el alcance por mina donde corresponda.
 
-## Evaluacion diaria
+## Evaluacion diaria desde asistencia
 
 - Nace de una asistencia cerrada.
 - La pestana diaria muestra los detalles del dia antes de abrir el formulario:
@@ -66,6 +67,21 @@ evaluacion por si mismo y conserva el alcance por mina donde corresponda.
   almacena descripcion de incidencia.
 - El formulario conserva notas y observaciones ante errores de validacion. Al
   guardar, evaluacion y promedio se actualizan en una misma transaccion.
+
+## Evaluacion diaria directa
+
+- En la misma pestana diaria existe un formulario independiente para cualquier
+  persona registrada en Personal, sin asistencia ni parada. Requiere seleccionar
+  una mina activa; no exige asignacion del trabajador a ella ni scope de mina
+  del evaluador.
+- Cualquier cuenta con `evaluaciones.evaluar_desempeno` puede registrarla,
+  incluso sin vinculo a Personal. La cuenta autenticada queda como autor; si
+  tiene Personal vinculado, no puede evaluarse a si misma.
+- Conserva los cinco criterios 1..4, incidencia y promedio transaccional. Se
+  permiten varias evaluaciones del mismo trabajador en la misma fecha y mina;
+  un token de envio unico impide guardar dos veces el mismo formulario.
+- El autor puede consultar su evaluacion directa sin scope de mina. Esto no
+  amplia la visibilidad de evaluaciones desde asistencia de otros responsables.
 
 ## Supervisores
 

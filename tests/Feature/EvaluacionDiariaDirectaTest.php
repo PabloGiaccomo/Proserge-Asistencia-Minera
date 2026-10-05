@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Services\EvaluacionDesempenoService;
+use App\Modules\Evaluaciones\Services\EvaluacionesDashboardService;
+use App\Modules\Evaluaciones\Services\EvaluacionesPageService;
 use App\Modules\Evaluaciones\Services\PromedioDesempenoService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Database\QueryException;
@@ -159,6 +161,24 @@ class EvaluacionDiariaDirectaTest extends TestCase
 
         $this->assertSame(0, DB::table('evaluacion_desempeno')->where('trabajador_id', $worker)->count());
         $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $worker]);
+    }
+
+    public function test_direct_author_sees_record_without_mine_scope_in_history_lookup_and_dashboard(): void
+    {
+        $worker = $this->personal();
+        $mine = $this->mine();
+        $actor = $this->user(['evaluar_desempeno', 'ver_todas_evaluaciones']);
+        $item = app(EvaluacionDesempenoService::class)->createDirect($actor, $this->payload($worker, $mine))['item'];
+
+        $page = app(EvaluacionesPageService::class)->build($actor, 'desempeno', '2026-10-05');
+        $this->assertTrue($page['dailyHistory']->contains('id', $item->id));
+        $this->assertSame($item->id, app(EvaluacionDesempenoService::class)->find($actor, $item->id)?->id);
+        $this->assertTrue(app(EvaluacionDesempenoService::class)->list($actor, [])->contains('id', $item->id));
+
+        $dashboard = app(EvaluacionesDashboardService::class)->build($actor, [
+            'desde' => '2026-10-01', 'hasta' => '2026-10-31', 'mina' => '', 'cargo' => '', 'evaluacion_tipo' => 'desempeno',
+        ]);
+        $this->assertSame(1, $dashboard['total']);
     }
 
     private function personal(): string
