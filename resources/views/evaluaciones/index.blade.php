@@ -65,6 +65,64 @@
     @endif
 
     @if($activeType === 'desempeno')
+        @if($canEvaluate['desempeno'])
+        @php($directOld = old('submission_key') !== null)
+        <section class="eval-section">
+            <div class="eval-section-heading">
+                <div><h2>Evaluación directa</h2><p>Registra una evaluación diaria sin asistencia ni parada, indicando la mina.</p></div>
+            </div>
+            <details class="eval-attendance" @if($directOld) open @endif>
+                <summary class="eval-attendance-heading"><strong>Nueva evaluación directa</strong><span class="eval-worker-action">Evaluar</span></summary>
+                <form method="POST" action="{{ route('evaluaciones.desempeno.directa.store') }}" class="eval-form eval-score-form">
+                    @csrf
+                    <input type="hidden" name="submission_key" value="{{ old('submission_key', (string) \Illuminate\Support\Str::uuid()) }}">
+                    <div class="eval-form-grid eval-form-grid-3">
+                        @include('evaluaciones.partials.person-search', ['name' => 'trabajador_id', 'label' => 'Persona evaluada', 'evaluationType' => 'desempeno'])
+                        <div class="eval-field">
+                            <label for="eval-direct-mine">Mina</label>
+                            <select id="eval-direct-mine" name="mina_id" required @if($errors->has('mina_id')) aria-invalid="true" @endif>
+                                <option value="">Seleccionar mina</option>
+                                @foreach($directMines as $mine)
+                                <option value="{{ $mine->id }}" @selected($directOld && old('mina_id') === $mine->id)>{{ $mine->nombre }}</option>
+                                @endforeach
+                            </select>
+                            @error('mina_id')<small class="eval-field-error">{{ $message }}</small>@enderror
+                        </div>
+                        <div class="eval-field">
+                            <label for="eval-direct-date">Fecha</label>
+                            <input id="eval-direct-date" type="date" name="fecha" value="{{ $directOld ? old('fecha', $selectedDate) : $selectedDate }}" required @if($directOld && $errors->has('fecha')) aria-invalid="true" @endif>
+                            @error('fecha')<small class="eval-field-error">{{ $message }}</small>@enderror
+                        </div>
+                    </div>
+                    @error('trabajador_id')<small class="eval-field-error">{{ $message }}</small>@enderror
+
+                    <div class="eval-score-grid">
+                        @foreach($scoreCriteria as $field => $label)
+                            <fieldset class="eval-score-field {{ $directOld && $errors->has($field) ? 'eval-has-error' : '' }}">
+                                <legend>{{ $label }}</legend>
+                                <div class="eval-score-options">
+                                    @foreach(range(1, 4) as $score)
+                                        <label><input type="radio" name="{{ $field }}" value="{{ $score }}" @checked($directOld && (string) old($field) === (string) $score) required><span>{{ $score }}</span></label>
+                                    @endforeach
+                                </div>
+                                @if($directOld) @error($field)<small class="eval-field-error">{{ $message }}</small>@enderror @endif
+                            </fieldset>
+                        @endforeach
+                    </div>
+                    <div class="eval-total" aria-live="polite"><span>Total</span><strong data-score-total>0 / 20</strong></div>
+                    <label class="eval-check"><input type="checkbox" name="tuvo_incidencia" value="1" data-incident-toggle @checked($directOld && old('tuvo_incidencia'))><span>Se registró una incidencia durante la jornada</span></label>
+                    <div class="eval-field {{ $directOld && old('tuvo_incidencia') ? '' : 'is-hidden' }}" data-incident-field>
+                        <label for="eval-direct-incident">Descripción de la incidencia</label>
+                        <textarea id="eval-direct-incident" name="descripcion_incidencia" rows="3" @if($directOld && old('tuvo_incidencia')) required @endif @if($directOld && $errors->has('descripcion_incidencia')) aria-invalid="true" @endif>{{ $directOld ? old('descripcion_incidencia') : '' }}</textarea>
+                        @if($directOld) @error('descripcion_incidencia')<small class="eval-field-error">{{ $message }}</small>@enderror @endif
+                    </div>
+                    <div class="eval-field"><label for="eval-direct-notes">Observaciones</label><textarea id="eval-direct-notes" name="observaciones" rows="3">{{ $directOld ? old('observaciones') : '' }}</textarea>@if($directOld) @error('observaciones')<small class="eval-field-error">{{ $message }}</small>@enderror @endif</div>
+                    <div class="eval-actions"><button type="button" class="btn btn-outline" data-eval-cancel>Cancelar</button><button type="submit" class="btn btn-primary">Guardar evaluación</button></div>
+                </form>
+            </details>
+        </section>
+        @endif
+
         <section class="eval-section">
             <div class="eval-section-heading">
                 <div>
@@ -75,7 +133,7 @@
             </div>
 
             @if(!$user->personal_id)
-                <div class="eval-empty">Tu cuenta debe estar vinculada a un trabajador para identificar quién realiza la evaluación.</div>
+                <div class="eval-empty">Para evaluar desde una asistencia, tu cuenta debe estar vinculada a Personal. Puedes usar la evaluación directa.</div>
             @elseif($dailyPending->isEmpty())
                 <div class="eval-empty">
                     <strong>No hay asistencias para esta fecha.</strong>

@@ -51,6 +51,9 @@ class EvaluacionesPageService
             'activeType' => $activeType,
             'selectedDate' => $date,
             'mines' => $mines,
+            'directMines' => $activeType === 'desempeno' && $access['desempeno']
+                ? Mina::query()->activeOperational()->orderBy('nombre')->get(['id', 'nombre'])
+                : collect(),
             'dailyPending' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyPending($usuario, $date) : collect(),
             'dailyHistory' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyHistory($usuario, $mineIds) : collect(),
             'supervisorHistory' => $access['supervisores'] && $activeType !== 'dashboard' ? $this->supervisorHistory($usuario, $mineIds) : collect(),

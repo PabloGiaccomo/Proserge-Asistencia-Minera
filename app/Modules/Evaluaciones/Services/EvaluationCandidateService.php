@@ -33,7 +33,7 @@ class EvaluationCandidateService
             $query->where('es_supervisor', true);
         } elseif ($type === 'residentes') {
             $query->whereRaw('UPPER(COALESCE(puesto, ?)) LIKE ?', ['', '%RESIDENTE%']);
-        } else {
+        } elseif ($type !== 'desempeno') {
             return collect();
         }
 

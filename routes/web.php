@@ -334,7 +334,7 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Evaluaciones
     Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno|ver_supervisores|evaluar_supervisores|ver_residentes|evaluar_residentes')->name('evaluaciones.index');
-    Route::get('/evaluaciones/personal/buscar', [EvaluacionDesempenoPageController::class, 'searchPersonal'])->middleware('web.permission:evaluaciones,evaluar_supervisores|evaluar_residentes')->name('evaluaciones.personal.buscar');
+    Route::get('/evaluaciones/personal/buscar', [EvaluacionDesempenoPageController::class, 'searchPersonal'])->middleware('web.permission:evaluaciones,evaluar_desempeno|evaluar_supervisores|evaluar_residentes')->name('evaluaciones.personal.buscar');
     Route::get('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.index');
     Route::get('/evaluaciones/desempeno/create', [EvaluacionDesempenoPageController::class, 'create'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.create');
     Route::get('/evaluaciones/desempeno/promedios', [EvaluacionDesempenoPageController::class, 'promedios'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.promedios');
@@ -439,6 +439,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/faltas/{id}/anular', [FaltasPageController::class, 'anular'])->middleware('web.permission:faltas,anular')->name('faltas.anular');
 
     Route::post('/evaluaciones/desempeno', [EvaluacionDesempenoPageController::class, 'storeDaily'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.store');
+    Route::post('/evaluaciones/desempeno/directa', [EvaluacionDesempenoPageController::class, 'storeDirect'])->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.desempeno.directa.store');
     Route::post('/evaluaciones/supervisores', [EvaluacionDesempenoPageController::class, 'storeSupervisor'])->middleware('web.permission:evaluaciones,evaluar_supervisores')->name('evaluaciones.supervisores.store');
     Route::post('/evaluaciones/residentes', [EvaluacionDesempenoPageController::class, 'storeResident'])->middleware('web.permission:evaluaciones,evaluar_residentes')->name('evaluaciones.residentes.store');
     Route::put('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'update'])->middleware('web.permission:evaluaciones,actualizar')->name('evaluaciones.desempeno.update');

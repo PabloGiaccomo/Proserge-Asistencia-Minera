@@ -13,6 +13,72 @@ class EvaluacionesWebTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_formulario_directo_muestra_minera_activa_sin_scope_y_busca_cualquier_persona(): void
+    {
+        [$userId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        DB::table('usuarios')->where('id', $userId)->update(['personal_id' => null]);
+        $mineId = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mineId, 'nombre' => 'MINA DIRECTA FUERA DE SCOPE', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        $worker = $this->createPersonal('PERSONA DIRECTA BUSCABLE');
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('evaluaciones.index', ['tipo' => 'desempeno']))
+            ->assertOk()
+            ->assertSee('Evaluación directa')
+            ->assertSee('MINA DIRECTA FUERA DE SCOPE')
+            ->assertSee('action="'.route('evaluaciones.desempeno.directa.store').'"', false);
+
+        $this->withSession($this->sessionFor($userId))
+            ->getJson(route('evaluaciones.personal.buscar', ['tipo' => 'desempeno', 'q' => 'PERSONA DIRECTA BUSCABLE']))
+            ->assertOk()->assertJsonPath('data.0.id', $worker);
+    }
+
+    public function test_formulario_directo_con_nota_invalida_conserva_seleccion_y_valores(): void
+    {
+        [$userId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        $worker = $this->createPersonal('PERSONA CON NOTA INVALIDA');
+        $mineId = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mineId, 'nombre' => 'MINA DIRECTA FORM', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        $url = route('evaluaciones.index', ['tipo' => 'desempeno']);
+        $token = (string) Str::uuid();
+
+        $this->withSession($this->sessionFor($userId))->from($url)
+            ->post(route('evaluaciones.desempeno.directa.store'), [
+                'trabajador_id' => $worker, 'mina_id' => $mineId, 'fecha' => '2026-10-05',
+                'submission_key' => $token, 'desempeno_trabajo' => 5,
+                'orden_limpieza' => 3, 'seguridad_trabajo' => 2,
+                'compromiso' => 4, 'respuesta_emocional' => 1,
+            ])->assertRedirect($url)->assertSessionHasErrors('desempeno_trabajo');
+
+        $this->withSession($this->sessionFor($userId))->get($url)
+            ->assertOk()->assertSee('value="'.$worker.'"', false)
+            ->assertSee('value="'.$token.'"', false)
+            ->assertSee('name="orden_limpieza" value="3" checked', false);
+    }
+
+    public function test_ruta_directa_rechaza_sin_permiso_y_exito_regresa_al_historial(): void
+    {
+        [$allowedId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
+        [$deniedId] = $this->createUser(['evaluaciones' => ['ver_desempeno']]);
+        $worker = $this->createPersonal('PERSONA DIRECTA GUARDADA');
+        $mineId = (string) Str::uuid();
+        DB::table('minas')->insert(['id' => $mineId, 'nombre' => 'MINA DIRECTA GUARDADA', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        $payload = [
+            'trabajador_id' => $worker, 'mina_id' => $mineId, 'fecha' => '2026-10-05',
+            'submission_key' => (string) Str::uuid(), 'desempeno_trabajo' => 4,
+            'orden_limpieza' => 3, 'seguridad_trabajo' => 2,
+            'compromiso' => 4, 'respuesta_emocional' => 1,
+        ];
+
+        $this->withSession($this->sessionFor($deniedId))
+            ->post(route('evaluaciones.desempeno.directa.store'), $payload)->assertForbidden();
+        $this->withSession($this->sessionFor($allowedId))
+            ->post(route('evaluaciones.desempeno.directa.store'), $payload)
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('evaluaciones.index', ['tipo' => 'desempeno', 'fecha' => '2026-10-05']));
+        $this->assertDatabaseHas('evaluacion_desempeno', ['trabajador_id' => $worker, 'origen' => 'DIRECTA']);
+    }
+
     public function test_error_de_validacion_diaria_conserva_formulario_y_notas(): void
     {
         [$userId, $personalId] = $this->createUser(['evaluaciones' => ['evaluar_desempeno']]);
@@ -33,11 +99,18 @@ class EvaluacionesWebTest extends TestCase
             'observaciones' => 'Revisar herramientas',
         ])->assertRedirect($url)->assertSessionHasErrors('descripcion_incidencia');
 
-        $this->withSession($session)->get($url)->assertOk()
+        $response = $this->withSession($session)->get($url)->assertOk()
             ->assertSee('value="'.$detailId.'"', false)
             ->assertSee('name="desempeno_trabajo" value="4" checked', false)
             ->assertSee('Revisar herramientas')
             ->assertSee('aria-invalid="true"', false);
+
+        $document = new \DOMDocument();
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $directForm = $xpath->query('//form[contains(@action, "/evaluaciones/desempeno/directa")]')->item(0);
+        $this->assertNotNull($directForm);
+        $this->assertSame(0, $xpath->query('.//input[@name="orden_limpieza" and @checked]', $directForm)->length);
     }
 
     public function test_fallo_del_promedio_revierte_evaluacion_diaria(): void

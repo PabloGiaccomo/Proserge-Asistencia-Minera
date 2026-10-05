@@ -5,6 +5,7 @@ namespace App\Modules\Evaluaciones\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\AsistenciaDetalle;
 use App\Modules\Evaluaciones\Requests\StoreEvaluacionDiariaRequest;
+use App\Modules\Evaluaciones\Requests\StoreEvaluacionDirectaRequest;
 use App\Modules\Evaluaciones\Requests\UpdateEvaluacionDesempenoRequest;
 use App\Modules\Evaluaciones\Services\EvaluacionDesempenoService;
 use App\Modules\Evaluaciones\Services\EvaluacionesPageService;
@@ -102,11 +103,28 @@ class EvaluacionDesempenoPageController extends WebPageController
         ])->with('success', 'Evaluación diaria registrada correctamente.');
     }
 
+    public function storeDirect(StoreEvaluacionDirectaRequest $request): RedirectResponse
+    {
+        $result = $this->performanceService->createDirect(
+            $this->requireAuthenticatedUser(),
+            $request->validated(),
+        );
+
+        if (($result['ok'] ?? false) !== true) {
+            return back()->withInput()->withErrors(['evaluacion' => $result['message'] ?? 'No se pudo guardar la evaluación.']);
+        }
+
+        return redirect()->route('evaluaciones.index', [
+            'tipo' => 'desempeno',
+            'fecha' => $result['item']->fecha->toDateString(),
+        ])->with('success', 'Evaluación diaria registrada correctamente.');
+    }
+
     public function searchPersonal(Request $request): JsonResponse
     {
         $user = $this->requireAuthenticatedUser();
         $filters = $request->validate([
-            'tipo' => ['required', 'string', 'in:supervisores,residentes'],
+            'tipo' => ['required', 'string', 'in:desempeno,supervisores,residentes'],
             'q' => ['nullable', 'string', 'max:191'],
             'id' => ['nullable', 'string', 'size:36'],
             'mina_id' => ['nullable', 'string', 'size:36', 'exists:minas,id'],
