@@ -38,6 +38,14 @@ class EvaluacionDesempeno extends Model
         'evaluado_por_usuario_id',
         'origen',
         'submission_key',
+        'import_lote_id',
+        'source_file',
+        'source_sheet',
+        'source_row',
+        'source_id',
+        'source_mina',
+        'source_evaluador',
+        'source_key',
     ];
 
     protected $casts = [
