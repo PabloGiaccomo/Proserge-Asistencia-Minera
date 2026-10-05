@@ -172,6 +172,14 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $this->assertCount(2, $manifest['blocked']);
     }
 
+    public function test_preview_requires_both_primary_workbooks(): void
+    {
+        $read = app(EvaluacionesHistoricalWorkbookReader::class)->read([]);
+
+        $this->assertCount(2, $read['issues']);
+        $this->assertSame([], $read['rows']);
+    }
+
     private function personal(string $dni): string
     {
         $id = (string) Str::uuid();

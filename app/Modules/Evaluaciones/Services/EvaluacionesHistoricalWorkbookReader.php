@@ -12,6 +12,12 @@ class EvaluacionesHistoricalWorkbookReader
     {
         $result = ['rows' => [], 'personal_map' => [], 'attendance_headers' => [], 'issues' => []];
 
+        foreach (['control', 'consolidado'] as $required) {
+            if (! array_key_exists($required, $privatePaths)) {
+                $result['issues'][] = ['source' => $required, 'message' => 'Falta uno de los dos libros principales.'];
+            }
+        }
+
         foreach ($privatePaths as $source => $path) {
             if (! in_array($source, ['control', 'consolidado'], true) || ! is_readable($path)) {
                 $result['issues'][] = ['source' => $source, 'message' => 'Archivo no reconocido o ilegible.'];
