@@ -36,6 +36,8 @@ class EvaluacionDesempeno extends Model
         'destino_tipo',
         'destino_id',
         'evaluado_por_usuario_id',
+        'origen',
+        'submission_key',
     ];
 
     protected $casts = [
