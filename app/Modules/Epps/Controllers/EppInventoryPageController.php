@@ -12,15 +12,14 @@ use App\Models\Mina;
 use App\Models\Usuario;
 use App\Modules\Epps\Requests\AdjustEppStockRequest;
 use App\Modules\Epps\Requests\OpenEppStockRequest;
+use App\Modules\Epps\Services\EppInventoryConfirmationService;
 use App\Modules\Epps\Services\EppInventoryService;
 use App\Modules\Epps\Services\EppScopeService;
 use App\Support\Rbac\MinaScopeAccess;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -28,7 +27,7 @@ use InvalidArgumentException;
 
 class EppInventoryPageController extends WebPageController
 {
-    public function __construct(private readonly EppInventoryService $inventory, private readonly EppScopeService $scope) {}
+    public function __construct(private readonly EppInventoryService $inventory, private readonly EppScopeService $scope, private readonly EppInventoryConfirmationService $confirmations) {}
 
     public function index(Request $request): View
     {
@@ -95,36 +94,8 @@ class EppInventoryPageController extends WebPageController
     {
         $actor = $this->actor();
         $validated = $request->validate(['preview_token' => ['required', 'uuid'], 'confirmacion' => ['accepted']]);
-        $preview = $request->session()->get('epp_inventory_preview');
-        if (! $preview || $preview['actor_id'] !== $actor->id || $preview['action'] !== $action
-            || ! hash_equals($preview['token'], $validated['preview_token']) || $preview['expires_at'] < time()) {
-            throw ValidationException::withMessages(['preview_token' => 'La revision vencio o ya fue confirmada. Genera una nueva vista previa.']);
-        }
-        $payload = $preview['payload'];
         try {
-            $count = DB::transaction(function () use ($action, $actor, $payload): int {
-                if ($action === 'almacen') {
-                    $warehouse = new EppAlmacen(['id' => $payload['new_warehouse_id'], 'nombre' => trim($payload['nombre']), 'mina_id' => $payload['mina_id'] ?? null, 'estado' => 'ACTIVO']);
-                    Gate::forUser($actor)->authorize('manageInventory', [EppOperacion::class, $warehouse]);
-                    $warehouse->save();
-                    DB::afterCommit(fn () => Log::info('epp.warehouse_created', ['almacen_id' => $warehouse->id, 'mina_id' => $warehouse->mina_id, 'actor_usuario_id' => $actor->id, 'origen' => 'WEB', 'motivo' => $payload['motivo']]));
-
-                    return 1;
-                }
-                if ($action === 'apertura') {
-                    return $this->inventory->openStock(EppAlmacen::query()->findOrFail($payload['almacen_id']), $payload['lines'], $actor, $payload['motivo'])->count();
-                }
-                $existence = EppExistencia::query()->findOrFail($payload['existencia_id']);
-                $warehouse = EppAlmacen::query()->lockForUpdate()->findOrFail($existence->almacen_id);
-                $existence = EppExistencia::query()->lockForUpdate()->findOrFail($existence->id);
-                Gate::forUser($actor)->authorize('adjustInventory', [EppOperacion::class, $warehouse]);
-                if ($existence->cantidad_disponible !== $payload['saldo_anterior']) {
-                    throw new InvalidArgumentException('El saldo cambio despues de la revision. Genera una nueva vista previa.');
-                }
-                $this->inventory->adjust($warehouse, $existence->epp, $existence->atributos_json ?: [], (int) $payload['delta'], $actor, $payload['motivo']);
-
-                return 1;
-            }, 3);
+            $count = $this->confirmations->confirm($validated['preview_token'], $actor, $action)['count'];
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['inventario' => $exception->getMessage()]);
         }
@@ -135,7 +106,8 @@ class EppInventoryPageController extends WebPageController
 
     private function savePreview(Request $request, Usuario $actor, string $action, array $payload, array $rows, string $warehouseName): View
     {
-        $preview = ['token' => (string) Str::uuid(), 'actor_id' => $actor->id, 'action' => $action, 'payload' => $payload, 'rows' => $rows, 'warehouse_name' => $warehouseName, 'expires_at' => time() + 900];
+        $confirmation = $this->confirmations->preview($actor, $action, $payload);
+        $preview = ['token' => $confirmation->id, 'actor_id' => $actor->id, 'action' => $action, 'payload' => $payload, 'rows' => $rows, 'warehouse_name' => $warehouseName, 'expires_at' => $confirmation->expires_at->timestamp];
         $request->session()->put('epp_inventory_preview', $preview);
 
         return $this->page($request, $actor, $preview);

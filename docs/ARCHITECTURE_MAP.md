@@ -101,6 +101,8 @@ Vistas principales:
 - Catalogo e inventario EPP: `EppCatalogService`, `EppInventoryService` y
   `EppInventoryPageController`; apertura y ajustes con revision/confirmacion,
   bloqueo de existencias y libro append-only. Flujo: `docs/EPP_INVENTARIO.md`.
+  `EppInventoryConfirmationService` coordina consumo atomico del token y
+  resultado persistido en `epp_inventario_confirmaciones` para reintentos.
 
 - Usuarios, roles y permisos: `Usuario`, `Rol`, `UsuarioRol`,
   `UsuarioMinaScope`, `RoleManagementService`, vistas `seguridad`.

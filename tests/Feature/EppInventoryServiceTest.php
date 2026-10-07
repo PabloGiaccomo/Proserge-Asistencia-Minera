@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\EppAlmacen;
 use App\Models\EppExistencia;
+use App\Models\EppInventarioConfirmacion;
 use App\Models\EppInventarioMovimiento;
 use App\Models\EppRegistro;
 use App\Models\Mina;
@@ -147,7 +148,8 @@ class EppInventoryServiceTest extends TestCase
         $token = session('epp_inventory_preview.token');
         $this->post('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1', 'lines' => [$this->line(999)]])->assertRedirect();
         $this->assertSame(8, app(EppInventoryService::class)->available($this->warehouse, $this->epp, ['talla' => 'M']));
-        $this->post('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1'])->assertSessionHasErrors('preview_token');
+        $this->post('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1'])->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame(1, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count());
     }
 
     public function test_inventory_http_requires_direct_permission(): void
@@ -185,6 +187,8 @@ class EppInventoryServiceTest extends TestCase
         $token = session('epp_inventory_preview.token');
         $service->adjust($this->warehouse, $this->epp, ['talla' => 'M'], 1, $this->actor, 'Otro operador');
         $this->post('/epps/inventario/ajuste', ['preview_token' => $token, 'confirmacion' => '1'])->assertSessionHasErrors('inventario');
+        $this->assertNull(EppInventarioConfirmacion::query()->findOrFail($token)->confirmado_at);
+        $this->assertNull(EppInventarioConfirmacion::query()->findOrFail($token)->resultado_json);
         $this->assertSame(9, $service->available($this->warehouse, $this->epp, ['talla' => 'M']));
         $this->post('/epps/inventario/ajuste/preview', ['existencia_id' => $opening->existencia_id, 'delta' => -2, 'motivo' => 'Conteo corregido'])->assertOk();
         $this->post('/epps/inventario/ajuste', ['preview_token' => session('epp_inventory_preview.token'), 'confirmacion' => '1'])->assertRedirect()->assertSessionHasNoErrors();
@@ -208,6 +212,84 @@ class EppInventoryServiceTest extends TestCase
         $this->actor->update(['rol_id' => $role->id]);
         $this->postJson('/epps/inventario/almacen/preview', ['nombre' => 'FUERA DE ALCANCE', 'mina_id' => $mine->id, 'motivo' => 'Conteo'])->assertForbidden();
         $this->get('/epps/inventario?almacen_id='.$this->warehouse->id)->assertForbidden();
+    }
+
+    public function test_adjustment_replay_after_balance_aba_has_only_one_effect(): void
+    {
+        $inventory = app(EppInventoryService::class);
+        $opening = $inventory->openStock($this->warehouse, [$this->line(8)], $this->actor, 'Conteo inicial')->first();
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id]);
+        $this->post('/epps/inventario/ajuste/preview', ['existencia_id' => $opening->existencia_id, 'delta' => 3, 'motivo' => 'Ajuste una vez'])->assertOk();
+        $preview = session('epp_inventory_preview');
+        $confirm = ['preview_token' => $preview['token'], 'confirmacion' => '1'];
+        $this->post('/epps/inventario/ajuste', $confirm)->assertRedirect()->assertSessionHasNoErrors();
+        $inventory->adjust($this->warehouse, $this->epp, ['talla' => 'M'], -3, $this->actor, 'Otro conteo devuelve saldo anterior');
+        $this->withSession(['epp_inventory_preview' => $preview])->post('/epps/inventario/ajuste', $confirm)->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame(8, $inventory->available($this->warehouse, $this->epp, ['talla' => 'M']));
+        $this->assertSame(1, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->where('motivo', 'Ajuste una vez')->count());
+        $this->assertSame(3, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count());
+    }
+
+    public function test_warehouse_double_confirmation_returns_same_result_without_duplicate_or_server_error(): void
+    {
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id]);
+        $this->post('/epps/inventario/almacen/preview', ['nombre' => 'ALMACEN IDEMPOTENTE', 'motivo' => 'Alta una vez'])->assertOk();
+        $preview = session('epp_inventory_preview');
+        $confirm = ['preview_token' => $preview['token'], 'confirmacion' => '1'];
+        $this->post('/epps/inventario/almacen', $confirm)->assertRedirect()->assertSessionHasNoErrors();
+        $this->withSession(['epp_inventory_preview' => $preview])->post('/epps/inventario/almacen', $confirm)->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame(1, EppAlmacen::query()->where('nombre', 'ALMACEN IDEMPOTENTE')->count());
+        $this->assertSame(0, EppInventarioMovimiento::query()->where('almacen_id', $preview['payload']['new_warehouse_id'])->count());
+    }
+
+    public function test_confirmation_uses_persisted_preview_even_if_session_payload_is_restored_or_modified(): void
+    {
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id]);
+        $this->post('/epps/inventario/apertura/preview', ['almacen_id' => $this->warehouse->id, 'lines' => [$this->line(8)], 'motivo' => 'Conteo protegido'])->assertOk();
+        $preview = session('epp_inventory_preview');
+        $token = $preview['token'];
+        $preview['payload']['lines'][0]['cantidad'] = 999;
+        $this->withSession(['epp_inventory_preview' => $preview])->post('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1'])->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame(8, app(EppInventoryService::class)->available($this->warehouse, $this->epp, ['talla' => 'M']));
+    }
+
+    public function test_confirmations_reject_expired_wrong_actor_and_wrong_action_tokens(): void
+    {
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id]);
+        $payload = ['almacen_id' => $this->warehouse->id, 'lines' => [$this->line(8)], 'motivo' => 'Conteo'];
+        $this->post('/epps/inventario/apertura/preview', $payload)->assertOk();
+        $token = session('epp_inventory_preview.token');
+        $this->postJson('/epps/inventario/apertura', ['preview_token' => (string) Str::uuid(), 'confirmacion' => '1'])->assertUnprocessable()->assertJsonValidationErrors('preview_token');
+        $this->postJson('/epps/inventario/almacen', ['preview_token' => $token, 'confirmacion' => '1'])->assertUnprocessable()->assertJsonValidationErrors('preview_token');
+        $other = Usuario::query()->create(['id' => (string) Str::uuid(), 'email' => Str::uuid().'@test.local', 'password' => 'test-secret', 'rol_id' => $this->actor->rol_id, 'estado' => 'ACTIVO']);
+        $this->withSession(['user_id' => $other->id])->postJson('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1'])->assertUnprocessable()->assertJsonValidationErrors('preview_token');
+        $this->travel(16)->minutes();
+        try {
+            $this->withSession(['user_id' => $this->actor->id])->postJson('/epps/inventario/apertura', ['preview_token' => $token, 'confirmacion' => '1'])->assertUnprocessable()->assertJsonValidationErrors('preview_token');
+        } finally {
+            $this->travelBack();
+        }
+        $this->assertSame(0, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count());
+    }
+
+    public function test_opening_http_rejects_product_without_inventory_control(): void
+    {
+        $this->epp->update(['control_inventario' => false]);
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id])->postJson('/epps/inventario/apertura/preview', ['almacen_id' => $this->warehouse->id, 'lines' => [$this->line(8)], 'motivo' => 'Conteo'])->assertUnprocessable()->assertJsonValidationErrors('lines');
+        $this->assertSame(0, EppExistencia::query()->where('almacen_id', $this->warehouse->id)->count());
+    }
+
+    public function test_confirmation_replay_still_requires_current_warehouse_scope(): void
+    {
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id]);
+        $this->post('/epps/inventario/apertura/preview', ['almacen_id' => $this->warehouse->id, 'lines' => [$this->line(8)], 'motivo' => 'Conteo'])->assertOk();
+        $token = session('epp_inventory_preview.token');
+        $confirm = ['preview_token' => $token, 'confirmacion' => '1'];
+        $this->post('/epps/inventario/apertura', $confirm)->assertRedirect()->assertSessionHasNoErrors();
+        $role = Rol::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'REPLAY SCOPED '.Str::uuid(), 'estado' => 'ACTIVO', 'permisos' => PermissionCatalog::matrixFromSelections(['epps' => ['gestionar_inventario']])]);
+        $this->actor->update(['rol_id' => $role->id]);
+        $this->postJson('/epps/inventario/apertura', $confirm)->assertForbidden();
+        $this->assertSame(1, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count());
     }
 
     private function line(int $quantity): array

@@ -48,10 +48,17 @@ actor, origen, motivo y atributos snapshot, y actualiza la existencia. El bloque
 del almacen tambien serializa las aperturas cuando aun no existe la fila de
 existencia. Un error revierte el lote completo; nunca deja aperturas parciales.
 
-Las vistas previas quedan en la sesion del servidor con token aleatorio, actor,
-tipo de accion y vencimiento de 15 minutos. La confirmacion toma esos datos del
-servidor, revalida permisos/alcance y consume la revision; el payload enviado por
-el navegador no reemplaza el conteo revisado. No hay cambios de stock en preview.
+Las vistas previas conservan token aleatorio, actor, accion, payload y vencimiento
+de 15 minutos en `epp_inventario_confirmaciones`. La sesion conserva solo datos
+de presentacion. Preview crea metadatos de coordinacion, sin cambiar stock ni
+agregar movimientos. Confirmacion bloquea la fila del token en MySQL y aplica
+el cambio de inventario/almacen y su resultado dentro de la misma transaccion.
+Los reintentos devuelven el resultado original y no generan otro movimiento,
+incluso con una sesion restaurada o si el saldo vuelve al valor previo. Siempre
+se revalidan permisos y alcance del actor, tambien al consultar el resultado
+consumido. Los tokens desconocidos, vencidos sin confirmar, de otra accion o de
+otro actor se rechazan. El payload del navegador o de sesion no sustituye el
+payload persistido. Las claves consumidas se conservan al revertir la aplicacion.
 
 ## Validacion y despliegue
 
@@ -60,6 +67,9 @@ y documentos privados. Revisar permisos del rol antes de habilitar el inventario
 La apertura requiere conteo fisico y confirmacion; no se ejecuta automaticamente
 durante migraciones ni cambia entregas historicas o datos de Personal.
 
-Pruebas: `EppCatalogTest`, `EppInventoryServiceTest`, `EppAuthorizationTest`.
+Pruebas: `EppCatalogTest`, `EppInventoryServiceTest`, `EppAuthorizationTest`,
+`EppInventoryConfirmationConcurrencyTest`. Esta ultima usa dos procesos MySQL,
+fixtures comprometidos de coordinacion/almacen y limpieza dirigida; nunca muta
+ni limpia el libro de inventario.
 `tests/Browser/epp-inventory.cjs` usa Playwright/Chrome con fixtures en memoria y
 solo puede consultar `proserge_app_test`; revisa 1440/320/375/390/430 px.
