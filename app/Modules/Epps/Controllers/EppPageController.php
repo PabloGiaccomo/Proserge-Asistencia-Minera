@@ -5,8 +5,11 @@ namespace App\Modules\Epps\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\EppEntrega;
 use App\Models\ParadaHerramientaCatalogo;
+use App\Models\Usuario;
+use App\Modules\Epps\Requests\SaveEppCatalogRequest;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -85,12 +88,12 @@ class EppPageController extends WebPageController
         return $this->service->downloadPersonalKardex((string) $validated['personal_id']);
     }
 
-    public function storeCatalog(Request $request): RedirectResponse
+    public function storeCatalog(SaveEppCatalogRequest $request): RedirectResponse
     {
-        $this->requireAuthenticatedUser();
+        $this->authorizeCatalog();
 
         try {
-            $this->service->storeCatalog($request->validate($this->catalogRules()));
+            $this->service->storeCatalog($request->validated());
         } catch (InvalidArgumentException $exception) {
             return back()->withInput()->with('error', $exception->getMessage());
         }
@@ -99,12 +102,12 @@ class EppPageController extends WebPageController
             ->with('success', 'Item guardado correctamente.');
     }
 
-    public function updateCatalog(Request $request, string $id): RedirectResponse
+    public function updateCatalog(SaveEppCatalogRequest $request, string $id): RedirectResponse
     {
-        $this->requireAuthenticatedUser();
+        $this->authorizeCatalog();
 
         try {
-            $this->service->updateCatalog($id, $request->validate($this->catalogRules()));
+            $this->service->updateCatalog($id, $request->validated());
         } catch (InvalidArgumentException $exception) {
             return back()
                 ->withInput($request->input() + ['catalog_edit_id' => $id])
@@ -391,22 +394,10 @@ class EppPageController extends WebPageController
         ]);
     }
 
-    private function catalogRules(): array
+    private function authorizeCatalog(): void
     {
-        return [
-            'nombre' => ['required', 'string', 'max:191'],
-            'vida_util_dias' => ['required', 'integer', 'min:1', 'max:3650'],
-            'requiere_talla' => ['nullable', 'boolean'],
-            'tallas' => ['nullable', 'string', 'max:1000'],
-            'requiere_color' => ['nullable', 'boolean'],
-            'colores' => ['nullable', 'string', 'max:1000'],
-            'otros_atributos' => ['nullable', 'array'],
-            'otros_atributos.*.nombre' => ['nullable', 'string', 'max:100'],
-            'otros_atributos.*.valores' => ['nullable', 'string', 'max:1000'],
-            'categoria' => ['nullable', 'string', 'in:EPP,HERRAMIENTA,CONSUMIBLE'],
-            'estado' => ['nullable', 'string', 'max:20'],
-            'catalog_edit_id' => ['nullable', 'string'],
-        ];
+        $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
+        abort_unless(PermissionMatrix::userCanDirect($actor, 'epps', 'gestionar_inventario'), 403);
     }
 
     private function toolCatalogRules(): array

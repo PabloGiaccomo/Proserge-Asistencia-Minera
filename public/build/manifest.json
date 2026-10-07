@@ -1,12 +1,12 @@
 {
-  "node_modules/@zxing/browser/esm/index.js": {
+  "../../../../../../proserge_app/node_modules/@zxing/browser/esm/index.js": {
     "file": "assets/index-B2ZkNDM-.js",
     "name": "index",
-    "src": "node_modules/@zxing/browser/esm/index.js",
+    "src": "../../../../../../proserge_app/node_modules/@zxing/browser/esm/index.js",
     "isDynamicEntry": true
   },
   "resources/css/app.css": {
-    "file": "assets/app-yFnJsHpv.css",
+    "file": "assets/app-CNSJevkK.css",
     "src": "resources/css/app.css",
     "isEntry": true,
     "name": "app",
@@ -20,7 +20,7 @@
     "src": "resources/js/app.js",
     "isEntry": true,
     "dynamicImports": [
-      "node_modules/@zxing/browser/esm/index.js"
+      "../../../../../../proserge_app/node_modules/@zxing/browser/esm/index.js"
     ]
   }
 }

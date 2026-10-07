@@ -160,6 +160,9 @@
     <header class="lgt-header">
         <h1 class="lgt-title">Logística</h1>
         <p class="lgt-subtitle">Control de EPP, herramientas, servicios y costos</p>
+        @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'gestionar_inventario') || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'ajustar_inventario'))
+            <a class="epp-btn epp-btn-light" href="{{ route('epps.inventory.index') }}">Inventario por almacén</a>
+        @endif
     </header>
 
     <nav class="lgt-tabs" aria-label="Secciones de logística" data-logistics-tabs>
@@ -1435,13 +1438,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 @endif
             >
             @php
-                $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'configurar');
-                $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'editar');
-                $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
-                            $identCategoria = strtoupper(trim((string) request()->query('ident_categoria', 'EPP')));
+                $identCategoria = strtoupper(trim((string) request()->query('ident_categoria', 'EPP')));
                 if (!in_array($identCategoria, ['EPP', 'HERRAMIENTA', 'CONSUMIBLE'], true)) {
                     $identCategoria = 'EPP';
                 }
+                $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', $identCategoria === 'EPP' ? 'gestionar_inventario' : 'configurar');
+                $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', $identCategoria === 'EPP' ? 'gestionar_inventario' : 'editar');
+                $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
                 $categoriaUrl = function (string $cat) use ($tabUrl): string {
                     $query = request()->except(['tab', 'ident_categoria', 'page']);
                     $query['tab'] = 'identificacion';
@@ -1699,6 +1702,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                                                         <form method="POST" action="{{ route('epps.catalogo.update', $itemId) }}" class="epp-form-grid">
                                                                             @csrf
                                                                             @method('PUT')
+                                                                            @include('epps.catalog-policy-fields', ['catalogPolicy' => $row, 'useOldPolicy' => $editingThis])
                                                                             <input type="hidden" name="tab" value="identificacion">
                                                                             <input type="hidden" name="ident_categoria" value="{{ $identCategoria }}">
                                                                             <input type="hidden" name="catalog_edit_id" value="{{ $itemId }}">
@@ -1899,6 +1903,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <input type="text" name="nombre" value="{{ old('nombre') }}" placeholder="Casco, lentes, guantes..." required data-epp-code-source>
                                     <span class="epp-code-preview">Código generado: <strong data-epp-code-preview>--</strong></span>
                                 </label>
+
+                                @include('epps.catalog-policy-fields', ['catalogPolicy' => [], 'useOldPolicy' => true])
 
                                 <label>
                                     Vida útil (días)

@@ -98,6 +98,9 @@ Vistas principales:
 - Operaciones EPP: `EppScopeService`, `EppOperationPolicy` y capacidades
   directas en `PermissionCatalog`/`PermissionMatrix`. Reglas de alcance y
   compatibilidad historica: `docs/EPP_AUTORIZACION.md`.
+- Catalogo e inventario EPP: `EppCatalogService`, `EppInventoryService` y
+  `EppInventoryPageController`; apertura y ajustes con revision/confirmacion,
+  bloqueo de existencias y libro append-only. Flujo: `docs/EPP_INVENTARIO.md`.
 
 - Usuarios, roles y permisos: `Usuario`, `Rol`, `UsuarioRol`,
   `UsuarioMinaScope`, `RoleManagementService`, vistas `seguridad`.

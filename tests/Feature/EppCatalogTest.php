@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
-use App\Models\EppRegistro;
 use App\Models\EppEntrega;
+use App\Models\EppRegistro;
 use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\PersonalMina;
+use App\Modules\Epps\Services\EppCatalogService;
 use App\Modules\Epps\Services\EppService;
+use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -16,6 +18,41 @@ use Tests\TestCase;
 class EppCatalogTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_consumable_policy_and_controls_survive_catalog_edit_and_dashboard(): void
+    {
+        $epp = app(EppCatalogService::class)->save(new EppRegistro, [
+            'nombre' => 'MASCARILLA N95', 'politica_devolucion' => 'CONSUMIBLE',
+            'control_inventario' => true, 'permite_entrega_repetida' => true,
+            'requiere_serie' => true, 'es_requerido_cobertura' => false,
+        ]);
+        $edited = app(EppService::class)->updateCatalog($epp->id, ['nombre' => 'MASCARILLA N95 REVISADA']);
+        $this->assertSame('CONSUMIBLE', $edited->politica_devolucion);
+        $this->assertTrue($edited->control_inventario);
+        $this->assertTrue($edited->permite_entrega_repetida);
+        $this->assertTrue($edited->requiere_serie);
+        $this->assertFalse($edited->es_requerido_cobertura);
+        $row = app(LogisticaDashboardService::class)->pageData(['tab' => 'identificacion'])['identityRows']->firstWhere('id', $epp->id);
+        $this->assertSame('CONSUMIBLE', $row['politica_devolucion']);
+        $this->assertTrue($row['control_inventario']);
+        $this->assertTrue($row['permite_entrega_repetida']);
+        $this->assertTrue($row['requiere_serie']);
+        $this->assertFalse($row['es_requerido_cobertura']);
+    }
+
+    public function test_unspecified_catalog_policy_defaults_to_returnable(): void
+    {
+        $epp = app(EppCatalogService::class)->save(new EppRegistro, ['nombre' => 'CASCO SIN POLITICA']);
+        $this->assertSame('RETORNABLE', $epp->politica_devolucion);
+        $this->assertTrue($epp->control_inventario);
+        $this->assertFalse($epp->permite_entrega_repetida);
+    }
+
+    public function test_catalog_rejects_unknown_policy(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        app(EppCatalogService::class)->save(new EppRegistro, ['nombre' => 'CASCO INVALIDO', 'politica_devolucion' => 'OTRA']);
+    }
 
     public function test_catalogo_guarda_si_epp_requiere_talla_y_color(): void
     {

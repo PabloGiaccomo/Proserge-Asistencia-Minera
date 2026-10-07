@@ -477,36 +477,12 @@ class EppService
 
     public function storeCatalog(array $payload): EppRegistro
     {
-        $data = $this->normalizeCatalogPayload($payload);
-
-        return DB::transaction(function () use ($data): EppRegistro {
-            $epp = EppRegistro::query()->firstOrNew(['codigo' => $data['codigo']]);
-
-            if (!$epp->exists) {
-                $epp->id = (string) Str::uuid();
-            }
-
-            return $this->saveCatalog($epp, $data);
-        });
+        return app(EppCatalogService::class)->save(new EppRegistro(), $payload);
     }
 
     public function updateCatalog(string $id, array $payload): EppRegistro
     {
-        $data = $this->normalizeCatalogPayload($payload);
-
-        return DB::transaction(function () use ($id, $data): EppRegistro {
-            $epp = EppRegistro::query()->findOrFail($id);
-            $duplicado = EppRegistro::query()
-                ->where('codigo', $data['codigo'])
-                ->where('id', '!=', $epp->id)
-                ->exists();
-
-            if ($duplicado) {
-                throw new InvalidArgumentException('Ya existe otro EPP con ese nombre.');
-            }
-
-            return $this->saveCatalog($epp, $data);
-        });
+        return app(EppCatalogService::class)->save(EppRegistro::query()->findOrFail($id), $payload);
     }
 
     public function deliver(array $payload, ?Usuario $usuario): EppEntrega
@@ -1427,98 +1403,6 @@ class EppService
         }
 
         return collect($merged)->sum(fn (array $interval): int => (int) $interval['desde']->diffInDays($interval['hasta']) + 1);
-    }
-
-    private function codigoFromNombre(string $nombre): string
-    {
-        $codigo = Str::of($nombre)->ascii()->slug('_')->upper()->limit(110, '')->toString();
-
-        return $codigo !== '' ? $codigo : 'EPP_'.Str::upper(Str::random(8));
-    }
-
-    private function normalizeCatalogPayload(array $payload): array
-    {
-        $nombre = mb_strtoupper(trim((string) ($payload['nombre'] ?? '')), 'UTF-8');
-
-        if ($nombre === '') {
-            throw new InvalidArgumentException('Indica el nombre del EPP.');
-        }
-
-        $estado = strtoupper((string) ($payload['estado'] ?? EppRegistro::ESTADO_ACTIVO));
-        if (!in_array($estado, [EppRegistro::ESTADO_ACTIVO, EppRegistro::ESTADO_INACTIVO], true)) {
-            $estado = EppRegistro::ESTADO_ACTIVO;
-        }
-
-        $requiereTalla = (bool) ($payload['requiere_talla'] ?? false);
-        $requiereColor = (bool) ($payload['requiere_color'] ?? false);
-
-        return [
-            'codigo' => $this->codigoFromNombre($nombre),
-            'nombre' => $nombre,
-            'categoria' => 'EPP',
-            'stock' => 0,
-            'vida_util_dias' => max(1, (int) ($payload['vida_util_dias'] ?? 1)),
-            'requiere_talla' => $requiereTalla,
-            'tallas' => $requiereTalla ? $this->normalizeOptions((string) ($payload['tallas'] ?? '')) : null,
-            'requiere_color' => $requiereColor,
-            'colores' => $requiereColor ? $this->normalizeOptions((string) ($payload['colores'] ?? '')) : null,
-            'otros_atributos' => $this->normalizeOtrosAtributos($payload['otros_atributos'] ?? []),
-            'estado' => $estado,
-        ];
-    }
-
-    private function saveCatalog(EppRegistro $epp, array $data): EppRegistro
-    {
-        foreach (['requiere_talla', 'tallas', 'requiere_color', 'colores', 'otros_atributos'] as $column) {
-            if (! Schema::hasColumn('epp_registro', $column)) {
-                unset($data[$column]);
-            }
-        }
-
-        $epp->forceFill($data)->save();
-
-        return $epp->refresh();
-    }
-
-    private function normalizeOptions(string $value): array
-    {
-        return $this->normalizeOptionsFromList(preg_split('/[\r\n,;]+/', $value) ?: []);
-    }
-
-    private function normalizeOtrosAtributos(array $atributos): ?array
-    {
-        $result = [];
-        $indexesByName = [];
-
-        foreach ($atributos as $atributo) {
-            $nombre = $this->normalizeOptionLabel((string) ($atributo['nombre'] ?? ''));
-            $nombreKey = $this->normalizeOptionKey($nombre);
-            $valoresRaw = (string) ($atributo['valores'] ?? '');
-
-            if ($nombreKey === '' || trim($valoresRaw) === '') {
-                continue;
-            }
-
-            $valores = $this->normalizeOptions($valoresRaw);
-
-            if ($valores === []) {
-                continue;
-            }
-
-            if (array_key_exists($nombreKey, $indexesByName)) {
-                $index = $indexesByName[$nombreKey];
-                $result[$index]['valores'] = $this->normalizeOptionsFromList(array_merge($result[$index]['valores'], $valores));
-                continue;
-            }
-
-            $indexesByName[$nombreKey] = count($result);
-            $result[] = [
-                'nombre' => $nombre,
-                'valores' => $valores,
-            ];
-        }
-
-        return $result !== [] ? $result : null;
     }
 
     private function normalizeOptionsFromList(array $values): array
