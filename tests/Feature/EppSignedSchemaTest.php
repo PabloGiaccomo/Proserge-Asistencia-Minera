@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class EppSignedSchemaTest extends TestCase
@@ -170,6 +171,87 @@ class EppSignedSchemaTest extends TestCase
         $movimiento = $this->movement();
         $this->expectException(\LogicException::class);
         $movimiento->delete();
+    }
+
+    #[DataProvider('ledgerMutationMethods')]
+    public function test_inventory_ledger_rejects_quiet_and_bulk_mutations(string $method): void
+    {
+        $movimiento = $this->movement();
+        $query = EppInventarioMovimiento::query()->whereKey($movimiento->id);
+        try {
+            match ($method) {
+                'saveQuietly' => $movimiento->forceFill(['cantidad' => 99])->saveQuietly(),
+                'updateQuietly' => $movimiento->updateQuietly(['cantidad' => 99]),
+                'deleteQuietly' => $movimiento->deleteQuietly(),
+                'withoutEvents' => EppInventarioMovimiento::withoutEvents(fn () => $movimiento->update(['cantidad' => 99])),
+                'bulkUpdate' => $query->update(['cantidad' => 99]),
+                'bulkDelete' => $query->delete(),
+                'forceDelete' => $query->forceDelete(),
+                'increment' => $query->increment('cantidad'),
+                'decrement' => $query->decrement('cantidad'),
+                'incrementEach' => $query->incrementEach(['cantidad' => 1]),
+                'decrementEach' => $query->decrementEach(['cantidad' => 1]),
+                'incrementQuietly' => $movimiento->incrementQuietly('cantidad'),
+                'decrementQuietly' => $movimiento->decrementQuietly('cantidad'),
+                'updateOrCreate' => EppInventarioMovimiento::query()->updateOrCreate(['id' => $movimiento->id], ['cantidad' => 99]),
+                'updateOrInsert' => $query->updateOrInsert(['id' => $movimiento->id], ['cantidad' => 99]),
+                'upsert' => $query->upsert([array_replace($movimiento->getAttributes(), ['cantidad' => 99])], ['id'], ['cantidad']),
+                'truncate' => DB::connection()->pretend(fn () => $query->truncate()),
+            };
+        } catch (\LogicException) {
+            $this->assertDatabaseHas('epp_inventario_movimientos', [
+                'id' => $movimiento->id, 'cantidad' => 10, 'saldo_anterior' => 0, 'saldo_posterior' => 10,
+            ]);
+
+            return;
+        }
+
+        $this->fail("La via {$method} debe rechazar modificaciones del libro.");
+    }
+
+    public static function ledgerMutationMethods(): array
+    {
+        return array_map(fn (string $method): array => [$method], [
+            'saveQuietly', 'updateQuietly', 'deleteQuietly', 'withoutEvents',
+            'bulkUpdate', 'bulkDelete', 'forceDelete', 'increment', 'decrement',
+            'incrementEach', 'decrementEach', 'incrementQuietly', 'decrementQuietly',
+            'updateOrCreate', 'updateOrInsert', 'upsert', 'truncate',
+        ]);
+    }
+
+    public function test_acceptance_preserves_canonical_json_bytes_without_double_encoding(): void
+    {
+        $canonical = '{"declaracion":"Sí / acepto","cantidad":5,"precio":1.0}';
+        $data = $this->evidence();
+        $data['operacion_id'] = (string) Str::uuid();
+        $data['contenido_json'] = $canonical;
+        $data['contenido_sha256'] = hash('sha256', $canonical);
+        $aceptacion = EppAceptacion::query()->create($data)->fresh();
+
+        $this->assertSame($canonical, $aceptacion->getRawOriginal('contenido_json'));
+        $this->assertSame(hash('sha256', $aceptacion->getRawOriginal('contenido_json')), $aceptacion->contenido_sha256);
+        $this->assertSame(['declaracion' => 'Sí / acepto', 'cantidad' => 5, 'precio' => 1.0], $aceptacion->contenido_json);
+    }
+
+    public function test_acceptance_array_input_uses_fixed_json_serialization(): void
+    {
+        $aceptacion = new EppAceptacion;
+        $aceptacion->contenido_json = ['declaracion' => 'Sí / acepto', 'precio' => 1.0];
+        $this->assertSame('{"declaracion":"Sí / acepto","precio":1.0}', $aceptacion->getAttributes()['contenido_json']);
+    }
+
+    public function test_acceptance_rejects_invalid_canonical_json(): void
+    {
+        $this->expectException(\JsonException::class);
+        $aceptacion = new EppAceptacion;
+        $aceptacion->contenido_json = '{invalid';
+    }
+
+    public function test_acceptance_rejects_scalar_json_content(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $aceptacion = new EppAceptacion;
+        $aceptacion->contenido_json = '"text"';
     }
 
     public function test_migrations_are_repeatable_without_overwriting_existing_catalog_policy(): void

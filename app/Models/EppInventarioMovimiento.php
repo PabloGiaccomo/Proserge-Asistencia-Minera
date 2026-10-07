@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Builders\EppInventarioQueryBuilder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -68,15 +69,11 @@ class EppInventarioMovimiento extends Model
         'created_at' => 'datetime',
     ];
 
-    protected static function booted(): void
+    protected function newBaseQueryBuilder(): EppInventarioQueryBuilder
     {
-        static::updating(function (): never {
-            throw new \LogicException('El libro de inventario es inmutable; registre un movimiento compensatorio.');
-        });
+        $connection = $this->getConnection();
 
-        static::deleting(function (): never {
-            throw new \LogicException('El libro de inventario no permite eliminar movimientos.');
-        });
+        return new EppInventarioQueryBuilder($connection, $connection->getQueryGrammar(), $connection->getPostProcessor());
     }
 
     public function existencia(): BelongsTo

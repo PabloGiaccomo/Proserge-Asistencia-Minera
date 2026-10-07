@@ -63,6 +63,29 @@ class EppAceptacion extends Model
 
     protected $hidden = ['firma_path', 'documento_snapshot', 'ip_sha256', 'sesion_sha256', 'user_agent'];
 
+    /**
+     * The acceptance service supplies canonical JSON and hashes these exact bytes.
+     * Arrays use fixed encoding flags but preserve their supplied key order.
+     */
+    public function setContenidoJsonAttribute(array|string $value): void
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+            if (! is_array($decoded)) {
+                throw new \InvalidArgumentException('El contenido firmado debe ser un objeto o lista JSON.');
+            }
+
+            $this->attributes['contenido_json'] = $value;
+
+            return;
+        }
+
+        $this->attributes['contenido_json'] = json_encode(
+            $value,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR,
+        );
+    }
+
     public function operacion(): BelongsTo
     {
         return $this->belongsTo(EppOperacion::class, 'operacion_id');
