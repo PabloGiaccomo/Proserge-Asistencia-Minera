@@ -18,7 +18,8 @@ firma real ni su validacion en el flujo de aceptacion.
 ## Compatibilidad explicita
 
 Al normalizar permisos historicos EPP, solo si la capacidad nueva no existe
-en el documento original, se conserva esta equivalencia:
+en el documento original y el grant antiguo esta explicitamente concedido en
+ese documento, se conserva esta equivalencia:
 
 | Grant EPP historico | Capacidad nueva |
 |---|---|
@@ -31,6 +32,9 @@ en el documento original, se conserva esta equivalencia:
 | `administrar` | Todas las capacidades salvo `aprobar_excepcion_firma` |
 
 Un valor nuevo explicitamente `false` prevalece sobre el grant antiguo.
+Los valores derivados de la matriz no son fuente de grants historicos:
+por ejemplo, solo `confirmar_entrega`, `gestionar_inventario` o
+`aprobar_excepcion_firma` no conceden `ver_operaciones` ni otra capacidad.
 La normalizacion es idempotente, no escribe roles en la base y admite las
 listas antiguas `epps.read`, `epps.write`, `epps.admin`/`epps.manage`.
 Las matrices completas creadas con capacidades nuevas en `false` requieren
@@ -54,6 +58,26 @@ una operacion y comprueban tanto su almacen actual como su trabajador.
 `manageInventory`/`adjustInventory` reciben almacen. `viewAny` comprueba la
 capacidad de listado; la consulta del listado debe aplicar ademas
 `visibleWarehouseIds` y el alcance de trabajador.
+
+Al invocar Laravel Gate, la primera entrada resuelve la policy registrada
+para `EppOperacion`. Preparacion e inventario necesitan la clase como primera
+entrada; Laravel la retira antes de llamar al metodo de policy:
+
+```php
+$gate = Gate::forUser($usuario);
+$gate->authorize('viewAny', EppOperacion::class);
+$gate->authorize('prepareDelivery', [EppOperacion::class, $almacen, $personal]);
+$gate->authorize('prepareReturn', [EppOperacion::class, $almacen, $personal]);
+$gate->authorize('manageInventory', [EppOperacion::class, $almacen]);
+$gate->authorize('adjustInventory', [EppOperacion::class, $almacen]);
+$gate->authorize('viewEvidence', $operacion);
+```
+
+Se importa `App\Models\EppOperacion` y
+`Illuminate\Support\Facades\Gate`. Para preparar/gestionar, pasar solo
+`$almacen` a Gate busca una policy de `EppAlmacen`, que no esta registrada,
+y deniega incluso a ADMIN. La llamada directa al objeto `EppOperationPolicy`
+recibe usuario, almacen y, cuando aplica, trabajador, sin prefijo de clase.
 
 Las futuras rutas deben usar sesion web propia (`web.auth`), permiso directo
 `web.permission:epps,<capacidad>` y la policy/servicio de alcance. Los cambios

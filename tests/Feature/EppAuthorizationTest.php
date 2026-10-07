@@ -54,6 +54,31 @@ class EppAuthorizationTest extends TestCase
         ], 'epps', $action));
     }
 
+    #[DataProvider('capabilities')]
+    public function test_isolated_operation_capability_does_not_grant_another_capability(string $action): void
+    {
+        $raw = ['epps' => [$action => true]];
+        $matrix = PermissionMatrix::normalize($raw);
+        foreach (self::capabilities() as [$candidate]) {
+            $this->assertSame($candidate === $action, PermissionMatrix::allowsDirect($raw, 'epps', $candidate), $candidate);
+            $this->assertSame($candidate === $action, $matrix['epps'][$candidate], $candidate.' normalized');
+        }
+        $this->assertSame($matrix, PermissionMatrix::normalize($matrix));
+    }
+
+    public function test_partial_legacy_grants_only_migrate_explicit_input_actions(): void
+    {
+        $matrix = PermissionMatrix::normalize(['epps' => ['registrar' => true]]);
+        $this->assertTrue($matrix['epps']['preparar_entrega']);
+        $this->assertTrue($matrix['epps']['confirmar_entrega']);
+        $this->assertFalse($matrix['epps']['ver_operaciones']);
+        $this->assertFalse($matrix['epps']['ver_evidencia']);
+        $this->assertFalse($matrix['epps']['gestionar_inventario']);
+        $this->assertTrue(PermissionMatrix::allowsDirect(['epps' => ['ver' => true]], 'epps', 'ver_operaciones'));
+        $this->assertFalse(PermissionMatrix::allowsDirect(['epps' => ['ver' => true, 'ver_operaciones' => false]], 'epps', 'ver_operaciones'));
+        $this->assertFalse(PermissionMatrix::allowsDirect(['epps.write'], 'epps', 'ver_operaciones'));
+    }
+
     public function test_tab_visibility_does_not_grant_epp_writes(): void
     {
         // The operation controller is introduced in a later task. Exercise its exact middleware contract now.
@@ -152,6 +177,21 @@ class EppAuthorizationTest extends TestCase
         $this->assertTrue(app(EppOperationPolicy::class)->viewAny($user));
     }
 
+    #[DataProvider('privilegedRoles')]
+    public function test_preparation_and_inventory_gates_use_the_operation_class_for_policy_resolution(string $role): void
+    {
+        $user = $this->user([], $role);
+        $warehouse = $this->warehouse(null);
+        $personal = $this->personal();
+        $gate = Gate::forUser($user);
+
+        $this->assertTrue($gate->allows('viewAny', EppOperacion::class));
+        $this->assertTrue($gate->allows('prepareDelivery', [EppOperacion::class, $warehouse, $personal]));
+        $this->assertTrue($gate->allows('prepareReturn', [EppOperacion::class, $warehouse, $personal]));
+        $this->assertTrue($gate->allows('manageInventory', [EppOperacion::class, $warehouse]));
+        $this->assertTrue($gate->allows('adjustInventory', [EppOperacion::class, $warehouse]));
+    }
+
     public function test_inactive_user_is_denied_even_when_privileged(): void
     {
         $user = $this->user([], 'ADMIN');
@@ -204,18 +244,18 @@ class EppAuthorizationTest extends TestCase
         $this->assign($personal, $mine);
         $user = $this->user();
         $this->scope($user, $mine);
-        $policy = app(EppOperationPolicy::class);
+        $policy = Gate::forUser($user);
         foreach (['prepareDelivery' => 'preparar_entrega', 'prepareReturn' => 'preparar_devolucion'] as $gate => $action) {
-            $this->assertFalse($policy->$gate($user, $warehouse, $personal));
+            $this->assertFalse($policy->allows($gate, [EppOperacion::class, $warehouse, $personal]));
             $user->rol->update(['permisos' => PermissionCatalog::matrixFromSelections(['epps' => [$action]])]);
-            $this->assertTrue($policy->$gate($user, $warehouse, $personal));
-            $this->assertFalse($policy->$gate($user, $warehouse, $this->personal()));
+            $this->assertTrue($policy->allows($gate, [EppOperacion::class, $warehouse, $personal]));
+            $this->assertFalse($policy->allows($gate, [EppOperacion::class, $warehouse, $this->personal()]));
         }
         foreach (['manageInventory' => 'gestionar_inventario', 'adjustInventory' => 'ajustar_inventario'] as $gate => $action) {
-            $this->assertFalse($policy->$gate($user, $warehouse));
+            $this->assertFalse($policy->allows($gate, [EppOperacion::class, $warehouse]));
             $user->rol->update(['permisos' => PermissionCatalog::matrixFromSelections(['epps' => [$action]])]);
-            $this->assertTrue($policy->$gate($user, $warehouse));
-            $this->assertFalse($policy->$gate($user, $this->warehouse(null)));
+            $this->assertTrue($policy->allows($gate, [EppOperacion::class, $warehouse]));
+            $this->assertFalse($policy->allows($gate, [EppOperacion::class, $this->warehouse(null)]));
         }
     }
 

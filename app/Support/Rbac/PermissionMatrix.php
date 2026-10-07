@@ -409,6 +409,8 @@ class PermissionMatrix
 
     private static function normalizeLegacyList(array $rawPermissions, array $matrix): array
     {
+        $explicitEpp = [];
+
         foreach ($rawPermissions as $permission) {
             if (! is_string($permission) || trim($permission) === '') {
                 continue;
@@ -429,11 +431,14 @@ class PermissionMatrix
             foreach (self::mapLegacyAction($legacyAction) as $mappedAction) {
                 if (isset($matrix[$module][$mappedAction])) {
                     $matrix[$module][$mappedAction] = true;
+                    if ($module === 'epps') {
+                        $explicitEpp[$mappedAction] = true;
+                    }
                 }
             }
         }
 
-        return self::normalizeLegacyEppGrants($matrix, []);
+        return self::normalizeLegacyEppGrants($matrix, $explicitEpp);
     }
 
     private static function normalizeModule(string $module): string
@@ -450,6 +455,8 @@ class PermissionMatrix
      * Logistics/tab permissions never migrate. A persisted explicit false wins;
      * repeated normalization is idempotent. Witness approval always needs its
      * own grant (or a privileged role), never a legacy write/admin grant.
+     * The source is the input payload, never the matrix where view permission
+     * may already have been derived from an unrelated operation capability.
      */
     private static function normalizeLegacyEppGrants(array $matrix, array $explicit): array
     {
@@ -465,7 +472,7 @@ class PermissionMatrix
         ];
 
         foreach ($mapping as $legacy => $actions) {
-            if (($matrix['epps'][$legacy] ?? false) !== true) {
+            if (! filter_var($explicit[$legacy] ?? false, FILTER_VALIDATE_BOOL)) {
                 continue;
             }
             foreach ($actions as $action) {
