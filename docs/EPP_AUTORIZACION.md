@@ -84,3 +84,16 @@ Las futuras rutas deben usar sesion web propia (`web.auth`), permiso directo
 de estado, reglas de firma e inventario pertenecen a los servicios de dominio;
 esta policy comprueba autorizacion. No hay bypass de estado laboral o de
 firma por rol privilegiado.
+
+## Firma por testigo autorizado
+
+`confirmWithWitness()` recibe un aprobador autorizado por
+`approveSignatureException` (`epps.aprobar_excepcion_firma`) y revalida el
+permiso de confirmar del operador que preparo el lote. Se conserva la semantica
+de roles privilegiados de la policy existente. El aprobador debe ser distinto
+del operador y del testigo. El testigo debe ser un usuario activo vinculado a
+Personal, con nombre/documento e identidad distinta del trabajador receptor.
+Se exige motivo y una firma PNG real, con las mismas validaciones de tinta que
+la firma normal. La aceptacion identifica expresamente `TESTIGO_AUTORIZADO`,
+sin atribuir su dibujo al trabajador. `RECHAZADO` o un evento
+`FIRMA_RECHAZADA` impiden convertir una negativa en excepcion.

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -62,6 +63,11 @@ class EppAceptacion extends Model
     ];
 
     protected $hidden = ['firma_path', 'documento_snapshot', 'ip_sha256', 'sesion_sha256', 'user_agent'];
+
+    public function getFirmadoAtUtcAttribute(?string $value): ?CarbonImmutable
+    {
+        return $value === null ? null : CarbonImmutable::parse($value, 'UTC');
+    }
 
     /**
      * The acceptance service supplies canonical JSON and hashes these exact bytes.

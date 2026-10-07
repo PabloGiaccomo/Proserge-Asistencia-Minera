@@ -103,6 +103,12 @@ Vistas principales:
   bloqueo de existencias y libro append-only. Flujo: `docs/EPP_INVENTARIO.md`.
   `EppInventoryConfirmationService` coordina consumo atomico del token y
   resultado persistido en `epp_inventario_confirmaciones` para reintentos.
+- Firma de entregas EPP: `EppOperationConfirmationService` coordina archivo
+  privado previo, bloqueos e idempotencia; `EppAcceptanceService` conserva el
+  resumen canonico y verifica hashes. `EppSignaturePayload` valida y normaliza
+  PNG/tinta; `EppCanonicalPayload` serializa tanto revision como evidencia.
+  Contrato y recuperacion: `docs/EPP_INVENTARIO.md`; testigo:
+  `docs/EPP_AUTORIZACION.md`.
 
 - Usuarios, roles y permisos: `Usuario`, `Rol`, `UsuarioRol`,
   `UsuarioMinaScope`, `RoleManagementService`, vistas `seguridad`.

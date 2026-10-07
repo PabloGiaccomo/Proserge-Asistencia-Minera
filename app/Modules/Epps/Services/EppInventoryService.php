@@ -230,6 +230,49 @@ class EppInventoryService
         return $count;
     }
 
+    /** The confirmation boundary owns operation/warehouse/detail locks and the final evidence file. */
+    public function consumeOperationReservations(EppOperacion $operation, Usuario $actor, CarbonInterface $consumedAt): int
+    {
+        if (DB::transactionLevel() === 0 || $operation->tipo !== 'ENTREGA' || $operation->estado !== 'LISTO_PARA_FIRMA') {
+            throw new InvalidArgumentException('Consumir reservas requiere una entrega lista y una transaccion de confirmacion.');
+        }
+        EppAlmacen::query()->lockForUpdate()->findOrFail($operation->almacen_id);
+        $details = $operation->detalles()->orderBy('id')->lockForUpdate()->get();
+        $reservations = $operation->reservas()->orderBy('id')->lockForUpdate()->get();
+        $existences = EppExistencia::query()->whereIn('id', $reservations->pluck('existencia_id')->unique())->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $controlled = $details->filter(fn ($detail) => $detail->cantidad_procesada > 0 && $detail->estado !== 'RECHAZADO' && $detail->control_inventario_snapshot);
+        if ($controlled->count() !== $reservations->count()) {
+            throw new InvalidArgumentException('Las reservas no coinciden con las lineas procesadas.');
+        }
+        foreach ($controlled as $detail) {
+            $matches = $reservations->where('operacion_detalle_id', $detail->id);
+            $reservation = $matches->first();
+            $existence = $reservation ? $existences->get($reservation->existencia_id) : null;
+            if ($matches->count() !== 1 || $reservation->estado !== 'ACTIVA' || $reservation->expires_at->lte($consumedAt)
+                || $reservation->cantidad !== $detail->cantidad_procesada || $detail->estado !== 'RESERVADO'
+                || $existence === null || $existence->conciliado_at === null
+                || $existence->id !== $detail->existencia_id || $existence->almacen_id !== $operation->almacen_id
+                || $existence->epp_id !== $detail->epp_id || $existence->variante_clave !== $detail->variante_clave
+                || $existence->cantidad_reservada < $reservation->cantidad) {
+                throw new InvalidArgumentException('La reserva vencio o no coincide con la existencia y cantidad revisada.');
+            }
+            $afterReserved = $existence->cantidad_reservada - $reservation->cantidad;
+            EppInventarioMovimiento::query()->create([
+                'existencia_id' => $existence->id, 'almacen_id' => $existence->almacen_id, 'epp_id' => $existence->epp_id,
+                'operacion_id' => $operation->id, 'operacion_detalle_id' => $detail->id, 'tipo' => 'SALIDA',
+                'cantidad' => $reservation->cantidad, 'saldo_anterior' => $existence->cantidad_disponible,
+                'saldo_posterior' => $existence->cantidad_disponible, 'destino' => 'DISPONIBLE',
+                'actor_usuario_id' => $actor->id, 'origen' => 'WEB', 'motivo' => 'Entrega confirmada con aceptacion firmada.',
+                'snapshot_json' => ['atributos' => $existence->atributos_json, 'delta' => 0,
+                    'reservada_anterior' => $existence->cantidad_reservada, 'reservada_posterior' => $afterReserved],
+            ]);
+            $existence->update(['cantidad_reservada' => $afterReserved]);
+            $reservation->update(['estado' => 'CONSUMIDA', 'consumida_at' => $consumedAt]);
+        }
+
+        return $controlled->count();
+    }
+
     private function reservationMovement(EppExistencia $existence, EppOperacion $operation, string $detailId, int $quantity, int $after, string $type, ?Usuario $actor, string $reason, string $origin): void
     {
         EppInventarioMovimiento::query()->create([

@@ -132,6 +132,16 @@ class EppOperationService
         return DB::transaction(function () use ($operation, $actor): EppOperacion {
             $operation = $this->lockedOperation($operation, $actor);
             if ($operation->estado === 'LISTO_PARA_FIRMA') {
+                // Earlier unsigned summaries used Spanish keys. A fresh review invalidates
+                // their old hash without releasing or reserving the same units again.
+                if (($operation->resumen_json['schema_version'] ?? null) !== 1) {
+                    $operation->load('detalles', 'personal', 'almacen');
+                    $operation->update(['version' => $operation->version + 1]);
+                    $payload = $this->currentReviewPayload($operation);
+                    $operation->update(['resumen_json' => $payload, 'resumen_sha256' => hash('sha256', EppCanonicalPayload::json($payload))]);
+                    $this->event($operation, $actor, 'RESUMEN_ACTUALIZADO', 'Revisa nuevamente el contenido antes de firmar.', $payload);
+                }
+
                 return $operation->load('detalles', 'reservas');
             }
             if ($operation->estado !== 'BORRADOR') {
@@ -254,6 +264,12 @@ class EppOperationService
         return EppCanonicalPayload::normalize($operation->resumen_json ?: $this->payload($operation));
     }
 
+    /** Rebuild operative values while keeping the identities shown in the frozen review. */
+    public function currentReviewPayload(EppOperacion $operation): array
+    {
+        return EppCanonicalPayload::normalize($this->payload($operation));
+    }
+
     private function lockedOperation(EppOperacion $operation, Usuario $actor): EppOperacion
     {
         $operation = EppOperacion::query()->lockForUpdate()->findOrFail($operation->id);
@@ -309,22 +325,28 @@ class EppOperationService
     {
         $operation->loadMissing('personal', 'almacen', 'detalles');
         $details = $operation->detalles->sortBy('id')->map(fn ($detail) => [
-            'id' => $detail->id, 'epp_solicitado_id' => $detail->epp_solicitado_id, 'epp_id' => $detail->epp_id,
-            'cantidad_solicitada' => $detail->cantidad_solicitada, 'cantidad_procesada' => $detail->cantidad_procesada,
-            'cantidad_pendiente' => $detail->cantidad_pendiente, 'estado' => $detail->estado,
-            'atributos' => $detail->atributos_json, 'motivo' => $detail->motivo, 'snapshot' => $detail->snapshot_json,
-            'entrega_origen_id' => $detail->entrega_origen_id, 'detalle_origen_id' => $detail->detalle_origen_id,
-            'condicion_devolucion' => $detail->condicion_devolucion, 'destino_inventario' => $detail->destino_inventario,
+            'id' => $detail->id, 'requested_epp_id' => $detail->epp_solicitado_id, 'epp_id' => $detail->epp_id,
+            'existence_id' => $detail->existencia_id, 'variant_key' => $detail->variante_clave,
+            'requested_quantity' => $detail->cantidad_solicitada, 'processed_quantity' => $detail->cantidad_procesada,
+            'pending_quantity' => $detail->cantidad_pendiente, 'state' => $detail->estado,
+            'size' => $detail->talla, 'color' => $detail->color,
+            'attributes' => $detail->atributos_json, 'reason' => $detail->motivo, 'snapshot' => $detail->snapshot_json,
+            'return_policy' => $detail->politica_devolucion_snapshot, 'inventory_control' => $detail->control_inventario_snapshot,
+            'unit_price' => $detail->precio_unitario_snapshot,
+            'original_delivery_id' => $detail->entrega_origen_id, 'original_detail_id' => $detail->detalle_origen_id,
+            'return_condition' => $detail->condicion_devolucion, 'inventory_destination' => $detail->destino_inventario,
         ]);
 
         return [
-            'operacion_id' => $operation->id, 'submission_uuid' => $operation->submission_uuid, 'version' => $operation->version,
-            'tipo' => $operation->tipo, 'estado' => $operation->estado,
-            'personal' => ['id' => $operation->personal_id, 'nombre' => $operation->personal->nombre_completo, 'documento' => $operation->personal->dni],
-            'almacen' => ['id' => $operation->almacen_id, 'nombre' => $operation->almacen->nombre, 'mina_id' => $operation->mina_id],
-            'detalles' => $details->filter(fn ($detail) => $detail['cantidad_procesada'] > 0 && $detail['estado'] !== 'RECHAZADO')->values()->all(),
-            'pendientes' => $details->filter(fn ($detail) => $detail['cantidad_pendiente'] > 0 && $detail['estado'] !== 'RECHAZADO')->values()->all(),
-            'rechazados' => $details->where('estado', 'RECHAZADO')->values()->all(),
+            'schema_version' => 1, 'operation_id' => $operation->id, 'submission_uuid' => $operation->submission_uuid, 'revision' => $operation->version,
+            'type' => $operation->tipo, 'state' => $operation->estado, 'registered_by' => $operation->registrado_por_usuario_id,
+            'reason' => $operation->motivo, 'notes' => $operation->observacion,
+            'declaration_version' => $operation->tipo === 'DEVOLUCION' ? 'RETURN_V1' : 'DELIVERY_V1',
+            'worker' => $operation->resumen_json['worker'] ?? ['id' => $operation->personal_id, 'name' => $operation->personal->nombre_completo, 'document' => $operation->personal->dni],
+            'warehouse' => $operation->resumen_json['warehouse'] ?? ['id' => $operation->almacen_id, 'name' => $operation->almacen->nombre, 'mine_id' => $operation->mina_id],
+            'details' => $details->filter(fn ($detail) => $detail['processed_quantity'] > 0 && $detail['state'] !== 'RECHAZADO')->values()->all(),
+            'pending' => $details->filter(fn ($detail) => $detail['pending_quantity'] > 0 && $detail['state'] !== 'RECHAZADO')->values()->all(),
+            'rejected' => $details->where('state', 'RECHAZADO')->values()->all(),
         ];
     }
 

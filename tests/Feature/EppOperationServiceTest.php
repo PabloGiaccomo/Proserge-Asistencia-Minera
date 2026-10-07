@@ -129,10 +129,10 @@ class EppOperationServiceTest extends TestCase
         $this->open(5);
         $prepared = $this->prepare([$this->line(1), array_replace($this->line(2), ['talla' => 'L', 'rechazar' => true, 'motivo' => 'No recibo talla L'])]);
         $payload = app(EppOperationService::class)->reviewPayload($prepared);
-        $this->assertCount(1, $payload['detalles']);
-        $this->assertSame(1, $payload['detalles'][0]['cantidad_procesada']);
-        $this->assertCount(1, $payload['rechazados']);
-        $this->assertSame('No recibo talla L', $payload['rechazados'][0]['motivo']);
+        $this->assertCount(1, $payload['details']);
+        $this->assertSame(1, $payload['details'][0]['processed_quantity']);
+        $this->assertCount(1, $payload['rejected']);
+        $this->assertSame('No recibo talla L', $payload['rejected'][0]['reason']);
         $this->assertSame(2, $this->ledgerCount());
     }
 
@@ -368,8 +368,21 @@ class EppOperationServiceTest extends TestCase
         $this->assertSame($prepared->resumen_sha256, hash('sha256', json_encode($service->reviewPayload($prepared->fresh()), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)));
         $this->personal->update(['nombre_completo' => 'OTRO NOMBRE']);
         $this->epp->update(['nombre' => 'OTRO EPP']);
-        $this->assertSame('PRUEBA OPERACION EPP', $service->reviewPayload($prepared)['personal']['nombre']);
-        $this->assertSame('GUANTE RESERVA', $service->reviewPayload($prepared)['detalles'][0]['snapshot']['real']['nombre']);
+        $this->assertSame('PRUEBA OPERACION EPP', $service->reviewPayload($prepared)['worker']['name']);
+        $this->assertSame('GUANTE RESERVA', $service->reviewPayload($prepared)['details'][0]['snapshot']['real']['nombre']);
+    }
+
+    public function test_review_uses_the_canonical_evidence_contract(): void
+    {
+        $this->open(5);
+        $prepared = $this->prepare([$this->line(10) + ['aceptar_parcial' => true]]);
+        $payload = app(EppOperationService::class)->reviewPayload($prepared);
+        $this->assertArrayHasKey('details', $payload);
+        $this->assertSame(1, $payload['schema_version']);
+        $this->assertSame(5, $payload['details'][0]['processed_quantity']);
+        $this->assertSame(10, $payload['details'][0]['requested_quantity']);
+        $this->assertSame(5, $payload['details'][0]['pending_quantity']);
+        $this->assertSame('DELIVERY_V1', $payload['declaration_version']);
     }
 
     public function test_canonical_payload_sorts_nested_keys_and_preserves_list_order(): void

@@ -113,6 +113,62 @@ otros lotes. La liberacion manual rechaza ese saldo con un error de dominio
 antes de escribir un movimiento; requiere conciliacion mediante ajuste con motivo.
 La confirmacion firmada y los saldos definitivos usan servicios separados.
 
+## Confirmacion y evidencia privada
+
+`EppOperationConfirmationService::confirm()` confirma entregas preparadas.
+`EppAcceptanceService::capture()` usa la misma frontera transaccional cuando
+se invoca directamente. La firma cubre el resumen congelado del servidor; el
+navegador envia `submission_uuid`, `personal_id`, `review_hash`,
+`review_version`, `firma_data_url` e `ink` (cantidad de puntos y limites del
+trazo). No se aceptan cantidades definitivas del navegador en la confirmacion.
+`SignEppOperationRequest` y `EppSignaturePayload` comparten las reglas de entrada.
+
+El contrato canonico version 1 usa `details`, `requested_quantity`,
+`processed_quantity`, `pending_quantity`, `pending`, `rejected`, `worker`,
+`warehouse`, `revision` y `declaration_version`. Los atributos y snapshots de
+catalogo conservan sus claves operativas originales. `EppCanonicalPayload`
+es el unico normalizador/serializador: el resumen preparado y
+`epp_aceptaciones.contenido_json` representan exactamente los mismos bytes y
+hash. Los resumenes sin version con claves anteriores en espanol requieren
+volver a preparar/revisar; eso incrementa la revision y reemplaza su hash sin
+duplicar ni extender las reservas vigentes.
+
+Se exige PNG real de hasta 1 MiB y de 300 a 2400 pixeles por lado. Se decodifica
+y normaliza la imagen; los metadatos requieren al menos diez puntos y un trazo
+de 20 por 10 pixeles dentro del lienzo. Tambien se comprueba tinta real en los
+pixeles. La imagen se guarda exclusivamente en disco `local`, en
+`epp/firmas/{operacion_id}/{uuid_aleatorio}.png`, con visibilidad privada y antes
+de abrir la transaccion de confirmacion. No se persiste el Data URL.
+
+La transaccion bloquea operacion, almacen, detalles, catalogo, reservas y
+existencias; revalida permisos/alcance, identidad, revision/hash, vencimientos
+y la correspondencia exacta de las reservas. Una salida consume unidades
+reservadas sin descontar de nuevo el disponible. El libro se agrega mediante
+Eloquent; nunca se reescribe. Se crean entregas solo por cantidades procesadas:
+retornables con saldo positivo y consumibles en `CONSUMIDO` con saldo de
+devolucion cero. Se guardan aceptacion, evento y estado `FIRMADO` o
+`FIRMADO_PARCIAL` juntos. La confirmacion de devoluciones se integra con el
+servicio de saldos en el incremento correspondiente; este servicio todavia
+rechaza ese tipo sin producir movimientos de salida.
+
+`submission_uuid` identifica la operacion y su resultado original, tambien
+tras vencer la reserva si ya fue firmada. Los reintentos revalidan autorizacion
+y devuelven la misma aceptacion; no escriben otra firma ni repiten salidas o
+entregas. Dos confirmaciones concurrentes crean archivos distintos: al ganar
+una, la otra elimina exclusivamente su propio archivo sin referencia. Ante
+rollback se limpia solo el archivo creado por esa ejecucion y sin referencia
+en aceptaciones. Si no puede comprobarse el resultado en MySQL se conserva la
+evidencia para una auditoria de huerfanos; nunca se borra una evidencia confirmada.
+
+La aceptacion conserva identidad snapshot del firmante, operador, fecha del
+servidor en zona aplicativa y UTC, zona, version de declaracion, codigo aleatorio
+de verificacion, resumen de navegador y hashes HMAC-SHA256 de sesion/IP. La
+columna UTC se interpreta siempre como UTC al leerla. `verify()` compara el
+archivo y los bytes canonicos, devuelve `EVIDENCIA_INVALIDA` con causas y marca
+`FIRMA_INVALIDA` o `ARCHIVO_FALTANTE` cuando corresponde. Esta alerta no deshace
+ni repite una entrega ya confirmada. Los cambios posteriores en Personal o
+catalogo no reemplazan la identidad ni los productos del snapshot firmado.
+
 ## Validacion y despliegue
 
 Aplicar primero las migraciones aditivas EPP del 2026-10-07 con respaldo de la base
