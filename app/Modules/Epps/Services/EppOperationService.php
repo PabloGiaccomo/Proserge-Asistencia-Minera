@@ -12,6 +12,7 @@ use App\Models\EppRegistro;
 use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Epps\Support\EppCanonicalPayload;
+use App\Modules\Epps\Support\EppReservationBalanceException;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -221,20 +222,25 @@ class EppOperationService
         $count = 0;
         $ids = EppOperacion::query()->whereIn('estado', ['RESERVADO', 'LISTO_PARA_FIRMA'])->where('reserva_expires_at', '<=', $now)->orderBy('id')->pluck('id');
         foreach ($ids as $id) {
-            $count += DB::transaction(function () use ($id, $now): int {
-                $operation = EppOperacion::query()->lockForUpdate()->findOrFail($id);
-                if (! in_array($operation->estado, ['RESERVADO', 'LISTO_PARA_FIRMA'], true) || $operation->reserva_expires_at === null || $operation->reserva_expires_at->gt($now)) {
-                    return 0;
-                }
-                $released = $this->inventory->releaseOperationReservations($operation, null, 'EXPIRADA', $now);
-                foreach ($operation->detalles()->where('estado', 'RESERVADO')->lockForUpdate()->get() as $detail) {
-                    $detail->update(['estado' => 'PENDIENTE', 'cantidad_procesada' => 0, 'cantidad_pendiente' => $detail->cantidad_solicitada]);
-                }
-                $operation->update(['estado' => 'EXPIRADO', 'resumen_json' => null, 'resumen_sha256' => null]);
-                $this->event($operation, null, 'RESERVA_EXPIRADA', 'Vencio el plazo para firmar.', null, 'SYSTEM');
+            try {
+                $count += DB::transaction(function () use ($id, $now): int {
+                    $operation = EppOperacion::query()->lockForUpdate()->findOrFail($id);
+                    if (! in_array($operation->estado, ['RESERVADO', 'LISTO_PARA_FIRMA'], true) || $operation->reserva_expires_at === null || $operation->reserva_expires_at->gt($now)) {
+                        return 0;
+                    }
+                    $released = $this->inventory->releaseOperationReservations($operation, null, 'EXPIRADA', $now);
+                    foreach ($operation->detalles()->where('estado', 'RESERVADO')->lockForUpdate()->get() as $detail) {
+                        $detail->update(['estado' => 'PENDIENTE', 'cantidad_procesada' => 0, 'cantidad_pendiente' => $detail->cantidad_solicitada]);
+                    }
+                    $operation->update(['estado' => 'EXPIRADO', 'resumen_json' => null, 'resumen_sha256' => null]);
+                    $this->event($operation, null, 'RESERVA_EXPIRADA', 'Vencio el plazo para firmar.', null, 'SYSTEM');
 
-                return $released;
-            }, 3);
+                    return $released;
+                }, 3);
+            } catch (EppReservationBalanceException $exception) {
+                // Keep this batch and its ledger intact; other warehouses must still expire.
+                $this->event(EppOperacion::query()->findOrFail($id), null, 'RESERVA_LIBERACION_BLOQUEADA', $exception->getMessage(), $exception->snapshot, 'SYSTEM');
+            }
         }
 
         return $count;

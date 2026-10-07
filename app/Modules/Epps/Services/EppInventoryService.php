@@ -10,6 +10,7 @@ use App\Models\EppOperacionDetalle;
 use App\Models\EppRegistro;
 use App\Models\EppReserva;
 use App\Models\Usuario;
+use App\Modules\Epps\Support\EppReservationBalanceException;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -19,6 +20,8 @@ use InvalidArgumentException;
 
 class EppInventoryService
 {
+    private const MAX_QUANTITY = 4294967295;
+
     public function variantKey(array $attributes): string
     {
         return hash('sha256', json_encode($this->canonicalAttributes($attributes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
@@ -117,8 +120,8 @@ class EppInventoryService
                 throw new InvalidArgumentException('Registra y confirma la apertura de esta variante antes de ajustar.');
             }
             $after = $existence->cantidad_disponible + $delta;
-            if ($after < 0 || $after > 4294967295) {
-                throw new InvalidArgumentException('El ajuste no puede dejar un saldo negativo o fuera de rango.');
+            if ($after < 0 || $after + $existence->cantidad_reservada > self::MAX_QUANTITY) {
+                throw new InvalidArgumentException('El ajuste no puede dejar un saldo negativo o fuera de rango, incluyendo las unidades reservadas.');
             }
             $move = $this->record($existence, $after, 'AJUSTE', $actor, $reason);
             $existence->update(['cantidad_disponible' => $after]);
@@ -208,10 +211,16 @@ class EppInventoryService
             if ($reservation->estado !== 'ACTIVA') {
                 continue;
             }
+            $snapshot = ['existencia_id' => $existence->id, 'reserva_id' => $reservation->id,
+                'cantidad_disponible' => $existence->cantidad_disponible, 'cantidad_reservada' => $existence->cantidad_reservada,
+                'cantidad_liberar' => $reservation->cantidad];
             if ($existence->cantidad_reservada < $reservation->cantidad) {
-                throw new InvalidArgumentException('El saldo reservado no coincide con la reserva. Revisa el inventario.');
+                throw new EppReservationBalanceException('El saldo reservado no coincide con la reserva. Revisa el inventario.', $snapshot);
             }
             $after = $existence->cantidad_disponible + $reservation->cantidad;
+            if ($after > self::MAX_QUANTITY) {
+                throw new EppReservationBalanceException('La liberacion dejaria el saldo disponible fuera de rango. Revisa el inventario.', $snapshot);
+            }
             $this->reservationMovement($existence, $operation, $reservation->operacion_detalle_id, $reservation->cantidad, $after, 'LIBERACION', $actor, $state === 'EXPIRADA' ? 'Reserva vencida sin firma.' : 'Reserva liberada por rechazo.', $actor ? 'WEB' : 'SYSTEM');
             $existence->update(['cantidad_disponible' => $after, 'cantidad_reservada' => $existence->cantidad_reservada - $reservation->cantidad]);
             $reservation->update(['estado' => $state, 'liberada_at' => $releasedAt]);

@@ -377,6 +377,87 @@ class EppOperationServiceTest extends TestCase
         $this->assertSame('{"a":{"x":1,"y":2},"z":[{"b":2,"c":3},{"a":1}]}', EppCanonicalPayload::json(['z' => [['c' => 3, 'b' => 2], ['a' => 1]], 'a' => ['y' => 2, 'x' => 1]]));
     }
 
+    public function test_adjustment_cannot_fill_available_uint32_limit_while_one_unit_is_reserved(): void
+    {
+        $prepared = $this->reserveAtUnsignedLimit();
+        $inventory = app(EppInventoryService::class);
+        try {
+            $inventory->adjust($this->warehouse, $this->epp, ['TALLA' => 'M'], 1, $this->actor, 'Ajuste invalido con reserva');
+            $this->fail('El ajuste no debe impedir la futura liberacion de la reserva.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('reserv', $exception->getMessage());
+        }
+        $this->assertSame(4294967294, $this->existence()->cantidad_disponible);
+        $this->assertSame(1, $this->existence()->cantidad_reservada);
+        $this->assertSame('ACTIVA', $prepared->reservas()->first()->estado);
+        $this->assertSame('LISTO_PARA_FIRMA', $prepared->fresh()->estado);
+        $this->assertSame(2, $this->ledgerCount());
+        app(EppOperationService::class)->expireReservations($prepared->reserva_expires_at);
+        $this->assertSame(4294967295, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_reservada);
+        $this->assertSame('EXPIRADO', $prepared->fresh()->estado);
+        $this->assertSame(3, $this->ledgerCount());
+    }
+
+    public function test_rejected_overflow_adjustment_does_not_prevent_rejecting_the_reserved_batch(): void
+    {
+        $prepared = $this->reserveAtUnsignedLimit();
+        try {
+            app(EppInventoryService::class)->adjust($this->warehouse, $this->epp, ['TALLA' => 'M'], 1, $this->actor, 'Ajuste invalido con reserva');
+            $this->fail('El ajuste debe rechazar el saldo agregado fuera de rango.');
+        } catch (InvalidArgumentException) {
+            $this->assertSame(2, $this->ledgerCount());
+        }
+        app(EppOperationService::class)->reject($prepared, $this->actor, 'No recibe el EPP');
+        $this->assertSame(4294967295, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_reservada);
+        $this->assertSame('RECHAZADO', $prepared->fresh()->estado);
+        $this->assertSame('LIBERADA', $prepared->reservas()->first()->estado);
+        $this->assertSame(3, $this->ledgerCount());
+    }
+
+    public function test_corrupt_overflow_reservation_is_diagnosed_without_blocking_other_expired_batches(): void
+    {
+        $blocked = $this->reserveAtUnsignedLimit();
+        // Simulate a historical invalid adjustment: available is full while one unit remains reserved.
+        $this->existence()->update(['cantidad_disponible' => 4294967295]);
+        $otherWarehouse = EppAlmacen::query()->create(['nombre' => 'OTRA RESERVA EXPIRADA']);
+        $inventory = app(EppInventoryService::class);
+        $inventory->openStock($otherWarehouse, [['epp_id' => $this->epp->id, 'cantidad' => 1, 'talla' => 'M']], $this->actor, 'Conteo otro almacen');
+        $service = app(EppOperationService::class);
+        $other = $service->createDraft($this->actor, $this->personal, $otherWarehouse, 'ENTREGA', (string) Str::uuid());
+        $other = $service->prepareForSignature($service->syncDetails($other, [$this->line(1)], $this->actor), $this->actor);
+        $cutoff = now()->addMinutes(11);
+        $service->expireReservations($cutoff);
+        $this->assertSame('EXPIRADO', $other->fresh()->estado);
+        $this->assertSame('EXPIRADA', $other->reservas()->first()->estado);
+        $this->assertSame(1, EppExistencia::query()->where('almacen_id', $otherWarehouse->id)->firstOrFail()->cantidad_disponible);
+        $this->assertSame('LISTO_PARA_FIRMA', $blocked->fresh()->estado);
+        $this->assertSame('ACTIVA', $blocked->reservas()->first()->estado);
+        $this->assertSame(4294967295, $this->existence()->cantidad_disponible);
+        $this->assertSame(1, $this->existence()->cantidad_reservada);
+        $this->assertSame(2, $this->ledgerCount());
+        $diagnostic = $blocked->eventos()->where('accion', 'RESERVA_LIBERACION_BLOQUEADA')->firstOrFail();
+        $this->assertSame($this->existence()->id, $diagnostic->snapshot_json['existencia_id']);
+        $this->assertStringContainsString('rango', $diagnostic->motivo);
+        // A subsequent run keeps the corrupt batch intact and cannot append a release twice elsewhere.
+        $service->expireReservations($cutoff);
+        $this->assertSame(3, EppInventarioMovimiento::query()->where('almacen_id', $otherWarehouse->id)->count());
+        $this->assertSame(2, $this->ledgerCount());
+    }
+
+    public function test_quarantine_uses_its_own_uint32_bucket_and_does_not_prevent_valid_release(): void
+    {
+        $prepared = $this->reserveAtUnsignedLimit();
+        $this->existence()->update(['cantidad_disponible' => 4294967293, 'cantidad_cuarentena' => 4294967295]);
+        app(EppInventoryService::class)->adjust($this->warehouse, $this->epp, ['TALLA' => 'M'], 1, $this->actor, 'Ajuste valido al limite disponible mas reserva');
+        app(EppOperationService::class)->reject($prepared, $this->actor, 'No recibe el EPP');
+        $this->assertSame(4294967295, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_reservada);
+        $this->assertSame(4294967295, $this->existence()->cantidad_cuarentena);
+        $this->assertSame(4, $this->ledgerCount());
+    }
+
     public function test_only_one_operator_reserves_last_unit(): void
     {
         $this->open(1);
@@ -530,6 +611,15 @@ class EppOperationServiceTest extends TestCase
     private function open(int $quantity): void
     {
         app(EppInventoryService::class)->openStock($this->warehouse, [['epp_id' => $this->epp->id, 'cantidad' => $quantity, 'talla' => 'M']], $this->actor, 'Conteo prueba');
+    }
+
+    private function reserveAtUnsignedLimit(): EppOperacion
+    {
+        $this->open(1);
+        // Legal historical balance reached through accumulated positive adjustments.
+        $this->existence()->update(['cantidad_disponible' => 4294967295]);
+
+        return $this->prepare([$this->line(1)]);
     }
 
     private function existence(): EppExistencia

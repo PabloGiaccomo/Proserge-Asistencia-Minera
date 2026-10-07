@@ -37,7 +37,14 @@ al catalogo ni valores fuera de sus opciones. La existencia conserva los atribut
 ## Ajustes e historial
 
 Un ajuste registra una diferencia entera positiva o negativa y motivo. Se exige
-apertura previa y nunca se permite saldo negativo. La vista previa muestra
+apertura previa y nunca se permite saldo negativo.
+El limite UINT32 de disponible incluye tambien las unidades reservadas que
+podrian regresar a ese mismo saldo al liberar una reserva; un ajuste no puede
+dejar `cantidad_disponible + cantidad_reservada` por encima de 4294967295.
+La cuarentena tiene una columna independiente y no se suma en esta liberacion;
+cualquier traslado posterior debe validar el limite de su saldo de destino.
+
+La vista previa muestra
 saldo anterior/posterior; si el saldo cambia antes de confirmar, se exige revisar
 otra vez. Los ajustes de existencias de articulos posteriormente desactivados
 conservan su variante historica y no reescriben su catalogo.
@@ -99,6 +106,11 @@ tambien se ejecuta al consultar disponibilidad, preparar o revisar una
 operacion. Bloquea nuevamente la operacion y libera cada reserva activa una
 sola vez, agregando `LIBERACION` al libro y dejando la operacion `EXPIRADO`.
 `expireReservations()` devuelve el numero de reservas liberadas, no de lotes.
+Si un saldo historico impide liberar por desborde o inconsistencia de reserva,
+el lote y su libro quedan intactos. Se registra `RESERVA_LIBERACION_BLOQUEADA`
+con identificadores y cantidades para revision y la limpieza continua con los
+otros lotes. La liberacion manual rechaza ese saldo con un error de dominio
+antes de escribir un movimiento; requiere conciliacion mediante ajuste con motivo.
 La confirmacion firmada y los saldos definitivos usan servicios separados.
 
 ## Validacion y despliegue
