@@ -120,8 +120,13 @@ class EppBalanceService
         return $source;
     }
 
-    public function markLoss(EppEntrega $delivery, int $quantity, string $reason, Usuario $actor): EppOperacion
+    /** The caller must retain this UUID across retries, including any future HTTP endpoint. */
+    public function markLoss(EppEntrega $delivery, int $quantity, string $reason, Usuario $actor, string $submissionUuid): EppOperacion
     {
+        if (! Str::isUuid($submissionUuid)) {
+            throw new InvalidArgumentException('La perdida requiere un UUID de solicitud estable.');
+        }
+        $submissionUuid = strtolower($submissionUuid);
         if ($quantity < 1 || $quantity > 1000000 || trim($reason) === '' || mb_strlen($reason) > 1000) {
             throw new InvalidArgumentException('Indica cantidad positiva y motivo de la perdida, hasta 1000 caracteres.');
         }
@@ -131,16 +136,37 @@ class EppBalanceService
             throw new InvalidArgumentException('Regulariza el almacen de la entrega historica antes de registrar la perdida.');
         }
 
-        return DB::transaction(function () use ($sourceOperation, $delivery, $quantity, $reason, $actor) {
+        return DB::transaction(function () use ($sourceOperation, $delivery, $quantity, $reason, $actor, $submissionUuid) {
             EppOperacion::query()->lockForUpdate()->findOrFail($sourceOperation->id);
             $warehouse = EppAlmacen::query()->lockForUpdate()->findOrFail($sourceOperation->almacen_id);
             Gate::forUser(Usuario::query()->findOrFail($actor->id))->authorize('correct', $sourceOperation->fresh()->setRelation('almacen', $warehouse));
             $source = EppEntrega::query()->lockForUpdate()->findOrFail($delivery->id);
+            $request = ['accion' => 'PERDIDA_REGISTRADA', 'entrega_origen_id' => $source->id, 'cantidad' => $quantity];
+            // The unique UUID also arbitrates callers using the same key on different origins.
+            // Keep a locking read on firstOrCreate's duplicate-key recovery under MySQL snapshots.
+            $operation = EppOperacion::query()->lockForUpdate()->firstOrCreate(['submission_uuid' => $submissionUuid], [
+                'personal_id' => $source->personal_id, 'almacen_id' => $warehouse->id, 'mina_id' => $warehouse->mina_id,
+                'tipo' => 'CORRECCION', 'estado' => 'FIRMADO', 'operacion_origen_id' => $sourceOperation->id,
+                'registrado_por_usuario_id' => $actor->id, 'confirmado_por_usuario_id' => $actor->id,
+                'motivo' => trim($reason), 'resumen_json' => $request,
+            ]);
+            if (! $operation->wasRecentlyCreated) {
+                if ($operation->tipo !== 'CORRECCION' || $operation->estado !== 'FIRMADO'
+                    || $operation->operacion_origen_id !== $sourceOperation->id || $operation->personal_id !== $source->personal_id
+                    || $operation->almacen_id !== $warehouse->id || $operation->registrado_por_usuario_id !== $actor->id
+                    || $operation->confirmado_por_usuario_id !== $actor->id || $operation->motivo !== trim($reason)
+                    || ($operation->resumen_json['accion'] ?? null) !== 'PERDIDA_REGISTRADA'
+                    || ($operation->resumen_json['entrega_origen_id'] ?? null) !== $source->id
+                    || ($operation->resumen_json['cantidad'] ?? null) !== $quantity) {
+                    throw new InvalidArgumentException('El UUID ya pertenece a una operacion o perdida diferente.');
+                }
+
+                return $operation;
+            }
             if ($source->politica_devolucion_snapshot !== 'RETORNABLE' || $source->estado !== 'ENTREGADO' || $quantity > $source->cantidad_pendiente_devolucion) {
                 throw new InvalidArgumentException('La perdida supera el saldo retornable vigente.');
             }
             $remaining = $source->cantidad_pendiente_devolucion - $quantity;
-            $operation = EppOperacion::query()->create(['personal_id' => $source->personal_id, 'almacen_id' => $warehouse->id, 'mina_id' => $warehouse->mina_id, 'tipo' => 'CORRECCION', 'estado' => 'FIRMADO', 'submission_uuid' => (string) Str::uuid(), 'operacion_origen_id' => $sourceOperation->id, 'registrado_por_usuario_id' => $actor->id, 'confirmado_por_usuario_id' => $actor->id, 'motivo' => trim($reason)]);
             $source->update(['cantidad_pendiente_devolucion' => $remaining, 'estado' => $remaining === 0 ? 'PERDIDA_OLVIDO' : 'ENTREGADO', 'cerrado_por_usuario_id' => $remaining === 0 ? $actor->id : null]);
             $operation->eventos()->create(['actor_usuario_id' => $actor->id, 'accion' => 'PERDIDA_REGISTRADA', 'origen' => 'WEB', 'motivo' => trim($reason), 'snapshot_json' => ['entrega_origen_id' => $source->id, 'cantidad' => $quantity, 'saldo_anterior' => $remaining + $quantity, 'saldo_restante' => $remaining]]);
 

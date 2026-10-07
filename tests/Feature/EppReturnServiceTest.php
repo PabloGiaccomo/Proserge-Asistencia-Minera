@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -137,12 +138,219 @@ class EppReturnServiceTest extends TestCase
 
     public function test_loss_does_not_add_stock(): void
     {
-        $operation = app(EppBalanceService::class)->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor);
+        $operation = app(EppBalanceService::class)->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor, (string) Str::uuid());
         $this->assertSame(3, $this->delivery->fresh()->cantidad_pendiente_devolucion);
         $this->assertSame(0, $this->existence()->cantidad_disponible);
         $this->assertSame(0, $this->existence()->cantidad_cuarentena);
         $this->assertSame(0, $this->moves()->count());
         $this->assertSame(1, $operation->eventos()->where('accion', 'PERDIDA_REGISTRADA')->count());
+    }
+
+    public function test_loss_retry_after_lost_response_returns_original_operation(): void
+    {
+        $key = (string) Str::uuid();
+        $service = app(EppBalanceService::class);
+        $first = $service->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor, $key);
+        $retry = $service->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor, $key);
+
+        $this->assertSame($first->id, $retry->id);
+        $this->assertSame($key, $retry->submission_uuid);
+        $this->assertSame(3, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(1, EppOperacion::query()->where('operacion_origen_id', $this->delivery->operacion_id)->where('tipo', 'CORRECCION')->count());
+        $this->assertSame(1, $retry->eventos()->count());
+        $this->assertSame(0, $retry->aceptacion()->count());
+        $this->assertSame(0, $this->moves()->count());
+        $this->assertSame(0, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_cuarentena);
+    }
+
+    public function test_loss_retries_remain_valid_after_distinct_losses_close_balance(): void
+    {
+        $service = app(EppBalanceService::class);
+        $first = $service->markLoss($this->delivery, 2, 'Primera perdida', $this->actor, $firstKey = (string) Str::uuid());
+        $second = $service->markLoss($this->delivery, 3, 'Segunda perdida', $this->actor, $secondKey = (string) Str::uuid());
+        $this->assertNotSame($first->id, $second->id);
+        $this->assertSame($first->id, $service->markLoss($this->delivery, 2, 'Primera perdida', $this->actor, $firstKey)->id);
+        $this->assertSame($second->id, $service->markLoss($this->delivery, 3, 'Segunda perdida', $this->actor, $secondKey)->id);
+        $this->assertSame(0, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame('PERDIDA_OLVIDO', $this->delivery->fresh()->estado);
+        $this->assertSame(1, $first->eventos()->count());
+        $this->assertSame(1, $second->eventos()->count());
+        $this->assertSame(0, $this->moves()->count());
+        $this->expectException(InvalidArgumentException::class);
+        $service->markLoss($this->delivery, 1, 'Sin saldo', $this->actor, (string) Str::uuid());
+    }
+
+    public function test_loss_key_cannot_be_reused_for_different_quantity_reason_delivery_or_actor(): void
+    {
+        $service = app(EppBalanceService::class);
+        $operation = $service->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $key = (string) Str::uuid());
+        $otherDelivery = $this->delivery->replicate(['id']);
+        $otherDelivery->id = (string) Str::uuid();
+        $otherDelivery->save();
+        $otherActor = $this->actor->replicate(['id']);
+        $otherActor->id = (string) Str::uuid();
+        $otherActor->email = Str::uuid().'@test.local';
+        $otherActor->save();
+        foreach ([[$this->delivery, 2, 'Perdida reportada', $this->actor], [$this->delivery, 1, 'Otro motivo', $this->actor], [$otherDelivery, 1, 'Perdida reportada', $this->actor], [$this->delivery, 1, 'Perdida reportada', $otherActor]] as $arguments) {
+            try {
+                $service->markLoss(...[...$arguments, $key]);
+                $this->fail('La clave pertenece exclusivamente a la perdida original.');
+            } catch (InvalidArgumentException) {
+                $this->assertSame(4, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+                $this->assertSame(1, $operation->eventos()->count());
+            }
+        }
+        $this->assertSame(5, $otherDelivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(0, $this->moves()->count());
+    }
+
+    public function test_loss_key_cannot_replay_an_unrelated_operation(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        app(EppBalanceService::class)->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $this->delivery->operacion->submission_uuid);
+    }
+
+    public function test_loss_replay_does_not_depend_on_json_object_key_order(): void
+    {
+        $service = app(EppBalanceService::class);
+        $operation = $service->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor, $key = (string) Str::uuid());
+        $operation->update(['resumen_json' => ['cantidad' => 2, 'entrega_origen_id' => $this->delivery->id, 'accion' => 'PERDIDA_REGISTRADA']]);
+        $this->assertSame($operation->id, $service->markLoss($this->delivery, 2, 'Perdida reportada', $this->actor, $key)->id);
+        $this->assertSame(3, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(1, $operation->eventos()->count());
+    }
+
+    public function test_loss_requires_valid_caller_uuid(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        app(EppBalanceService::class)->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, 'no-uuid');
+    }
+
+    public function test_loss_replay_reloads_revoked_actor(): void
+    {
+        $service = app(EppBalanceService::class);
+        $service->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $key = (string) Str::uuid());
+        Usuario::query()->whereKey($this->actor->id)->update(['estado' => 'INACTIVO']);
+        $this->expectException(AuthorizationException::class);
+        $service->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $key);
+    }
+
+    public function test_loss_replay_rechecks_current_worker_and_warehouse_scope(): void
+    {
+        $mine = Mina::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'MINA PERDIDA '.Str::uuid(), 'unidad_minera' => 'UM TEST']);
+        $this->warehouse->update(['mina_id' => $mine->id]);
+        $workerScope = PersonalMina::query()->create(['id' => (string) Str::uuid(), 'personal_id' => $this->worker->id, 'mina_id' => $mine->id, 'estado' => 'EN_PROCESO', 'activo' => true]);
+        $role = Rol::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'CORREGIR EPP '.Str::uuid(), 'estado' => 'ACTIVO', 'permisos' => ['epps' => ['corregir' => true]]]);
+        $this->actor->update(['rol_id' => $role->id]);
+        $actorScope = UsuarioMinaScope::query()->create(['id' => (string) Str::uuid(), 'usuario_id' => $this->actor->id, 'mina_id' => $mine->id]);
+        $service = app(EppBalanceService::class);
+        $operation = $service->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $key = (string) Str::uuid());
+        foreach (['worker', 'warehouse'] as $scope) {
+            if ($scope === 'worker') {
+                $workerScope->update(['activo' => false]);
+            } else {
+                $workerScope->update(['activo' => true]);
+                $actorScope->delete();
+            }
+            try {
+                $service->markLoss($this->delivery, 1, 'Perdida reportada', $this->actor, $key);
+                $this->fail('El replay exige alcance vigente sobre trabajador y almacen.');
+            } catch (AuthorizationException) {
+                $this->assertSame(4, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+                $this->assertSame(1, $operation->eventos()->count());
+            }
+        }
+    }
+
+    #[DataProvider('concurrentLossKeys')]
+    public function test_concurrent_loss_keys_preserve_exactly_once_balances(bool $sameKey, int $operationCount, int $remaining): void
+    {
+        $keys = [(string) Str::uuid()];
+        $keys[] = $sameKey ? $keys[0] : (string) Str::uuid();
+        $root = storage_path('app/testing/loss-'.Str::uuid());
+        $sourceSignature = $this->delivery->operacion->aceptacion->firma_path;
+        $sourceBytes = Storage::disk('local')->get($sourceSignature);
+        config(['filesystems.disks.local.root' => $root]);
+        Storage::forgetDisk('local');
+        Storage::disk('local')->put($sourceSignature, $sourceBytes, ['visibility' => 'private']);
+        $processes = [];
+        $ready = [];
+        $ledgerCount = EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count();
+        DB::commit();
+        try {
+            DB::beginTransaction();
+            EppOperacion::query()->lockForUpdate()->findOrFail($this->delivery->operacion_id);
+            foreach ([0, 1] as $index) {
+                $ready[$index] = $root.'/'.$index.'.ready';
+                $process = new Process([PHP_BINARY, base_path('tests/Support/mark-epp-loss.php'), $this->delivery->id, $this->actor->id, $keys[$index], $ready[$index]], base_path(), [
+                    'APP_ENV' => 'testing', 'DB_URL' => '', 'DB_CONNECTION' => 'mysql', 'DB_HOST' => config('database.connections.mysql.host'), 'DB_PORT' => (string) config('database.connections.mysql.port'),
+                    'DB_DATABASE' => 'proserge_app_test', 'DB_USERNAME' => config('database.connections.mysql.username'), 'DB_PASSWORD' => config('database.connections.mysql.password'),
+                ]);
+                $process->setTimeout(25)->start();
+                $processes[] = $process;
+            }
+            $deadline = microtime(true) + 10;
+            while ((! is_file($ready[0]) || ! is_file($ready[1])) && microtime(true) < $deadline) {
+                foreach ($processes as $process) {
+                    $process->isRunning();
+                }
+                usleep(10000);
+            }
+            foreach ($ready as $path) {
+                $this->assertFileExists($path);
+            }
+            foreach ($processes as $process) {
+                $this->assertTrue($process->isRunning());
+            }
+            DB::commit();
+            foreach ($processes as $process) {
+                $process->wait();
+            }
+            $results = array_map(fn ($process) => json_decode($process->getOutput(), true), $processes);
+            $this->assertCount(2, array_filter($results, fn ($result) => isset($result['operacion_id'])), implode('\n', array_map(fn ($process) => $process->getErrorOutput().$process->getOutput(), $processes)));
+            if ($sameKey) {
+                $this->assertSame($results[0]['operacion_id'], $results[1]['operacion_id']);
+            } else {
+                $this->assertNotSame($results[0]['operacion_id'], $results[1]['operacion_id']);
+            }
+            foreach ($results as $index => $result) {
+                $this->assertSame($keys[$index], $result['submission_uuid']);
+                $operation = EppOperacion::query()->findOrFail($result['operacion_id']);
+                $this->assertSame(1, $operation->eventos()->count());
+                $this->assertSame(0, $operation->aceptacion()->count());
+            }
+            $this->assertSame($operationCount, EppOperacion::query()->where('operacion_origen_id', $this->delivery->operacion_id)->where('tipo', 'CORRECCION')->count());
+            $this->assertSame($remaining, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+            $this->assertSame(0, $this->existence()->cantidad_disponible);
+            $this->assertSame(0, $this->existence()->cantidad_cuarentena);
+            $this->assertSame($ledgerCount, EppInventarioMovimiento::query()->where('almacen_id', $this->warehouse->id)->count());
+        } finally {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            foreach ($processes as $process) {
+                if ($process->isRunning()) {
+                    $process->stop();
+                }
+            }
+            foreach ($ready as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+            // Preserve committed append-only ledger/evidence; retire only this synthetic fixture.
+            $this->worker->update(['estado' => 'CESADO']);
+            $this->warehouse->update(['estado' => 'INACTIVO']);
+            $this->actor->update(['estado' => 'INACTIVO']);
+            $this->epp->update(['estado' => 'INACTIVO']);
+            DB::beginTransaction();
+        }
+    }
+
+    public static function concurrentLossKeys(): array
+    {
+        return ['same key retries once' => [true, 1, 3], 'different keys legitimate losses' => [false, 2, 1]];
     }
 
     public function test_consumables_never_appear_as_returnable(): void

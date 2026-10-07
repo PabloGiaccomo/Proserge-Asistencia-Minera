@@ -251,8 +251,16 @@ firma la nueva devolucion, nunca se inventa una firma de entrega historica.
 No se genera una apertura de stock automatica; un error de saldo/inventario
 revierte aceptacion, devoluciones y libro del lote completo.
 
-`EppBalanceService::markLoss()` exige `corregir`, cantidad dentro del saldo y
-motivo. Registra una operacion `CORRECCION` con evento `PERDIDA_REGISTRADA`,
+`EppBalanceService::markLoss()` exige `corregir`, cantidad dentro del saldo,
+motivo y un `submission_uuid` valido suministrado por el caller. El caller debe
+conservar esa clave ante respuesta perdida o retry: la misma clave, entrega,
+cantidad, motivo y actor recuperan la operacion original, incluso con saldo
+ya cerrado, sin otro descuento ni evento. Una clave distinta permite una nueva
+perdida hasta el saldo vigente; reutilizarla con otro contenido se rechaza.
+Cada replay vuelve a comprobar actor activo, permiso y scope de trabajador y
+almacen. No existe ruta HTTP de perdida; cualquier futura ruta debe exigir
+ese UUID estable, nunca generarlo en cada intento del servidor.
+Registra una operacion `CORRECCION` con evento `PERDIDA_REGISTRADA`,
 actor y saldos anterior/restante; una perdida completa cierra en
 `PERDIDA_OLVIDO`. Nunca suma stock ni se presenta como devolucion fisica o
 aceptacion firmada por el trabajador. Para una entrega legacy sin almacen,
