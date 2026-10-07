@@ -6,8 +6,11 @@ use App\Models\EppAlmacen;
 use App\Models\EppExistencia;
 use App\Models\EppInventarioMovimiento;
 use App\Models\EppOperacion;
+use App\Models\EppOperacionDetalle;
 use App\Models\EppRegistro;
+use App\Models\EppReserva;
 use App\Models\Usuario;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +51,7 @@ class EppInventoryService
 
     public function available(EppAlmacen $warehouse, EppRegistro $epp, array $attributes): ?int
     {
+        app(EppOperationService::class)->expireReservations(now());
         $existence = $this->existenceQuery($warehouse, $epp, $attributes)->first();
 
         return $existence?->conciliado_at === null ? null : $existence->cantidad_disponible;
@@ -135,10 +139,10 @@ class EppInventoryService
         return $this->canonicalAttributes($attributes);
     }
 
-    public function assertVariant(EppRegistro $epp, array $attributes): void
+    public function assertVariant(EppRegistro $epp, array $attributes, bool $requireInventory = true): void
     {
         $attributes = $this->canonicalAttributes($attributes);
-        if ($epp->estado !== 'ACTIVO' || ! $epp->control_inventario) {
+        if ($epp->estado !== 'ACTIVO' || ($requireInventory && ! $epp->control_inventario)) {
             throw new InvalidArgumentException('El EPP debe estar activo y tener control de inventario.');
         }
         $required = [];
@@ -162,6 +166,70 @@ class EppInventoryService
         if (array_diff(array_keys($attributes), array_keys($required)) !== []) {
             throw new InvalidArgumentException('La variante tiene atributos que no corresponden al catalogo.');
         }
+    }
+
+    /** The caller holds the operation and warehouse locks for the entire batch. */
+    public function reserveDetail(EppOperacion $operation, EppOperacionDetalle $detail, Usuario $actor, CarbonInterface $expires, bool $acceptPartial): int
+    {
+        if (DB::transactionLevel() === 0 || $detail->operacion_id !== $operation->id || ! $detail->control_inventario_snapshot) {
+            throw new InvalidArgumentException('La reserva requiere una linea controlada y una transaccion de operacion.');
+        }
+        $existence = EppExistencia::query()->where('almacen_id', $operation->almacen_id)->where('epp_id', $detail->epp_id)->where('variante_clave', $detail->variante_clave)->lockForUpdate()->first();
+        $snapshot = $detail->snapshot_json;
+        $snapshot['disponibilidad'] = $existence?->conciliado_at === null ? 'STOCK_NO_CONCILIADO' : 'CONCILIADO';
+        $detail->update(['existencia_id' => $existence?->id, 'snapshot_json' => $snapshot]);
+        if ($existence?->conciliado_at === null) {
+            return 0;
+        }
+        $quantity = min($detail->cantidad_solicitada, $existence->cantidad_disponible);
+        if ($quantity <= 0 || (! $acceptPartial && $quantity < $detail->cantidad_solicitada)) {
+            return 0;
+        }
+        $after = $existence->cantidad_disponible - $quantity;
+        $this->reservationMovement($existence, $operation, $detail->id, $quantity, $after, 'RESERVA', $actor, 'Stock reservado para firma.', 'WEB');
+        $existence->update(['cantidad_disponible' => $after, 'cantidad_reservada' => $existence->cantidad_reservada + $quantity]);
+        EppReserva::query()->create(['existencia_id' => $existence->id, 'operacion_id' => $operation->id, 'operacion_detalle_id' => $detail->id, 'cantidad' => $quantity, 'estado' => 'ACTIVA', 'expires_at' => $expires]);
+
+        return $quantity;
+    }
+
+    /** Must run after locking the operation, before locking its existence and reservation rows. */
+    public function releaseOperationReservations(EppOperacion $operation, ?Usuario $actor, string $state, CarbonInterface $releasedAt): int
+    {
+        if (DB::transactionLevel() === 0 || ! in_array($state, ['LIBERADA', 'EXPIRADA'], true)) {
+            throw new InvalidArgumentException('La liberacion requiere una transaccion y un estado valido.');
+        }
+        EppAlmacen::query()->lockForUpdate()->findOrFail($operation->almacen_id);
+        $count = 0;
+        $reservations = EppReserva::query()->where('operacion_id', $operation->id)->where('estado', 'ACTIVA')->orderBy('existencia_id')->orderBy('id')->get();
+        foreach ($reservations as $candidate) {
+            $existence = EppExistencia::query()->lockForUpdate()->findOrFail($candidate->existencia_id);
+            $reservation = EppReserva::query()->lockForUpdate()->findOrFail($candidate->id);
+            if ($reservation->estado !== 'ACTIVA') {
+                continue;
+            }
+            if ($existence->cantidad_reservada < $reservation->cantidad) {
+                throw new InvalidArgumentException('El saldo reservado no coincide con la reserva. Revisa el inventario.');
+            }
+            $after = $existence->cantidad_disponible + $reservation->cantidad;
+            $this->reservationMovement($existence, $operation, $reservation->operacion_detalle_id, $reservation->cantidad, $after, 'LIBERACION', $actor, $state === 'EXPIRADA' ? 'Reserva vencida sin firma.' : 'Reserva liberada por rechazo.', $actor ? 'WEB' : 'SYSTEM');
+            $existence->update(['cantidad_disponible' => $after, 'cantidad_reservada' => $existence->cantidad_reservada - $reservation->cantidad]);
+            $reservation->update(['estado' => $state, 'liberada_at' => $releasedAt]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private function reservationMovement(EppExistencia $existence, EppOperacion $operation, string $detailId, int $quantity, int $after, string $type, ?Usuario $actor, string $reason, string $origin): void
+    {
+        EppInventarioMovimiento::query()->create([
+            'existencia_id' => $existence->id, 'almacen_id' => $existence->almacen_id, 'epp_id' => $existence->epp_id,
+            'operacion_id' => $operation->id, 'operacion_detalle_id' => $detailId, 'tipo' => $type,
+            'cantidad' => $quantity, 'saldo_anterior' => $existence->cantidad_disponible, 'saldo_posterior' => $after,
+            'destino' => 'DISPONIBLE', 'actor_usuario_id' => $actor?->id, 'origen' => $origin, 'motivo' => $reason,
+            'snapshot_json' => ['atributos' => $existence->atributos_json, 'delta' => $after - $existence->cantidad_disponible, 'reservada_anterior' => $existence->cantidad_reservada, 'reservada_posterior' => $existence->cantidad_reservada + ($type === 'RESERVA' ? $quantity : -$quantity)],
+        ]);
     }
 
     private function authorize(EppAlmacen $warehouse, Usuario $actor, string $ability): void

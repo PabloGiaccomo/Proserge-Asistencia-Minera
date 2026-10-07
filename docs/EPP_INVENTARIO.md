@@ -60,6 +60,47 @@ consumido. Los tokens desconocidos, vencidos sin confirmar, de otra accion o de
 otro actor se rechazan. El payload del navegador o de sesion no sustituye el
 payload persistido. Las claves consumidas se conservan al revertir la aplicacion.
 
+## Preparacion de operaciones y reservas
+
+`EppOperationService` prepara lotes de un trabajador y un almacen. Crear el
+borrador exige permiso directo de preparar entrega/devolucion y alcance actual
+del trabajador y almacen. `submission_uuid` identifica una sola operacion; su
+reintento conserva el mismo resultado y rechaza otro actor, trabajador, almacen
+o tipo. Es independiente de los tokens de apertura/ajuste del inventario.
+
+Solo `BORRADOR` permite sincronizar lineas; el cliente envia
+`cantidad_solicitada`, nunca cantidades procesadas definitivas. `epp_id` es el
+articulo solicitado; `epp_real_id` opcional propone sustitucion con
+`aceptar_sustitucion` y motivo. Se conservan los nombres, politica, precio y
+atributos reales como snapshots. Las referencias a existencias, entregas y
+pendientes previos deben corresponder al trabajador, almacen y variante.
+
+Al preparar, el servidor bloquea operacion, almacen y existencias, revalida el
+catalogo y calcula disponibilidad. Solo reserva una cantidad menor a la
+solicitada cuando `aceptar_parcial` fue confirmado. Sin unidades procesables
+queda `PENDIENTE_STOCK`; si todas las lineas se rechazaron queda `RECHAZADO`.
+Los retornables ya asignados exigen motivo para una nueva entrega. Las variantes
+duplicadas requieren `permite_entrega_repetida`; los consumibles pueden usar esa
+politica. `control_inventario=false` permite preparar cantidades sin existencia,
+reserva ni movimiento de stock.
+
+Las unidades procesables quedan `LISTO_PARA_FIRMA` durante diez minutos. El
+resumen congelado distingue procesadas, pendientes y rechazadas; nunca incluye
+lineas rechazadas entre las cantidades por firmar. El hash del resumen se
+conserva tras releerlo desde MySQL. El soporte
+compartido `EppCanonicalPayload` ordena recursivamente claves asociativas y
+conserva el orden de listas antes de serializar con Unicode y barras sin escape.
+Preparar de nuevo una operacion vigente no duplica reservas. El rechazo en etapa de firma registra
+`FIRMA_RECHAZADA`, libera las reservas y no crea entregas. La preparacion con
+todas las lineas rechazadas registra `LINEAS_RECHAZADAS`.
+
+La limpieza `epps:expire-reservations` se ejecuta cada minuto sin solapamientos;
+tambien se ejecuta al consultar disponibilidad, preparar o revisar una
+operacion. Bloquea nuevamente la operacion y libera cada reserva activa una
+sola vez, agregando `LIBERACION` al libro y dejando la operacion `EXPIRADO`.
+`expireReservations()` devuelve el numero de reservas liberadas, no de lotes.
+La confirmacion firmada y los saldos definitivos usan servicios separados.
+
 ## Validacion y despliegue
 
 Aplicar primero las migraciones aditivas EPP del 2026-10-07 con respaldo de la base
@@ -68,8 +109,11 @@ La apertura requiere conteo fisico y confirmacion; no se ejecuta automaticamente
 durante migraciones ni cambia entregas historicas o datos de Personal.
 
 Pruebas: `EppCatalogTest`, `EppInventoryServiceTest`, `EppAuthorizationTest`,
-`EppInventoryConfirmationConcurrencyTest`. Esta ultima usa dos procesos MySQL,
+`EppInventoryConfirmationConcurrencyTest`, `EppOperationServiceTest`. Las pruebas
+concurrentes usan dos procesos MySQL,
 fixtures comprometidos de coordinacion/almacen y limpieza dirigida; nunca muta
 ni limpia el libro de inventario.
+Las pruebas de operaciones conservan sus fixtures comprometidos en la base
+aislada junto con el libro append-only; liberan las reservas al terminar.
 `tests/Browser/epp-inventory.cjs` usa Playwright/Chrome con fixtures en memoria y
 solo puede consultar `proserge_app_test`; revisa 1440/320/375/390/430 px.
