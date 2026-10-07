@@ -177,6 +177,44 @@ El llamador debe presentar la alerta de integridad aunque el estado historico
 sea `FIRMADO`/`FIRMADO_PARCIAL`. Una perdida o alteracion detectada despues del
 commit mantiene la aceptacion y los efectos unicos de inventario/entrega.
 
+## Entrega multiple desde celular
+
+Logistica ofrece **Entrega multiple con firma** en `/epps/operaciones/nueva`.
+Preparar requiere `preparar_entrega`; revisar y firmar requieren
+`confirmar_entrega`; consultar el resultado requiere `ver_operaciones`.
+Cada ruta usa sesion propia, capacidad directa y scope actual del trabajador
+y almacen. La busqueda de trabajadores y las opciones de testigo respetan
+el scope de mina; no se reutiliza la busqueda legada sin scope.
+
+El operador selecciona trabajador/almacen, agrega tarjetas de articulos con
+cantidades y variantes, e indica entrega parcial, sustitucion o motivo de
+nueva entrega cuando corresponde. Guardar calcula y reserva con los servicios
+del dominio. El resumen del trabajador muestra recibidas ahora, pendientes,
+sustituciones y rechazadas; no permite editar cantidades ni catalogo.
+La firma confirma solamente el resumen congelado. La confirmacion acepta
+identidad, revision/hash, declaracion y firma; ignora cantidades del navegador.
+
+Desacuerdo y negativa usan `reject()` con motivo: no crean entrega, liberan
+reservas y no admiten convertir el lote en excepcion. Rechazar requiere el
+permiso de preparacion del operador segun el contrato del servicio. Solo
+`aprobar_excepcion_firma` permite abrir la revision por testigo; conserva
+identidad de testigo, motivo, operador y aprobador distinto, e indica que el
+trabajador no firmo. La firma se valida igual que en la entrega normal.
+
+`signature-pad.js` comparte Pointer Events, captura de puntero, DPR, metadata
+de tinta y preservacion vectorial al redimensionar. `clear()`, `hasInk()` y
+`toPayload()` exponen el contrato; `signature:changed` actualiza el campo
+oculto. Un cambio de lineas invalida firma/hash/version; cambiar testigo o
+motivo borra su firma. Las fichas de Personal conservan `firma_base64`,
+validacion de obligatoriedad y recuperacion de firma en borradores.
+
+`tests/Browser/epp-signed-delivery.cjs` revisa formulario, resumen, testigo y
+resultado a 320/375/390/430/1440 px con fixtures sinteticos sobre la base de
+pruebas. No requiere servidor web; necesita Playwright y Chrome. Puede usar
+`NODE_PATH` hacia el runtime disponible sin instalar dependencias del proyecto.
+La pantalla de resultado conserva alertas de integridad ya detectadas y pide
+revision, sin sugerir repetir una entrega firmada.
+
 ## Validacion y despliegue
 
 Aplicar primero las migraciones aditivas EPP del 2026-10-07 con respaldo de la base

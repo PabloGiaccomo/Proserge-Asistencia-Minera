@@ -22,6 +22,7 @@ use App\Modules\ManPower\Controllers\ManPowerPageController;
 use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
 use App\Modules\Epps\Controllers\EppPageController;
 use App\Modules\Epps\Controllers\EppInventoryPageController;
+use App\Modules\Epps\Controllers\EppOperationPageController;
 use App\Modules\Logistica\Controllers\LogisticaPageController;
 use App\Modules\Transporte\Controllers\TransportePageController;
 use App\Modules\RQMina\Controllers\RQMinaPageController;
@@ -266,6 +267,15 @@ Route::middleware('web.auth')->group(function (): void {
 
     // EPP logistica
     Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
+    Route::get('/epps/operaciones/nueva', [EppOperationPageController::class, 'create'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.create');
+    Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.workers');
+    Route::post('/epps/operaciones', [EppOperationPageController::class, 'store'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.store');
+    Route::get('/epps/operaciones/{operation}/editar', [EppOperationPageController::class, 'edit'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.edit');
+    Route::put('/epps/operaciones/{operation}', [EppOperationPageController::class, 'update'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.update');
+    Route::get('/epps/operaciones/{operation}/revisar', [EppOperationPageController::class, 'review'])->middleware('web.permission:epps,confirmar_entrega|confirmar_devolucion|aprobar_excepcion_firma')->name('epps.operations.review');
+    Route::post('/epps/operaciones/{operation}/firmar', [EppOperationPageController::class, 'sign'])->middleware('web.permission:epps,confirmar_entrega|confirmar_devolucion|aprobar_excepcion_firma')->name('epps.operations.sign');
+    Route::post('/epps/operaciones/{operation}/rechazar', [EppOperationPageController::class, 'reject'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.reject');
+    Route::get('/epps/operaciones/{operation}', [EppOperationPageController::class, 'show'])->middleware('web.permission:epps,ver_operaciones')->name('epps.operations.show');
     Route::get('/epps/personal/buscar', [EppPageController::class, 'buscarPersonal'])->middleware('web.permission:epps,ver')->name('epps.personal.buscar');
     Route::get('/epps/entregas/ultima', [EppPageController::class, 'ultimaEntrega'])->middleware('web.permission:epps,ver')->name('epps.entregas.ultima');
     Route::get('/epps/kardex', [EppPageController::class, 'kardexPersonal'])->middleware('web.permission:epps,ver')->name('epps.kardex.show');

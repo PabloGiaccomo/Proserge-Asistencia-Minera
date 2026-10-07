@@ -1,4 +1,12 @@
 import './bootstrap';
+import { initSignaturePads } from './modules/signature-pad';
+import { initEppOperations } from './modules/epp-operation';
+
+window.initProsergeSignaturePads = initSignaturePads;
+document.addEventListener('DOMContentLoaded', () => {
+    initSignaturePads();
+    initEppOperations();
+});
 
 window.loadProsergeBarcodeScanner = async function () {
     if (window.ProsergeBarcodeScanner) {

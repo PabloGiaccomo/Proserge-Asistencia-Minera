@@ -2,19 +2,154 @@
 
 namespace Tests\Feature;
 
+use App\Models\EppAlmacen;
 use App\Models\EppEntrega;
+use App\Models\EppOperacion;
 use App\Models\EppRegistro;
+use App\Models\Mina;
 use App\Models\Personal;
+use App\Models\PersonalMina;
+use App\Models\Usuario;
+use App\Modules\Epps\Services\EppInventoryService;
+use App\Modules\Epps\Services\EppOperationService;
 use App\Modules\Epps\Services\EppService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class LogisticaEppIntegrationTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_mobile_review_shows_processed_and_pending_before_signature(): void
+    {
+        [$session, $operation] = $this->signedOperationFixture();
+        $this->withSession($session)->get(route('epps.operations.review', $operation))
+            ->assertOk()->assertSee('Recibiras ahora: 5')->assertSee('Quedara pendiente: 5')
+            ->assertSee('Confirmo haber recibido unicamente los articulos mostrados')
+            ->assertDontSee('data-operation-line', false)->assertDontSee('Testigo autorizado');
+    }
+
+    public function test_mobile_form_prepares_multiple_items_and_retry_keeps_the_same_lot(): void
+    {
+        [$session, $operation, $warehouse] = $this->signedOperationFixture();
+        $this->withSession($session)->post(route('epps.operations.reject', $operation), ['decision' => 'DESACUERDO', 'motivo' => 'Preparar otro lote'])->assertSessionHasNoErrors();
+        $this->get(route('epps.operations.create', ['personal_id' => $operation->personal_id, 'almacen_id' => $warehouse->id]))
+            ->assertOk()->assertSee('TRABAJADOR FIRMA MOVIL')->assertSee('data-add-line', false);
+        $uncontrolled = app(EppService::class)->storeCatalog(['nombre' => 'ARTICULO SIN STOCK '.Str::uuid(), 'estado' => 'ACTIVO', 'vida_util_dias' => 30, 'control_inventario' => false]);
+        $uuid = (string) Str::uuid();
+        $payload = ['tipo' => 'ENTREGA', 'submission_uuid' => $uuid, 'personal_id' => $operation->personal_id, 'almacen_id' => $warehouse->id,
+            'lines' => [['epp_id' => $operation->detalles()->first()->epp_id, 'cantidad_solicitada' => 2], ['epp_id' => $uncontrolled->id, 'cantidad_solicitada' => 1]]];
+        $this->post(route('epps.operations.store'), $payload)->assertSessionHasNoErrors();
+        $prepared = EppOperacion::query()->where('submission_uuid', $uuid)->firstOrFail();
+        $this->assertSame('LISTO_PARA_FIRMA', $prepared->estado);
+        $this->assertSame(2, $prepared->detalles()->count());
+        $this->assertSame(3, (int) $prepared->detalles()->sum('cantidad_procesada'));
+        $version = $prepared->version;
+        $this->post(route('epps.operations.store'), $payload)->assertRedirect(route('epps.operations.review', $prepared))->assertSessionHasNoErrors();
+        $this->assertSame($version, $prepared->fresh()->version);
+        $this->assertSame(1, $prepared->reservas()->count());
+    }
+
+    public function test_mobile_worker_search_is_scoped_and_requires_real_selection(): void
+    {
+        [$session, $operation] = $this->signedOperationFixture();
+        $hidden = Personal::query()->create(['id' => (string) Str::uuid(), 'dni' => (string) random_int(10000000, 99999999), 'nombre_completo' => 'TRABAJADOR FIRMA OCULTO', 'puesto' => 'OPERARIO', 'estado' => 'ACTIVO', 'qr_code' => (string) Str::uuid()]);
+        $this->withSession($session)->getJson(route('epps.operations.workers', ['q' => 'TRABAJADOR FIRMA']))
+            ->assertOk()->assertJsonCount(1, 'items')->assertJsonFragment(['id' => $operation->personal_id])->assertJsonMissing(['id' => $hidden->id]);
+        $this->getJson(route('epps.operations.workers', ['q' => '']))->assertOk()->assertJsonCount(0, 'items');
+        $this->get(route('epps.operations.create', ['personal_id' => $hidden->id]))->assertForbidden();
+    }
+
+    public function test_disagreement_and_refusal_release_stock_without_delivery(): void
+    {
+        foreach (['DESACUERDO', 'NEGATIVA'] as $decision) {
+            [$session, $operation, $warehouse] = $this->signedOperationFixture();
+            $this->withSession($session)->post(route('epps.operations.reject', $operation), ['decision' => $decision, 'motivo' => 'El trabajador solicita revisar el lote'])
+                ->assertRedirect(route('epps.operations.show', $operation))->assertSessionHasNoErrors();
+            $this->assertSame('RECHAZADO', $operation->fresh()->estado);
+            $this->assertSame(0, $operation->entregas()->count());
+            $this->assertSame(0, $operation->aceptacion()->count());
+            $this->assertSame(5, $warehouse->existencias()->first()->cantidad_disponible);
+            $this->assertSame(0, $warehouse->existencias()->first()->cantidad_reservada);
+            $this->get(route('epps.operations.show', $operation))->assertOk()->assertSee('No se registro entrega');
+            $this->get(route('epps.operations.review', $operation))->assertRedirect(route('epps.operations.show', $operation));
+        }
+    }
+
+    public function test_sign_uses_server_quantities_and_rejects_changed_review(): void
+    {
+        Storage::fake('local');
+        [$session, $operation] = $this->signedOperationFixture();
+        $image = imagecreatetruecolor(600, 300);
+        imagefill($image, 0, 0, imagecolorallocate($image, 255, 255, 255));
+        $pen = imagecolorallocate($image, 15, 25, 35);
+        imageline($image, 40, 160, 170, 50, $pen);
+        imageline($image, 170, 50, 110, 210, $pen);
+        ob_start();
+        imagepng($image);
+        $bytes = ob_get_clean();
+        imagedestroy($image);
+        $payload = ['submission_uuid' => $operation->submission_uuid, 'personal_id' => $operation->personal_id,
+            'review_hash' => $operation->resumen_sha256, 'review_version' => $operation->version,
+            'firma_data_url' => 'data:image/png;base64,'.base64_encode($bytes), 'confirmacion' => '1',
+            'ink' => ['point_count' => 40, 'bounds' => ['min_x' => 40, 'min_y' => 50, 'max_x' => 170, 'max_y' => 210]],
+            'lines' => [['cantidad_procesada' => 999]], 'cantidad_procesada' => 999];
+        $this->withSession($session)->post(route('epps.operations.sign', $operation), array_replace($payload, ['review_hash' => str_repeat('0', 64)]))
+            ->assertSessionHasErrors();
+        $this->assertSame(0, $operation->entregas()->count());
+        $this->post(route('epps.operations.sign', $operation), $payload)
+            ->assertRedirect(route('epps.operations.show', $operation))->assertSessionHasNoErrors();
+        $this->assertSame(5, (int) $operation->entregas()->sum('cantidad'));
+        $this->assertSame('FIRMADO_PARCIAL', $operation->fresh()->estado);
+        $operation->aceptacion()->first()->update(['estado_integridad' => 'ARCHIVO_FALTANTE']);
+        $this->get(route('epps.operations.show', $operation))->assertOk()->assertSee('Alerta de integridad');
+    }
+
+    public function test_mobile_routes_deny_worker_and_warehouse_outside_scope(): void
+    {
+        [$session, $operation] = $this->signedOperationFixture();
+        DB::table('usuario_mina_scope')->where('usuario_id', $session['user_id'])->delete();
+        foreach (['edit', 'review', 'show'] as $action) {
+            $this->withSession($session)->get(route('epps.operations.'.$action, $operation))->assertForbidden();
+        }
+        $this->post(route('epps.operations.reject', $operation), ['decision' => 'NEGATIVA', 'motivo' => 'Prueba'])->assertForbidden();
+    }
+
+    public function test_witness_review_requires_capability_and_cannot_follow_refusal(): void
+    {
+        [$session, $operation] = $this->signedOperationFixture();
+        $this->withSession($session)->get(route('epps.operations.review', [$operation, 'testigo' => 1]))->assertForbidden();
+        $actor = Usuario::query()->findOrFail($session['user_id']);
+        $actor->rol->update(['permisos' => PermissionCatalog::matrixFromSelections(['epps' => ['preparar_entrega', 'confirmar_entrega', 'ver_operaciones', 'aprobar_excepcion_firma']])]);
+        $outside = Personal::query()->create(['id' => (string) Str::uuid(), 'dni' => (string) random_int(10000000, 99999999), 'nombre_completo' => 'TESTIGO FUERA DEL ALCANCE', 'puesto' => 'OPERARIO', 'estado' => 'ACTIVO', 'qr_code' => (string) Str::uuid()]);
+        Usuario::query()->create(['id' => (string) Str::uuid(), 'email' => Str::uuid().'@test.local', 'password' => 'test-secret', 'estado' => 'ACTIVO', 'rol_id' => $actor->rol_id, 'personal_id' => $outside->id]);
+        $this->get(route('epps.operations.review', [$operation, 'testigo' => 1]))->assertOk()
+            ->assertSee('Testigo autorizado')->assertSee('El trabajador no firmo')->assertDontSee('TESTIGO FUERA DEL ALCANCE');
+        $this->post(route('epps.operations.reject', $operation), ['decision' => 'NEGATIVA', 'motivo' => 'No desea firmar'])->assertSessionHasNoErrors();
+        $this->get(route('epps.operations.review', [$operation, 'testigo' => 1]))->assertRedirect(route('epps.operations.show', $operation));
+    }
+
+    private function signedOperationFixture(): array
+    {
+        $session = $this->sessionWithSelections(['epps' => ['preparar_entrega', 'confirmar_entrega', 'ver_operaciones', 'gestionar_inventario']]);
+        $actor = Usuario::query()->findOrFail($session['user_id']);
+        $mine = Mina::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'MINA MOVIL '.Str::uuid(), 'unidad_minera' => 'UM PRUEBA', 'estado' => 'ACTIVO']);
+        DB::table('usuario_mina_scope')->insert(['id' => (string) Str::uuid(), 'usuario_id' => $actor->id, 'mina_id' => $mine->id]);
+        $worker = Personal::query()->create(['id' => (string) Str::uuid(), 'dni' => (string) random_int(10000000, 99999999), 'nombre_completo' => 'TRABAJADOR FIRMA MOVIL', 'puesto' => 'OPERARIO', 'estado' => 'ACTIVO', 'qr_code' => (string) Str::uuid()]);
+        PersonalMina::query()->create(['id' => (string) Str::uuid(), 'personal_id' => $worker->id, 'mina_id' => $mine->id, 'activo' => true, 'estado_habilitacion' => 'EN_PROCESO']);
+        $warehouse = EppAlmacen::query()->create(['nombre' => 'ALMACEN MOVIL', 'mina_id' => $mine->id, 'estado' => 'ACTIVO']);
+        $epp = app(EppService::class)->storeCatalog(['nombre' => 'GUANTES MOVIL '.Str::uuid(), 'vida_util_dias' => 30, 'estado' => 'ACTIVO', 'control_inventario' => true]);
+        app(EppInventoryService::class)->openStock($warehouse, [['epp_id' => $epp->id, 'cantidad' => 5]], $actor, 'Conteo de prueba');
+        $service = app(EppOperationService::class);
+        $draft = $service->createDraft($actor, $worker, $warehouse, 'ENTREGA', (string) Str::uuid());
+        $draft = $service->syncDetails($draft, [['epp_id' => $epp->id, 'cantidad_solicitada' => 10, 'aceptar_parcial' => true]], $actor);
+
+        return [$session, $service->prepareForSignature($draft, $actor), $warehouse];
+    }
 
     public function test_registrar_otra_entrega_conserva_solo_trabajador_y_fecha(): void
     {
@@ -439,7 +574,7 @@ class LogisticaEppIntegrationTest extends TestCase
 
         DB::table('roles')->insert([
             'id' => $roleId,
-            'nombre' => 'LOGISTICA_EPP_TEST',
+            'nombre' => 'LOGISTICA_EPP_TEST '.Str::random(8),
             'permisos' => json_encode($permissions),
             'estado' => 'ACTIVO',
         ]);

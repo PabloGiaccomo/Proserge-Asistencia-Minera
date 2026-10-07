@@ -1,0 +1,28 @@
+.epp-operation { width: 100%; max-width: 820px; margin: 0 auto; display: grid; gap: 16px; overflow-wrap: anywhere; }
+.epp-operation form, .epp-operation-card { min-width: 0; }
+.epp-operation-card { background: #fff; border: 1px solid #d5deea; border-radius: 14px; padding: 20px; display: grid; gap: 12px; margin-bottom: 16px; }
+.epp-operation-card h1 { font-size: clamp(23px, 5vw, 30px); line-height: 1.25; }
+.epp-operation-card h2 { font-size: 20px; line-height: 1.35; }
+.epp-operation-card h3 { font-size: 17px; }
+.epp-operation label { display: grid; gap: 6px; font-weight: 600; min-width: 0; }
+.epp-operation input:not([type="checkbox"]):not([type="hidden"]), .epp-operation select, .epp-operation textarea { width: 100%; max-width: 100%; min-width: 0; min-height: 48px; border: 1px solid #94a3b8; border-radius: 9px; padding: 10px 12px; background: #fff; font: inherit; font-size: 16px; color: #0f172a; }
+.epp-operation textarea { min-height: 96px; }
+.epp-operation .epp-operation-check { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; font-weight: 500; }
+.epp-operation-check input { width: 24px; height: 24px; flex: 0 0 24px; margin-top: 2px; }
+.epp-operation-button { display: flex; justify-content: center; align-items: center; min-height: 48px; padding: 12px 16px; border: 1px solid #64748b; border-radius: 9px; background: #fff; color: #0f172a; font: inherit; font-weight: 600; text-align: center; cursor: pointer; text-decoration: none; white-space: normal; }
+.epp-operation-button.is-primary { background: #0d6f69; color: #fff; border-color: #0d6f69; }
+.epp-operation-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.epp-quantity-controls { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; gap: 8px; }
+.epp-quantity-controls button { min-height: 52px; border: 1px solid #94a3b8; background: #f1f5f9; border-radius: 8px; font-size: 26px; }
+.epp-quantity-controls input { text-align: center; }
+.epp-operation details summary { cursor: pointer; min-height: 48px; padding: 12px 0; font-weight: 600; }
+.epp-operation details label, .epp-operation form > label { margin-bottom: 12px; }
+.epp-review-item { border-top: 1px solid #dbe3ed; padding-top: 12px; display: grid; gap: 6px; }
+.epp-operation .signature-pad-wrap { min-width: 0; width: 100%; display: grid; gap: 12px; }
+.epp-operation .signature-pad { display: block; width: 100%; height: 220px; border: 2px solid #64748b; border-radius: 9px; background: #fff; touch-action: none; }
+[data-signature-pad] { touch-action: none; }
+.epp-operation .signature-pad.is-invalid { border-color: #b91c1c; }
+.epp-operation [role="alert"] { color: #991b1b; }
+.epp-operation [hidden] { display: none !important; }
+.epp-worker-results { display: grid; gap: 8px; }
+@media (max-width: 520px) { .epp-operation-card { padding: 14px; } .epp-operation-actions { grid-template-columns: minmax(0, 1fr); } }

@@ -544,10 +544,10 @@
                                     </ul>
                                 </div>
                                 <div class="signature-pad-wrap">
-                                    <canvas id="signaturePad" class="signature-pad"></canvas>
-                                    <input type="hidden" name="firma_base64" id="firmaBase64" value="{{ old('firma_base64') }}">
+                                    <canvas id="signaturePad" class="signature-pad" data-signature-pad data-required="1"></canvas>
+                                    <input type="hidden" name="firma_base64" id="firmaBase64" data-signature-input value="{{ old('firma_base64') }}">
                                     <div class="ficha-actions-bar" style="justify-content:flex-start;">
-                                        <button type="button" class="btn btn-outline btn-sm" id="clearSignature">Limpiar firma</button>
+                                        <button type="button" class="btn btn-outline btn-sm" id="clearSignature" data-clear-signature>Limpiar firma</button>
                                     </div>
                                     @error('firma_base64') <span class="ficha-error">{{ $message }}</span> @enderror
                                 </div>
@@ -630,8 +630,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const pendingFileUploads = new WeakMap();
     const csrfToken = form?.querySelector('input[name="_token"]')?.value || '';
     const draftDataUrl = @json(route('ficha-colaborador.datos-borrador', ['token' => $token]));
-    let drawing = false;
-    let hasSignature = Boolean(hidden && hidden.value);
 
     try {
         window.localStorage.removeItem(draftStorageBaseKey);
@@ -640,88 +638,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (canvas && hidden) {
-        const ctx = canvas.getContext('2d');
-
-        const resizeCanvas = function () {
-            const ratio = Math.max(window.devicePixelRatio || 1, 1);
-            const rect = canvas.getBoundingClientRect();
-            const current = hasSignature ? hidden.value : null;
-            canvas.width = rect.width * ratio;
-            canvas.height = rect.height * ratio;
-            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-            ctx.lineWidth = 2.4;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.strokeStyle = '#0f172a';
-            if (current) {
-                const img = new Image();
-                img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
-                img.src = current;
-            }
-        };
-
-        const point = function (event) {
-            const source = event.touches?.[0] || event.changedTouches?.[0] || event;
-            const rect = canvas.getBoundingClientRect();
-            return {
-                x: source.clientX - rect.left,
-                y: source.clientY - rect.top,
-            };
-        };
-
-        const startDrawing = function (event) {
-            event.preventDefault();
-            drawing = true;
-            hasSignature = true;
-            if (event.pointerId !== undefined && canvas.setPointerCapture) {
-                canvas.setPointerCapture(event.pointerId);
-            }
-            const p = point(event);
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-        };
-
-        const moveDrawing = function (event) {
-            if (!drawing) return;
-            event.preventDefault();
-            const p = point(event);
-            ctx.lineTo(p.x, p.y);
-            ctx.stroke();
-            hidden.value = canvas.toDataURL('image/png');
-        };
-
-        const stop = function (event) {
-            if (!drawing) return;
-            event?.preventDefault?.();
-            drawing = false;
-            hidden.value = canvas.toDataURL('image/png');
-        };
-
-        if (window.PointerEvent) {
-            canvas.addEventListener('pointerdown', startDrawing);
-            canvas.addEventListener('pointermove', moveDrawing);
-            canvas.addEventListener('pointerup', stop);
-            canvas.addEventListener('pointercancel', stop);
-        } else {
-            canvas.addEventListener('touchstart', startDrawing, { passive: false });
-            canvas.addEventListener('touchmove', moveDrawing, { passive: false });
-            canvas.addEventListener('touchend', stop, { passive: false });
-            canvas.addEventListener('touchcancel', stop, { passive: false });
-            canvas.addEventListener('mousedown', startDrawing);
-            window.addEventListener('mousemove', moveDrawing);
-            window.addEventListener('mouseup', stop);
-        }
-        window.addEventListener('resize', resizeCanvas);
-
-        if (clearBtn) {
-            clearBtn.addEventListener('click', function () {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                hidden.value = '';
-                hasSignature = false;
-            });
-        }
-
-        resizeCanvas();
+        window.initProsergeSignaturePads?.();
     }
 
     const huella = document.getElementById('huella');
@@ -1216,7 +1133,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (hidden && draft.firma_base64) {
             hidden.value = draft.firma_base64;
-            hasSignature = true;
+            canvas?.signaturePad?.importImage(draft.firma_base64);
         }
 
         await Promise.allSettled(draftFileInputs.map(loadDraftFile));
@@ -1476,6 +1393,10 @@ document.addEventListener('DOMContentLoaded', function () {
         form?.addEventListener('input', scheduleDraftSave, true);
         form?.addEventListener('change', scheduleDraftSave, true);
         form?.addEventListener('submit', async function (event) {
+            if (form._validateSignature && !form._validateSignature()) {
+                event.preventDefault();
+                return;
+            }
             if (allowFinalSubmit) {
                 return;
             }

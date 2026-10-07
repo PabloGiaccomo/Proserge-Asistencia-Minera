@@ -233,6 +233,9 @@
             </div>
             <div class="epp-panel-header-actions">
                 <span class="epp-count">{{ $entregasTotal }} registros</span>
+                @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'preparar_entrega'))
+                    <a class="epp-btn epp-btn-primary epp-list-action" href="{{ route('epps.operations.create') }}">Entrega multiple con firma</a>
+                @endif
                 @if($canRegisterEpps)
                     <button type="button" class="epp-btn epp-btn-primary epp-list-action" data-epp-open-modal="eppDeliveryModal">
                         + Registrar entrega
