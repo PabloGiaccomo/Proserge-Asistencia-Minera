@@ -95,6 +95,10 @@ Vistas principales:
 
 ### Seguridad y notificaciones
 
+- Operaciones EPP: `EppScopeService`, `EppOperationPolicy` y capacidades
+  directas en `PermissionCatalog`/`PermissionMatrix`. Reglas de alcance y
+  compatibilidad historica: `docs/EPP_AUTORIZACION.md`.
+
 - Usuarios, roles y permisos: `Usuario`, `Rol`, `UsuarioRol`,
   `UsuarioMinaScope`, `RoleManagementService`, vistas `seguridad`.
 - Notificaciones: `NotificationService`, `NotificationInboxService`,

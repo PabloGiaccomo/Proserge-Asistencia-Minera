@@ -2,13 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Models\Usuario;
+use App\Modules\Seguridad\Services\AdminProtectionService;
 use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
-use App\Modules\Seguridad\Services\AdminProtectionService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class WebPermissionMiddlewareTest extends TestCase
@@ -56,7 +58,7 @@ class WebPermissionMiddlewareTest extends TestCase
         }
 
         $this->assertArrayNotHasKey('personal_vencimientos', $modules);
-        $this->assertArrayNotHasKey('epps', $modules);
+        $this->assertArrayHasKey('epps', $modules);
     }
 
     public function test_canonical_permissions_keep_legacy_module_access(): void
@@ -78,10 +80,10 @@ class WebPermissionMiddlewareTest extends TestCase
             'logistica' => ['ver', 'ver_logistica_entregas'],
         ]);
         $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'ver'));
-        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'registrar'));
-        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'editar'));
-        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'actualizar'));
-        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'eliminar'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'registrar'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'editar'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'actualizar'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'eliminar'));
 
         $legacyVencimientos = PermissionCatalog::matrixFromSelections([
             'personal_vencimientos' => ['ver'],
@@ -113,7 +115,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $userId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $roleId,
             'personal_id' => null,
@@ -170,7 +172,7 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertJsonPath('ok', true);
     }
 
-    public function test_logistica_entregas_permission_allows_epp_action_routes(): void
+    public function test_logistica_entregas_permission_does_not_allow_epp_action_routes(): void
     {
         Route::post('/__test/web-permission-epp-register', fn () => response()->json(['ok' => true]))
             ->middleware(['web', 'web.permission:epps,registrar']);
@@ -186,8 +188,7 @@ class WebPermissionMiddlewareTest extends TestCase
                 ],
             ])
             ->postJson('/__test/web-permission-epp-register')
-            ->assertOk()
-            ->assertJsonPath('ok', true);
+            ->assertForbidden();
     }
 
     public function test_main_module_entry_routes_are_protected_by_view_permission(): void
@@ -254,7 +255,7 @@ class WebPermissionMiddlewareTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Trabajador detalle', false)
-            ->assertDontSee('href="' . route('personal.edit', $personalId) . '"', false);
+            ->assertDontSee('href="'.route('personal.edit', $personalId).'"', false);
     }
 
     public function test_personal_export_query_requires_export_permission(): void
@@ -334,14 +335,14 @@ class WebPermissionMiddlewareTest extends TestCase
         DB::table('usuarios')->insert([
             [
                 'id' => $legacyUserId,
-                'email' => Str::lower(Str::random(8)) . '@test.local',
+                'email' => Str::lower(Str::random(8)).'@test.local',
                 'password' => bcrypt('secret123'),
                 'rol_id' => $legacyRoleId,
                 'personal_id' => null,
             ],
             [
                 'id' => $fullUserId,
-                'email' => Str::lower(Str::random(8)) . '@test.local',
+                'email' => Str::lower(Str::random(8)).'@test.local',
                 'password' => bcrypt('secret123'),
                 'rol_id' => $fullRoleId,
                 'personal_id' => null,
@@ -419,7 +420,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $userId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $editorRoleId,
             'personal_id' => null,
@@ -453,8 +454,10 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertSee('Ver evaluaciones de otros')
             ->assertSee('Ver entregas y cambios de EPP')
             ->assertSee('name="permisos[logistica][ver_logistica_kardex]"', false)
-            ->assertDontSee('name="permisos[epps][ver]"', false)
-            ->assertDontSee('<h3 class="permission-screen-title">EPPs</h3>', false)
+            ->assertSee('name="permisos[epps][ver]"', false)
+            ->assertSee('name="permisos[epps][confirmar_entrega]"', false)
+            ->assertSee('name="permisos[epps][aprobar_excepcion_firma]"', false)
+            ->assertSee('<h3 class="permission-screen-title">EPPs</h3>', false)
             ->assertSee('Guardar permisos');
     }
 
@@ -486,7 +489,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $userId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $editorRoleId,
             'personal_id' => null,
@@ -557,7 +560,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $userId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $editorRoleId,
             'personal_id' => null,
@@ -600,7 +603,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $adminRoleId,
             'personal_id' => null,
@@ -656,7 +659,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $adminRoleId,
             'personal_id' => null,
@@ -696,7 +699,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $adminRoleId,
             'personal_id' => null,
@@ -747,7 +750,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
-            'email' => Str::lower(Str::random(8)) . '@test.local',
+            'email' => Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $adminRoleId,
             'personal_id' => null,
@@ -858,7 +861,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         $actorId = $this->createPermissionUser($editorRoleId, 'editor-email');
         $targetUserId = $this->createPermissionUser($targetRoleId, 'usuario-email');
-        $newEmail = 'actualizado-' . Str::lower(Str::random(8)) . '@test.local';
+        $newEmail = 'actualizado-'.Str::lower(Str::random(8)).'@test.local';
 
         $this
             ->withSession($this->sessionForPermissionUser($actorId))
@@ -888,7 +891,7 @@ class WebPermissionMiddlewareTest extends TestCase
             ->withSession($this->sessionForPermissionUser($actorId))
             ->post(route('usuarios.store'), [
                 'personal_id' => $personalId,
-                'email' => 'nuevo-' . Str::lower(Str::random(8)) . '@test.local',
+                'email' => 'nuevo-'.Str::lower(Str::random(8)).'@test.local',
                 'password' => 'secret123',
                 'password_confirmation' => 'secret123',
                 'rol_id' => $newUserRoleId,
@@ -932,13 +935,13 @@ class WebPermissionMiddlewareTest extends TestCase
 
         $this
             ->withToken($deniedToken)
-            ->getJson('/api/v1/seguridad/usuarios/' . $targetUserId . '/mina-scope')
+            ->getJson('/api/v1/seguridad/usuarios/'.$targetUserId.'/mina-scope')
             ->assertForbidden()
             ->assertJsonPath('code', 'USUARIO_MINA_SCOPE_FORBIDDEN');
 
         $this
             ->withToken($scopeToken)
-            ->getJson('/api/v1/seguridad/usuarios/' . $targetUserId . '/mina-scope')
+            ->getJson('/api/v1/seguridad/usuarios/'.$targetUserId.'/mina-scope')
             ->assertOk()
             ->assertJsonPath('code', 'USUARIO_MINA_SCOPE_OK');
     }
@@ -962,8 +965,8 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertOk()
             ->assertDontSee('Editar Usuario')
             ->assertDontSee('Eliminar Usuario')
-            ->assertDontSee('action="' . route('usuarios.update', $targetUserId) . '"', false)
-            ->assertDontSee('action="' . route('usuarios.password', $targetUserId) . '"', false);
+            ->assertDontSee('action="'.route('usuarios.update', $targetUserId).'"', false)
+            ->assertDontSee('action="'.route('usuarios.password', $targetUserId).'"', false);
 
         $this
             ->withSession($this->sessionForPermissionUser($viewerUserId))
@@ -1055,11 +1058,11 @@ class WebPermissionMiddlewareTest extends TestCase
         $this->assertDatabaseHas('usuarios', ['id' => $superAdminUserId]);
 
         $adminProtection = app(AdminProtectionService::class);
-        $userModel = \App\Models\Usuario::query()->findOrFail($superAdminUserId);
+        $userModel = Usuario::query()->findOrFail($superAdminUserId);
 
         DB::table('usuarios')->where('id', '!=', $superAdminUserId)->update(['estado' => 'INACTIVO']);
 
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->expectException(ValidationException::class);
         $adminProtection->assertUserDeleteAllowed($userModel);
     }
 
@@ -1144,7 +1147,7 @@ class WebPermissionMiddlewareTest extends TestCase
         $minaId = (string) Str::uuid();
         DB::table('minas')->insert([
             'id' => $minaId,
-            'nombre' => 'MINA_SCOPE_' . Str::upper(Str::random(4)),
+            'nombre' => 'MINA_SCOPE_'.Str::upper(Str::random(4)),
             'estado' => 'ACTIVO',
             'created_at' => now(),
             'updated_at' => now(),
@@ -1210,21 +1213,21 @@ class WebPermissionMiddlewareTest extends TestCase
         // 1. Non-superadmin blocked
         $this
             ->withToken($adminToken)
-            ->deleteJson('/api/v1/seguridad/usuarios/' . $targetUserId)
+            ->deleteJson('/api/v1/seguridad/usuarios/'.$targetUserId)
             ->assertForbidden()
             ->assertJsonPath('code', 'USUARIOS_DELETE_SUPERADMIN_ONLY');
 
         // 2. Self-deletion blocked
         $this
             ->withToken($superAdminToken)
-            ->deleteJson('/api/v1/seguridad/usuarios/' . $superAdminUserId)
+            ->deleteJson('/api/v1/seguridad/usuarios/'.$superAdminUserId)
             ->assertStatus(422)
             ->assertJsonPath('code', 'USUARIOS_SELF_DELETE_FORBIDDEN');
 
         // 3. Successful accidental user deletion
         $this
             ->withToken($superAdminToken)
-            ->deleteJson('/api/v1/seguridad/usuarios/' . $disposableUserId)
+            ->deleteJson('/api/v1/seguridad/usuarios/'.$disposableUserId)
             ->assertOk()
             ->assertJsonPath('code', 'USUARIOS_DELETED');
 
@@ -1239,7 +1242,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         $this
             ->withToken($scopeToken)
-            ->putJson('/api/v1/seguridad/usuarios/' . $targetUserId . '/mina-scope', [
+            ->putJson('/api/v1/seguridad/usuarios/'.$targetUserId.'/mina-scope', [
                 'mina_ids' => [],
             ])
             ->assertOk()
@@ -1491,7 +1494,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('roles')->insert([
             'id' => $id,
-            'nombre' => $name . '_' . Str::upper(Str::random(6)),
+            'nombre' => $name.'_'.Str::upper(Str::random(6)),
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections($permissions)),
             'estado' => 'ACTIVO',
         ]);
@@ -1505,7 +1508,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $id,
-            'email' => $prefix . '-' . Str::lower(Str::random(8)) . '@test.local',
+            'email' => $prefix.'-'.Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $roleId,
             'personal_id' => null,
@@ -1523,9 +1526,9 @@ class WebPermissionMiddlewareTest extends TestCase
         DB::table('personal')->insert([
             'id' => $id,
             'dni' => (string) random_int(10000000, 99999999),
-            'nombre_completo' => 'Trabajador ' . $prefix . ' ' . $token,
+            'nombre_completo' => 'Trabajador '.$prefix.' '.$token,
             'puesto' => 'Operario',
-            'qr_code' => 'QR-' . $token,
+            'qr_code' => 'QR-'.$token,
             'estado' => 'ACTIVO',
             'created_at' => now(),
             'updated_at' => now(),
@@ -1571,7 +1574,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     private function createApiTokenForUser(string $userId): string
     {
-        $plain = 'token-' . Str::random(40);
+        $plain = 'token-'.Str::random(40);
 
         DB::table('auth_tokens')->insert([
             'id' => (string) Str::uuid(),

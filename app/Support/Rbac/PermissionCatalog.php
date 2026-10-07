@@ -123,12 +123,21 @@ class PermissionCatalog
         'gestionar_lista_negra',
         'gestionar_puestos',
         'scope',
+        'ver_operaciones',
+        'preparar_entrega',
+        'confirmar_entrega',
+        'preparar_devolucion',
+        'confirmar_devolucion',
+        'ver_evidencia',
+        'descargar_constancia',
+        'gestionar_inventario',
+        'ajustar_inventario',
+        'aprobar_excepcion_firma',
     ];
 
     /** @var array<int, string> */
     private const HIDDEN_MODULES = [
         'personal_vencimientos',
-        'epps',
     ];
 
     /** @var array<string, array<int, string>> */
@@ -226,7 +235,12 @@ class PermissionCatalog
         ],
         'herramientas' => ['ver', 'actualizar', 'importar', 'registrar', 'completar', 'enviar', 'entregar', 'recepcionar', 'administrar'],
         'transportes' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'entregar', 'recepcionar', 'duplicar', 'administrar'],
-        'epps' => ['ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver', 'administrar'],
+        'epps' => [
+            'ver', 'crear', 'editar', 'actualizar', 'eliminar', 'registrar', 'configurar', 'devolver', 'administrar',
+            'ver_operaciones', 'preparar_entrega', 'confirmar_entrega', 'preparar_devolucion', 'confirmar_devolucion',
+            'ver_evidencia', 'descargar_constancia', 'gestionar_inventario', 'ajustar_inventario',
+            'corregir', 'anular', 'aprobar_excepcion_firma',
+        ],
         'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
         'bienestar' => ['ver', 'dashboards', 'crear', 'editar', 'actualizar', 'eliminar', 'anular'],
         'evaluaciones' => [
@@ -283,7 +297,7 @@ class PermissionCatalog
         foreach (self::HIDDEN_MODULES as $hiddenModule) {
             unset($extraModules[$hiddenModule]);
         }
-        if (!empty($extraModules)) {
+        if (! empty($extraModules)) {
             ksort($extraModules);
             foreach ($extraModules as $module => $_) {
                 $labels[$module] = self::moduleLabel($module);
@@ -344,7 +358,7 @@ class PermissionCatalog
 
         foreach (Route::getRoutes() as $route) {
             foreach ($route->middleware() as $middleware) {
-                if (!is_string($middleware) || !str_starts_with($middleware, 'web.permission:')) {
+                if (! is_string($middleware) || ! str_starts_with($middleware, 'web.permission:')) {
                     continue;
                 }
 
@@ -452,6 +466,16 @@ class PermissionCatalog
             'gestionar_lista_negra' => 'Gestionar lista negra',
             'gestionar_puestos' => 'Gestionar puestos',
             'scope' => 'Alcance',
+            'ver_operaciones' => 'Ver operaciones EPP',
+            'preparar_entrega' => 'Preparar entrega EPP',
+            'confirmar_entrega' => 'Confirmar entrega firmada',
+            'preparar_devolucion' => 'Preparar devolucion EPP',
+            'confirmar_devolucion' => 'Confirmar devolucion firmada',
+            'ver_evidencia' => 'Ver firma y evidencia EPP',
+            'descargar_constancia' => 'Descargar constancia EPP',
+            'gestionar_inventario' => 'Gestionar inventario EPP',
+            'ajustar_inventario' => 'Registrar ajuste de inventario EPP',
+            'aprobar_excepcion_firma' => 'Aprobar firma de testigo autorizado',
             default => ucfirst($action),
         };
     }
@@ -684,7 +708,7 @@ class PermissionCatalog
         }
 
         $extras = array_values(array_diff($actions, $base));
-        if (!empty($extras)) {
+        if (! empty($extras)) {
             sort($extras);
             $sorted = array_merge($sorted, $extras);
         }

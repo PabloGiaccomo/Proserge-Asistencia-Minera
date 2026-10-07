@@ -7,6 +7,12 @@ use App\Models\Usuario;
 class PermissionMatrix
 {
     private const EXPLICIT_ACTIONS = [
+        'epps' => [
+            'ver_operaciones', 'preparar_entrega', 'confirmar_entrega',
+            'preparar_devolucion', 'confirmar_devolucion', 'ver_evidencia',
+            'descargar_constancia', 'gestionar_inventario', 'ajustar_inventario',
+            'corregir', 'anular', 'aprobar_excepcion_firma',
+        ],
         'evaluaciones' => [
             'ver_todas_evaluaciones',
             'ver_desempeno',
@@ -23,7 +29,7 @@ class PermissionMatrix
     {
         $matrix = PermissionCatalog::emptyMatrix();
 
-        if (!is_array($rawPermissions)) {
+        if (! is_array($rawPermissions)) {
             return $matrix;
         }
 
@@ -36,7 +42,7 @@ class PermissionMatrix
         }
 
         foreach ($rawPermissions as $module => $actions) {
-            if (!isset($matrix[$module]) || !is_array($actions)) {
+            if (! isset($matrix[$module]) || ! is_array($actions)) {
                 continue;
             }
 
@@ -47,7 +53,7 @@ class PermissionMatrix
             }
 
             if (array_key_exists('dashboards', $matrix[$module])
-                && !array_key_exists('dashboards', $actions)
+                && ! array_key_exists('dashboards', $actions)
                 && (($matrix[$module]['ver'] ?? false) === true)
             ) {
                 $matrix[$module]['dashboards'] = true;
@@ -75,6 +81,9 @@ class PermissionMatrix
                 }
             }
         }
+
+        $explicitEpp = $rawPermissions['epps'] ?? [];
+        $matrix = self::normalizeLegacyEppGrants($matrix, is_array($explicitEpp) ? $explicitEpp : []);
 
         return self::applyDerivedPermissions($matrix);
     }
@@ -116,7 +125,7 @@ class PermissionMatrix
 
     public static function effectivePermissions(?Usuario $usuario): array
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return PermissionCatalog::emptyMatrix();
         }
 
@@ -164,7 +173,7 @@ class PermissionMatrix
         }
 
         return $action !== 'administrar'
-            && !self::requiresExplicitGrant($module, $action)
+            && ! self::requiresExplicitGrant($module, $action)
             && (($matrix[$module]['administrar'] ?? false) === true);
     }
 
@@ -192,7 +201,7 @@ class PermissionMatrix
 
     public static function userCan(?Usuario $usuario, string $module, string $action = 'ver'): bool
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return false;
         }
 
@@ -201,7 +210,7 @@ class PermissionMatrix
 
     public static function userCanDirect(?Usuario $usuario, string $module, string $action = 'ver'): bool
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return false;
         }
 
@@ -210,7 +219,7 @@ class PermissionMatrix
 
     public static function userCanAny(?Usuario $usuario, string $module, array $actions): bool
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return false;
         }
 
@@ -219,7 +228,7 @@ class PermissionMatrix
 
     public static function userCanDirectAny(?Usuario $usuario, string $module, array $actions): bool
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return false;
         }
 
@@ -228,24 +237,20 @@ class PermissionMatrix
 
     private static function matrixAllows(array $matrix, string $module, string $action): bool
     {
-        if (!isset($matrix[$module][$action])) {
+        if (! isset($matrix[$module][$action])) {
             return false;
         }
 
         return $matrix[$module][$action] === true
             || ($action !== 'administrar'
-                && !self::requiresExplicitGrant($module, $action)
+                && ! self::requiresExplicitGrant($module, $action)
                 && ($matrix[$module]['administrar'] ?? false) === true);
     }
 
     private static function applyDerivedPermissions(array $matrix): array
     {
         if (($matrix['logistica']['ver_logistica_entregas'] ?? false) === true) {
-            foreach (PermissionCatalog::availableModuleActions()['epps'] ?? [] as $action) {
-                if (array_key_exists($action, $matrix['epps'] ?? [])) {
-                    $matrix['epps'][$action] = true;
-                }
-            }
+            $matrix['epps']['ver'] = true;
         }
 
         return $matrix;
@@ -258,6 +263,10 @@ class PermissionMatrix
 
     private static function fallbackPermissionChecks(string $module, string $action): array
     {
+        if ($module === 'epps' && self::requiresExplicitGrant($module, $action)) {
+            return [];
+        }
+
         $checks = [];
 
         foreach (self::fallbackActionsFor($action) as $fallbackAction) {
@@ -284,7 +293,7 @@ class PermissionMatrix
         }
 
         return collect($checks)
-            ->unique(fn (array $check) => $check[0] . '.' . $check[1])
+            ->unique(fn (array $check) => $check[0].'.'.$check[1])
             ->values()
             ->all();
     }
@@ -401,7 +410,7 @@ class PermissionMatrix
     private static function normalizeLegacyList(array $rawPermissions, array $matrix): array
     {
         foreach ($rawPermissions as $permission) {
-            if (!is_string($permission) || trim($permission) === '') {
+            if (! is_string($permission) || trim($permission) === '') {
                 continue;
             }
 
@@ -413,7 +422,7 @@ class PermissionMatrix
             [$module, $legacyAction] = array_pad(explode('.', $permission, 2), 2, null);
 
             $module = self::normalizeModule((string) $module);
-            if (!isset($matrix[$module]) || $legacyAction === null) {
+            if (! isset($matrix[$module]) || $legacyAction === null) {
                 continue;
             }
 
@@ -424,7 +433,7 @@ class PermissionMatrix
             }
         }
 
-        return $matrix;
+        return self::normalizeLegacyEppGrants($matrix, []);
     }
 
     private static function normalizeModule(string $module): string
@@ -434,6 +443,39 @@ class PermissionMatrix
             'rq_proserge' => 'rq_proserge',
             default => $module,
         };
+    }
+
+    /**
+     * Only explicit historical EPP grants migrate to operation capabilities.
+     * Logistics/tab permissions never migrate. A persisted explicit false wins;
+     * repeated normalization is idempotent. Witness approval always needs its
+     * own grant (or a privileged role), never a legacy write/admin grant.
+     */
+    private static function normalizeLegacyEppGrants(array $matrix, array $explicit): array
+    {
+        $mapping = [
+            'ver' => ['ver_operaciones'],
+            'registrar' => ['preparar_entrega', 'confirmar_entrega'],
+            'devolver' => ['preparar_devolucion', 'confirmar_devolucion'],
+            'editar' => ['corregir'],
+            'actualizar' => ['corregir'],
+            'eliminar' => ['anular'],
+            'configurar' => ['gestionar_inventario'],
+            'administrar' => array_diff(self::EXPLICIT_ACTIONS['epps'], ['aprobar_excepcion_firma']),
+        ];
+
+        foreach ($mapping as $legacy => $actions) {
+            if (($matrix['epps'][$legacy] ?? false) !== true) {
+                continue;
+            }
+            foreach ($actions as $action) {
+                if (! array_key_exists($action, $explicit)) {
+                    $matrix['epps'][$action] = true;
+                }
+            }
+        }
+
+        return $matrix;
     }
 
     private static function mapLegacyAction(string $legacyAction): array

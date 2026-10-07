@@ -415,6 +415,7 @@ class LogisticaEppIntegrationTest extends TestCase
     {
         return $this->sessionWithSelections([
             'logistica' => ['ver', 'actualizar'],
+            'epps' => ['ver', 'registrar', 'editar', 'actualizar', 'eliminar', 'configurar', 'devolver'],
         ]);
     }
 

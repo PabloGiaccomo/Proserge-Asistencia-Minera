@@ -2,10 +2,13 @@
 
 namespace App\Providers;
 
-use App\Modules\Notificaciones\Services\NotificationInboxService;
+use App\Models\EppOperacion;
 use App\Models\NotificationUserSetting;
+use App\Modules\Epps\Policies\EppOperationPolicy;
+use App\Modules\Notificaciones\Services\NotificationInboxService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -26,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::policy(EppOperacion::class, EppOperationPolicy::class);
+
         Blade::if('allowed', function (string $module, string $action = 'ver'): bool {
             return PermissionMatrix::allows(session('user.permissions', []), $module, $action);
         });
@@ -43,10 +48,11 @@ class AppServiceProvider extends ServiceProvider
             $schemaReady = Schema::hasTable('notification_recipients') && Schema::hasTable('notification_events');
             $notificationsAllowed = $this->notificationsAllowedForUser($userId);
 
-            if ($userId === '' || !$schemaReady || !$notificationsAllowed) {
+            if ($userId === '' || ! $schemaReady || ! $notificationsAllowed) {
                 $view->with('notificationsEnabled', false);
                 $view->with('headerUnreadCount', 0);
                 $view->with('headerNotifications', collect());
+
                 return;
             }
 
@@ -69,7 +75,7 @@ class AppServiceProvider extends ServiceProvider
             return false;
         }
 
-        if (!Schema::hasTable('notification_user_settings')) {
+        if (! Schema::hasTable('notification_user_settings')) {
             return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
         }
 
@@ -81,11 +87,11 @@ class AppServiceProvider extends ServiceProvider
             return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
         }
 
-        if (!$setting) {
+        if (! $setting) {
             return PermissionMatrix::allows(session('user.permissions', []), 'notificaciones', 'ver');
         }
 
         return (bool) $setting->in_app_enabled
-            && (!$setting->muted_until || now()->gte($setting->muted_until));
+            && (! $setting->muted_until || now()->gte($setting->muted_until));
     }
 }
