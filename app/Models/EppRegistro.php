@@ -8,7 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class EppRegistro extends Model
 {
     public const ESTADO_ACTIVO = 'ACTIVO';
+
     public const ESTADO_INACTIVO = 'INACTIVO';
+
+    public const POLITICA_RETORNABLE = 'RETORNABLE';
+
+    public const POLITICA_CONSUMIBLE = 'CONSUMIBLE';
 
     protected $table = 'epp_registro';
 
@@ -35,6 +40,11 @@ class EppRegistro extends Model
         'colores',
         'otros_atributos',
         'estado',
+        'politica_devolucion',
+        'control_inventario',
+        'permite_entrega_repetida',
+        'requiere_serie',
+        'es_requerido_cobertura',
     ];
 
     protected $casts = [
@@ -47,10 +57,19 @@ class EppRegistro extends Model
         'requiere_color' => 'boolean',
         'colores' => 'array',
         'otros_atributos' => 'array',
+        'control_inventario' => 'boolean',
+        'permite_entrega_repetida' => 'boolean',
+        'requiere_serie' => 'boolean',
+        'es_requerido_cobertura' => 'boolean',
     ];
 
     public function entregas(): HasMany
     {
         return $this->hasMany(EppEntrega::class, 'epp_id');
+    }
+
+    public function existencias(): HasMany
+    {
+        return $this->hasMany(EppExistencia::class, 'epp_id');
     }
 }
