@@ -268,7 +268,9 @@ Route::middleware('web.auth')->group(function (): void {
     // EPP logistica
     Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
     Route::get('/epps/operaciones/nueva', [EppOperationPageController::class, 'create'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.create');
-    Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.workers');
+    Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.workers');
+    Route::get('/epps/operaciones/devoluciones/nueva', [EppOperationPageController::class, 'createReturn'])->middleware('web.permission:epps,preparar_devolucion')->name('epps.operations.returns.create');
+    Route::post('/epps/operaciones/devoluciones', [EppOperationPageController::class, 'storeReturn'])->middleware('web.permission:epps,preparar_devolucion')->name('epps.operations.returns.store');
     Route::post('/epps/operaciones', [EppOperationPageController::class, 'store'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.store');
     Route::get('/epps/operaciones/{operation}/editar', [EppOperationPageController::class, 'edit'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.edit');
     Route::put('/epps/operaciones/{operation}', [EppOperationPageController::class, 'update'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.update');

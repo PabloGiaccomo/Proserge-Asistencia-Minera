@@ -1405,6 +1405,9 @@ class LogisticaDashboardService
         $deliveries = EppEntrega::query()
             ->with(['epp:id,codigo,nombre', 'registradoPor:id,email'])
             ->whereIn('personal_id', $workers->pluck('id')->all())
+            ->where('politica_devolucion_snapshot', 'RETORNABLE')
+            ->where('cantidad_pendiente_devolucion', '>', 0)
+            ->where('estado', EppEntrega::ESTADO_ENTREGADO)
             ->orderByDesc('fecha_entrega')
             ->orderByDesc('created_at')
             ->get()
@@ -1466,7 +1469,7 @@ class LogisticaDashboardService
                     'estado_resolucion' => $resuelto ? 'Resuelto' : 'Pendiente de entrega',
                     'fecha_entrega' => $delivery->fecha_entrega?->format('d/m/Y') ?: '-',
                     'fecha_cierre' => $delivery->devuelto_at?->format('d/m/Y') ?: '-',
-                    'cantidad' => (int) ($delivery->cantidad ?: 1),
+                    'cantidad' => (int) $itemDeliveries->sum('cantidad_pendiente_devolucion'),
                     'responsable' => $delivery->registradoPor?->email ?: 'Sistema',
                     'observacion' => (string) ($delivery->observacion ?: $delivery->motivo_cambio ?: ''),
                 ];

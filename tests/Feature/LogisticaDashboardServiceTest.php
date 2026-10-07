@@ -73,7 +73,7 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame('4 / 30 dias', $row['uso_efectivo']);
     }
 
-    public function test_cesados_por_entregar_muestra_epp_pendiente_y_resuelto(): void
+    public function test_cesados_por_entregar_muestra_solo_saldo_retornable_positivo(): void
     {
         $worker = $this->createPersonal('CESADO', 'TRABAJADOR CESADO LOGISTICA');
         $worker->forceFill([
@@ -97,26 +97,27 @@ class LogisticaDashboardServiceTest extends TestCase
         $resolvedEpp = $this->createEpp('CHALECO CESADO RESUELTO');
 
         $this->createDelivery($worker, $pendingEpp, '2026-06-01', '2026-07-01', EppEntrega::ESTADO_ENTREGADO);
+        EppEntrega::query()->where('personal_id', $worker->id)->where('epp_id', $pendingEpp)->firstOrFail()->update(['politica_devolucion_snapshot' => 'RETORNABLE', 'cantidad_pendiente_devolucion' => 1]);
         $this->createDelivery($worker, $resolvedEpp, '2026-06-05', '2026-07-05', EppEntrega::ESTADO_DEVUELTO);
 
-        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'cesados']);
+        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'cesados', 'q' => 'TRABAJADOR CESADO LOGISTICA']);
         $row = collect($data['ceasedRows'])->firstWhere('trabajador', 'TRABAJADOR CESADO LOGISTICA');
 
         $this->assertNotNull($row);
         $this->assertSame('PENDIENTE', $row['estado_logistico']);
         $this->assertSame(1, $row['pendientes']);
-        $this->assertSame(1, $row['resueltos']);
+        $this->assertSame(0, $row['resueltos']);
         $this->assertSame(1, $data['ceasedSummary']['trabajadores']);
         $this->assertSame(1, $data['ceasedSummary']['pendientes']);
-        $this->assertSame(1, $data['ceasedSummary']['resueltos']);
+        $this->assertSame(0, $data['ceasedSummary']['resueltos']);
 
         $pendingItem = collect($row['items'])->firstWhere('epp', 'CASCO CESADO PENDIENTE');
         $resolvedItem = collect($row['items'])->firstWhere('epp', 'CHALECO CESADO RESUELTO');
 
         $this->assertFalse($pendingItem['resuelto']);
         $this->assertSame('Pendiente de entrega', $pendingItem['estado_resolucion']);
-        $this->assertTrue($resolvedItem['resuelto']);
-        $this->assertSame('Resuelto', $resolvedItem['estado_resolucion']);
+        $this->assertNull($resolvedItem);
+        $this->assertSame(1, $pendingItem['cantidad']);
     }
 
     public function test_logistica_actualiza_requerimiento_de_transporte_de_rq_mina(): void

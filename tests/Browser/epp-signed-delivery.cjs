@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
     try {
         const manifest = JSON.parse(fs.readFileSync('public/build/manifest.json', 'utf8'));
-        for (const mode of ['form', 'review', 'witness', 'show', 'personal-public', 'personal-ingreso']) {
+        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'personal-public', 'personal-ingreso']) {
             const page = await browser.newPage({ deviceScaleFactor: 2 });
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
@@ -37,7 +37,29 @@ const assert = require('node:assert/strict');
                 await page.getByText('Sustitucion o motivo de nueva entrega', { exact: true }).click();
                 await page.locator('[data-actual-product]').selectOption('00000000-0000-0000-0000-000000000005');
                 assert.match(await page.locator('[data-line-availability]').textContent(), /Stock sin conciliar/);
-            } else if (mode === 'review' || mode === 'witness' || mode.startsWith('personal-')) {
+            } else if (mode === 'return-form') {
+                const rows = page.locator('[data-return-line]');
+                assert.equal(await rows.count(), 2);
+                assert.equal(await rows.first().locator('[data-return-quantity]').isDisabled(), true);
+                await rows.first().locator('[data-return-select]').check();
+                await rows.first().locator('[data-return-quantity]').fill('2');
+                assert.match(await rows.first().locator('[data-return-remaining]').textContent(), /Saldo restante: 3/);
+                await rows.first().locator('[data-return-condition]').selectOption('DANADO');
+                assert.equal(await rows.first().locator('[data-return-destination]').inputValue(), 'CUARENTENA');
+                assert.equal(await rows.first().locator('option[value="DISPONIBLE"]').evaluate(option => option.disabled), true);
+                await rows.last().locator('[data-return-select]').check();
+                await rows.last().locator('[data-return-quantity]').fill('2');
+                assert.match(await rows.last().locator('[data-return-remaining]').textContent(), /Saldo restante: 0/);
+                assert.equal(await page.locator('[data-return-form]').evaluate(form => new FormData(form).getAll('lines[0][cantidad_solicitada]')[0]), '2');
+                await rows.first().locator('[data-return-select]').uncheck();
+                assert.equal(await rows.first().locator('[data-return-quantity]').isDisabled(), true);
+                assert.equal(await page.locator('[data-return-form]').evaluate(form => new FormData(form).has('lines[0][cantidad_solicitada]')), false);
+            } else if (mode === 'review' || mode === 'return-review' || mode === 'witness' || mode.startsWith('personal-')) {
+                if (mode === 'return-review') {
+                    assert.match(await page.locator('[name="confirmacion"]').locator('..').textContent(), /Confirmo haber devuelto/);
+                    assert.match(await page.locator('.epp-operation').textContent(), /Saldo restante: 3/);
+                    assert.equal(await page.locator('[data-return-quantity]').count(), 0);
+                }
                 await page.setViewportSize({ width: 375, height: 1000 });
                 const canvas = page.locator('[data-signature-pad]');
                 await canvas.scrollIntoViewIfNeeded();
@@ -72,6 +94,6 @@ const assert = require('node:assert/strict');
             assert.deepEqual(errors, [], mode + ' console');
             await page.close();
         }
-        console.log('PASS signed EPP form/review/witness/result, Personal public/ingreso signature, drawing/clear/resize, availability, controls, console and 320/375/390/430/1440 px');
+        console.log('PASS signed EPP delivery/return form/review/witness/result, selected quantities/remaining balances/dispositions, Personal signatures, drawing/clear/resize, console and 320/375/390/430/1440 px');
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -26,3 +26,5 @@
 .epp-operation [hidden] { display: none !important; }
 .epp-worker-results { display: grid; gap: 8px; }
 @media (max-width: 520px) { .epp-operation-card { padding: 14px; } .epp-operation-actions { grid-template-columns: minmax(0, 1fr); } }
+.epp-operation [data-return-line] [data-return-remaining] { font-weight: 700; }
+.epp-operation [data-return-field]:disabled { opacity: .65; }

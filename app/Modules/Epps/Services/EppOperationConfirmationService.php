@@ -74,13 +74,13 @@ class EppOperationConfirmationService
                 if (! hash_equals($locked->resumen_sha256, hash('sha256', EppCanonicalPayload::json($current)))) {
                     throw new InvalidArgumentException('El contenido cambio desde la revision. Prepara y revisa nuevamente.');
                 }
-                // Signed returns attach their balance/disposition handler in Task 7.
-                if ($locked->tipo !== 'ENTREGA') {
-                    throw new InvalidArgumentException('La confirmacion de devoluciones requiere el flujo de saldos retornables.');
-                }
                 $products = EppRegistro::query()->whereIn('id', $details->pluck('epp_id')->merge($details->pluck('epp_solicitado_id'))->unique())->orderBy('id')->lockForUpdate()->get()->keyBy('id');
                 foreach ($details as $detail) {
                     if ($detail->cantidad_procesada <= 0 || $detail->estado === 'RECHAZADO') {
+                        continue;
+                    }
+                    if ($locked->tipo === 'DEVOLUCION') {
+                        // Returns match the source delivery snapshot, including retired catalog variants.
                         continue;
                     }
                     $product = $products->get($detail->epp_id);
@@ -94,10 +94,19 @@ class EppOperationConfirmationService
                 }
                 $operator = $prepared->data['tipo_firmante'] === 'TESTIGO_AUTORIZADO'
                     ? Usuario::query()->findOrFail($locked->registrado_por_usuario_id) : $actor;
-                $this->inventory->consumeOperationReservations($locked, $operator, now());
+                if ($locked->tipo === 'DEVOLUCION') {
+                    app(EppBalanceService::class)->validateBatch($locked, $details, 'cantidad_procesada', true);
+                } else {
+                    $this->inventory->consumeOperationReservations($locked, $operator, now());
+                }
                 $acceptance = $this->acceptance->capture($locked, $prepared, $actor);
                 foreach ($details as $detail) {
                     if ($detail->cantidad_procesada <= 0 || $detail->estado === 'RECHAZADO') {
+                        continue;
+                    }
+                    if ($locked->tipo === 'DEVOLUCION') {
+                        app(EppBalanceService::class)->applyReturn($detail, $operator);
+
                         continue;
                     }
                     $returnable = $detail->politica_devolucion_snapshot === 'RETORNABLE';

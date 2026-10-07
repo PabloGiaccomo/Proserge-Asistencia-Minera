@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\EppAlmacen;
+use App\Models\EppEntrega;
 use App\Models\EppExistencia;
 use App\Models\EppOperacion;
 use App\Models\EppRegistro;
@@ -36,6 +37,12 @@ if (str_starts_with($mode, 'personal-')) {
     echo ($mode === 'personal-public'
         ? view('ficha-public.show', $data + ['token' => 'test-token', 'mode' => 'edit', 'ficha' => null, 'link' => null, 'verifyFields' => [], 'familiares' => collect()])
         : view('ficha-public.ingreso', $data + ['authorized' => true, 'familiares' => []]))->render();
+} elseif ($mode === 'return-form') {
+    $delivery = new EppEntrega(['id' => $id(11), 'personal_id' => $worker->id, 'epp_id' => $product->id, 'cantidad_pendiente_devolucion' => 5, 'fecha_entrega' => now()->subDays(3), 'atributos_json' => ['TALLA' => 'M']]);
+    $delivery->setRelation('epp', $product);
+    $other = new EppEntrega(['id' => $id(12), 'personal_id' => $worker->id, 'epp_id' => $substitute->id, 'cantidad_pendiente_devolucion' => 2, 'fecha_entrega' => now()->subDays(2), 'atributos_json' => ['TALLA' => 'L']]);
+    $other->setRelation('epp', $substitute);
+    echo view('epps.operations.return-form', ['warehouses' => collect([$warehouse]), 'warehouse' => $warehouse, 'worker' => $worker, 'balances' => collect([$delivery, $other]), 'submissionUuid' => $id(6)])->render();
 } elseif ($mode === 'form') {
     $existence = new EppExistencia(['epp_id' => $product->id, 'atributos_json' => ['TALLA' => 'M'], 'cantidad_disponible' => 5, 'conciliado_at' => now()]);
     echo view('epps.operations.form', ['operation' => null, 'warehouses' => collect([$warehouse]), 'warehouse' => $warehouse, 'worker' => $worker, 'catalog' => collect([$product, $substitute]), 'existences' => collect([$existence]), 'lines' => [['epp_id' => $product->id, 'cantidad_solicitada' => 10, 'atributos' => ['TALLA' => 'M'], 'aceptar_parcial' => true]], 'submissionUuid' => $id(6)])->render();
@@ -43,6 +50,16 @@ if (str_starts_with($mode, 'personal-')) {
     $operation->estado = 'RECHAZADO';
     echo view('epps.operations.show', compact('operation', 'payload'))->render();
 } else {
+    if ($mode === 'return-review') {
+        $operation->tipo = 'DEVOLUCION';
+        $line['snapshot']['saldo_restante'] = 3;
+        $line['requested_epp_id'] = $line['epp_id'];
+        $line['processed_quantity'] = 2;
+        $line['return_condition'] = 'BUENO';
+        $line['inventory_destination'] = 'DISPONIBLE';
+        $payload['details'] = [$line];
+        $payload['pending'] = [];
+    }
     $approver = new Usuario(['id' => $id(8), 'email' => 'aprobador@test.local']);
     $approver->setRelation('personal', new Personal(['nombre_completo' => 'APROBADOR DE PRUEBA']));
     $witnessUser = new Usuario(['id' => $id(9)]);

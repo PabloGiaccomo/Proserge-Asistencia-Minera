@@ -65,8 +65,10 @@ class EppOperationService
                 $requested = EppRegistro::query()->findOrFail($line['epp_id'] ?? '');
                 $actual = EppRegistro::query()->findOrFail($line['epp_real_id'] ?? $requested->id);
                 $attributes = $this->inventory->lineAttributes($line);
-                $this->inventory->assertVariant($actual, $attributes, false);
-                if ($requested->estado !== 'ACTIVO') {
+                if ($operation->tipo === 'ENTREGA') {
+                    $this->inventory->assertVariant($actual, $attributes, false);
+                }
+                if ($operation->tipo === 'ENTREGA' && $requested->estado !== 'ACTIVO') {
                     throw new InvalidArgumentException('El EPP solicitado debe estar activo.');
                 }
                 $quantity = filter_var($line['cantidad_solicitada'] ?? null, FILTER_VALIDATE_INT);
@@ -83,7 +85,7 @@ class EppOperationService
                     throw new InvalidArgumentException('Confirma la sustitucion e indica el motivo de sustitucion o rechazo.');
                 }
                 $key = $actual->id.':'.$this->inventory->variantKey($attributes);
-                if (! $rejected && isset($seen[$key]) && ! $actual->permite_entrega_repetida) {
+                if ($operation->tipo === 'ENTREGA' && ! $rejected && isset($seen[$key]) && ! $actual->permite_entrega_repetida) {
                     throw new InvalidArgumentException('El EPP no permite repetir la misma variante en el lote.');
                 }
                 if (! $rejected) {
@@ -97,6 +99,8 @@ class EppOperationService
                     }
                 }
                 $this->assertReferences($operation, $actual, $line);
+                $source = $operation->tipo === 'DEVOLUCION' ? EppEntrega::query()->with('operacionDetalle')->findOrFail($line['entrega_origen_id']) : null;
+                $actualSnapshot = $source?->operacionDetalle?->snapshot_json['real'] ?? $this->productSnapshot($actual);
                 $prepared[] = [
                     'epp_solicitado_id' => $requested->id, 'epp_id' => $actual->id, 'existencia_id' => $existenceId,
                     'entrega_origen_id' => $line['entrega_origen_id'] ?? null, 'detalle_origen_id' => $line['detalle_origen_id'] ?? null,
@@ -104,16 +108,19 @@ class EppOperationService
                     'estado' => $rejected ? 'RECHAZADO' : 'PENDIENTE',
                     'talla' => $attributes['TALLA'] ?? null, 'color' => $attributes['COLOR'] ?? null,
                     'atributos_json' => $attributes, 'variante_clave' => $this->inventory->variantKey($attributes),
-                    'politica_devolucion_snapshot' => $actual->politica_devolucion,
-                    'control_inventario_snapshot' => $actual->control_inventario, 'precio_unitario_snapshot' => $actual->precio_unitario,
+                    'politica_devolucion_snapshot' => $source?->politica_devolucion_snapshot ?? $actual->politica_devolucion,
+                    'control_inventario_snapshot' => $source?->operacionDetalle?->control_inventario_snapshot ?? $actual->control_inventario, 'precio_unitario_snapshot' => $source?->operacionDetalle?->precio_unitario_snapshot ?? $actual->precio_unitario,
                     'condicion_devolucion' => $line['condicion_devolucion'] ?? null, 'destino_inventario' => $line['destino_inventario'] ?? null,
                     'motivo' => $reason ?: null,
                     'snapshot_json' => [
-                        'solicitado' => $this->productSnapshot($requested), 'real' => $this->productSnapshot($actual),
+                        'solicitado' => $source ? $actualSnapshot : $this->productSnapshot($requested), 'real' => $actualSnapshot,
                         'atributos' => $attributes, 'aceptar_parcial' => $this->flag($line, 'aceptar_parcial'),
                         'aceptar_sustitucion' => $substitution && $this->flag($line, 'aceptar_sustitucion'),
                     ],
                 ];
+            }
+            if ($operation->tipo === 'DEVOLUCION') {
+                app(EppBalanceService::class)->validateBatch($operation, collect($prepared)->map(fn ($line) => new EppOperacionDetalle($line)), 'cantidad_solicitada');
             }
             // Only unsigned drafts replace their editable lines; events retain the previous revision.
             $operation->detalles()->delete();
@@ -152,26 +159,33 @@ class EppOperationService
                 throw new InvalidArgumentException('Agrega al menos una linea antes de preparar la firma.');
             }
             $expires = now()->addMinutes(10);
+            // Catalog before sources, ordered IDs; same order as signed confirmation.
+            EppRegistro::query()->whereIn('id', $details->pluck('epp_id')->merge($details->pluck('epp_solicitado_id'))->unique())->orderBy('id')->lockForUpdate()->get();
+            $sources = $operation->tipo === 'DEVOLUCION' ? app(EppBalanceService::class)->validateBatch($operation, $details, 'cantidad_solicitada') : collect();
             $seen = [];
             foreach ($details as $detail) {
                 if ($detail->estado === 'RECHAZADO') {
                     continue;
                 }
                 $actual = EppRegistro::query()->lockForUpdate()->findOrFail($detail->epp_id);
-                $this->inventory->assertVariant($actual, $detail->atributos_json ?: [], false);
+                if ($operation->tipo === 'ENTREGA') {
+                    $this->inventory->assertVariant($actual, $detail->atributos_json ?: [], false);
+                }
                 $key = $actual->id.':'.$detail->variante_clave;
-                if (isset($seen[$key]) && ! $actual->permite_entrega_repetida) {
+                if ($operation->tipo === 'ENTREGA' && isset($seen[$key]) && ! $actual->permite_entrega_repetida) {
                     throw new InvalidArgumentException('El catalogo ya no permite repetir esta variante. Revisa el borrador.');
                 }
                 $seen[$key] = true;
                 $requested = EppRegistro::query()->findOrFail($detail->epp_solicitado_id);
-                if ($requested->estado !== 'ACTIVO') {
+                if ($operation->tipo === 'ENTREGA' && $requested->estado !== 'ACTIVO') {
                     throw new InvalidArgumentException('El EPP solicitado fue desactivado. Revisa el borrador.');
                 }
                 $this->assertReferences($operation, $actual, $detail->toArray());
                 $snapshot = $detail->snapshot_json;
-                $snapshot['real'] = $this->productSnapshot($actual);
-                $detail->update(['politica_devolucion_snapshot' => $actual->politica_devolucion, 'control_inventario_snapshot' => $actual->control_inventario, 'precio_unitario_snapshot' => $actual->precio_unitario, 'snapshot_json' => $snapshot]);
+                if ($operation->tipo === 'ENTREGA') {
+                    $snapshot['real'] = $this->productSnapshot($actual);
+                    $detail->update(['politica_devolucion_snapshot' => $actual->politica_devolucion, 'control_inventario_snapshot' => $actual->control_inventario, 'precio_unitario_snapshot' => $actual->precio_unitario, 'snapshot_json' => $snapshot]);
+                }
                 if ($operation->tipo === 'ENTREGA') {
                     if ($actual->politica_devolucion === 'RETORNABLE' && EppEntrega::query()->where('personal_id', $operation->personal_id)->where('epp_id', $actual->id)->where('politica_devolucion_snapshot', 'RETORNABLE')->where('cantidad_pendiente_devolucion', '>', 0)->where('estado', 'ENTREGADO')->exists() && trim((string) $detail->motivo) === '') {
                         throw new InvalidArgumentException('El trabajador tiene un retornable activo. Indica el motivo de la nueva entrega.');
@@ -180,10 +194,11 @@ class EppOperationService
                         ? $this->inventory->reserveDetail($operation, $detail, $actor, $expires, (bool) ($snapshot['aceptar_parcial'] ?? false))
                         : $detail->cantidad_solicitada;
                 } else {
-                    $delivery = EppEntrega::query()->lockForUpdate()->findOrFail($detail->entrega_origen_id);
-                    if ($delivery->politica_devolucion_snapshot !== 'RETORNABLE' || $detail->cantidad_solicitada > $delivery->cantidad_pendiente_devolucion || $delivery->estado !== 'ENTREGADO') {
-                        throw new InvalidArgumentException('La devolucion debe corresponder a un saldo retornable vigente.');
-                    }
+                    $delivery = $sources->get($detail->entrega_origen_id);
+                    $snapshot = $detail->snapshot_json;
+                    $snapshot['saldo_anterior'] = $delivery->cantidad_pendiente_devolucion;
+                    $snapshot['saldo_restante'] = $delivery->cantidad_pendiente_devolucion - $details->where('entrega_origen_id', $delivery->id)->where('estado', '!=', 'RECHAZADO')->sum('cantidad_solicitada');
+                    $detail->update(['snapshot_json' => $snapshot]);
                     $quantity = $detail->cantidad_solicitada;
                 }
                 $detail->update(['cantidad_procesada' => $quantity, 'cantidad_pendiente' => $detail->cantidad_solicitada - $quantity, 'estado' => $quantity > 0 ? 'RESERVADO' : 'NO_DISPONIBLE']);

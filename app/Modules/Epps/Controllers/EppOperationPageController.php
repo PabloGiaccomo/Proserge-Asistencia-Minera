@@ -11,7 +11,9 @@ use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Epps\Requests\SignEppOperationRequest;
 use App\Modules\Epps\Requests\StoreEppOperationRequest;
+use App\Modules\Epps\Requests\StoreEppReturnRequest;
 use App\Modules\Epps\Requests\UpdateEppOperationRequest;
+use App\Modules\Epps\Services\EppBalanceService;
 use App\Modules\Epps\Services\EppOperationConfirmationService;
 use App\Modules\Epps\Services\EppOperationService;
 use App\Modules\Epps\Services\EppScopeService;
@@ -43,7 +45,7 @@ class EppOperationPageController extends WebPageController
     public function searchWorkers(Request $request): JsonResponse
     {
         $actor = $this->actor();
-        abort_unless(PermissionMatrix::userCanDirect($actor, 'epps', 'preparar_entrega'), 403);
+        abort_unless(PermissionMatrix::userCanDirect($actor, 'epps', $request->boolean('devolucion') ? 'preparar_devolucion' : 'preparar_entrega'), 403);
         $q = trim((string) $request->query('q'));
         $items = [];
         if (mb_strlen($q) >= 2) {
@@ -78,11 +80,49 @@ class EppOperationPageController extends WebPageController
         return $this->next($operation);
     }
 
+    public function createReturn(Request $request): View
+    {
+        $actor = $this->actor();
+        abort_unless(PermissionMatrix::userCanDirect($actor, 'epps', 'preparar_devolucion'), 403);
+        $warehouses = EppAlmacen::query()->whereIn('id', $this->scope->visibleWarehouseIds($actor))->where('estado', 'ACTIVO')->orderBy('nombre')->get();
+        $warehouseId = $request->input('almacen_id', old('almacen_id'));
+        $warehouse = $warehouseId ? EppAlmacen::query()->findOrFail($warehouseId) : $warehouses->first();
+        if ($warehouse) {
+            $this->scope->assertWarehouseAccess($actor, $warehouse);
+        }
+        $workerId = $request->input('personal_id', old('personal_id'));
+        $worker = $workerId ? Personal::query()->findOrFail($workerId) : null;
+        $balances = $worker && $warehouse ? app(EppBalanceService::class)->forWorker($worker, $actor)->filter(fn ($delivery) => $delivery->operacion === null || $delivery->operacion->almacen_id === $warehouse->id) : collect();
+
+        return view('epps.operations.return-form', ['worker' => $worker, 'warehouse' => $warehouse, 'warehouses' => $warehouses, 'balances' => $balances, 'submissionUuid' => old('submission_uuid', (string) Str::uuid())]);
+    }
+
+    public function storeReturn(StoreEppReturnRequest $request): RedirectResponse
+    {
+        $actor = $this->actor();
+        $data = $request->validated();
+        try {
+            $operation = DB::transaction(function () use ($actor, $data) {
+                $draft = $this->operations->createDraft($actor, Personal::query()->findOrFail($data['personal_id']), EppAlmacen::query()->findOrFail($data['almacen_id']), 'DEVOLUCION', $data['submission_uuid']);
+                if ($draft->estado !== 'BORRADOR') {
+                    return $draft;
+                }
+
+                return $this->operations->prepareForSignature($this->operations->syncDetails($draft, $data['lines'], $actor), $actor);
+            });
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['lines' => $exception->getMessage()]);
+        }
+
+        return $this->next($operation);
+    }
+
     public function edit(Request $request, EppOperacion $operation): View
     {
         $actor = $this->actor();
         $this->authorizePreparation($actor, $operation);
         abort_unless($operation->estado === 'BORRADOR', 409, 'Este lote ya fue preparado. Revisa o registra un desacuerdo antes de crear otro.');
+        abort_if($operation->tipo === 'DEVOLUCION', 409, 'Prepara una nueva devolucion desde sus saldos vigentes.');
 
         return $this->form($request, $actor, $operation);
     }
@@ -137,7 +177,9 @@ class EppOperationPageController extends WebPageController
         }
         $valid = (bool) ($confirmed->verificacion_evidencia['valid'] ?? false);
 
-        return redirect()->route('epps.operations.show', $confirmed)->with($valid ? 'success' : 'warning', $valid ? 'Entrega confirmada. Se registraron solo las unidades revisadas.' : 'Entrega registrada con alerta de integridad. Solicita revision de la evidencia.');
+        $label = $confirmed->tipo === 'DEVOLUCION' ? 'Devolucion' : 'Entrega';
+
+        return redirect()->route('epps.operations.show', $confirmed)->with($valid ? 'success' : 'warning', $valid ? $label.' confirmada. Se registraron solo las unidades revisadas.' : $label.' registrada con alerta de integridad. Solicita revision de la evidencia.');
     }
 
     public function reject(Request $request, EppOperacion $operation): RedirectResponse
@@ -151,7 +193,7 @@ class EppOperationPageController extends WebPageController
             throw ValidationException::withMessages(['motivo' => $exception->getMessage()]);
         }
 
-        return redirect()->route('epps.operations.show', $operation)->with('success', 'Lote rechazado. No se registro entrega y se liberaron las reservas.');
+        return redirect()->route('epps.operations.show', $operation)->with('success', $operation->tipo === 'DEVOLUCION' ? 'Lote rechazado. No se registro devolucion ni cambio de saldo.' : 'Lote rechazado. No se registro entrega y se liberaron las reservas.');
     }
 
     public function show(EppOperacion $operation): View

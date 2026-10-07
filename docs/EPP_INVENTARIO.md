@@ -147,9 +147,10 @@ reservadas sin descontar de nuevo el disponible. El libro se agrega mediante
 Eloquent; nunca se reescribe. Se crean entregas solo por cantidades procesadas:
 retornables con saldo positivo y consumibles en `CONSUMIDO` con saldo de
 devolucion cero. Se guardan aceptacion, evento y estado `FIRMADO` o
-`FIRMADO_PARCIAL` juntos. La confirmacion de devoluciones se integra con el
-servicio de saldos en el incremento correspondiente; este servicio todavia
-rechaza ese tipo sin producir movimientos de salida.
+`FIRMADO_PARCIAL` juntos. Las devoluciones usan esa misma frontera de
+confirmacion y aceptacion privada; reducen el saldo de las entregas de origen
+y registran su destino fisico sin crear nuevas entregas ni consumir reservas
+de salida.
 
 `submission_uuid` identifica la operacion y su resultado original, tambien
 tras vencer la reserva si ya fue firmada. Los reintentos revalidan autorizacion
@@ -214,6 +215,49 @@ pruebas. No requiere servidor web; necesita Playwright y Chrome. Puede usar
 `NODE_PATH` hacia el runtime disponible sin instalar dependencias del proyecto.
 La pantalla de resultado conserva alertas de integridad ya detectadas y pide
 revision, sin sugerir repetir una entrega firmada.
+
+## Devolucion multiple y saldos
+
+**Devolucion multiple con firma** abre `/epps/operaciones/devoluciones/nueva`.
+Preparar exige `preparar_devolucion`; revisar/firmar, `confirmar_devolucion`.
+Se elige trabajador y almacen receptor, y se seleccionan exclusivamente sus
+saldos `RETORNABLE`, `ENTREGADO` y positivos. Consumibles y saldos cerrados no
+aparecen, tampoco en Cesados por entregar. Esa consulta suma la cantidad
+pendiente real por articulo; no modifica las otras metricas del dashboard.
+
+Cada tarjeta permite cantidad, condicion y destino. `BUENO` vuelve a
+`DISPONIBLE`; `DESGASTADO`, `DANADO` e `INCOMPLETO` requieren `CUARENTENA` o
+`BAJA`. `OTRO` requiere descripcion y cuarentena/baja. Una baja registra la
+recepcion y descarte sin sumar disponible ni cuarentena. La cantidad devuelta
+parcial deja saldo y estado `ENTREGADO`; completar el saldo registra `DEVUELTO`,
+fecha y actor de cierre. La firma `RETURN_V1` declara "Confirmo haber devuelto"
+y cubre exclusivamente las cantidades procesadas, condiciones y destinos.
+El resumen firmado muestra saldo anterior/restante por entrega de origen.
+
+Antes de preparar y confirmar se acumulan todas las lineas de cada
+`entrega_origen_id`. La confirmacion bloquea operacion, almacen, detalles,
+catalogo ordenado, entregas de origen ordenadas y existencias. Revalida la
+cantidad total contra el saldo bajo bloqueo: lineas duplicadas o lotes
+concurrentes nunca consumen el mismo saldo dos veces. Si cambia el saldo
+mostrado, exige una nueva revision incluso si aun alcanza la cantidad.
+Un reintento conserva aceptacion, cantidades y movimientos originales.
+
+El origen debe corresponder exactamente al trabajador, EPP, variante y, para
+entregas nuevas, almacen. Se conservan politica, control de inventario y
+catalogo snapshot de la entrega original, aunque el catalogo actual cambie.
+Las entregas legacy sin almacen pueden devolverse al receptor seleccionado
+con scope vigente y variante conciliada. Conservan `LEGACY_SIN_FIRMA`: se
+firma la nueva devolucion, nunca se inventa una firma de entrega historica.
+No se genera una apertura de stock automatica; un error de saldo/inventario
+revierte aceptacion, devoluciones y libro del lote completo.
+
+`EppBalanceService::markLoss()` exige `corregir`, cantidad dentro del saldo y
+motivo. Registra una operacion `CORRECCION` con evento `PERDIDA_REGISTRADA`,
+actor y saldos anterior/restante; una perdida completa cierra en
+`PERDIDA_OLVIDO`. Nunca suma stock ni se presenta como devolucion fisica o
+aceptacion firmada por el trabajador. Para una entrega legacy sin almacen,
+la perdida requiere regularizar primero su contexto de almacen; no se elige
+un almacen arbitrario. No aplica descuentos economicos.
 
 ## Validacion y despliegue
 

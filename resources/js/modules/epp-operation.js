@@ -12,6 +12,39 @@ export function initEppOperations(root = document) {
         const pads = [...page.querySelectorAll('[data-signature-pad]')].map(canvas => canvas.signaturePad).filter(Boolean);
         invalidateOperationSignature(page, pads);
         const lineChanged = () => page.dispatchEvent(new Event('operation:lines-changed'));
+        page.querySelectorAll('[data-return-line]').forEach(line => {
+            const selected = line.querySelector('[data-return-select]');
+            const quantity = line.querySelector('[data-return-quantity]');
+            const condition = line.querySelector('[data-return-condition]');
+            const destination = line.querySelector('[data-return-destination]');
+            const refresh = () => {
+                line.querySelectorAll('[data-return-field]').forEach(field => { field.disabled = !selected.checked; });
+                const good = condition.value === 'BUENO';
+                line.querySelector('textarea').required = condition.value === 'OTRO';
+                [...destination.options].forEach(option => { option.disabled = good ? option.value !== 'DISPONIBLE' : option.value === 'DISPONIBLE'; });
+                if (destination.selectedOptions[0].disabled) destination.value = good ? 'DISPONIBLE' : 'CUARENTENA';
+                const remaining = Number(line.dataset.balance) - (selected.checked ? Number(quantity.value || 0) : 0);
+                line.querySelector('[data-return-remaining]').textContent = `Saldo restante: ${remaining} unidades.`;
+                lineChanged();
+            };
+            line.addEventListener('input', refresh);
+            line.addEventListener('change', refresh);
+            refresh();
+        });
+        page.querySelector('[data-return-form]')?.addEventListener('submit', event => {
+            if (!page.querySelector('[data-return-select]:checked')) {
+                event.preventDefault();
+                page.querySelector('[data-return-error]').hidden = false;
+            }
+        });
+        page.querySelector('[data-return-search]')?.closest('form').addEventListener('input', () => {
+            const form = page.querySelector('[data-return-form]');
+            if (form) {
+                form.inert = true;
+                const error = page.querySelector('[data-return-error]');
+                if (error) { error.textContent = 'Pulsa Ver saldos por devolver para actualizar el trabajador y almacen.'; error.hidden = false; }
+            }
+        });
         const catalog = JSON.parse(page.querySelector('[data-operation-catalog]')?.textContent || '[]');
         const existences = JSON.parse(page.querySelector('[data-operation-existences]')?.textContent || '[]');
         const lines = page.querySelector('[data-operation-lines]');
@@ -91,7 +124,7 @@ export function initEppOperations(root = document) {
             if (query.length < 2) return;
             timer = setTimeout(async () => {
                 try {
-                    const response = await fetch(`${search.dataset.searchUrl}?q=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                    const response = await fetch(`${search.dataset.searchUrl}?q=${encodeURIComponent(query)}${search.hasAttribute('data-return-search') ? '&devolucion=1' : ''}`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
                     if (!response.ok) throw new Error();
                     const data = await response.json();
                     if (number !== requestNumber) return;

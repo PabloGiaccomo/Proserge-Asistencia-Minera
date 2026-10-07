@@ -273,6 +273,39 @@ class EppInventoryService
         return $controlled->count();
     }
 
+    /** Operation, warehouse, catalog and source-delivery locks precede this existence lock. */
+    public function receiveReturn(EppOperacion $operation, EppOperacionDetalle $detail, Usuario $actor): void
+    {
+        if (DB::transactionLevel() === 0 || $operation->tipo !== 'DEVOLUCION' || $detail->operacion_id !== $operation->id) {
+            throw new InvalidArgumentException('El retorno requiere una transaccion de devolucion.');
+        }
+        if (! $detail->control_inventario_snapshot) {
+            return;
+        }
+        $existence = EppExistencia::query()->where('almacen_id', $operation->almacen_id)->where('epp_id', $detail->epp_id)->where('variante_clave', $detail->variante_clave)->lockForUpdate()->first();
+        if ($existence?->conciliado_at === null) {
+            throw new InvalidArgumentException('Concilia la variante del almacen antes de confirmar su devolucion.');
+        }
+        $destination = $detail->destino_inventario;
+        $column = $destination === 'CUARENTENA' ? 'cantidad_cuarentena' : 'cantidad_disponible';
+        $before = $destination === 'BAJA' ? 0 : $existence->$column;
+        $after = $destination === 'BAJA' ? 0 : $before + $detail->cantidad_procesada;
+        if ($after > self::MAX_QUANTITY || ($destination === 'DISPONIBLE' && $after + $existence->cantidad_reservada > self::MAX_QUANTITY)) {
+            throw new InvalidArgumentException('La devolucion dejaria el saldo de inventario fuera de rango.');
+        }
+        EppInventarioMovimiento::query()->create([
+            'existencia_id' => $existence->id, 'almacen_id' => $operation->almacen_id, 'epp_id' => $detail->epp_id,
+            'operacion_id' => $operation->id, 'operacion_detalle_id' => $detail->id,
+            'tipo' => $destination === 'BAJA' ? 'BAJA' : 'DEVOLUCION', 'cantidad' => $detail->cantidad_procesada,
+            'saldo_anterior' => $before, 'saldo_posterior' => $after, 'destino' => $destination,
+            'actor_usuario_id' => $actor->id, 'origen' => 'WEB', 'motivo' => $detail->motivo ?: 'Devolucion confirmada con aceptacion firmada.',
+            'snapshot_json' => ['atributos' => $detail->atributos_json, 'condicion' => $detail->condicion_devolucion, 'entrega_origen_id' => $detail->entrega_origen_id, 'delta' => $after - $before],
+        ]);
+        if ($destination !== 'BAJA') {
+            $existence->update([$column => $after]);
+        }
+    }
+
     private function reservationMovement(EppExistencia $existence, EppOperacion $operation, string $detailId, int $quantity, int $after, string $type, ?Usuario $actor, string $reason, string $origin): void
     {
         EppInventarioMovimiento::query()->create([

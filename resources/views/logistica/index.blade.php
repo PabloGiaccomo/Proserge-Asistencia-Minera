@@ -164,6 +164,7 @@
             <a class="epp-btn epp-btn-light" href="{{ route('epps.inventory.index') }}">Inventario por almacén</a>
         @endif
         @allowed('epps', 'preparar_entrega')<a class="epp-btn epp-btn-primary" href="{{ route('epps.operations.create') }}">Entrega multiple con firma</a>@endallowed
+        @allowed('epps', 'preparar_devolucion')<a class="epp-btn" href="{{ route('epps.operations.returns.create') }}">Devolucion multiple con firma</a>@endallowed
     </header>
 
     <nav class="lgt-tabs" aria-label="Secciones de logística" data-logistics-tabs>
