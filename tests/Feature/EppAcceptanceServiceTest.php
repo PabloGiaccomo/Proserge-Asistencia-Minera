@@ -24,12 +24,14 @@ use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -63,6 +65,8 @@ class EppAcceptanceServiceTest extends TestCase
         $operation = $this->prepare(10, 5, true);
         $confirmed = $this->confirm($operation, $this->signature($operation));
         $this->assertSame('FIRMADO_PARCIAL', $confirmed->estado);
+        $this->assertSame('FIRMA_VALIDA', $confirmed->estado_integridad);
+        $this->assertSame(['valid' => true, 'reasons' => []], $confirmed->verificacion_evidencia);
         $this->assertSame(5, data_get($confirmed->aceptacion->contenido_json, 'details.0.processed_quantity'));
         $this->assertSame(10, data_get($confirmed->aceptacion->contenido_json, 'details.0.requested_quantity'));
         $this->assertSame(5, data_get($confirmed->aceptacion->contenido_json, 'pending.0.pending_quantity'));
@@ -267,7 +271,9 @@ class EppAcceptanceServiceTest extends TestCase
         $confirmed = $this->confirm($operation, $signature);
         Storage::disk('local')->delete($confirmed->aceptacion->firma_path);
         $retry = $this->confirm($operation->fresh(), $signature);
-        $result = app(EppAcceptanceService::class)->verify($retry->aceptacion);
+        $this->assertSame('EVIDENCIA_INVALIDA', $retry->estado_integridad);
+        $this->assertSame('EVIDENCIA_INVALIDA', $retry->toArray()['estado_integridad']);
+        $result = $retry->verificacion_evidencia;
         $this->assertFalse($result['valid']);
         $this->assertContains('ARCHIVO_FALTANTE', $result['reasons']);
         $this->assertSame('ARCHIVO_FALTANTE', $retry->aceptacion->fresh()->estado_integridad);
@@ -287,6 +293,67 @@ class EppAcceptanceServiceTest extends TestCase
         $this->assertContains('CONTENIDO_HASH_NO_COINCIDE', $result['reasons']);
         $this->assertSame(3, $this->moves()->count());
         $this->assertSame(2, $operation->entregas()->first()->cantidad);
+    }
+
+    public function test_retry_reports_altered_evidence_without_overwriting_or_repeating_effects(): void
+    {
+        $operation = $this->prepare();
+        $signature = $this->signature($operation);
+        $confirmed = $this->confirm($operation, $signature);
+        $acceptance = $confirmed->aceptacion;
+        Storage::disk('local')->put($acceptance->firma_path, 'Evidencia alterada despues del commit');
+        $retry = $this->confirm($operation->fresh(), $signature);
+        $this->assertSame('EVIDENCIA_INVALIDA', $retry->estado_integridad);
+        $this->assertSame(['valid' => false, 'reasons' => ['EVIDENCIA_INVALIDA', 'FIRMA_HASH_NO_COINCIDE']], $retry->verificacion_evidencia);
+        $this->assertSame('FIRMA_INVALIDA', $retry->aceptacion->estado_integridad);
+        $this->assertSame($acceptance->id, $retry->aceptacion->id);
+        $this->assertSame($acceptance->firma_sha256, $retry->aceptacion->firma_sha256);
+        $this->assertSame('Evidencia alterada despues del commit', Storage::disk('local')->get($acceptance->firma_path));
+        $this->assertCount(1, Storage::disk('local')->allFiles('epp/firmas'));
+        $this->assertSame(1, $retry->aceptacion()->count());
+        $this->assertSame(1, $retry->entregas()->count());
+        $this->assertSame(2, $retry->entregas->first()->cantidad);
+        $this->assertSame(3, $this->moves()->count());
+        $this->assertSame(3, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_reservada);
+    }
+
+    public static function postCommitEvidenceFailures(): array
+    {
+        return [
+            'archivo faltante' => [null, 'ARCHIVO_FALTANTE', 'ARCHIVO_FALTANTE'],
+            'archivo alterado' => ['Alteracion posterior al commit', 'FIRMA_HASH_NO_COINCIDE', 'FIRMA_INVALIDA'],
+        ];
+    }
+
+    #[DataProvider('postCommitEvidenceFailures')]
+    public function test_confirmation_reports_invalid_evidence_after_commit_without_rolling_back(?string $bytes, string $reason, string $acceptanceState): void
+    {
+        $operation = $this->prepare();
+        $this->app['events']->listen(TransactionCommitted::class, function () use ($operation, $bytes): void {
+            $acceptance = $operation->aceptacion()->firstOrFail();
+            if ($bytes === null) {
+                Storage::disk('local')->delete($acceptance->firma_path);
+            } else {
+                Storage::disk('local')->put($acceptance->firma_path, $bytes);
+            }
+        });
+        $confirmed = $this->confirm($operation, $this->signature($operation));
+        $this->assertSame('FIRMADO', $confirmed->estado);
+        $this->assertSame('EVIDENCIA_INVALIDA', $confirmed->estado_integridad);
+        $this->assertSame(['valid' => false, 'reasons' => ['EVIDENCIA_INVALIDA', $reason]], $confirmed->verificacion_evidencia);
+        $this->assertSame($acceptanceState, $confirmed->aceptacion->estado_integridad);
+        $this->assertSame('EVIDENCIA_INVALIDA', $confirmed->toArray()['estado_integridad']);
+        $this->assertSame(1, $confirmed->aceptacion()->count());
+        $this->assertSame(1, $confirmed->entregas()->count());
+        $this->assertSame(3, $this->moves()->count());
+        $this->assertSame(3, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_reservada);
+        if ($bytes === null) {
+            Storage::disk('local')->assertMissing($confirmed->aceptacion->firma_path);
+        } else {
+            $this->assertSame($bytes, Storage::disk('local')->get($confirmed->aceptacion->firma_path));
+        }
     }
 
     public function test_acceptance_stores_server_and_utc_times(): void

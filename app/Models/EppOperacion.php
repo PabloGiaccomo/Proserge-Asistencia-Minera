@@ -38,6 +38,11 @@ class EppOperacion extends Model
 
     public const ESTADO_ANULADO = 'ANULADO';
 
+    public const INTEGRIDAD_EVIDENCIA_INVALIDA = 'EVIDENCIA_INVALIDA';
+
+    /** Verification is response data, never a writable database attribute. */
+    protected ?array $evidenceVerification = null;
+
     protected $table = 'epp_operaciones';
 
     public $incrementing = false;
@@ -70,6 +75,31 @@ class EppOperacion extends Model
         'reserva_expires_at' => 'datetime',
         'firmado_at' => 'datetime',
     ];
+
+    /** @param array{valid: bool, reasons: array} $verification */
+    public function withEvidenceVerification(array $verification): static
+    {
+        $this->evidenceVerification = $verification;
+        $this->append(['estado_integridad', 'verificacion_evidencia']);
+
+        return $this;
+    }
+
+    public function getEstadoIntegridadAttribute(): ?string
+    {
+        if ($this->evidenceVerification === null) {
+            return null;
+        }
+
+        return $this->evidenceVerification['valid']
+            ? EppAceptacion::INTEGRIDAD_VALIDA
+            : self::INTEGRIDAD_EVIDENCIA_INVALIDA;
+    }
+
+    public function getVerificacionEvidenciaAttribute(): ?array
+    {
+        return $this->evidenceVerification;
+    }
 
     public function personal(): BelongsTo
     {

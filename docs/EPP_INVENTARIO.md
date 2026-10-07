@@ -169,6 +169,14 @@ archivo y los bytes canonicos, devuelve `EVIDENCIA_INVALIDA` con causas y marca
 ni repite una entrega ya confirmada. Los cambios posteriores en Personal o
 catalogo no reemplazan la identidad ni los productos del snapshot firmado.
 
+`confirm()` y `confirmWithWitness()`, incluidos sus reintentos, devuelven una
+operacion con `estado_integridad` (`FIRMA_VALIDA` o `EVIDENCIA_INVALIDA`) y
+`verificacion_evidencia` (`valid`, `reasons`) de la comprobacion realizada.
+Son datos transitorios serializables de la respuesta, no columnas editables.
+El llamador debe presentar la alerta de integridad aunque el estado historico
+sea `FIRMADO`/`FIRMADO_PARCIAL`. Una perdida o alteracion detectada despues del
+commit mantiene la aceptacion y los efectos unicos de inventario/entrega.
+
 ## Validacion y despliegue
 
 Aplicar primero las migraciones aditivas EPP del 2026-10-07 con respaldo de la base

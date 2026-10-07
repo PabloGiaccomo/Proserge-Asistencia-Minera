@@ -134,10 +134,9 @@ class EppOperationConfirmationService
         if ($confirmed->aceptacion->firma_path !== $prepared->signaturePath) {
             $this->removeUnreferencedFile($prepared);
         }
-        // Integrity failures after commit never enter rollback cleanup or repeat stock effects.
-        $this->acceptance->verify($confirmed->aceptacion);
 
-        return $confirmed->load('aceptacion', 'entregas');
+        // Integrity failures after commit never enter rollback cleanup or repeat stock effects.
+        return $this->verifiedResult($confirmed);
     }
 
     private function assertSubmission(EppOperacion $operation, EppSignaturePayload $signature): void
@@ -177,11 +176,16 @@ class EppOperationConfirmationService
             || $acceptance->motivo_excepcion !== $context['reason']) {
             throw new InvalidArgumentException('El reintento debe corresponder a la misma aceptacion y revision.');
         }
-        if ($verify) {
-            $this->acceptance->verify($acceptance);
-        }
+        $operation->load('detalles', 'reservas', 'aceptacion', 'entregas');
 
-        return $operation->load('detalles', 'reservas', 'aceptacion', 'entregas');
+        return $verify ? $this->verifiedResult($operation) : $operation;
+    }
+
+    private function verifiedResult(EppOperacion $operation): EppOperacion
+    {
+        $verification = $this->acceptance->verify($operation->aceptacion);
+
+        return $operation->load('aceptacion', 'entregas')->withEvidenceVerification($verification);
     }
 
     private function writeSignature(EppOperacion $operation, EppSignaturePayload $signature): EppSignaturePayload
