@@ -14,11 +14,14 @@ use App\Models\PersonalMina;
 use App\Models\Rol;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Modules\Epps\Services\EppAcceptanceService;
 use App\Modules\Epps\Services\EppBalanceService;
+use App\Modules\Epps\Services\EppCorrectionService;
 use App\Modules\Epps\Services\EppInventoryService;
 use App\Modules\Epps\Services\EppOperationConfirmationService;
 use App\Modules\Epps\Services\EppOperationService;
 use App\Modules\Epps\Services\EppService;
+use App\Modules\Epps\Support\EppCanonicalPayload;
 use App\Modules\Epps\Support\EppSignaturePayload;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -72,6 +75,36 @@ class EppReturnServiceTest extends TestCase
         $retry = $this->confirm($return);
         $this->assertSame($return->aceptacion->id, $retry->aceptacion->id);
         $this->assertSame(1, $this->moves()->count());
+    }
+
+    #[DataProvider('reversibleDestinations')]
+    public function test_signed_return_can_be_annulled_without_losing_its_inventory_link(string $condition, string $destination): void
+    {
+        $return = $this->confirm($this->prepare('DEVOLUCION', [$this->line(2, $condition, $destination)]));
+        app(EppCorrectionService::class)->annul($return, $this->actor, 'Devolucion atribuida por error', (string) Str::uuid());
+        $this->assertSame(5, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(0, $this->existence()->cantidad_disponible);
+        $this->assertSame(0, $this->existence()->cantidad_cuarentena);
+        $this->assertSame($this->existence()->id, $return->fresh()->detalles->first()->existencia_id);
+    }
+
+    public static function reversibleDestinations(): array
+    {
+        return [['BUENO', 'DISPONIBLE'], ['DANADO', 'CUARENTENA']];
+    }
+
+    public function test_older_signed_return_without_existence_link_can_be_compensated_from_its_ledger(): void
+    {
+        $draft = $this->prepare('DEVOLUCION', [$this->line(2)]);
+        $draft->detalles->first()->update(['existencia_id' => null]);
+        $payload = app(EppOperationService::class)->currentReviewPayload($draft->fresh());
+        $draft->update(['resumen_json' => $payload, 'resumen_sha256' => hash('sha256', EppCanonicalPayload::json($payload))]);
+        $return = $this->confirm($draft->fresh());
+        app(EppCorrectionService::class)->annul($return, $this->actor, 'Corregir retorno anterior', (string) Str::uuid());
+        $this->assertSame(5, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(0, $this->existence()->cantidad_disponible);
+        $this->assertNull($return->fresh()->detalles->first()->existencia_id);
+        $this->assertTrue(app(EppAcceptanceService::class)->verify($return->aceptacion)['valid']);
     }
 
     public function test_full_return_closes_balance(): void
@@ -134,6 +167,16 @@ class EppReturnServiceTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
         $this->prepare('DEVOLUCION', [$this->line(2, 'DANADO', 'DISPONIBLE')]);
+    }
+
+    public function test_loss_has_a_scoped_http_action_and_retries_do_not_add_stock(): void
+    {
+        $payload = ['submission_uuid' => (string) Str::uuid(), 'cantidad' => 2, 'motivo' => 'Perdida comunicada por trabajador'];
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id])
+            ->post(route('epps.deliveries.loss', $this->delivery), $payload)->assertSessionHasNoErrors()->assertRedirect();
+        $this->post(route('epps.deliveries.loss', $this->delivery), $payload)->assertSessionHasNoErrors();
+        $this->assertSame(3, $this->delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(0, $this->existence()->cantidad_disponible);
     }
 
     public function test_loss_does_not_add_stock(): void

@@ -7,9 +7,12 @@ use App\Models\EppAlmacen;
 use App\Models\EppEntrega;
 use App\Models\EppOperacion;
 use App\Models\EppOperacionDetalle;
+use App\Models\Mina;
 use App\Models\Personal;
+use App\Models\PersonalMina;
 use App\Models\Rol;
 use App\Models\Usuario;
+use App\Models\UsuarioMinaScope;
 use App\Modules\Epps\Services\EppKardexService;
 use App\Modules\Epps\Services\EppQrCodeService;
 use App\Modules\Epps\Services\EppReceiptPdfService;
@@ -51,7 +54,13 @@ class EppKardexEvidenceTest extends TestCase
         EppOperacionDetalle::query()->create(['operacion_id' => $this->operation->id, 'epp_solicitado_id' => $epp->id, 'epp_id' => $epp->id, 'cantidad_solicitada' => 2, 'cantidad_procesada' => 2, 'cantidad_pendiente' => 0, 'estado' => 'ENTREGADO', 'politica_devolucion_snapshot' => 'RETORNABLE', 'control_inventario_snapshot' => true, 'snapshot_json' => ['epp_name' => $epp->nombre]]);
         $payload = EppCanonicalPayload::normalize(['schema_version' => 1, 'operation_id' => $this->operation->id, 'submission_uuid' => $this->operation->submission_uuid, 'revision' => 1, 'type' => 'ENTREGA', 'state' => 'LISTO_PARA_FIRMA', 'declaration_version' => 'DELIVERY_V1', 'worker' => ['id' => $this->worker->id, 'name' => $this->worker->nombre_completo, 'document' => $this->worker->dni], 'warehouse' => ['id' => $warehouse->id, 'name' => $warehouse->nombre, 'mine_id' => null], 'details' => [['epp_id' => $epp->id, 'epp_name' => $epp->nombre, 'requested_quantity' => 2, 'processed_quantity' => 2, 'pending_quantity' => 0]], 'pending' => [], 'rejected' => []]);
         $json = EppCanonicalPayload::json($payload);
-        $signature = 'private-signature-bytes';
+        $image = imagecreatetruecolor(600, 300);
+        imagefill($image, 0, 0, imagecolorallocate($image, 255, 255, 255));
+        imageline($image, 30, 250, 450, 30, imagecolorallocate($image, 20, 20, 20));
+        ob_start();
+        imagepng($image);
+        $signature = ob_get_clean();
+        imagedestroy($image);
         $path = 'epp/firmas/'.$this->operation->id.'/firma.png';
         Storage::disk('local')->put($path, $signature);
         $this->operation->update(['resumen_json' => $payload, 'resumen_sha256' => hash('sha256', $json)]);
@@ -68,6 +77,23 @@ class EppKardexEvidenceTest extends TestCase
         $this->assertContains('FIRMADO_VALIDO', array_column($operations, 'evidence_state'));
         $this->assertContains('LEGACY_SIN_FIRMA', array_column($operations, 'evidence_state'));
         $this->assertSame($this->operation->id, collect($operations)->firstWhere('type', 'CORRECCION')['original_operation_id']);
+    }
+
+    public function test_worker_kardex_keeps_visible_operations_when_another_warehouse_is_hidden(): void
+    {
+        $mine = Mina::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'MINA VISIBLE '.Str::uuid(), 'unidad_minera' => 'UM TEST']);
+        $this->operation->almacen->update(['mina_id' => $mine->id]);
+        $this->viewer->rol->update(['nombre' => 'LECTOR LIMITADO '.Str::uuid()]);
+        UsuarioMinaScope::query()->create(['id' => (string) Str::uuid(), 'usuario_id' => $this->viewer->id, 'mina_id' => $mine->id]);
+        PersonalMina::query()->create(['id' => (string) Str::uuid(), 'personal_id' => $this->worker->id, 'mina_id' => $mine->id, 'estado' => 'EN_PROCESO', 'activo' => true]);
+        $hidden = $this->operation->replicate();
+        $hidden->id = (string) Str::uuid();
+        $hidden->submission_uuid = (string) Str::uuid();
+        $hidden->almacen_id = EppAlmacen::query()->create(['nombre' => 'ALMACEN OCULTO '.Str::uuid()])->id;
+        $hidden->save();
+        $ids = array_column(app(EppKardexService::class)->forWorker($this->worker, $this->viewer)['operations'], 'id');
+        $this->assertContains($this->operation->id, $ids);
+        $this->assertNotContains($hidden->id, $ids);
     }
 
     public function test_tampered_signature_is_invalid(): void
@@ -110,6 +136,57 @@ class EppKardexEvidenceTest extends TestCase
         $this->assertStringContainsString('<svg', $svg);
         $this->assertStringNotContainsString($this->worker->dni, $svg);
         $this->assertStringNotContainsString($this->acceptance->firma_sha256, $svg);
+    }
+
+    public function test_reports_preserve_signed_names_attributes_and_return_facts(): void
+    {
+        $payload = $this->acceptance->contenido_json;
+        $payload['details'][0]['snapshot'] = ['real' => ['nombre' => 'NOMBRE FIRMADO ORIGINAL']];
+        $payload['details'][0]['attributes'] = ['MATERIAL' => 'CUERO ESPECIAL'];
+        $payload['details'][0]['return_condition'] = 'DANADO';
+        $payload['details'][0]['inventory_destination'] = 'CUARENTENA';
+        $payload['pending'] = [['snapshot' => ['solicitado' => ['nombre' => 'PENDIENTE ORIGINAL']], 'requested_quantity' => 3, 'processed_quantity' => 0, 'pending_quantity' => 3]];
+        $payload['rejected'] = [['snapshot' => ['solicitado' => ['nombre' => 'ARTICULO RECHAZADO']], 'reason' => 'No corresponde al trabajador']];
+        $this->replacePayload($payload);
+        $this->operation->detalles->first()->epp->update(['nombre' => 'CATALOGO RENOMBRADO']);
+        $operations = app(EppKardexService::class)->forWorker($this->worker, $this->viewer)['operations'];
+        $signed = collect($operations)->firstWhere('id', $this->operation->id);
+        $this->assertSame('NOMBRE FIRMADO ORIGINAL', $signed['details'][0]['epp']);
+        $html = app(EppReceiptPdfService::class)->html($this->operation->fresh());
+        foreach (['NOMBRE FIRMADO ORIGINAL', 'CUERO ESPECIAL', 'DANADO', 'CUARENTENA', 'PENDIENTE ORIGINAL', 'ARTICULO RECHAZADO', 'No corresponde al trabajador'] as $fact) {
+            $this->assertStringContainsString($fact, $html);
+        }
+    }
+
+    public function test_excel_keeps_catalog_formula_text_as_literal_string(): void
+    {
+        $payload = $this->acceptance->contenido_json;
+        $payload['details'][0]['epp_name'] = '=SUM';
+        $payload['details'][0]['snapshot'] = ['real' => ['nombre' => '=SUM']];
+        $payload['details'][0]['processed_quantity'] = 1;
+        $this->replacePayload($payload);
+        $this->operation->detalles->first()->epp->update(['nombre' => '=SUM']);
+        $this->operation->detalles->first()->update(['cantidad_procesada' => 1]);
+        $response = app(EppKardexService::class)->downloadExcel($this->worker, $this->viewer);
+        ob_start();
+        $response->sendContent();
+        $bytes = ob_get_clean();
+        $path = tempnam(sys_get_temp_dir(), 'epp-formula-');
+        file_put_contents($path, $bytes);
+        try {
+            $cell = IOFactory::load($path)->getActiveSheet()->getCell('H2');
+            $this->assertSame('s', $cell->getDataType());
+            $this->assertStringStartsWith('=SUM (1)', $cell->getValue());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    private function replacePayload(array $payload): void
+    {
+        $json = EppCanonicalPayload::json($payload);
+        $this->acceptance->update(['contenido_json' => $json, 'contenido_sha256' => hash('sha256', $json)]);
+        $this->operation->update(['resumen_json' => $payload, 'resumen_sha256' => hash('sha256', $json)]);
     }
 
     public function test_excel_contains_verification_columns(): void

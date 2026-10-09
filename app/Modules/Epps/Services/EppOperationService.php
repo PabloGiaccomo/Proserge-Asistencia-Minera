@@ -198,6 +198,13 @@ class EppOperationService
                     $snapshot = $detail->snapshot_json;
                     $snapshot['saldo_anterior'] = $delivery->cantidad_pendiente_devolucion;
                     $snapshot['saldo_restante'] = $delivery->cantidad_pendiente_devolucion - $details->where('entrega_origen_id', $delivery->id)->where('estado', '!=', 'RECHAZADO')->sum('cantidad_solicitada');
+                    if ($detail->control_inventario_snapshot) {
+                        $existence = EppExistencia::query()->where('almacen_id', $operation->almacen_id)->where('epp_id', $detail->epp_id)->where('variante_clave', $detail->variante_clave)->lockForUpdate()->first();
+                        if ($existence?->conciliado_at === null) {
+                            throw new InvalidArgumentException('Concilia la variante del almacen antes de preparar su devolucion.');
+                        }
+                        $detail->existencia_id = $existence->id;
+                    }
                     $detail->update(['snapshot_json' => $snapshot]);
                     $quantity = $detail->cantidad_solicitada;
                 }

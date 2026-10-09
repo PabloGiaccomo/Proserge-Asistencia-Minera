@@ -212,6 +212,7 @@ class EppOperationPageController extends WebPageController
         return view('epps.operations.show', [
             'operation' => $operation->fresh()->load('detalles'), 'payload' => $payload,
             'integrityState' => $operation->aceptacion()->value('estado_integridad'),
+            'correctionLimits' => $this->corrections->reversibleQuantities($operation),
         ]);
     }
 
@@ -227,6 +228,26 @@ class EppOperationPageController extends WebPageController
         return redirect()->route('epps.operations.show', $correction)->with('success', 'Correccion compensatoria registrada. La operacion original se conserva sin cambios.');
     }
 
+    public function lossForm(EppEntrega $delivery): View
+    {
+        abort_unless($delivery->operacion_id, 409, 'Regulariza el almacen de la entrega historica antes de registrar la perdida.');
+        Gate::forUser($this->actor())->authorize('correct', $delivery->operacion);
+
+        return view('epps.operations.loss', ['delivery' => $delivery]);
+    }
+
+    public function loss(Request $request, EppEntrega $delivery): RedirectResponse
+    {
+        $data = $request->validate(['submission_uuid' => ['required', 'uuid'], 'cantidad' => ['required', 'integer', 'min:1', 'max:1000000'], 'motivo' => ['required', 'string', 'max:1000']]);
+        try {
+            $operation = app(EppBalanceService::class)->markLoss($delivery, (int) $data['cantidad'], $data['motivo'], $this->actor(), $data['submission_uuid']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['cantidad' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('epps.operations.show', $operation)->with('success', 'Perdida registrada. No se agrego stock fisico.');
+    }
+
     public function legacyForm(EppEntrega $delivery): View
     {
         $actor = $this->actor();
@@ -239,9 +260,9 @@ class EppOperationPageController extends WebPageController
 
     public function legacyCompensate(Request $request, EppEntrega $delivery): RedirectResponse
     {
-        $data = $request->validate(['almacen_id' => ['required', 'uuid', 'exists:epp_almacenes,id'], 'cantidad' => ['required', 'integer', 'min:1'], 'motivo' => ['required', 'string', 'max:1000'], 'tipo' => ['required', 'in:CORRECCION,ANULACION']]);
+        $data = $request->validate(['submission_uuid' => ['required', 'uuid'], 'almacen_id' => ['required', 'uuid', 'exists:epp_almacenes,id'], 'cantidad' => ['required', 'integer', 'min:1'], 'motivo' => ['required', 'string', 'max:1000'], 'tipo' => ['required', 'in:CORRECCION,ANULACION']]);
         try {
-            $operation = $this->corrections->compensateLegacy($delivery, EppAlmacen::query()->findOrFail($data['almacen_id']), (int) $data['cantidad'], $this->actor(), $data['motivo'], $data['tipo'] === 'ANULACION');
+            $operation = $this->corrections->compensateLegacy($delivery, EppAlmacen::query()->findOrFail($data['almacen_id']), (int) $data['cantidad'], $this->actor(), $data['motivo'], $data['tipo'] === 'ANULACION', $data['submission_uuid']);
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['cantidad' => $exception->getMessage()]);
         }
@@ -253,7 +274,7 @@ class EppOperationPageController extends WebPageController
     {
         $actor = $this->actor();
         try {
-            $annulment = $this->corrections->annul($operation, $actor, $request->validated('motivo'));
+            $annulment = $this->corrections->annul($operation, $actor, $request->validated('motivo'), $request->validated('submission_uuid'));
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['anulacion' => $exception->getMessage()]);
         }

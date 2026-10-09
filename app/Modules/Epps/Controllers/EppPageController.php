@@ -52,7 +52,7 @@ class EppPageController extends WebPageController
         $limit = max(5, min(25, (int) $request->query('limit', 15)));
 
         return response()->json([
-            'items' => $this->service->searchPersonal((string) $request->query('q', ''), $limit),
+            'items' => $this->service->searchPersonal((string) $request->query('q', ''), $limit, $this->eppActor()),
         ]);
     }
 
@@ -63,7 +63,7 @@ class EppPageController extends WebPageController
         return response()->json([
             'data' => $this->service->lastDeliverySummary(
                 (string) $request->query('personal_id', ''),
-                (string) $request->query('epp_id', '')
+                (string) $request->query('epp_id', ''), $this->eppActor()
             ),
         ])->header('Cache-Control', 'private, no-store, max-age=0');
     }
@@ -73,7 +73,7 @@ class EppPageController extends WebPageController
         $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
         $worker = Personal::query()->findOrFail((string) $request->query('personal_id', ''));
         app(EppScopeService::class)->assertPersonalAccess($actor, $worker);
-        $data = $this->service->personalKardex($worker->id);
+        $data = $this->service->personalKardex($worker->id, $actor);
         if (PermissionMatrix::userCanDirect($actor, 'epps', 'ver_evidencia')) {
             $data['operations'] = app(EppKardexService::class)->forWorker($worker, $actor)['operations'];
         }
@@ -94,7 +94,7 @@ class EppPageController extends WebPageController
         $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
         app(EppScopeService::class)->assertPersonalAccess($actor, Personal::query()->findOrFail($validated['personal_id']));
 
-        return $this->service->downloadPersonalKardex((string) $validated['personal_id']);
+        return $this->service->downloadPersonalKardex((string) $validated['personal_id'], $actor);
     }
 
     public function storeCatalog(SaveEppCatalogRequest $request): RedirectResponse
@@ -130,6 +130,11 @@ class EppPageController extends WebPageController
     public function storeEntrega(Request $request): RedirectResponse
     {
         abort(409, 'El registro individual fue retirado. Usa Nueva entrega multiple con firma.');
+    }
+
+    private function eppActor(): Usuario
+    {
+        return Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
     }
 
     public function closeEntrega(Request $request, string $id): RedirectResponse

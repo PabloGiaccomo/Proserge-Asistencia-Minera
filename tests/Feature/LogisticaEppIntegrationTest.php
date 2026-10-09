@@ -30,7 +30,7 @@ class LogisticaEppIntegrationTest extends TestCase
         $this->withSession($session)->get(route('logistica.index', ['tab' => 'entregas']))->assertOk()->assertSee('Nueva entrega multiple')->assertDontSee('Registrar y agregar otra');
         $this->post(route('epps.entregas.store'), [])->assertStatus(409);
         $this->get(route('logistica.index', ['tab' => 'dashboard']))->assertOk()
-            ->assertSee('Unidades pendientes de lotes')->assertSee('Lotes con firma')
+            ->assertSee('Pendientes registrados en lotes')->assertSee('Lotes con firma')
             ->assertSee('Entregas historicas sin firma')->assertSee('Stock por conciliar')
             ->assertDontSee('Obligatorios: casco, chaleco');
     }
@@ -243,6 +243,8 @@ class LogisticaEppIntegrationTest extends TestCase
             'estado' => 'ACTIVO',
         ]);
 
+        $this->grantWorkerScope($session, $personal);
+
         $this
             ->withSession($session)
             ->getJson(route('epps.personal.buscar', [
@@ -393,6 +395,7 @@ class LogisticaEppIntegrationTest extends TestCase
             ]);
         }
 
+        $this->grantWorkerScope($session, $personal);
         $response = $this
             ->withSession($session)
             ->get(route('logistica.index', [
@@ -445,6 +448,8 @@ class LogisticaEppIntegrationTest extends TestCase
                 'estado' => EppEntrega::ESTADO_ENTREGADO,
             ]);
         }
+
+        $this->grantWorkerScope($session, $personal);
 
         $this
             ->withSession($session)
@@ -514,6 +519,13 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('data-logistics-tab-panel="identificacion"', false)
             ->assertSee('DISCO DE CORTE')
             ->assertSee('Catalogo de parada');
+    }
+
+    private function grantWorkerScope(array $session, Personal $worker): void
+    {
+        $mine = Mina::query()->create(['id' => (string) Str::uuid(), 'nombre' => 'MINA TEST '.Str::uuid(), 'unidad_minera' => 'UM TEST']);
+        PersonalMina::query()->create(['id' => (string) Str::uuid(), 'personal_id' => $worker->id, 'mina_id' => $mine->id, 'estado' => 'EN_PROCESO', 'activo' => true]);
+        DB::table('usuario_mina_scope')->insert(['id' => (string) Str::uuid(), 'usuario_id' => $session['user_id'], 'mina_id' => $mine->id]);
     }
 
     private function sessionWithEppPermissions(): array

@@ -1,47 +1,47 @@
 <?php
 
-use App\Modules\Auth\Controllers\LoginPageController;
-use App\Modules\Evaluaciones\Controllers\EvaluacionDesempenoPageController;
-use App\Modules\Evaluaciones\Controllers\EvaluacionesHistoricalImportPageController;
-use App\Modules\Personal\Controllers\PersonalPageController;
-use App\Modules\Personal\Controllers\PersonalImportController;
-use App\Modules\Personal\Controllers\PersonalDocumentoController;
-use App\Modules\Personal\Controllers\PersonalFichaController;
-use App\Modules\Personal\Controllers\PersonalIngresoController;
-use App\Modules\Personal\Controllers\PersonalContratoController;
-use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
-use App\Modules\Personal\Controllers\PersonalContratoDatoController;
-use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
-use App\Modules\Personal\Controllers\PersonalRegularizationController;
-use App\Modules\Personal\Controllers\PersonalPuestoController;
-use App\Modules\Personal\Controllers\PublicPersonalFichaController;
-use App\Modules\Personal\Controllers\PublicPersonalIngresoController;
-use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
-use App\Modules\Bienestar\Controllers\BienestarPageController;
-use App\Modules\ManPower\Controllers\ManPowerPageController;
-use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
-use App\Modules\Epps\Controllers\EppPageController;
-use App\Modules\Epps\Controllers\EppInventoryPageController;
-use App\Modules\Epps\Controllers\EppOperationPageController;
-use App\Modules\Epps\Controllers\EppEvidenceController;
-use App\Modules\Logistica\Controllers\LogisticaPageController;
-use App\Modules\Transporte\Controllers\TransportePageController;
-use App\Modules\RQMina\Controllers\RQMinaPageController;
-use App\Modules\RQMina\Controllers\ParadaDashboardController;
-use App\Modules\RQMina\Controllers\RQMinaPlanController;
-use App\Modules\RQProserge\Controllers\RQProsergePageController;
 use App\Modules\Asistencia\Controllers\AsistenciaPageController;
-use App\Modules\Faltas\Controllers\FaltasPageController;
-use App\Modules\Seguridad\Controllers\UsuarioPageController;
-use App\Modules\Seguridad\Controllers\RolPageController;
-use App\Modules\Seguridad\Controllers\PermisoPageController;
+use App\Modules\Auth\Controllers\LoginPageController;
+use App\Modules\Bienestar\Controllers\BienestarPageController;
 use App\Modules\Catalogos\Controllers\CatalogoHubController;
 use App\Modules\Catalogos\Controllers\MinaPageController;
-use App\Modules\Catalogos\Controllers\TallerPageController;
 use App\Modules\Catalogos\Controllers\OficinaPageController;
 use App\Modules\Catalogos\Controllers\ParaderoPageController;
-use App\Modules\Perfil\Controllers\PerfilPageController;
+use App\Modules\Catalogos\Controllers\TallerPageController;
+use App\Modules\Epps\Controllers\EppEvidenceController;
+use App\Modules\Epps\Controllers\EppInventoryPageController;
+use App\Modules\Epps\Controllers\EppOperationPageController;
+use App\Modules\Epps\Controllers\EppPageController;
+use App\Modules\Evaluaciones\Controllers\EvaluacionDesempenoPageController;
+use App\Modules\Evaluaciones\Controllers\EvaluacionesHistoricalImportPageController;
+use App\Modules\Faltas\Controllers\FaltasPageController;
+use App\Modules\Logistica\Controllers\LogisticaPageController;
+use App\Modules\ManPower\Controllers\ManPowerPageController;
+use App\Modules\MiAsistencia\Controllers\MiAsistenciaPageController;
 use App\Modules\Notificaciones\Controllers\NotificacionPageController;
+use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
+use App\Modules\Perfil\Controllers\PerfilPageController;
+use App\Modules\Personal\Controllers\PersonalContratoController;
+use App\Modules\Personal\Controllers\PersonalContratoDatoController;
+use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
+use App\Modules\Personal\Controllers\PersonalDocumentoController;
+use App\Modules\Personal\Controllers\PersonalFichaController;
+use App\Modules\Personal\Controllers\PersonalImportController;
+use App\Modules\Personal\Controllers\PersonalIngresoController;
+use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
+use App\Modules\Personal\Controllers\PersonalPageController;
+use App\Modules\Personal\Controllers\PersonalPuestoController;
+use App\Modules\Personal\Controllers\PersonalRegularizationController;
+use App\Modules\Personal\Controllers\PublicPersonalFichaController;
+use App\Modules\Personal\Controllers\PublicPersonalIngresoController;
+use App\Modules\RQMina\Controllers\ParadaDashboardController;
+use App\Modules\RQMina\Controllers\RQMinaPageController;
+use App\Modules\RQMina\Controllers\RQMinaPlanController;
+use App\Modules\RQProserge\Controllers\RQProsergePageController;
+use App\Modules\Seguridad\Controllers\PermisoPageController;
+use App\Modules\Seguridad\Controllers\RolPageController;
+use App\Modules\Seguridad\Controllers\UsuarioPageController;
+use App\Modules\Transporte\Controllers\TransportePageController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/favicon.ico', function () {
@@ -86,6 +86,7 @@ Route::get('/', function () {
     if (session('auth_token')) {
         return redirect()->route('inicio');
     }
+
     return redirect()->route('login');
 })->name('home');
 
@@ -104,7 +105,7 @@ Route::post('/ficha-colaborador/{token}', [PublicPersonalFichaController::class,
 Route::middleware('web.auth')->group(function (): void {
     // Inicio - Home principal
     Route::get('/inicio', [PersonalPageController::class, 'home'])->middleware('web.permission:inicio,ver')->name('inicio');
-    
+
     // Perfil
     Route::get('/perfil', [PerfilPageController::class, 'index'])->middleware('web.permission:perfil,ver')->name('perfil.index');
 
@@ -116,7 +117,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/notificaciones/{recipientId}/leer', [NotificacionPageController::class, 'markRead'])->middleware('web.permission:notificaciones,actualizar')->name('notificaciones.mark-read');
     Route::post('/notificaciones/{recipientId}/archivar', [NotificacionPageController::class, 'archive'])->middleware('web.permission:notificaciones,actualizar')->name('notificaciones.archive');
     Route::get('/notificaciones/{recipientId}/accion', [NotificacionPageController::class, 'openAction'])->middleware('web.permission:notificaciones,ver')->name('notificaciones.action');
-    
+
     // Personal
     Route::get('/personal', [PersonalPageController::class, 'index'])->middleware('web.permission:personal,ver')->name('personal.index');
     Route::get('/personal/api/list', [PersonalPageController::class, 'apiList'])->middleware('web.permission:personal,ver')->name('personal.api.list');
@@ -221,7 +222,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/importar', [PersonalImportController::class, 'showImportForm'])->middleware('web.permission:personal,importar|importar_master_general')->name('personal.importar');
     Route::post('/personal/importar', [PersonalImportController::class, 'import'])->middleware('web.permission:personal,importar|importar_master_general')->name('personal.importar.post');
     Route::get('/personal/{id}', [PersonalPageController::class, 'show'])->middleware('web.permission:personal,ver_detalle')->name('personal.show');
-    
+
     // Mi Asistencia
     Route::get('/mi-asistencia', [MiAsistenciaPageController::class, 'index'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.index');
     Route::get('/mi-asistencia/{id}', [MiAsistenciaPageController::class, 'show'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.show');
@@ -232,7 +233,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/mi-asistencia/{id}/cerrar', [MiAsistenciaPageController::class, 'cerrar'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.cerrar');
     Route::get('/mi-asistencia-mobile', [MiAsistenciaPageController::class, 'mobile'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.mobile');
     Route::post('/mi-asistencia-mobile/{id}/marcar', [MiAsistenciaPageController::class, 'marcarMobile'])->middleware('web.permission:mi_asistencia,ver')->name('mi-asistencia.marcar-mobile');
-    
+
     // Man Power
     Route::get('/man-power', [ManPowerPageController::class, 'index'])->middleware('web.permission:man_power,ver')->name('man-power.index');
     Route::get('/man-power/paradas', [ManPowerPageController::class, 'paradas'])->middleware('web.permission:man_power,ver')->name('man-power.paradas');
@@ -272,6 +273,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/epps/operaciones/{operation}/constancia', [EppEvidenceController::class, 'receipt'])->middleware('web.permission:epps,descargar_constancia')->name('epps.evidence.receipt');
     Route::get('/epps/kardex/verificable/descargar', [EppEvidenceController::class, 'excel'])->middleware('web.permission:epps,ver_evidencia|descargar_constancia')->name('epps.evidence.excel');
     Route::get('/epps/operaciones/nueva', [EppOperationPageController::class, 'create'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.create');
+    Route::get('/epps/entregas/{delivery}/perdida', [EppOperationPageController::class, 'lossForm'])->middleware('web.permission:epps,corregir')->name('epps.deliveries.loss.form');
+    Route::post('/epps/entregas/{delivery}/perdida', [EppOperationPageController::class, 'loss'])->middleware('web.permission:epps,corregir')->name('epps.deliveries.loss');
     Route::get('/epps/legacy/{delivery}/compensar', [EppOperationPageController::class, 'legacyForm'])->middleware('web.permission:epps,corregir|anular')->name('epps.legacy.form');
     Route::post('/epps/legacy/{delivery}/compensar', [EppOperationPageController::class, 'legacyCompensate'])->middleware('web.permission:epps,corregir|anular')->name('epps.legacy.compensate');
     Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.workers');
@@ -374,7 +377,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/evaluaciones/desempeno/comparacion', [EvaluacionDesempenoPageController::class, 'comparacion'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.comparacion');
     Route::get('/evaluaciones/desempeno/{id}', [EvaluacionDesempenoPageController::class, 'show'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.desempeno.show');
     Route::get('/evaluaciones/desempeno/{id}/edit', [EvaluacionDesempenoPageController::class, 'edit'])->middleware('web.permission:evaluaciones,editar')->name('evaluaciones.desempeno.edit');
-    
+
     Route::get('/evaluaciones/supervisor', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_supervisores|evaluar_supervisores')->name('evaluaciones.supervisor');
     Route::get('/evaluaciones/residentes', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_residentes|evaluar_residentes')->name('evaluaciones.residentes');
 

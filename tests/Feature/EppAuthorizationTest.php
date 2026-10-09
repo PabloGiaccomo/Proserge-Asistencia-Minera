@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\EppAlmacen;
+use App\Models\EppEntrega;
+use App\Models\EppExistencia;
 use App\Models\EppOperacion;
 use App\Models\Mina;
 use App\Models\Personal;
@@ -12,6 +14,8 @@ use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
 use App\Modules\Epps\Policies\EppOperationPolicy;
 use App\Modules\Epps\Services\EppScopeService;
+use App\Modules\Epps\Services\EppService;
+use App\Modules\Logistica\Services\LogisticaDashboardService;
 use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -122,6 +126,38 @@ class EppAuthorizationTest extends TestCase
     public function test_malformed_epp_permissions_deny_access(): void
     {
         $this->assertFalse(PermissionMatrix::allowsDirect(['epps' => true], 'epps', 'confirmar_entrega'));
+    }
+
+    public function test_legacy_reads_and_dashboard_never_expose_workers_or_stock_outside_scope(): void
+    {
+        $user = $this->user(['epps' => ['ver'], 'logistica' => ['ver', 'ver_logistica_dashboard']]);
+        $mine = $this->mine();
+        $this->scope($user, $mine);
+        $visible = $this->personal();
+        $hidden = $this->personal();
+        $visible->update(['nombre_completo' => 'SCOPE VISIBLE '.Str::uuid()]);
+        $hidden->update(['nombre_completo' => 'SCOPE OCULTO '.Str::uuid()]);
+        $this->assign($visible, $mine);
+        $otherMine = $this->mine();
+        $this->assign($hidden, $otherMine);
+        $service = app(EppService::class);
+        $epp = $service->storeCatalog(['nombre' => 'SCOPE ARTICULO '.Str::uuid(), 'es_requerido_cobertura' => true]);
+        foreach ([[$mine, $visible, 2], [$otherMine, $hidden, 90]] as [$location, $worker, $stock]) {
+            $warehouse = $this->warehouse($location);
+            EppExistencia::query()->create(['almacen_id' => $warehouse->id, 'epp_id' => $epp->id, 'variante_clave' => 'SIN_VARIANTE', 'cantidad_disponible' => $stock, 'conciliado_at' => now()]);
+            EppEntrega::query()->create(['id' => (string) Str::uuid(), 'personal_id' => $worker->id, 'epp_id' => $epp->id, 'cantidad' => 1, 'fecha_entrega' => today(), 'estado' => 'ENTREGADO', 'politica_devolucion_snapshot' => 'RETORNABLE', 'cantidad_pendiente_devolucion' => 1]);
+        }
+        $this->assertSame([$visible->id], array_column($service->searchPersonal('SCOPE', 15, $user), 'id'));
+        $data = app(LogisticaDashboardService::class)->pageData(['q' => 'SCOPE', 'epps' => [$epp->id]], $user);
+        $this->assertSame(1, $data['metrics']['workers']);
+        $this->assertSame(2, $data['requirements']->first()['stock']);
+        $this->assertSame(1, $service->pageData(['q' => 'SCOPE'], $user)['entregas']->total());
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $user->id, 'user_role' => 'ADMIN'])
+            ->get(route('logistica.index', ['tab' => 'dashboard', 'q' => 'SCOPE', 'epps' => [$epp->id]]))
+            ->assertOk()->assertViewHas('metrics', fn (array $metrics): bool => $metrics['workers'] === 1)
+            ->assertViewHas('requirements', fn ($requirements): bool => $requirements->first()['stock'] === 2);
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $user->id])
+            ->getJson(route('epps.entregas.ultima', ['personal_id' => $hidden->id]))->assertForbidden();
     }
 
     public function test_only_warehouses_in_scope_are_visible(): void

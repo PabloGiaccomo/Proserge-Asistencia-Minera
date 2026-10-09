@@ -62,7 +62,7 @@ Guia: [EPP firma operativa](../../EPP_FIRMA_OPERATIVA.md).
 | Revisar procesados/pendientes | EppOperationService::reviewPayload; operations/review.blade.php |
 | Firmar y confirmar atomico | EppOperationConfirmationService::confirm; EppAcceptanceService::capture |
 | Desacuerdo/negativa | EppOperationService::reject; libera reservas, no entrega |
-| Devolucion y cuarentena | EppReturnService; EppOperationConfirmationService |
+| Devolucion y cuarentena | EppBalanceService; EppOperationService; EppOperationConfirmationService |
 | Compensacion sin borrar | EppCorrectionService::correct/annul |
 | Verificar evidencia | EppEvidenceController::verify; EppAcceptanceService::verify |
 

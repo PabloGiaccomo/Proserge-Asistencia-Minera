@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\EppEntrega;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class EppLegacyBackfillCommand extends Command
@@ -24,29 +25,35 @@ class EppLegacyBackfillCommand extends Command
                 foreach ($deliveries as $delivery) {
                     $counts['scanned']++;
                     try {
-                        $pending = $delivery->estado === EppEntrega::ESTADO_ENTREGADO
-                            ? max(0, (int) $delivery->cantidad)
-                            : 0;
-                        $values = [
-                            'cantidad_original' => max(0, (int) $delivery->cantidad),
-                            'cantidad_pendiente_devolucion' => $pending,
-                            'politica_devolucion_snapshot' => 'RETORNABLE',
-                            'es_legacy' => true,
-                            'estado_integridad' => EppEntrega::INTEGRIDAD_LEGACY,
-                        ];
+                        $updated = DB::transaction(function () use ($delivery, $dryRun): bool {
+                            $delivery = EppEntrega::query()->lockForUpdate()->findOrFail($delivery->id);
+                            if ($delivery->operacion_id !== null || $delivery->cantidad_original !== null) {
+                                return false;
+                            }
+                            $pending = $delivery->estado === EppEntrega::ESTADO_ENTREGADO
+                                ? max(0, (int) $delivery->cantidad)
+                                : 0;
+                            $values = [
+                                'cantidad_original' => max(0, (int) $delivery->cantidad),
+                                'cantidad_pendiente_devolucion' => $pending,
+                                'politica_devolucion_snapshot' => 'RETORNABLE',
+                                'es_legacy' => true,
+                                'estado_integridad' => EppEntrega::INTEGRIDAD_LEGACY,
+                            ];
 
-                        $dirty = collect($values)->contains(
-                            fn ($value, $column): bool => $delivery->getAttribute($column) !== $value
-                        );
-                        if (! $dirty) {
-                            $counts['skipped']++;
+                            $dirty = collect($values)->contains(
+                                fn ($value, $column): bool => $delivery->getAttribute($column) !== $value
+                            );
+                            if (! $dirty) {
+                                return false;
+                            }
+                            if (! $dryRun) {
+                                $delivery->forceFill($values)->save();
+                            }
 
-                            continue;
-                        }
-                        if (! $dryRun) {
-                            $delivery->forceFill($values)->save();
-                        }
-                        $counts['updated']++;
+                            return true;
+                        });
+                        $counts[$updated ? 'updated' : 'skipped']++;
                     } catch (Throwable $exception) {
                         $counts['errors']++;
                         $this->error('No se pudo procesar la entrega '.$delivery->id.': '.$exception->getMessage());

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\EppAceptacion;
 use App\Models\EppAlmacen;
 use App\Models\EppEntrega;
 use App\Models\EppExistencia;
@@ -33,7 +34,15 @@ $operation->setRelation('personal', $worker)->setRelation('almacen', $warehouse)
 $line = ['epp_id' => $substitute->id, 'requested_epp_id' => $product->id, 'processed_quantity' => 5, 'pending_quantity' => 5, 'requested_quantity' => 10, 'return_policy' => 'RETORNABLE', 'attributes' => ['TALLA' => 'M'], 'reason' => 'Articulo equivalente revisado', 'snapshot' => ['real' => ['nombre' => $substitute->nombre], 'solicitado' => ['nombre' => $product->nombre], 'disponibilidad' => 'CONCILIADO']];
 $payload = ['worker' => ['id' => $worker->id, 'name' => $worker->nombre_completo, 'document' => $worker->dni], 'warehouse' => ['name' => $warehouse->nombre], 'details' => [$line], 'pending' => [$line], 'rejected' => []];
 $mode = $argv[1] ?? 'review';
-if ($mode === 'dashboard') {
+if ($mode === 'loss') {
+    $delivery = new EppEntrega(['id' => $id(11), 'cantidad_pendiente_devolucion' => 5]);
+    $delivery->setRelation('personal', $worker)->setRelation('epp', $product);
+    echo view('epps.operations.loss', compact('delivery'))->render();
+} elseif ($mode === 'verify') {
+    $acceptance = new EppAceptacion(['codigo_verificacion' => 'TEST-CODE', 'contenido_json' => $payload, 'firmante_nombre' => 'TRABAJADOR DE PRUEBA', 'tipo_firmante' => 'TRABAJADOR', 'firmado_at' => now(), 'zona_horaria' => 'America/Lima']);
+    $operation->setRelation('operacionesCompensatorias', collect());
+    echo view('epps.operations.verify', ['operation' => $operation, 'acceptance' => $acceptance, 'verification' => ['valid' => true]])->render();
+} elseif ($mode === 'dashboard') {
     $data = app(LogisticaDashboardService::class)->pageData(['q' => 'BROWSER-ISOLATED-NONEXISTENT']);
     $data['coverageByItem'] = collect(range(1, 9))->map(fn ($n) => ['nombre' => 'PROTECCION '.$n, 'requerido' => 1, 'entregado' => 0, 'pendiente' => 1, 'coverage_pct' => 0]);
     $data['missingHeatmap'] = collect([['mina' => 'MINA DE PRUEBA', 'cells' => array_fill(0, 9, ['tone' => 'low', 'value' => 1])]]);

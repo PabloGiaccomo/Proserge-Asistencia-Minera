@@ -10,7 +10,7 @@ El operador necesita `preparar_entrega` y quien confirma `confirmar_entrega`. La
 
 ## Devolver y compensar
 
-Usar **Devolucion multiple con firma**, seleccionar saldos retornables positivos, cantidades y condicion. Bueno retorna a disponible; danado/desgastado/incompleto va a cuarentena. Los consumibles tienen historial sin saldo retornable ni pendiente al cese. Una perdida se registra por `EppReturnService::registerLoss` con motivo y UUID idempotente; no simula una devolucion.
+Usar **Devolucion multiple con firma**, seleccionar saldos retornables positivos, cantidades y condicion. Bueno retorna a disponible; danado/desgastado/incompleto va a cuarentena. Los consumibles tienen historial sin saldo retornable ni pendiente al cese. En una entrega firmada con saldo, **Registrar perdida** abre GET `/epps/entregas/{delivery}/perdida`; POST en la misma ruta requiere permiso `corregir`, motivo y UUID idempotente. `EppBalanceService::markLoss` reduce responsabilidad sin simular una devolucion ni aumentar inventario. Para legado sin almacen origen, regularizar primero la trazabilidad; no inventar un almacen para registrar una perdida.
 
 Firmados y legacy no admiten edicion ni borrado fisico desde web. Las rutas individuales antiguas devuelven 409. Las operaciones firmadas se corrigen o anulan desde su resultado con permiso directo `corregir`/`anular` y motivo; `EppCorrectionService` genera operaciones enlazadas y movimientos compensatorios, conservando la firma original. Una compensacion administrativa no recibe automaticamente la firma del trabajador: consultar su operacion origen.
 
@@ -41,3 +41,12 @@ La cobertura usa `es_requerido_cobertura` configurado en Identificacion, no seis
 7. Ante incidencia, detener nuevas escrituras y conservar base/archivos/eventos. Restaurar codigo anterior solo con evaluacion de compatibilidad; no ejecutar down ni borrar evidencia. Una restauracion de datos exige backup y reconciliar movimientos posteriores.
 
 El ensayo de despliegue debe realizarse exclusivamente en una copia aislada; las pruebas automatizadas usan `proserge_app_test`.
+
+## Controles de cierre de revision
+
+- Busqueda, ultimas entregas, listado, dashboard, kardex y descargas aplican el alcance vigente del usuario obtenido de MySQL. El kardex omite operaciones de almacenes ajenos sin bloquear las operaciones permitidas del mismo trabajador.
+- Correccion, anulacion y compensacion legacy requieren un `submission_uuid` estable del formulario. Repetir la misma solicitud devuelve la operacion existente; reutilizarlo con otro contenido se rechaza. Seleccionar solo las lineas a compensar: cero significa no seleccionada y los limites reflejan compensaciones anteriores.
+- Las devoluciones conservan la existencia de recepcion. Para evidencia anterior sin ese identificador, la compensacion resuelve el movimiento original sin reescribir el documento firmado.
+- PDF, verificacion y Excel usan nombres y atributos del resumen firmado, incluidos pendientes, rechazados y condicion/destino de devolucion. Las celdas exportadas son texto literal, incluso si el catalogo empieza con un signo de formula.
+- Repetir el backfill no restablece saldos legacy ya reducidos. Revisar sus contadores antes y despues de ejecutarlo.
+- La cobertura incluye consumibles entregados aunque su saldo retornable sea cero. **Pendientes registrados en lotes** suma el pendiente original firmado: no es demanda neta actual ni se descuenta automaticamente por una entrega posterior. El cumplimiento posterior requiere enlace y conciliacion operativa explicita.

@@ -9,6 +9,7 @@ use App\Models\Personal;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
 use App\Modules\Personal\Resources\PersonalIndexResource;
+use App\Support\Rbac\MinaScopeAccess;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -68,7 +69,7 @@ class EppService
         ['side' => 'posterior', 'label' => 'Guantes dielectricos', 'keywords' => ['GUANTE DIELECTRICO', 'GUANTES DIELECTRICOS']],
     ];
 
-    public function pageData(array $filters = []): array
+    public function pageData(array $filters = [], ?Usuario $actor = null): array
     {
         $search = trim((string) ($filters['q'] ?? ''));
         $estado = strtoupper(trim((string) ($filters['estado'] ?? '')));
@@ -85,10 +86,12 @@ class EppService
             ->orderBy('nombre')
             ->get();
         $minas = Mina::query()
+            ->when($actor && ! MinaScopeAccess::isPrivileged($actor), fn ($query) => $query->whereIn('id', $actor->scopesMina()->select('mina_id')))
             ->orderBy('nombre')
             ->get(['id', 'nombre']);
 
         $entregas = EppEntrega::query()
+            ->when($actor, fn ($query) => app(EppScopeService::class)->scopeDeliveries($query, $actor))
             ->with([
                 'personal:id,nombre_completo,dni,numero_documento,puesto,estado',
                 'personal.relacionesMina:id,personal_id,mina_id,activo',
@@ -175,7 +178,7 @@ class EppService
         ];
     }
 
-    public function searchPersonal(string $query, int $limit = 15): array
+    public function searchPersonal(string $query, int $limit = 15, ?Usuario $actor = null): array
     {
         $query = trim($query);
 
@@ -197,6 +200,7 @@ class EppService
         $exactId = $terms->count() === 1 ? $terms->first() : null;
 
         return Personal::query()
+            ->when($actor, fn ($query) => app(EppScopeService::class)->scopeWorkers($query, $actor))
             ->with([
                 'puestoCatalogo:id,nombre',
                 'contratoDatos',
@@ -310,7 +314,7 @@ class EppService
         }
     }
 
-    public function lastDeliverySummary(string $personalId, string $eppId = ''): ?array
+    public function lastDeliverySummary(string $personalId, string $eppId = '', ?Usuario $actor = null): ?array
     {
         $personalId = trim($personalId);
         $eppId = trim($eppId);
@@ -319,7 +323,11 @@ class EppService
             return null;
         }
 
+        if ($actor) {
+            app(EppScopeService::class)->assertPersonalAccess($actor, Personal::query()->findOrFail($personalId));
+        }
         $entrega = EppEntrega::query()
+            ->when($actor, fn ($query) => app(EppScopeService::class)->scopeDeliveries($query, $actor))
             ->with([
                 'personal:id,nombre_completo,dni,numero_documento,puesto',
                 'epp:id,codigo,nombre,vida_util_dias',
@@ -389,13 +397,16 @@ class EppService
         };
     }
 
-    public function personalKardex(string $personalId): array
+    public function personalKardex(string $personalId, ?Usuario $actor = null): array
     {
         $personal = Personal::query()
             ->with(['relacionesMina.mina:id,nombre'])
             ->findOrFail($personalId);
 
-        $rows = $this->kardexDeliveries($personal->id)
+        if ($actor) {
+            app(EppScopeService::class)->assertPersonalAccess($actor, $personal);
+        }
+        $rows = $this->kardexDeliveries($personal->id, $actor)
             ->map(fn (EppEntrega $entrega): array => $this->presentKardexEntrega($entrega))
             ->values();
         $matrix = $this->buildKardexMatrix($rows);
@@ -441,9 +452,9 @@ class EppService
         ];
     }
 
-    public function downloadPersonalKardex(string $personalId): StreamedResponse
+    public function downloadPersonalKardex(string $personalId, ?Usuario $actor = null): StreamedResponse
     {
-        $data = $this->personalKardex($personalId);
+        $data = $this->personalKardex($personalId, $actor);
         $worker = $data['worker'];
         $rows = collect($data['items'])
             ->sortBy([
@@ -782,9 +793,10 @@ class EppService
         ];
     }
 
-    private function kardexDeliveries(string $personalId)
+    private function kardexDeliveries(string $personalId, ?Usuario $actor = null)
     {
         return EppEntrega::query()
+            ->when($actor, fn ($query) => app(EppScopeService::class)->scopeDeliveries($query, $actor))
             ->with([
                 'personal:id,nombre_completo,dni,numero_documento,puesto,estado',
                 'epp:id,codigo,nombre,categoria,vida_util_dias',

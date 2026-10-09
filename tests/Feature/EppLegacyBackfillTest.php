@@ -57,6 +57,16 @@ class EppLegacyBackfillTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_rerunning_backfill_never_reopens_a_reduced_legacy_balance(): void
+    {
+        $delivery = $this->legacyDelivery(EppEntrega::ESTADO_ENTREGADO, 4);
+        $this->artisan('epp:backfill-legacy-traceability')->assertSuccessful();
+        $delivery->refresh()->update(['cantidad_pendiente_devolucion' => 2]);
+        $this->artisan('epp:backfill-legacy-traceability')->assertSuccessful();
+        $this->assertSame(2, $delivery->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(4, $delivery->fresh()->cantidad_original);
+    }
+
     private function legacyDelivery(string $state, int $quantity): EppEntrega
     {
         $worker = Personal::query()->create([

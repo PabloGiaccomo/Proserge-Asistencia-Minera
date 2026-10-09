@@ -19,7 +19,7 @@ class EppCorrectionService
 {
     private const MAX_QUANTITY = 4294967295;
 
-    public function compensateLegacy(EppEntrega $delivery, EppAlmacen $warehouse, int $quantity, Usuario $actor, string $reason, bool $annul = false): EppOperacion
+    public function compensateLegacy(EppEntrega $delivery, EppAlmacen $warehouse, int $quantity, Usuario $actor, string $reason, bool $annul, string $submissionUuid): EppOperacion
     {
         $reason = trim($reason);
         if ($reason === '' || mb_strlen($reason) > 1000 || $quantity < 1) {
@@ -27,9 +27,13 @@ class EppCorrectionService
         }
         $context = new EppOperacion(['almacen_id' => $warehouse->id, 'personal_id' => $delivery->personal_id]);
         Gate::forUser($actor)->authorize($annul ? 'cancel' : 'correct', $context);
+        $fingerprint = $this->fingerprint($submissionUuid, [$delivery->id, $warehouse->id, $quantity, $actor->id, $reason, $annul]);
 
-        return DB::transaction(function () use ($delivery, $warehouse, $quantity, $actor, $reason, $annul): EppOperacion {
+        return DB::transaction(function () use ($delivery, $warehouse, $quantity, $actor, $reason, $annul, $submissionUuid, $fingerprint): EppOperacion {
             $source = EppEntrega::query()->lockForUpdate()->findOrFail($delivery->id);
+            if ($existing = $this->replay($submissionUuid, $fingerprint)) {
+                return $existing;
+            }
             if ($source->operacion_id !== null || ! $source->es_legacy || $source->politica_devolucion_snapshot !== 'RETORNABLE'
                 || $quantity > $source->cantidad_pendiente_devolucion
                 || ($annul && $quantity !== $source->cantidad_pendiente_devolucion)) {
@@ -37,9 +41,9 @@ class EppCorrectionService
             }
             $operation = EppOperacion::query()->create([
                 'personal_id' => $source->personal_id, 'almacen_id' => $warehouse->id, 'mina_id' => $warehouse->mina_id,
-                'tipo' => $annul ? 'ANULACION' : 'CORRECCION', 'estado' => 'FIRMADO', 'submission_uuid' => (string) Str::uuid(),
+                'tipo' => $annul ? 'ANULACION' : 'CORRECCION', 'estado' => 'FIRMADO', 'submission_uuid' => $submissionUuid,
                 'registrado_por_usuario_id' => $actor->id, 'confirmado_por_usuario_id' => $actor->id, 'motivo' => $reason,
-                'resumen_json' => ['legacy_delivery_id' => $source->id, 'inventory_effect' => 'NINGUNO_ORIGEN_NO_CONCILIADO'],
+                'resumen_json' => ['legacy_delivery_id' => $source->id, 'inventory_effect' => 'NINGUNO_ORIGEN_NO_CONCILIADO', 'request_sha256' => $fingerprint],
             ]);
             $operation->detalles()->create([
                 'epp_solicitado_id' => $source->epp_id, 'epp_id' => $source->epp_id, 'entrega_origen_id' => $source->id,
@@ -56,10 +60,10 @@ class EppCorrectionService
 
     public function correct(EppOperacion $operation, array $payload, Usuario $actor, string $reason): EppOperacion
     {
-        return $this->compensate($operation, $payload['lines'] ?? [], $actor, $reason, EppOperacion::TIPO_CORRECCION);
+        return $this->compensate($operation, $payload['lines'] ?? [], $actor, $reason, EppOperacion::TIPO_CORRECCION, $payload['submission_uuid'] ?? '');
     }
 
-    public function annul(EppOperacion $operation, Usuario $actor, string $reason): EppOperacion
+    public function annul(EppOperacion $operation, Usuario $actor, string $reason, string $submissionUuid): EppOperacion
     {
         $operation = EppOperacion::query()->with('detalles')->findOrFail($operation->id);
         $lines = $operation->detalles->map(fn (EppOperacionDetalle $detail): array => [
@@ -67,28 +71,28 @@ class EppCorrectionService
             'cantidad' => $this->remainingReversibleQuantity($operation, $detail),
         ])->filter(fn (array $line): bool => $line['cantidad'] > 0)->values()->all();
 
-        if ($lines === []) {
-            throw new InvalidArgumentException('La operacion ya no tiene cantidades que puedan anularse.');
-        }
-
-        return $this->compensate($operation, $lines, $actor, $reason, EppOperacion::TIPO_ANULACION);
+        return $this->compensate($operation, $lines, $actor, $reason, EppOperacion::TIPO_ANULACION, $submissionUuid);
     }
 
-    private function compensate(EppOperacion $operation, array $lines, Usuario $actor, string $reason, string $type): EppOperacion
+    private function compensate(EppOperacion $operation, array $lines, Usuario $actor, string $reason, string $type, string $submissionUuid): EppOperacion
     {
         $reason = trim($reason);
         if ($reason === '' || mb_strlen($reason) > 1000) {
             throw new InvalidArgumentException('Indica un motivo de hasta 1000 caracteres.');
         }
         Gate::forUser($actor)->authorize($type === EppOperacion::TIPO_ANULACION ? 'cancel' : 'correct', $operation);
+        $fingerprint = $this->fingerprint($submissionUuid, [$operation->id, $actor->id, $reason, $type, $type === EppOperacion::TIPO_ANULACION ? [] : $this->normalizeLines($lines)->sortKeys()->all()]);
 
-        return DB::transaction(function () use ($operation, $lines, $actor, $reason, $type): EppOperacion {
+        return DB::transaction(function () use ($operation, $lines, $actor, $reason, $type, $submissionUuid, $fingerprint): EppOperacion {
             $source = EppOperacion::query()->lockForUpdate()->findOrFail($operation->id);
             if (! in_array($source->tipo, [EppOperacion::TIPO_ENTREGA, EppOperacion::TIPO_DEVOLUCION], true)
                 || ! in_array($source->estado, [EppOperacion::ESTADO_FIRMADO, EppOperacion::ESTADO_FIRMADO_PARCIAL], true)) {
                 throw new InvalidArgumentException('Solo una entrega o devolucion firmada puede corregirse o anularse.');
             }
             Gate::forUser($actor)->authorize($type === EppOperacion::TIPO_ANULACION ? 'cancel' : 'correct', $source);
+            if ($existing = $this->replay($submissionUuid, $fingerprint)) {
+                return $existing;
+            }
             EppAlmacen::query()->lockForUpdate()->findOrFail($source->almacen_id);
             if ($type === EppOperacion::TIPO_ANULACION && EppOperacion::query()->where('operacion_origen_id', $source->id)->where('tipo', EppOperacion::TIPO_ANULACION)->lockForUpdate()->exists()) {
                 throw new InvalidArgumentException('La operacion ya tiene una anulacion compensatoria.');
@@ -106,13 +110,13 @@ class EppCorrectionService
                 'mina_id' => $source->mina_id,
                 'tipo' => $type,
                 'estado' => EppOperacion::ESTADO_FIRMADO,
-                'submission_uuid' => (string) Str::uuid(),
+                'submission_uuid' => $submissionUuid,
                 'operacion_origen_id' => $source->id,
                 'registrado_por_usuario_id' => $actor->id,
                 'confirmado_por_usuario_id' => $actor->id,
                 'firmado_at' => now(),
                 'motivo' => $reason,
-                'resumen_json' => ['operation_origin_id' => $source->id, 'type' => $type, 'reason' => $reason],
+                'resumen_json' => ['operation_origin_id' => $source->id, 'type' => $type, 'reason' => $reason, 'request_sha256' => $fingerprint],
             ]);
 
             foreach ($normalized as $sourceDetailId => $quantity) {
@@ -144,6 +148,25 @@ class EppCorrectionService
         }, 3);
     }
 
+    private function fingerprint(string $uuid, array $data): string
+    {
+        if (! Str::isUuid($uuid)) {
+            throw new InvalidArgumentException('La compensacion requiere un UUID de solicitud estable.');
+        }
+
+        return hash('sha256', json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    private function replay(string $uuid, string $fingerprint): ?EppOperacion
+    {
+        $existing = EppOperacion::query()->where('submission_uuid', $uuid)->first();
+        if ($existing && ! hash_equals((string) data_get($existing->resumen_json, 'request_sha256'), $fingerprint)) {
+            throw new InvalidArgumentException('El UUID pertenece a otra solicitud de compensacion.');
+        }
+
+        return $existing?->load('detalles');
+    }
+
     private function normalizeLines(array $lines): Collection
     {
         return collect($lines)->groupBy('detalle_origen_id')->map(function (Collection $group): int {
@@ -173,6 +196,11 @@ class EppCorrectionService
         }
 
         return max(0, $detail->cantidad_procesada - (int) $already);
+    }
+
+    public function reversibleQuantities(EppOperacion $operation): array
+    {
+        return $operation->detalles->mapWithKeys(fn ($detail) => [$detail->id => $this->remainingReversibleQuantity($operation, $detail)])->all();
     }
 
     private function reverseDelivery(EppOperacion $source, EppOperacionDetalle $detail, int $quantity, EppOperacion $compensation, Usuario $actor, string $reason): void
@@ -214,7 +242,9 @@ class EppCorrectionService
         if (! $sourceDetail->control_inventario_snapshot) {
             return;
         }
-        $existence = EppExistencia::query()->lockForUpdate()->findOrFail($sourceDetail->existencia_id);
+        $existenceId = $sourceDetail->existencia_id ?: EppInventarioMovimiento::query()->where('operacion_id', $sourceDetail->operacion_id)->where('operacion_detalle_id', $sourceDetail->id)->where('tipo', 'DEVOLUCION')->value('existencia_id');
+        $existence = EppExistencia::query()->lockForUpdate()->findOrFail($existenceId);
+        $compensationDetail->update(['existencia_id' => $existence->id]);
         $column = $destination === 'CUARENTENA' ? 'cantidad_cuarentena' : 'cantidad_disponible';
         $before = (int) $existence->$column;
         $after = $before + ($direction * $quantity);

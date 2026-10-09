@@ -38,6 +38,18 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame('STOCK_NO_CONCILIADO', $data['stockRows']->first()['estado']);
     }
 
+    public function test_required_consumable_with_consumed_state_counts_for_coverage(): void
+    {
+        $worker = $this->createPersonal('ACTIVO', 'CONSUMIBLE COBERTURA '.Str::uuid());
+        $epp = $this->createEpp('CONSUMIBLE REQUERIDO '.Str::uuid());
+        DB::table('epp_registro')->where('id', $epp)->update(['es_requerido_cobertura' => true, 'politica_devolucion' => 'CONSUMIBLE']);
+        $delivery = $this->createDelivery($worker, $epp, today()->toDateString(), today()->addMonth()->toDateString());
+        EppEntrega::query()->where('personal_id', $worker->id)->update(['estado' => 'CONSUMIDO', 'politica_devolucion_snapshot' => 'CONSUMIBLE', 'cantidad_pendiente_devolucion' => 0]);
+        $data = app(LogisticaDashboardService::class)->pageData(['q' => $worker->nombre_completo, 'epps' => [$epp]]);
+        $this->assertSame(1, $data['metrics']['delivered_epp']);
+        $this->assertSame(0, $data['metrics']['pending_epp']);
+    }
+
     public function test_dashboard_uses_reconciled_stock_and_positive_return_balances(): void
     {
         $worker = $this->createPersonal('ACTIVO', 'SALDO CONFIGURADO '.Str::random(6));

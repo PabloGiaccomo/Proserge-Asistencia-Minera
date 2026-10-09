@@ -25,9 +25,7 @@ class LogisticaPageController extends WebPageController
         private readonly LogisticaDashboardService $service,
         private readonly EppService $eppService,
         private readonly ParadaHerramientaService $herramientaService
-    )
-    {
-    }
+    ) {}
 
     public function index(Request $request): View
     {
@@ -37,6 +35,7 @@ class LogisticaPageController extends WebPageController
         $canViewEpps = PermissionMatrix::allows($permissions, 'epps', 'ver');
         $canViewHerramientas = PermissionMatrix::allows($permissions, 'herramientas', 'ver');
         $canViewServicios = PermissionMatrix::allowsDirect($permissions, 'logistica', 'ver_logistica_servicios');
+        $eppActor = $canViewEpps ? Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id')) : null;
 
         if (! $canAccessLogistica && ! $canViewEpps && ! $canViewHerramientas) {
             abort(403, 'No tienes permiso para ver Logistica.');
@@ -50,7 +49,7 @@ class LogisticaPageController extends WebPageController
         // Servicios y alquileres no depende del permiso de EPP: se arma un
         // contexto minimo con paradas y requerimientos de transporte.
         $data = match (true) {
-            $canViewEpps => $this->service->pageData($query),
+            $canViewEpps => $this->service->pageData($query, $eppActor),
             $canViewServicios || $canViewHerramientas => $this->service->serviciosPageData($query),
             default => [
                 'activeTab' => 'herramientas',
@@ -74,7 +73,7 @@ class LogisticaPageController extends WebPageController
                 'fecha_desde' => $request->query('fecha_desde'),
                 'fecha_hasta' => $request->query('fecha_hasta'),
                 'per_page' => $request->query('per_page'),
-            ]);
+            ], $eppActor);
             $data['eppModule']['workerFilterChip'] = $this->workerFilterChip($workerSearch);
         }
 
@@ -133,7 +132,7 @@ class LogisticaPageController extends WebPageController
 
         $data = $validated;
         unset($data['doc_vehiculo'], $data['doc_proserge'], $data['doc_mantenimiento'], $data['doc_checklist'], $data['documentos']);
-        $directory = 'logistica/transportes/' . $id;
+        $directory = 'logistica/transportes/'.$id;
         $uploadedDocs = [];
         $documentTypes = [
             'doc_vehiculo' => 'Documentacion del vehiculo',
@@ -153,11 +152,11 @@ class LogisticaPageController extends WebPageController
                     continue;
                 }
 
-                $filename = $field . '_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
+                $filename = $field.'_'.Str::random(8).'.'.$file->getClientOriginalExtension();
                 $path = $file->storeAs($directory, $filename, 'local');
 
                 if ($index === 0) {
-                    $data[$field . '_path'] = $path;
+                    $data[$field.'_path'] = $path;
                 }
 
                 $uploadedDocs[] = [
@@ -175,13 +174,13 @@ class LogisticaPageController extends WebPageController
         if (is_array($additionalFiles)) {
             foreach ($additionalFiles as $index => $docFiles) {
                 $file = is_array($docFiles) ? ($docFiles['archivo'] ?? null) : $docFiles;
-                $nombre = trim((string) ($request->input('documentos.' . $index . '.nombre', '')));
+                $nombre = trim((string) ($request->input('documentos.'.$index.'.nombre', '')));
 
                 if (! $file || ! $file->isValid() || $nombre === '') {
                     continue;
                 }
 
-                $filename = 'doc_' . Str::slug($nombre) . '_' . Str::random(6) . '.' . $file->getClientOriginalExtension();
+                $filename = 'doc_'.Str::slug($nombre).'_'.Str::random(6).'.'.$file->getClientOriginalExtension();
                 $path = $file->storeAs($directory, $filename, 'local');
                 $uploadedDocs[] = [
                     'tipo' => 'adicional',

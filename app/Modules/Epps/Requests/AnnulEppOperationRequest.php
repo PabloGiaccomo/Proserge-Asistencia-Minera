@@ -13,6 +13,6 @@ class AnnulEppOperationRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['motivo' => ['required', 'string', 'max:1000']];
+        return ['submission_uuid' => ['required', 'uuid'], 'motivo' => ['required', 'string', 'max:1000']];
     }
 }

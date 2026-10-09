@@ -30,10 +30,13 @@
                     <summary>Registrar correccion compensatoria</summary>
                     <form method="POST" action="{{ route('epps.operations.correct', $operation) }}">
                         @csrf
-                        @foreach($operation->detalles as $index => $detail)
+                        <input type="hidden" name="submission_uuid" value="{{ old('submission_uuid', (string) \Illuminate\Support\Str::uuid()) }}">
+                        <p>Indica 0 en las lineas que no necesitan correccion.</p>
+                        @foreach($operation->detalles->where('cantidad_procesada', '>', 0) as $index => $detail)
+                            @continue(($correctionLimits[$detail->id] ?? 0) <= 0)
                             <input type="hidden" name="lines[{{ $index }}][detalle_origen_id]" value="{{ $detail->id }}">
                             <label>{{ data_get($detail->snapshot_json, 'real.nombre', 'EPP') }}: cantidad a compensar
-                                <input type="number" name="lines[{{ $index }}][cantidad]" min="1" max="{{ $detail->cantidad_procesada }}" value="{{ $detail->cantidad_procesada }}" required>
+                                <input type="number" name="lines[{{ $index }}][cantidad]" min="0" max="{{ $correctionLimits[$detail->id] }}" value="0" required>
                             </label>
                         @endforeach
                         <label>Motivo <textarea name="motivo" maxlength="1000" required></textarea></label>
@@ -44,6 +47,7 @@
             @allowed('epps', 'anular')
                 <form method="POST" action="{{ route('epps.operations.annul', $operation) }}">
                     @csrf
+                    <input type="hidden" name="submission_uuid" value="{{ old('submission_uuid', (string) \Illuminate\Support\Str::uuid()) }}">
                     <label>Motivo de anulacion <textarea name="motivo" maxlength="1000" required></textarea></label>
                     <button type="submit" class="epp-operation-button">Anular mediante compensacion</button>
                 </form>

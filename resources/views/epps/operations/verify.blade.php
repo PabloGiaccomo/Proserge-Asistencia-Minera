@@ -10,7 +10,7 @@
 <p>Firmante: {{ $acceptance->firmante_nombre }} — {{ $acceptance->tipo_firmante }}</p>
 <p>Fecha: {{ $acceptance->firmado_at }} {{ $acceptance->zona_horaria }}</p>
 @unless($verification['valid'])<p role="alert">La evidencia requiere revision. No repitas la operacion para corregir esta alerta.</p>@endunless
-@foreach(data_get($acceptance->contenido_json, 'details', []) as $detail)<p>{{ data_get($detail, 'snapshot.real.nombre', $detail['epp_name'] ?? 'EPP') }}: {{ $detail['processed_quantity'] }} unidades procesadas; {{ $detail['pending_quantity'] ?? 0 }} pendientes.</p>@endforeach
+<div style="overflow-x:auto"><div style="min-width:640px">@include('epps.operations.evidence-lines', ['payload' => $acceptance->contenido_json])</div></div>
 @foreach($operation->operacionesCompensatorias as $correction)<p>{{ $correction->tipo }}: {{ $correction->id }} — {{ $correction->motivo }}</p>@endforeach
 @allowed('epps', 'descargar_constancia')<a class="epp-operation-button" href="{{ route('epps.evidence.receipt', $operation) }}">Descargar constancia PDF</a>@endallowed
 </section></div>

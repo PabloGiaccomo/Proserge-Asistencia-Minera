@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
     try {
         const manifest = JSON.parse(fs.readFileSync('public/build/manifest.json', 'utf8'));
-        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'dashboard', 'personal-public', 'personal-ingreso']) {
+        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'loss', 'verify', 'dashboard', 'personal-public', 'personal-ingreso']) {
             const page = await browser.newPage({ deviceScaleFactor: 2 });
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
@@ -15,13 +15,17 @@ const assert = require('node:assert/strict');
             const html = execFileSync(process.env.PROSERGE_PHP || 'C:/xampp/php/php.exe', ['tests/Browser/render-epp-signed-delivery.php', mode], { encoding: 'utf8' });
             await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().resourceType() === 'document' ? html.replace(/<script\b(?![^>]*application\/json)[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<link\b[^>]*>/gi, '') : '' }));
             await page.goto('http://127.0.0.1:8000/epps/operaciones/prueba');
-            await page.addStyleTag({ path: 'public/css/proserge-app.css' });
+            await page.addStyleTag({ path: 'public/proserge-app.css' });
             await page.addStyleTag({ path: 'public/build/' + manifest['resources/css/app.css'].file });
             await page.addScriptTag({ path: 'public/build/' + manifest['resources/js/app.js'].file });
             await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
             for (const width of mode.startsWith('personal-') ? [] : [320, 375, 390, 430, 1440]) {
                 await page.setViewportSize({ width, height: 1000 });
-                await page.waitForTimeout(80);
+                await page.waitForTimeout(400);
+                if (width <= 430 && mode !== 'dashboard') {
+                    const sidebarRight = await page.locator('#sidebar').evaluate(element => element.getBoundingClientRect().right);
+                    assert.ok(sidebarRight <= 1, `${mode} ${width}: closed sidebar overlaps content (${sidebarRight})`);
+                }
                 const overflow = await page.locator(mode === 'dashboard' ? '[data-dashboard-preview]' : '.epp-operation').evaluate(element => ({ scroll: element.scrollWidth, width: element.clientWidth, page: document.documentElement.scrollWidth, viewport: window.innerWidth }));
                 assert.ok(overflow.scroll <= overflow.width + 1 && overflow.page <= overflow.viewport + 1, `${mode} ${width}: ${JSON.stringify(overflow)}`);
                 fs.mkdirSync('storage/app/testing', { recursive: true });
@@ -30,7 +34,7 @@ const assert = require('node:assert/strict');
             if (mode === 'dashboard') {
                 assert.equal(await page.locator('.lgtx-heat-head span').count(), 10);
                 assert.equal(await page.locator('.lgtx-heat-row span').count(), 9);
-                assert.match(await page.locator('.lgtx-kpis').textContent(), /Unidades pendientes de lotes/);
+                assert.match(await page.locator('.lgtx-kpis').textContent(), /Pendientes registrados en lotes/);
             } else if (mode === 'form') {
                 assert.match(await page.locator('[data-line-availability]').textContent(), /Disponibles: 5/);
                 await page.locator('[data-add-line]').click();
@@ -65,10 +69,16 @@ const assert = require('node:assert/strict');
                     assert.equal(await page.locator('[data-return-quantity]').count(), 0);
                 }
                 await page.setViewportSize({ width: 375, height: 1000 });
+                await page.waitForTimeout(400);
                 const canvas = page.locator('[data-signature-pad]');
                 await canvas.scrollIntoViewIfNeeded();
+                await page.waitForTimeout(100);
                 assert.equal(await canvas.evaluate(element => element.signaturePad.hasInk()), false);
                 const rect = await canvas.boundingBox();
+                assert.equal(await canvas.evaluate(element => {
+                    const box = element.getBoundingClientRect();
+                    return document.elementFromPoint(box.x + 20, box.y + 25) === element;
+                }), true, `${mode}: signature pad must receive pointer input`);
                 await page.mouse.move(rect.x + 20, rect.y + 25);
                 await page.mouse.down();
                 for (let i = 1; i <= 20; i++) await page.mouse.move(rect.x + 20 + i * 8, rect.y + 25 + (i % 4) * 20);

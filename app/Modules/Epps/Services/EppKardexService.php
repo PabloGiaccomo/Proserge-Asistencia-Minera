@@ -11,6 +11,8 @@ use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -29,6 +31,7 @@ class EppKardexService
         $operations = EppOperacion::query()
             ->with(['aceptacion', 'detalles.epp', 'operacionOrigen.aceptacion'])
             ->where('personal_id', $worker->id)
+            ->whereIn('almacen_id', $this->scope->visibleWarehouseIds($viewer))
             ->whereIn('estado', [EppOperacion::ESTADO_FIRMADO, EppOperacion::ESTADO_FIRMADO_PARCIAL])
             ->orderByDesc('firmado_at')->orderByDesc('created_at')->get()
             ->map(function (EppOperacion $operation) use ($viewer): array {
@@ -47,7 +50,11 @@ class EppKardexService
                     'original_operation_id' => $operation->operacion_origen_id,
                     'content_hash' => $acceptance ? Str::limit($acceptance->contenido_sha256, 16, '') : null,
                     'signature_hash' => $acceptance ? Str::limit($acceptance->firma_sha256, 16, '') : null,
-                    'details' => $operation->detalles->map(fn ($detail) => ['epp' => $detail->epp?->nombre ?: data_get($detail->snapshot_json, 'epp_name', 'EPP'), 'processed' => $detail->cantidad_procesada, 'pending' => $detail->cantidad_pendiente])->all(),
+                    'details' => $acceptance ? collect($acceptance->contenido_json['details'] ?? [])
+                        ->concat(collect($acceptance->contenido_json['pending'] ?? [])->filter(fn ($line) => ($line['processed_quantity'] ?? 0) === 0))
+                        ->concat($acceptance->contenido_json['rejected'] ?? [])
+                        ->map(fn ($line) => ['epp' => data_get($line, 'snapshot.real.nombre', data_get($line, 'snapshot.solicitado.nombre', $line['epp_name'] ?? 'EPP')), 'processed' => $line['processed_quantity'] ?? 0, 'pending' => $line['pending_quantity'] ?? 0, 'attributes' => $line['attributes'] ?? [], 'condition' => $line['return_condition'] ?? null, 'destination' => $line['inventory_destination'] ?? null, 'reason' => $line['reason'] ?? null])->all()
+                        : $operation->detalles->map(fn ($detail) => ['epp' => data_get($detail->snapshot_json, 'real.nombre', $detail->epp?->nombre ?: 'EPP'), 'processed' => $detail->cantidad_procesada, 'pending' => $detail->cantidad_pendiente])->all(),
                 ];
             });
 
@@ -78,8 +85,11 @@ class EppKardexService
         $sheet->fromArray(['ID operacion', 'Tipo', 'Estado', 'Estado evidencia', 'Fecha firma', 'Codigo verificacion', 'Operacion origen', 'Detalle'], null, 'A1');
         $row = 2;
         foreach ($data['operations'] as $operation) {
-            $details = collect($operation['details'])->map(fn ($detail) => $detail['epp'].' ('.$detail['processed'].')')->implode('; ');
-            $sheet->fromArray([$operation['id'], $operation['type'], $operation['state'], $operation['evidence_state'], $operation['signed_at'], $operation['verification_code'], $operation['original_operation_id'], $details], null, 'A'.$row++);
+            $details = collect($operation['details'])->map(fn ($detail) => $detail['epp'].' ('.$detail['processed'].') Pendiente: '.($detail['pending'] ?? 0).' '.collect($detail['attributes'] ?? [])->map(fn ($value, $key) => $key.': '.$value)->implode(', ').' '.($detail['condition'] ?? '').' '.($detail['destination'] ?? '').' '.($detail['reason'] ?? ''))->implode('; ');
+            foreach ([$operation['id'], $operation['type'], $operation['state'], $operation['evidence_state'], $operation['signed_at'], $operation['verification_code'], $operation['original_operation_id'], $details] as $index => $value) {
+                $sheet->setCellValueExplicit(Coordinate::stringFromColumnIndex($index + 1).$row, (string) $value, DataType::TYPE_STRING);
+            }
+            $row++;
         }
         $sheet->setCellValue('A'.($row + 1), 'La verificacion del servidor es la fuente autoritativa de integridad.');
         $writer = new Xlsx($sheet->getParent());

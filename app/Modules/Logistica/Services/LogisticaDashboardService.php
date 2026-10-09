@@ -18,7 +18,9 @@ use App\Models\RQMinaActividadTransporte;
 use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
+use App\Modules\Epps\Services\EppScopeService;
 use App\Modules\Epps\Services\EppService;
+use App\Support\Rbac\MinaScopeAccess;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -72,15 +74,32 @@ class LogisticaDashboardService
 
     public function __construct(private readonly EppService $eppService) {}
 
-    public function pageData(array $query): array
+    public function pageData(array $query, ?Usuario $actor = null): array
     {
         $tabs = $this->tabs();
         $filters = $this->filters($query, array_keys($tabs));
         $options = $this->options();
+        if ($actor && ! MinaScopeAccess::isPrivileged($actor)) {
+            $allowed = $actor->scopesMina()->pluck('mina_id')->all();
+            $filters['minas'] = ($filters['minas'] === [] ? $allowed : array_values(array_intersect($filters['minas'], $allowed))) ?: ['00000000-0000-0000-0000-000000000000'];
+            $options['minas'] = $options['minas']->whereIn('id', $allowed)->values();
+            $options['paradas'] = $options['paradas']->whereIn('mina_id', $allowed)->values();
+            $options['cargos'] = collect();
+        }
         $workers = $this->workers($filters);
+        if ($actor && ! MinaScopeAccess::isPrivileged($actor)) {
+            $workers = $workers->filter(fn ($worker) => app(EppScopeService::class)->canAccessPersonal($actor, $worker))->values();
+            foreach ($workers as $worker) {
+                $worker->setRelation('relacionesMina', $worker->relacionesMina->whereIn('mina_id', $allowed)->values());
+            }
+        }
         $catalog = $this->eppCatalog($filters);
         $deliveries = $this->deliveries($workers->pluck('id'), $catalog->pluck('id'), $filters);
-        $activeDeliveries = $deliveries->where('estado', EppEntrega::ESTADO_ENTREGADO)->filter(fn (EppEntrega $delivery): bool => $delivery->politica_devolucion_snapshot === 'CONSUMIBLE' || $delivery->cantidad_pendiente_devolucion > 0);
+        if ($actor) {
+            $visible = app(EppScopeService::class)->scopeDeliveries(EppEntrega::query()->whereIn('id', $deliveries->pluck('id')), $actor)->pluck('id');
+            $deliveries = $deliveries->whereIn('id', $visible)->values();
+        }
+        $activeDeliveries = $deliveries->whereIn('estado', [EppEntrega::ESTADO_ENTREGADO, EppEntrega::ESTADO_CONSUMIDO])->filter(fn (EppEntrega $delivery): bool => $delivery->politica_devolucion_snapshot === 'CONSUMIBLE' || $delivery->cantidad_pendiente_devolucion > 0);
         $trackedCatalog = $this->trackedCatalog($catalog, $filters);
         $workers = $this->filterWorkersByProfile($workers, $filters);
         $activeDeliveries = $activeDeliveries->whereIn('personal_id', $workers->pluck('id')->all());
@@ -114,8 +133,11 @@ class LogisticaDashboardService
         $expiredEpp = $expiringDeliveries->where('estado_visual', 'VENCIDO')->count();
         $habilitatedWorkers = $this->habilitatedWorkersCount($workers, $filters);
         $coveragePct = $requiredEpp > 0 ? round(($deliveredEpp / $requiredEpp) * 100, 1) : 0;
-        $ceasedRows = $this->ceasedEppRows($filters);
+        $ceasedRows = $this->ceasedEppRows($filters, $actor);
         $operationQuery = EppOperacion::query()->whereIn('personal_id', $workers->pluck('id'))->whereIn('estado', ['FIRMADO', 'FIRMADO_PARCIAL']);
+        if ($actor) {
+            $operationQuery->whereIn('almacen_id', app(EppScopeService::class)->visibleWarehouseIds($actor));
+        }
         if ($filters['minas'] !== []) {
             $operationQuery->whereIn('mina_id', $filters['minas']);
         }
@@ -1362,7 +1384,7 @@ class LogisticaDashboardService
             ->values();
     }
 
-    private function ceasedEppRows(array $filters): Collection
+    private function ceasedEppRows(array $filters, ?Usuario $actor = null): Collection
     {
         if (! $this->hasTable('personal') || ! $this->hasTable('epp_entregas')) {
             return collect();
@@ -1404,6 +1426,9 @@ class LogisticaDashboardService
             });
         }
 
+        if ($actor) {
+            app(EppScopeService::class)->scopeWorkers($query, $actor);
+        }
         $workers = $query->orderByDesc('fecha_cese')->orderBy('nombre_completo')->limit(250)->get();
         if ($workers->isEmpty()) {
             return collect();
@@ -1411,6 +1436,7 @@ class LogisticaDashboardService
 
         $deliveries = EppEntrega::query()
             ->with(['epp:id,codigo,nombre', 'registradoPor:id,email'])
+            ->when($actor, fn ($query) => app(EppScopeService::class)->scopeDeliveries($query, $actor))
             ->whereIn('personal_id', $workers->pluck('id')->all())
             ->where('politica_devolucion_snapshot', 'RETORNABLE')
             ->where('cantidad_pendiente_devolucion', '>', 0)

@@ -8,9 +8,28 @@ use App\Models\PersonalMina;
 use App\Models\Usuario;
 use App\Support\Rbac\MinaScopeAccess;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
 
 class EppScopeService
 {
+    public function scopeWorkers(Builder $query, Usuario $actor): Builder
+    {
+        if ($actor->estado !== 'ACTIVO') {
+            return $query->whereRaw('1 = 0');
+        }
+        if (! MinaScopeAccess::isPrivileged($actor)) {
+            $query->whereHas('relacionesMina', fn ($mine) => $mine->where('activo', true)->whereIn('mina_id', $actor->scopesMina()->select('mina_id')));
+        }
+
+        return $query;
+    }
+
+    public function scopeDeliveries(Builder $query, Usuario $actor): Builder
+    {
+        return $query->whereHas('personal', fn ($worker) => $this->scopeWorkers($worker, $actor))
+            ->where(fn ($row) => $row->whereNull('operacion_id')->orWhereHas('operacion', fn ($operation) => $operation->whereIn('almacen_id', $this->visibleWarehouseIds($actor))));
+    }
+
     public function assertWarehouseAccess(Usuario $usuario, EppAlmacen $almacen): void
     {
         if (! $this->canAccessWarehouse($usuario, $almacen)) {

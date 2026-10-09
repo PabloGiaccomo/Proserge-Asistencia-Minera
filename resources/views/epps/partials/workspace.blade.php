@@ -544,6 +544,7 @@
 
                                     @if($isProtectedHistory)
                                         @if($entrega->operacion_id)
+                                            @if($entrega->cantidad_pendiente_devolucion > 0)@allowed('epps', 'corregir')<a class="epp-btn epp-btn-sm" href="{{ route('epps.deliveries.loss.form', $entrega) }}">Registrar perdida</a>@endallowed @endif
                                             @allowed('epps', 'ver_operaciones')<a class="epp-btn epp-btn-sm" href="{{ route('epps.operations.show', $entrega->operacion_id) }}">Ver lote y acciones</a>@endallowed
                                         @elseif($entrega->cantidad_pendiente_devolucion > 0)
                                             @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'corregir') || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'anular'))<a class="epp-btn epp-btn-sm" href="{{ route('epps.legacy.form', $entrega) }}">Corregir / anular saldo legacy</a>@endif

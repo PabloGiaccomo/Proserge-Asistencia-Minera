@@ -110,7 +110,7 @@
     <article class="tone-danger"><span>Fichas incompletas por tallas</span><strong>{{ number_format((float) data_get($metrics, 'fichas_incompletas_tallas', 0)) }}</strong><small>Zapatos, camisa, pantalon o respirador</small></article>
     <article class="tone-warning"><span>Proximos vencimientos</span><strong>{{ number_format((float) data_get($metrics, 'expiring_epp', 0)) }}</strong><small>Dentro de 30 dias</small></article>
     <article class="tone-danger"><span>EPP vencidos</span><strong>{{ number_format((float) data_get($metrics, 'expired_epp', 0)) }}</strong><small>Requieren cambio o revision</small></article>
-    <article class="tone-warning"><span>Unidades pendientes de lotes</span><strong>{{ number_format((float) data_get($metrics, 'pending_operation_units', 0)) }}</strong><small>Solicitadas, aun no entregadas</small></article>
+    <article class="tone-warning"><span>Pendientes registrados en lotes</span><strong>{{ number_format((float) data_get($metrics, 'pending_operation_units', 0)) }}</strong><small>Pendiente original firmado; no es demanda neta</small></article>
     <article class="tone-ok"><span>Lotes con firma</span><strong>{{ number_format((float) data_get($metrics, 'signed_operations', 0)) }}</strong><small>Consultar integridad en Kardex</small></article>
     <article class="tone-warning"><span>Entregas historicas sin firma</span><strong>{{ number_format((float) data_get($metrics, 'legacy_deliveries', 0)) }}</strong><small>No equivalen a evidencia firmada</small></article>
     <article class="tone-warning"><span>Stock por conciliar</span><strong>{{ number_format((float) data_get($metrics, 'stock_no_conciliado', 0)) }}</strong><small>Almacen / variante sin conteo confirmado</small></article>
