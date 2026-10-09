@@ -214,4 +214,3 @@ La lista siguiente permite reproducir y comparar sin guardar HTML de respuestas 
 - `Tests\Feature\WebPermissionMiddlewareTest::test_usuario_scope_empty_and_sync`
 - `Tests\Feature\WebPermissionMiddlewareTest::test_api_eliminar_usuario_endpoints`
 - `Tests\Feature\WebPermissionMiddlewareTest::test_bienestar_bloqueo_actions_respect_specific_permissions`
-
