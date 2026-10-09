@@ -1,5 +1,7 @@
 # Logistica EPP: Firma Movil, Lotes e Inventario Implementation Plan
 
+> Actualizacion 2026-10-09: el usuario autorizo integrar el flujo en la aplicacion local. Codigo integrado, dependencias instaladas y cinco migraciones EPP ejecutadas con respaldo; 3 entregas conservadas como legado sin firma. Falta configurar almacen/conteo real. Ver [integracion local](../reports/2026-10-09-epp-integracion-local.md). Esto no sustituye el ensayo aislado ni la aprobacion de produccion de Task 11.
+
 > Estado al 2026-10-08: Tasks 1-10 implementadas en `codex/epp-signed-operations-finish`; revision final corregida. Task 11 parcial: controles focalizados, navegador y build ejecutados; suite global/estilo global no estan en verde y falta ensayo sobre copia realista aislada. No aprobado para produccion. Ver [registro de verificacion](2026-10-07-logistica-epp-firma-lotes-verification.md). Los checks de Tasks 1-10 registran pasos ejecutados; las excepciones de verificacion transversal se detallan en ese registro.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

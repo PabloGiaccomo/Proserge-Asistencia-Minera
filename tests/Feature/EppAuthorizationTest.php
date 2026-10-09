@@ -202,7 +202,8 @@ class EppAuthorizationTest extends TestCase
     #[DataProvider('privilegedRoles')]
     public function test_active_privileged_user_sees_all_warehouses_and_workers(string $role): void
     {
-        $user = $this->user([], $role);
+        // Global mine scope is distinct from permission to use EPP.
+        $user = $this->user($role === 'GERENTE' ? ['epps' => ['ver_operaciones']] : [], $role);
         $warehouse = $this->warehouse(null);
         $other = $this->warehouse($this->mine());
         $service = app(EppScopeService::class);
@@ -216,7 +217,7 @@ class EppAuthorizationTest extends TestCase
     #[DataProvider('privilegedRoles')]
     public function test_preparation_and_inventory_gates_use_the_operation_class_for_policy_resolution(string $role): void
     {
-        $user = $this->user([], $role);
+        $user = $this->user($role === 'GERENTE' ? ['epps' => ['ver_operaciones', 'preparar_entrega', 'preparar_devolucion', 'gestionar_inventario', 'ajustar_inventario']] : [], $role);
         $warehouse = $this->warehouse(null);
         $personal = $this->personal();
         $gate = Gate::forUser($user);
