@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
     try {
         const manifest = JSON.parse(fs.readFileSync('public/build/manifest.json', 'utf8'));
-        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'personal-public', 'personal-ingreso']) {
+        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'dashboard', 'personal-public', 'personal-ingreso']) {
             const page = await browser.newPage({ deviceScaleFactor: 2 });
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
@@ -22,12 +22,16 @@ const assert = require('node:assert/strict');
             for (const width of mode.startsWith('personal-') ? [] : [320, 375, 390, 430, 1440]) {
                 await page.setViewportSize({ width, height: 1000 });
                 await page.waitForTimeout(80);
-                const overflow = await page.locator('.epp-operation').evaluate(element => ({ scroll: element.scrollWidth, width: element.clientWidth, page: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+                const overflow = await page.locator(mode === 'dashboard' ? '[data-dashboard-preview]' : '.epp-operation').evaluate(element => ({ scroll: element.scrollWidth, width: element.clientWidth, page: document.documentElement.scrollWidth, viewport: window.innerWidth }));
                 assert.ok(overflow.scroll <= overflow.width + 1 && overflow.page <= overflow.viewport + 1, `${mode} ${width}: ${JSON.stringify(overflow)}`);
                 fs.mkdirSync('storage/app/testing', { recursive: true });
                 await page.screenshot({ path: `storage/app/testing/epp-signed-${mode}-${width}.png`, fullPage: true });
             }
-            if (mode === 'form') {
+            if (mode === 'dashboard') {
+                assert.equal(await page.locator('.lgtx-heat-head span').count(), 10);
+                assert.equal(await page.locator('.lgtx-heat-row span').count(), 9);
+                assert.match(await page.locator('.lgtx-kpis').textContent(), /Unidades pendientes de lotes/);
+            } else if (mode === 'form') {
                 assert.match(await page.locator('[data-line-availability]').textContent(), /Disponibles: 5/);
                 await page.locator('[data-add-line]').click();
                 assert.equal(await page.locator('[data-operation-line]').count(), 2);

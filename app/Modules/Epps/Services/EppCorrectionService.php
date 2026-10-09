@@ -19,6 +19,41 @@ class EppCorrectionService
 {
     private const MAX_QUANTITY = 4294967295;
 
+    public function compensateLegacy(EppEntrega $delivery, EppAlmacen $warehouse, int $quantity, Usuario $actor, string $reason, bool $annul = false): EppOperacion
+    {
+        $reason = trim($reason);
+        if ($reason === '' || mb_strlen($reason) > 1000 || $quantity < 1) {
+            throw new InvalidArgumentException('Indica cantidad positiva y motivo de hasta 1000 caracteres.');
+        }
+        $context = new EppOperacion(['almacen_id' => $warehouse->id, 'personal_id' => $delivery->personal_id]);
+        Gate::forUser($actor)->authorize($annul ? 'cancel' : 'correct', $context);
+
+        return DB::transaction(function () use ($delivery, $warehouse, $quantity, $actor, $reason, $annul): EppOperacion {
+            $source = EppEntrega::query()->lockForUpdate()->findOrFail($delivery->id);
+            if ($source->operacion_id !== null || ! $source->es_legacy || $source->politica_devolucion_snapshot !== 'RETORNABLE'
+                || $quantity > $source->cantidad_pendiente_devolucion
+                || ($annul && $quantity !== $source->cantidad_pendiente_devolucion)) {
+                throw new InvalidArgumentException('El legado no tiene ese saldo retornable vigente. Revisa el historial.');
+            }
+            $operation = EppOperacion::query()->create([
+                'personal_id' => $source->personal_id, 'almacen_id' => $warehouse->id, 'mina_id' => $warehouse->mina_id,
+                'tipo' => $annul ? 'ANULACION' : 'CORRECCION', 'estado' => 'FIRMADO', 'submission_uuid' => (string) Str::uuid(),
+                'registrado_por_usuario_id' => $actor->id, 'confirmado_por_usuario_id' => $actor->id, 'motivo' => $reason,
+                'resumen_json' => ['legacy_delivery_id' => $source->id, 'inventory_effect' => 'NINGUNO_ORIGEN_NO_CONCILIADO'],
+            ]);
+            $operation->detalles()->create([
+                'epp_solicitado_id' => $source->epp_id, 'epp_id' => $source->epp_id, 'entrega_origen_id' => $source->id,
+                'cantidad_solicitada' => $quantity, 'cantidad_procesada' => $quantity, 'cantidad_pendiente' => 0, 'estado' => 'ANULADO',
+                'politica_devolucion_snapshot' => $source->politica_devolucion_snapshot, 'control_inventario_snapshot' => false,
+                'snapshot_json' => ['legacy_delivery_id' => $source->id, 'saldo_anterior' => $source->cantidad_pendiente_devolucion, 'sin_movimiento_inventario' => true],
+            ]);
+            $source->update(['cantidad_pendiente_devolucion' => $source->cantidad_pendiente_devolucion - $quantity]);
+            $operation->eventos()->create(['actor_usuario_id' => $actor->id, 'accion' => 'LEGADO_COMPENSADO', 'origen' => 'WEB', 'motivo' => $reason, 'snapshot_json' => ['legacy_delivery_id' => $source->id, 'cantidad' => $quantity, 'sin_movimiento_inventario' => true]]);
+
+            return $operation->load('detalles');
+        });
+    }
+
     public function correct(EppOperacion $operation, array $payload, Usuario $actor, string $reason): EppOperacion
     {
         return $this->compensate($operation, $payload['lines'] ?? [], $actor, $reason, EppOperacion::TIPO_CORRECCION);

@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\EppAlmacen;
 use App\Models\EppEntrega;
+use App\Models\EppExistencia;
+use App\Models\EppOperacion;
+use App\Models\EppOperacionDetalle;
 use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalMina;
@@ -19,6 +23,49 @@ use Tests\TestCase;
 class LogisticaDashboardServiceTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_coverage_uses_catalog_requirement_flag_and_unconciliated_stock_is_unknown(): void
+    {
+        $worker = $this->createPersonal('ACTIVO', 'COBERTURA CONFIGURADA '.Str::random(6));
+        $required = $this->createEpp('PROTECCION ESPECIAL '.Str::random(6));
+        $optional = $this->createEpp('CASCO OPCIONAL '.Str::random(6));
+        DB::table('epp_registro')->where('id', $required)->update(['es_requerido_cobertura' => true]);
+        $data = app(LogisticaDashboardService::class)->pageData(['q' => $worker->nombre_completo, 'epps' => [$required, $optional]]);
+        $this->assertSame(1, $data['metrics']['required_epp']);
+        $this->assertCount(1, $data['requirements']);
+        $this->assertSame($required, $data['requirements']->first()['id']);
+        $this->assertNull($data['stockRows']->first()['stock']);
+        $this->assertSame('STOCK_NO_CONCILIADO', $data['stockRows']->first()['estado']);
+    }
+
+    public function test_dashboard_uses_reconciled_stock_and_positive_return_balances(): void
+    {
+        $worker = $this->createPersonal('ACTIVO', 'SALDO CONFIGURADO '.Str::random(6));
+        $epp = $this->createEpp('GUANTE CON SALDO '.Str::random(6));
+        DB::table('epp_registro')->where('id', $epp)->update(['es_requerido_cobertura' => true]);
+        $warehouse = EppAlmacen::query()->create(['nombre' => 'CONTEO '.Str::uuid()]);
+        EppExistencia::query()->create(['almacen_id' => $warehouse->id, 'epp_id' => $epp, 'variante_clave' => 'SIN_VARIANTE', 'atributos_json' => [], 'cantidad_disponible' => 7, 'cantidad_reservada' => 2, 'cantidad_cuarentena' => 1, 'conciliado_at' => now()]);
+        $this->createDelivery($worker, $epp, now()->toDateString(), now()->addMonth()->toDateString());
+        EppEntrega::query()->where('personal_id', $worker->id)->update(['politica_devolucion_snapshot' => 'RETORNABLE', 'cantidad_pendiente_devolucion' => 0]);
+        $data = app(LogisticaDashboardService::class)->pageData(['q' => $worker->nombre_completo, 'epps' => [$epp]]);
+        $this->assertSame(7, $data['requirements']->first()['stock']);
+        $this->assertSame(0, $data['metrics']['delivered_epp']);
+    }
+
+    public function test_dashboard_sums_partial_pending_and_separates_signed_legacy_counts(): void
+    {
+        $worker = $this->createPersonal('ACTIVO', 'PENDIENTE PARCIAL '.Str::random(6));
+        $epp = $this->createEpp('ARTICULO PARCIAL '.Str::random(6));
+        $warehouse = EppAlmacen::query()->create(['nombre' => 'PARCIAL '.Str::uuid()]);
+        $operation = EppOperacion::query()->create(['personal_id' => $worker->id, 'almacen_id' => $warehouse->id, 'tipo' => 'ENTREGA', 'estado' => 'FIRMADO_PARCIAL', 'submission_uuid' => (string) Str::uuid(), 'version' => 1]);
+        EppOperacion::query()->create(['personal_id' => $worker->id, 'almacen_id' => $warehouse->id, 'tipo' => 'CORRECCION', 'estado' => 'FIRMADO', 'operacion_origen_id' => $operation->id, 'submission_uuid' => (string) Str::uuid(), 'version' => 1]);
+        EppOperacionDetalle::query()->create(['operacion_id' => $operation->id, 'epp_solicitado_id' => $epp, 'epp_id' => $epp, 'cantidad_solicitada' => 10, 'cantidad_procesada' => 3, 'cantidad_pendiente' => 7, 'estado' => 'ENTREGADO', 'politica_devolucion_snapshot' => 'RETORNABLE', 'control_inventario_snapshot' => true, 'snapshot_json' => []]);
+        $this->createDelivery($worker, $epp, now()->toDateString(), now()->addMonth()->toDateString());
+        $data = app(LogisticaDashboardService::class)->pageData(['q' => $worker->nombre_completo, 'epps' => [$epp]]);
+        $this->assertSame(7, $data['metrics']['pending_operation_units']);
+        $this->assertSame(1, $data['metrics']['signed_operations']);
+        $this->assertSame(1, $data['metrics']['legacy_deliveries']);
+    }
 
     protected function tearDown(): void
     {
@@ -232,11 +279,11 @@ class LogisticaDashboardServiceTest extends TestCase
         $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
         $transporte = RQMinaActividadTransporte::query()->findOrFail($transportId);
         $transporte->forceFill([
-            'doc_vehiculo_path' => 'logistica/transportes/' . $transportId . '/vehiculo.pdf',
+            'doc_vehiculo_path' => 'logistica/transportes/'.$transportId.'/vehiculo.pdf',
             'documentos' => [[
                 'tipo' => 'adicional',
                 'nombre' => 'SOAT 2026',
-                'path' => 'logistica/transportes/' . $transportId . '/soat.pdf',
+                'path' => 'logistica/transportes/'.$transportId.'/soat.pdf',
                 'original_name' => 'soat.pdf',
                 'uploaded_at' => now()->toDateTimeString(),
             ]],
@@ -247,10 +294,10 @@ class LogisticaDashboardServiceTest extends TestCase
         $adicional = $service->transportDocumentSlot($transporte, 'adicional-0');
 
         $this->assertNotNull($legacy);
-        $this->assertSame('logistica/transportes/' . $transportId . '/vehiculo.pdf', $legacy['path']);
+        $this->assertSame('logistica/transportes/'.$transportId.'/vehiculo.pdf', $legacy['path']);
         $this->assertSame('documentacion-vehiculo.pdf', $legacy['name']);
         $this->assertNotNull($adicional);
-        $this->assertSame('logistica/transportes/' . $transportId . '/soat.pdf', $adicional['path']);
+        $this->assertSame('logistica/transportes/'.$transportId.'/soat.pdf', $adicional['path']);
         $this->assertSame('soat-2026.pdf', $adicional['name']);
         $this->assertNull($service->transportDocumentSlot($transporte, 'adicional-5'));
         $this->assertNull($service->transportDocumentSlot($transporte, 'slot-invalido'));
@@ -301,9 +348,9 @@ class LogisticaDashboardServiceTest extends TestCase
     public function test_dashboard_excluye_talleres_oficinas_y_sin_mina_del_heatmap(): void
     {
         $suffix = Str::upper(Str::random(6));
-        $realMineName = 'MINA LOGISTICA ' . $suffix;
-        $workshopName = 'TALLER LOGISTICA ' . $suffix;
-        $officeName = 'OFICINA LOGISTICA ' . $suffix;
+        $realMineName = 'MINA LOGISTICA '.$suffix;
+        $workshopName = 'TALLER LOGISTICA '.$suffix;
+        $officeName = 'OFICINA LOGISTICA '.$suffix;
 
         $realMineId = $this->createMine($realMineName);
         $workshopMineId = $this->createMine($workshopName);
@@ -403,12 +450,12 @@ class LogisticaDashboardServiceTest extends TestCase
             'ocupacion' => '',
             'contrato' => 'FIJO',
             'es_supervisor' => false,
-            'qr_code' => 'QR-' . Str::uuid(),
+            'qr_code' => 'QR-'.Str::uuid(),
             'fecha_ingreso' => '2026-01-01',
             'estado' => $state,
             'telefono_1' => '999999999',
             'telefono_2' => '',
-            'correo' => Str::slug($name) . '@test.local',
+            'correo' => Str::slug($name).'@test.local',
         ]);
     }
 
@@ -437,7 +484,7 @@ class LogisticaDashboardServiceTest extends TestCase
 
         DB::table('epp_registro')->insert([
             'id' => $id,
-            'codigo' => 'EPP-' . Str::upper(Str::random(8)),
+            'codigo' => 'EPP-'.Str::upper(Str::random(8)),
             'nombre' => $name,
             'categoria' => 'EPP',
             'precio_unitario' => 0,
@@ -475,6 +522,9 @@ class LogisticaDashboardServiceTest extends TestCase
             'fecha_entrega' => $deliveryDate,
             'fecha_vencimiento_calendario' => $expirationDate,
             'vida_util_dias_snapshot' => 30,
+            'cantidad_original' => 1,
+            'cantidad_pendiente_devolucion' => $estado === EppEntrega::ESTADO_ENTREGADO ? 1 : 0,
+            'politica_devolucion_snapshot' => 'RETORNABLE',
             'estado' => $estado,
             'motivo_cambio' => $estado === EppEntrega::ESTADO_DEVUELTO ? 'Devuelto por internamiento' : null,
             'devuelto_at' => $estado === EppEntrega::ESTADO_DEVUELTO ? $expirationDate : null,

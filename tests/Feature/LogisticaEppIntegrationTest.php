@@ -24,6 +24,17 @@ class LogisticaEppIntegrationTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_individual_entry_is_retired_in_favour_of_signed_batch(): void
+    {
+        $session = $this->sessionWithSelections(['logistica' => ['ver', 'ver_logistica_entregas', 'ver_logistica_dashboard'], 'epps' => ['ver', 'registrar', 'preparar_entrega']]);
+        $this->withSession($session)->get(route('logistica.index', ['tab' => 'entregas']))->assertOk()->assertSee('Nueva entrega multiple')->assertDontSee('Registrar y agregar otra');
+        $this->post(route('epps.entregas.store'), [])->assertStatus(409);
+        $this->get(route('logistica.index', ['tab' => 'dashboard']))->assertOk()
+            ->assertSee('Unidades pendientes de lotes')->assertSee('Lotes con firma')
+            ->assertSee('Entregas historicas sin firma')->assertSee('Stock por conciliar')
+            ->assertDontSee('Obligatorios: casco, chaleco');
+    }
+
     public function test_mobile_review_shows_processed_and_pending_before_signature(): void
     {
         [$session, $operation] = $this->signedOperationFixture();
@@ -151,53 +162,12 @@ class LogisticaEppIntegrationTest extends TestCase
         return [$session, $service->prepareForSignature($draft, $actor), $warehouse];
     }
 
-    public function test_registrar_otra_entrega_conserva_solo_trabajador_y_fecha(): void
+    public function test_registro_individual_retornando_no_crea_entrega(): void
     {
         $session = $this->sessionWithEppPermissions();
-        $personal = Personal::query()->create([
-            'id' => (string) Str::uuid(),
-            'dni' => '98'.random_int(100000, 999999),
-            'nombre_completo' => 'TRABAJADOR ENTREGAS CONTINUAS',
-            'puesto' => 'OPERARIO DE PRUEBA',
-            'qr_code' => (string) Str::uuid(),
-            'estado' => 'ACTIVO',
-        ]);
-        $epp = app(EppService::class)->storeCatalog([
-            'nombre' => 'EPP PRUEBA CONTINUA',
-            'vida_util_dias' => 30,
-            'estado' => EppRegistro::ESTADO_ACTIVO,
-        ]);
-        $url = route('logistica.index', ['tab' => 'entregas']);
-        $payload = [
-            'personal_id' => $personal->id,
-            'epp_id' => $epp->id,
-            'cantidad' => 3,
-            'fecha_entrega' => '2026-09-04',
-            'observacion' => 'Solo para la primera entrega',
-            '_epp_add_another' => '1',
-        ];
-
-        $this->withSession($session)->from($url)
-            ->post(route('epps.entregas.store'), $payload)
-            ->assertRedirect($url)
-            ->assertSessionHasNoErrors()
-            ->assertSessionHas('_old_input.personal_id', $personal->id)
-            ->assertSessionHas('_old_input.personal_label', $personal->nombre_completo.' - '.$personal->dni.' - '.$personal->puesto)
-            ->assertSessionHas('_old_input.fecha_entrega', '2026-09-04')
-            ->assertSessionHas('_old_input._epp_open_modal', 'eppDeliveryModal')
-            ->assertSessionMissing('_old_input.epp_id')
-            ->assertSessionMissing('_old_input.cantidad')
-            ->assertSessionMissing('_old_input.observacion')
-            ->assertSessionMissing('_old_input._epp_replaces_entrega_id');
-
-        $this->assertSame(1, EppEntrega::query()->where('personal_id', $personal->id)->count());
-        $this->get($url)->assertOk()->assertSee('Registrar y agregar otra');
-
-        unset($payload['_epp_add_another']);
-        $this->from($url)->post(route('epps.entregas.store'), $payload)
-            ->assertRedirect($url)->assertSessionHasNoErrors()
-            ->assertSessionMissing('_old_input._epp_open_modal');
-        $this->assertSame(2, EppEntrega::query()->where('personal_id', $personal->id)->count());
+        $before = EppEntrega::query()->count();
+        $this->withSession($session)->post(route('epps.entregas.store'), ['_epp_add_another' => '1'])->assertStatus(409);
+        $this->assertSame($before, EppEntrega::query()->count());
     }
 
     public function test_logistica_entregas_renderiza_la_vista_operativa_de_epp(): void
@@ -217,7 +187,7 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('Tipo de movimiento')
             ->assertSee('Fecha desde')
             ->assertSee('Fecha hasta')
-            ->assertSee('Registrar entrega')
+            ->assertDontSee('Registrar y agregar otra')
             ->assertSee('data-epp-filter-toggle', false)
             ->assertSee('aria-controls="eppFilterBody"', false)
             ->assertSee('Catalogo de EPP');

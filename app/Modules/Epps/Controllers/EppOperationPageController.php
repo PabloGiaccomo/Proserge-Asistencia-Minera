@@ -4,6 +4,7 @@ namespace App\Modules\Epps\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\EppAlmacen;
+use App\Models\EppEntrega;
 use App\Models\EppExistencia;
 use App\Models\EppOperacion;
 use App\Models\EppRegistro;
@@ -203,6 +204,9 @@ class EppOperationPageController extends WebPageController
     {
         $actor = $this->actor();
         Gate::forUser($actor)->authorize('view', $operation);
+        if (in_array($operation->tipo, ['CORRECCION', 'ANULACION'], true)) {
+            return view('epps.operations.compensation', ['operation' => $operation->load('personal', 'almacen', 'detalles.epp', 'operacionOrigen.aceptacion')]);
+        }
         $payload = $this->operations->reviewPayload($operation);
 
         return view('epps.operations.show', [
@@ -221,6 +225,28 @@ class EppOperationPageController extends WebPageController
         }
 
         return redirect()->route('epps.operations.show', $correction)->with('success', 'Correccion compensatoria registrada. La operacion original se conserva sin cambios.');
+    }
+
+    public function legacyForm(EppEntrega $delivery): View
+    {
+        $actor = $this->actor();
+        $this->scope->assertPersonalAccess($actor, $delivery->personal);
+        abort_unless(PermissionMatrix::userCanDirect($actor, 'epps', 'corregir') || PermissionMatrix::userCanDirect($actor, 'epps', 'anular'), 403);
+        abort_if($delivery->operacion_id !== null, 409, 'Usa la operacion firmada para compensar este registro.');
+
+        return view('epps.operations.legacy-correction', ['delivery' => $delivery, 'warehouses' => EppAlmacen::query()->whereIn('id', $this->scope->visibleWarehouseIds($actor))->where('estado', 'ACTIVO')->get()]);
+    }
+
+    public function legacyCompensate(Request $request, EppEntrega $delivery): RedirectResponse
+    {
+        $data = $request->validate(['almacen_id' => ['required', 'uuid', 'exists:epp_almacenes,id'], 'cantidad' => ['required', 'integer', 'min:1'], 'motivo' => ['required', 'string', 'max:1000'], 'tipo' => ['required', 'in:CORRECCION,ANULACION']]);
+        try {
+            $operation = $this->corrections->compensateLegacy($delivery, EppAlmacen::query()->findOrFail($data['almacen_id']), (int) $data['cantidad'], $this->actor(), $data['motivo'], $data['tipo'] === 'ANULACION');
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['cantidad' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('epps.operations.show', $operation)->with('success', 'Saldo legacy compensado con auditoria. No se modifico inventario.');
     }
 
     public function annul(AnnulEppOperationRequest $request, EppOperacion $operation): RedirectResponse

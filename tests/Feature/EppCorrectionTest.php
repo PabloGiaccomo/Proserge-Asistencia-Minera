@@ -72,6 +72,7 @@ class EppCorrectionTest extends TestCase
         $this->assertSame(2, $this->delivery->fresh()->cantidad_pendiente_devolucion);
         $this->assertSame($original, $this->operation->fresh()->getAttributes());
         $this->assertDatabaseHas('epp_inventario_movimientos', ['operacion_id' => $correction->id, 'tipo' => 'CORRECCION', 'cantidad' => 2]);
+        $this->withSession(['auth_token' => 'test-token', 'user_id' => $this->actor->id])->get(route('epps.operations.show', $correction))->assertOk()->assertSee('Compensacion administrativa');
     }
 
     public function test_annulment_reverses_remaining_effect_once_and_keeps_original_operation(): void
@@ -93,5 +94,23 @@ class EppCorrectionTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
         app(EppCorrectionService::class)->annul($this->operation, $this->actor, ' ');
+    }
+
+    public function test_legacy_annulment_preserves_original_and_does_not_invent_stock(): void
+    {
+        $legacy = $this->delivery->replicate(['operacion_id', 'operacion_detalle_id']);
+        $legacy->id = (string) Str::uuid();
+        $legacy->es_legacy = true;
+        $legacy->save();
+        $operation = app(EppCorrectionService::class)->compensateLegacy($legacy, $this->warehouse, 4, $this->actor, 'Registro historico duplicado', true);
+        $this->assertSame('ANULACION', $operation->tipo);
+        $this->assertNull($operation->aceptacion);
+        $this->assertSame($legacy->id, $operation->detalles->first()->entrega_origen_id);
+        $this->assertSame(0, $legacy->fresh()->cantidad_pendiente_devolucion);
+        $this->assertSame(4, $legacy->fresh()->cantidad);
+        $this->assertSame(5, $this->existence->fresh()->cantidad_disponible);
+        $this->assertDatabaseMissing('epp_inventario_movimientos', ['operacion_id' => $operation->id]);
+        $this->expectException(InvalidArgumentException::class);
+        app(EppCorrectionService::class)->compensateLegacy($legacy, $this->warehouse, 4, $this->actor, 'Reintento no debe duplicar', true);
     }
 }

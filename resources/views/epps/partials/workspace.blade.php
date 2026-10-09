@@ -2,7 +2,7 @@
     $permissions = session('user.permissions', []);
     $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'configurar');
     $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'editar');
-    $canRegisterEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'registrar');
+    $canRegisterEpps = false;
     $canUpdateEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'actualizar');
     $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
     $canManageEpps = $canConfigureEpps || $canEditEpps || $canRegisterEpps;
@@ -234,7 +234,7 @@
             <div class="epp-panel-header-actions">
                 <span class="epp-count">{{ $entregasTotal }} registros</span>
                 @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'preparar_entrega'))
-                    <a class="epp-btn epp-btn-primary epp-list-action" href="{{ route('epps.operations.create') }}">Entrega multiple con firma</a>
+                    <a class="epp-btn epp-btn-primary epp-list-action" href="{{ route('epps.operations.create') }}">Nueva entrega multiple</a>
                 @endif
                 @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'preparar_devolucion'))
                     <a class="epp-btn epp-list-action" href="{{ route('epps.operations.returns.create') }}">Devolucion multiple con firma</a>
@@ -268,7 +268,7 @@
                             $personal = $item['personal'];
                             $epp = $item['epp'];
                             $isActive = $entrega->estado === \App\Models\EppEntrega::ESTADO_ENTREGADO;
-                            $isProtectedHistory = $entrega->operacion_id !== null || $entrega->es_legacy;
+                            $isProtectedHistory = true;
                             $editableEpps = collect($eppsActivos ?? []);
                             if ($epp && ! $editableEpps->contains('id', $epp->id)) {
                                 $editableEpps = $editableEpps->push($epp);
@@ -543,6 +543,11 @@
                                     @endif
 
                                     @if($isProtectedHistory)
+                                        @if($entrega->operacion_id)
+                                            @allowed('epps', 'ver_operaciones')<a class="epp-btn epp-btn-sm" href="{{ route('epps.operations.show', $entrega->operacion_id) }}">Ver lote y acciones</a>@endallowed
+                                        @elseif($entrega->cantidad_pendiente_devolucion > 0)
+                                            @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'corregir') || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'anular'))<a class="epp-btn epp-btn-sm" href="{{ route('epps.legacy.form', $entrega) }}">Corregir / anular saldo legacy</a>@endif
+                                        @endif
                                         <span class="epp-no-action">{{ $entrega->es_legacy ? 'Legado sin firma: historial protegido' : 'Firmado: usa correccion o anulacion' }}</span>
                                     @elseif(!$canRegisterEpps && !$canUpdateEpps && !$canDeleteEpps)
                                         <span class="epp-no-action">Sin accion</span>

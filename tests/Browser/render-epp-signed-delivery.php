@@ -7,6 +7,7 @@ use App\Models\EppOperacion;
 use App\Models\EppRegistro;
 use App\Models\Personal;
 use App\Models\Usuario;
+use App\Modules\Logistica\Services\LogisticaDashboardService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\ViewErrorBag;
@@ -32,7 +33,13 @@ $operation->setRelation('personal', $worker)->setRelation('almacen', $warehouse)
 $line = ['epp_id' => $substitute->id, 'requested_epp_id' => $product->id, 'processed_quantity' => 5, 'pending_quantity' => 5, 'requested_quantity' => 10, 'return_policy' => 'RETORNABLE', 'attributes' => ['TALLA' => 'M'], 'reason' => 'Articulo equivalente revisado', 'snapshot' => ['real' => ['nombre' => $substitute->nombre], 'solicitado' => ['nombre' => $product->nombre], 'disponibilidad' => 'CONCILIADO']];
 $payload = ['worker' => ['id' => $worker->id, 'name' => $worker->nombre_completo, 'document' => $worker->dni], 'warehouse' => ['name' => $warehouse->nombre], 'details' => [$line], 'pending' => [$line], 'rejected' => []];
 $mode = $argv[1] ?? 'review';
-if (str_starts_with($mode, 'personal-')) {
+if ($mode === 'dashboard') {
+    $data = app(LogisticaDashboardService::class)->pageData(['q' => 'BROWSER-ISOLATED-NONEXISTENT']);
+    $data['coverageByItem'] = collect(range(1, 9))->map(fn ($n) => ['nombre' => 'PROTECCION '.$n, 'requerido' => 1, 'entregado' => 0, 'pendiente' => 1, 'coverage_pct' => 0]);
+    $data['missingHeatmap'] = collect([['mina' => 'MINA DE PRUEBA', 'cells' => array_fill(0, 9, ['tone' => 'low', 'value' => 1])]]);
+    $data['asCollection'] = fn ($value) => collect($value);
+    echo '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><main class="lgtx-screen" data-dashboard-preview>'.view('logistica.partials.dashboard', $data)->render().'</main></body></html>';
+} elseif (str_starts_with($mode, 'personal-')) {
     $data = ['data' => PersonalFichaCatalog::emptyData(), 'sections' => [], 'documentRequirements' => [], 'declarationCheckboxes' => [], 'puestoOptions' => [], 'archivos' => collect(), 'firmaBase64' => null, 'huellaDataUrl' => null];
     echo ($mode === 'personal-public'
         ? view('ficha-public.show', $data + ['token' => 'test-token', 'mode' => 'edit', 'ficha' => null, 'link' => null, 'verifyFields' => [], 'familiares' => collect()])

@@ -3,7 +3,6 @@
 namespace App\Modules\Epps\Controllers;
 
 use App\Http\Controllers\WebPageController;
-use App\Models\EppEntrega;
 use App\Models\ParadaHerramientaCatalogo;
 use App\Models\Personal;
 use App\Models\Usuario;
@@ -130,154 +129,22 @@ class EppPageController extends WebPageController
 
     public function storeEntrega(Request $request): RedirectResponse
     {
-        $usuario = $this->requireAuthenticatedUser();
-
-        $validated = $request->validate([
-            'personal_id' => ['required', 'string', 'exists:personal,id'],
-            'epp_id' => ['required', 'string', 'exists:epp_registro,id'],
-            'cantidad' => ['nullable', 'integer', 'min:1', 'max:1000'],
-            'talla' => ['nullable', 'string', 'max:80'],
-            'color' => ['nullable', 'string', 'max:120'],
-            'atributos' => ['nullable', 'array'],
-            'atributos.*.nombre' => ['nullable', 'string', 'max:100'],
-            'atributos.*.valor' => ['nullable', 'string', 'max:200'],
-            'fecha_entrega' => ['required', 'date'],
-            'observacion' => ['nullable', 'string', 'max:1000'],
-            '_epp_replaces_entrega_id' => ['nullable', 'string', 'exists:epp_entregas,id'],
-            '_epp_replacement_fecha' => ['nullable', 'date'],
-            '_epp_replacement_motivo' => ['nullable', 'string', 'max:120'],
-            '_epp_replacement_observacion' => ['nullable', 'string', 'max:1000'],
-            '_epp_add_another' => ['nullable', 'boolean'],
-        ]);
-
-        try {
-            if (filled($validated['_epp_replaces_entrega_id'] ?? null)) {
-                $this->service->replaceEntrega(
-                    (string) $validated['_epp_replaces_entrega_id'],
-                    $validated,
-                    [
-                        'devuelto_at' => $validated['_epp_replacement_fecha'] ?? $validated['fecha_entrega'],
-                        'motivo_cambio' => $validated['_epp_replacement_motivo'] ?? null,
-                        'observacion' => $validated['_epp_replacement_observacion'] ?? null,
-                    ],
-                    $usuario
-                );
-
-                return back()->with('success', 'Cambio de EPP registrado correctamente.');
-            }
-
-            $entrega = $this->service->deliver($validated, $usuario);
-        } catch (InvalidArgumentException $exception) {
-            return back()->withInput($request->input() + ['_epp_open_modal' => 'eppDeliveryModal'])
-                ->with('error', $exception->getMessage());
-        }
-
-        if ($request->boolean('_epp_add_another')) {
-            $personal = $entrega->personal;
-
-            return back()->with('success', 'Entrega registrada. Puedes agregar otra para el mismo trabajador.')
-                ->withInput([
-                    '_epp_open_modal' => 'eppDeliveryModal',
-                    'personal_id' => $entrega->personal_id,
-                    'personal_label' => collect([
-                        $personal?->nombre_completo,
-                        $personal?->dni ?: $personal?->numero_documento,
-                        $personal?->puesto,
-                    ])->filter()->implode(' - '),
-                    'fecha_entrega' => $validated['fecha_entrega'],
-                ]);
-        }
-
-        return back()->with('success', 'Entrega de EPP registrada correctamente.');
+        abort(409, 'El registro individual fue retirado. Usa Nueva entrega multiple con firma.');
     }
 
     public function closeEntrega(Request $request, string $id): RedirectResponse
     {
-        $usuario = $this->requireAuthenticatedUser();
-
-        $validated = $request->validate([
-            'estado' => ['required', 'string', 'in:'.implode(',', [
-                EppEntrega::ESTADO_CAMBIADO,
-                EppEntrega::ESTADO_DEVUELTO,
-                EppEntrega::ESTADO_USO_INCORRECTO,
-                EppEntrega::ESTADO_PERDIDA_OLVIDO,
-            ])],
-            'devuelto_at' => ['required', 'date'],
-            'motivo_cambio' => ['nullable', 'string', 'max:120'],
-            'observacion' => ['nullable', 'string', 'max:1000'],
-        ]);
-
-        if ($validated['estado'] === EppEntrega::ESTADO_CAMBIADO) {
-            $entrega = EppEntrega::query()->with(['personal', 'epp'])->findOrFail($id);
-
-            if ($entrega->estado !== EppEntrega::ESTADO_ENTREGADO) {
-                return back()->with('error', 'Esta entrega ya fue cerrada y no puede cambiarse otra vez.');
-            }
-
-            $personal = $entrega->personal;
-            $label = collect([
-                $personal?->nombre_completo,
-                $personal?->dni ?: $personal?->numero_documento,
-                $personal?->puesto,
-            ])->filter()->implode(' - ');
-
-            return back()
-                ->withInput([
-                    '_epp_open_modal' => 'eppDeliveryModal',
-                    '_epp_replaces_entrega_id' => $entrega->id,
-                    '_epp_replacement_fecha' => $validated['devuelto_at'],
-                    '_epp_replacement_motivo' => $validated['motivo_cambio'] ?? '',
-                    '_epp_replacement_observacion' => $validated['observacion'] ?? '',
-                    'personal_id' => $entrega->personal_id,
-                    'personal_label' => $label,
-                    'epp_id' => $entrega->epp_id,
-                    'cantidad' => $entrega->cantidad,
-                    'fecha_entrega' => $validated['devuelto_at'],
-                    'talla' => $entrega->talla,
-                    'color' => $entrega->color,
-                    'atributos' => $entrega->atributos_json ?: [],
-                ]);
-        }
-
-        $this->service->closeEntrega($id, $validated, $usuario);
-
-        return back()->with('success', 'Movimiento de EPP cerrado correctamente.');
+        abort(409, 'Usa la devolucion multiple o una correccion compensatoria para conservar el historial.');
     }
 
     public function updateEntrega(Request $request, string $id): RedirectResponse
     {
-        $usuario = $this->requireAuthenticatedUser();
-        $entrega = EppEntrega::query()->findOrFail($id);
-        abort_if($entrega->operacion_id !== null || $entrega->es_legacy, 409, 'El historial firmado o legado no se edita. Registra una correccion compensatoria.');
-
-        $validated = $request->validate([
-            'epp_id' => ['nullable', 'string', 'exists:epp_registro,id'],
-            'fecha_entrega' => ['nullable', 'date'],
-            'fecha_vencimiento_calendario' => ['nullable', 'date'],
-            'cantidad' => ['nullable', 'integer', 'min:1', 'max:1000'],
-            'talla' => ['nullable', 'string', 'max:80'],
-            'color' => ['nullable', 'string', 'max:120'],
-            'atributos' => ['nullable', 'array'],
-            'atributos.*.nombre' => ['nullable', 'string', 'max:100'],
-            'atributos.*.valor' => ['nullable', 'string', 'max:200'],
-            'motivo_cambio' => ['nullable', 'string', 'max:120'],
-            'observacion' => ['nullable', 'string', 'max:1000'],
-        ]);
-
-        $this->service->updateEntrega($id, $validated, $usuario);
-
-        return back()->with('success', 'Entrega de EPP actualizada correctamente.');
+        abort(409, 'El historial EPP no se edita directamente. Usa una correccion compensatoria.');
     }
 
     public function destroyEntrega(string $id): RedirectResponse
     {
-        $this->requireAuthenticatedUser();
-        $entrega = EppEntrega::query()->findOrFail($id);
-        abort_if($entrega->operacion_id !== null || $entrega->es_legacy, 409, 'El historial firmado o legado no se elimina. Registra una anulacion compensatoria.');
-
-        $this->service->destroyEntrega($id);
-
-        return back()->with('success', 'Entrega de EPP eliminada correctamente.');
+        abort(409, 'El historial EPP no se elimina. Usa una anulacion compensatoria.');
     }
 
     public function destroyCatalog(Request $request, string $id): RedirectResponse

@@ -272,6 +272,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/epps/operaciones/{operation}/constancia', [EppEvidenceController::class, 'receipt'])->middleware('web.permission:epps,descargar_constancia')->name('epps.evidence.receipt');
     Route::get('/epps/kardex/verificable/descargar', [EppEvidenceController::class, 'excel'])->middleware('web.permission:epps,ver_evidencia|descargar_constancia')->name('epps.evidence.excel');
     Route::get('/epps/operaciones/nueva', [EppOperationPageController::class, 'create'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.create');
+    Route::get('/epps/legacy/{delivery}/compensar', [EppOperationPageController::class, 'legacyForm'])->middleware('web.permission:epps,corregir|anular')->name('epps.legacy.form');
+    Route::post('/epps/legacy/{delivery}/compensar', [EppOperationPageController::class, 'legacyCompensate'])->middleware('web.permission:epps,corregir|anular')->name('epps.legacy.compensate');
     Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.workers');
     Route::get('/epps/operaciones/devoluciones/nueva', [EppOperationPageController::class, 'createReturn'])->middleware('web.permission:epps,preparar_devolucion')->name('epps.operations.returns.create');
     Route::post('/epps/operaciones/devoluciones', [EppOperationPageController::class, 'storeReturn'])->middleware('web.permission:epps,preparar_devolucion')->name('epps.operations.returns.store');

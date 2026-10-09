@@ -136,3 +136,15 @@ Se espera crecimiento en:
 Debe planearse separacion logica entre activo, historico y archivado. El
 archivado debe mantener referencia en MySQL, permisos, auditoria, fecha de
 movimiento, origen, responsable y mecanismo de recuperacion.
+
+## EPP firmado por lotes (2026-10-08)
+
+Flujo vigente y despliegue: [EPP_FIRMA_OPERATIVA.md](./EPP_FIRMA_OPERATIVA.md).
+`EppOperationPageController` prepara lotes; `EppOperationConfirmationService`
+confirma firma/inventario/saldos; `EppCorrectionService` compensa sin borrar.
+`EppKardexService`, `EppReceiptPdfService`, `EppQrCodeService` y
+`EppEvidenceController` producen evidencia autenticada y verificable.
+Comando: `epp:backfill-legacy-traceability [--dry-run]`.
+El dashboard usa `es_requerido_cobertura`, existencias conciliadas y saldos
+retornables positivos. Las rutas individuales de escritura devuelven 409;
+no usarlas como flujo productivo. Firmas en disco privado `local`.

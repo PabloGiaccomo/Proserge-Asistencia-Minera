@@ -1947,7 +1947,7 @@
 .lgtx-heat-head,
 .lgtx-heat-row {
     display: grid;
-    grid-template-columns: minmax(170px, 1.4fr) repeat(6, minmax(82px, 1fr));
+    grid-template-columns: minmax(170px, 1.4fr) repeat(var(--epp-columns, 6), minmax(82px, 1fr));
     gap: 8px;
     align-items: center;
     min-width: 760px;

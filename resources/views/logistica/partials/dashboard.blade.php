@@ -110,6 +110,10 @@
     <article class="tone-danger"><span>Fichas incompletas por tallas</span><strong>{{ number_format((float) data_get($metrics, 'fichas_incompletas_tallas', 0)) }}</strong><small>Zapatos, camisa, pantalon o respirador</small></article>
     <article class="tone-warning"><span>Proximos vencimientos</span><strong>{{ number_format((float) data_get($metrics, 'expiring_epp', 0)) }}</strong><small>Dentro de 30 dias</small></article>
     <article class="tone-danger"><span>EPP vencidos</span><strong>{{ number_format((float) data_get($metrics, 'expired_epp', 0)) }}</strong><small>Requieren cambio o revision</small></article>
+    <article class="tone-warning"><span>Unidades pendientes de lotes</span><strong>{{ number_format((float) data_get($metrics, 'pending_operation_units', 0)) }}</strong><small>Solicitadas, aun no entregadas</small></article>
+    <article class="tone-ok"><span>Lotes con firma</span><strong>{{ number_format((float) data_get($metrics, 'signed_operations', 0)) }}</strong><small>Consultar integridad en Kardex</small></article>
+    <article class="tone-warning"><span>Entregas historicas sin firma</span><strong>{{ number_format((float) data_get($metrics, 'legacy_deliveries', 0)) }}</strong><small>No equivalen a evidencia firmada</small></article>
+    <article class="tone-warning"><span>Stock por conciliar</span><strong>{{ number_format((float) data_get($metrics, 'stock_no_conciliado', 0)) }}</strong><small>Almacen / variante sin conteo confirmado</small></article>
 </section>
 
 <div class="lgtx-grid">
@@ -137,7 +141,7 @@
     </section>
 
     <section class="lgtx-card">
-        <header><h2>Cobertura de EPP por item</h2><p>Obligatorios: casco, chaleco, zapatos, camisa, pantalon y respirador.</p></header>
+        <header><h2>Cobertura de EPP por item</h2><p>Articulos configurados como requeridos de cobertura en el catalogo.</p></header>
         <div class="lgtx-stack-list">
             @foreach($coverageByItem as $row)
                 @php $required = max(1, (int) data_get($row, 'requerido', 0)); @endphp
@@ -158,8 +162,8 @@
 
 <section class="lgtx-card">
     <header><h2>Heatmap de faltantes por mina e item</h2><p>Cantidad de faltantes por unidad y EPP obligatorio.</p></header>
-    <div class="lgtx-heatmap">
-        <div class="lgtx-heat-head"><span>Mina</span>@foreach(['casco','chaleco','zapatos','camisa','pantalon','respirador'] as $key)<span>{{ data_get(['casco'=>'Casco','chaleco'=>'Chaleco','zapatos'=>'Zapatos','camisa'=>'Camisa','pantalon'=>'Pantalon','respirador'=>'Respirador'], $key) }}</span>@endforeach</div>
+    <div class="lgtx-heatmap" style="--epp-columns: {{ max(1, count($coverageByItem)) }}">
+        <div class="lgtx-heat-head"><span>Mina</span>@foreach($coverageByItem as $item)<span>{{ data_get($item, 'nombre') }}</span>@endforeach</div>
         @forelse($missingHeatmap as $row)
             <div class="lgtx-heat-row">
                 <strong>{{ data_get($row, 'mina') }}</strong>
@@ -204,7 +208,7 @@
         <header><h2>Stock y requerimiento de compra</h2><p>Requerido, stock disponible y pendiente de compra por item y talla.</p></header>
         <div class="lgtx-table-wrap"><table class="lgtx-table"><thead><tr><th>Item</th><th>Talla</th><th>Requerido</th><th>Stock disponible</th><th>Pendiente de compra</th><th>Estado</th></tr></thead><tbody>
             @forelse($stockRows->take(18) as $row)
-                <tr><td>{{ data_get($row, 'item') }}</td><td>{{ data_get($row, 'talla') }}</td><td>{{ data_get($row, 'requerido') }}</td><td>{{ data_get($row, 'stock') }}</td><td>{{ data_get($row, 'pendiente_compra') }}</td><td><span class="lgtx-badge {{ $stockTone(data_get($row, 'estado', '')) }}">{{ data_get($row, 'estado') }}</span></td></tr>
+                <tr><td>{{ data_get($row, 'item') }}</td><td>{{ data_get($row, 'talla') }}</td><td>{{ data_get($row, 'requerido') }}</td><td>{{ data_get($row, 'stock') ?? 'Por conciliar' }}</td><td>{{ data_get($row, 'pendiente_compra') ?? 'Por definir' }}</td><td><span class="lgtx-badge {{ $stockTone(data_get($row, 'estado', '')) }}">{{ data_get($row, 'estado') }}</span></td></tr>
             @empty
                 <tr><td colspan="6">No hay stock registrado para este filtro.</td></tr>
             @endforelse

@@ -6,11 +6,11 @@ Entregas EPP, listas de herramientas por parada y servicios de transporte.
 
 | Proceso | BPMN | Visual | Alcance |
 |---|---|---|---|
-| Registrar entrega de EPP | [BPMN](./entrega-devolucion-epp.bpmn) | [SVG](./entrega-devolucion-epp.svg) | Entrega independiente; cierre y reemplazo se documentan en un proceso separado. |
+| Entrega/devolucion multiple con firma | [BPMN](./entrega-devolucion-epp.bpmn) | BPMN vigente | Revision, reserva, firma y confirmacion atomica; rechazo sin movimiento. |
 | Lista de herramientas por parada | [BPMN](./herramientas-por-parada.bpmn) | [SVG](./herramientas-por-parada.svg) | Preparar y enviar lista de herramientas. Los recordatorios se ejecutan independientemente por scheduler. |
 | Crear servicio de transporte | [BPMN](./planificar-transporte.bpmn) | [SVG](./planificar-transporte.svg) | Crea servicio PERSONAL o CARGA y alcances. Pasajeros y cambios de estado son operaciones posteriores independientes. |
 | Recordar vencimiento de herramientas | [BPMN](./recordatorio-herramientas.bpmn) | [SVG](./recordatorio-herramientas.svg) | Comprobar tablas; si faltan devolver cero. Seleccionar RQ con inicio en nueve dias y lista no enviada. Por RQ: emitir solo si limite vence en dos dias. Emitir a jefes de planeamiento con clave de deduplicacion. Informar alertas emitidas; devolver SUCCESS |
-| Cerrar o reemplazar entrega de EPP | [BPMN](./cerrar-reemplazar-epp.bpmn) | [SVG](./cerrar-reemplazar-epp.svg) | Parte de una entrega existente. Un cambio no cierra la anterior hasta confirmar la nueva entrega. |
+| Corregir o anular EPP firmado | [BPMN](./cerrar-reemplazar-epp.bpmn) | BPMN vigente | Motivo, permiso directo y compensacion enlazada; original inmutable. |
 | Asignar pasajeros a transporte | [BPMN](./asignar-pasajeros.bpmn) | [SVG](./asignar-pasajeros.svg) | Solo servicios PERSONAL. Valida candidatos y capacidad antes de crear asignaciones. |
 | Cambiar estado de transporte | [BPMN](./cambiar-estado-transporte.bpmn) | [SVG](./cambiar-estado-transporte.svg) | Documenta la validacion existente; no impone una secuencia estricta de estados que el servicio no aplica. |
 | Retirar pasajero de transporte | [BPMN](./retirar-pasajero.bpmn) | [SVG](./retirar-pasajero.svg) | Retiro de una asignacion activa con motivo y evento; tambien puede ser invocado desde Man Power. |
@@ -48,3 +48,24 @@ Entregas EPP, listas de herramientas por parada y servicios de transporte.
 ## Por confirmar
 
 - Quien valida el envio y cierre de herramientas por parada.
+
+## EPP por lotes: contratos vigentes
+
+La entrega individual y el cierre/reemplazo individual fueron retirados de web (409).
+Los BPMN y SVG EPP documentan lotes firmados y compensaciones; fueron
+validados y renderizados desde la implementacion vigente.
+Guia: [EPP firma operativa](../../EPP_FIRMA_OPERATIVA.md).
+
+| Elemento del flujo | Evidencia confirmada |
+|---|---|
+| Preparar lote y reservar | EppOperationPageController::store/storeReturn; EppOperationService::prepareForSignature |
+| Revisar procesados/pendientes | EppOperationService::reviewPayload; operations/review.blade.php |
+| Firmar y confirmar atomico | EppOperationConfirmationService::confirm; EppAcceptanceService::capture |
+| Desacuerdo/negativa | EppOperationService::reject; libera reservas, no entrega |
+| Devolucion y cuarentena | EppReturnService; EppOperationConfirmationService |
+| Compensacion sin borrar | EppCorrectionService::correct/annul |
+| Verificar evidencia | EppEvidenceController::verify; EppAcceptanceService::verify |
+
+Actores: operador, trabajador, testigo autorizado y aprobador excepcional.
+Una devolucion parte de saldo retornable positivo; consumibles no se retornan.
+El reemplazo requiere devolucion/correccion y una nueva entrega independiente.

@@ -210,3 +210,15 @@ Para agregar un documento:
 2. Registrar metadata en tabla.
 3. Servirlo por controlador autenticado y autorizado.
 4. Añadir eliminacion/retencion y prueba.
+
+## EPP firmado por lotes (2026-10-08)
+
+Flujo vigente y despliegue: [EPP_FIRMA_OPERATIVA.md](./EPP_FIRMA_OPERATIVA.md).
+`EppOperationPageController` prepara lotes; `EppOperationConfirmationService`
+confirma firma/inventario/saldos; `EppCorrectionService` compensa sin borrar.
+`EppKardexService`, `EppReceiptPdfService`, `EppQrCodeService` y
+`EppEvidenceController` producen evidencia autenticada y verificable.
+Comando: `epp:backfill-legacy-traceability [--dry-run]`.
+El dashboard usa `es_requerido_cobertura`, existencias conciliadas y saldos
+retornables positivos. Las rutas individuales de escritura devuelven 409;
+no usarlas como flujo productivo. Firmas en disco privado `local`.
