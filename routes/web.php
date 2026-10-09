@@ -23,6 +23,7 @@ use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
 use App\Modules\Epps\Controllers\EppPageController;
 use App\Modules\Epps\Controllers\EppInventoryPageController;
 use App\Modules\Epps\Controllers\EppOperationPageController;
+use App\Modules\Epps\Controllers\EppEvidenceController;
 use App\Modules\Logistica\Controllers\LogisticaPageController;
 use App\Modules\Transporte\Controllers\TransportePageController;
 use App\Modules\RQMina\Controllers\RQMinaPageController;
@@ -267,6 +268,9 @@ Route::middleware('web.auth')->group(function (): void {
 
     // EPP logistica
     Route::get('/epps', [EppPageController::class, 'index'])->middleware('web.permission:epps,ver')->name('epps.index');
+    Route::get('/epps/evidencia/{code}', [EppEvidenceController::class, 'verify'])->middleware('web.permission:epps,ver_evidencia')->name('epps.evidence.verify');
+    Route::get('/epps/operaciones/{operation}/constancia', [EppEvidenceController::class, 'receipt'])->middleware('web.permission:epps,descargar_constancia')->name('epps.evidence.receipt');
+    Route::get('/epps/kardex/verificable/descargar', [EppEvidenceController::class, 'excel'])->middleware('web.permission:epps,ver_evidencia|descargar_constancia')->name('epps.evidence.excel');
     Route::get('/epps/operaciones/nueva', [EppOperationPageController::class, 'create'])->middleware('web.permission:epps,preparar_entrega')->name('epps.operations.create');
     Route::get('/epps/operaciones/trabajadores', [EppOperationPageController::class, 'searchWorkers'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.workers');
     Route::get('/epps/operaciones/devoluciones/nueva', [EppOperationPageController::class, 'createReturn'])->middleware('web.permission:epps,preparar_devolucion')->name('epps.operations.returns.create');

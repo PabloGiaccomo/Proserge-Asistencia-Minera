@@ -5,8 +5,11 @@ namespace App\Modules\Epps\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\EppEntrega;
 use App\Models\ParadaHerramientaCatalogo;
+use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Epps\Requests\SaveEppCatalogRequest;
+use App\Modules\Epps\Services\EppKardexService;
+use App\Modules\Epps\Services\EppScopeService;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
 use App\Support\Rbac\PermissionMatrix;
@@ -68,11 +71,17 @@ class EppPageController extends WebPageController
 
     public function kardexPersonal(Request $request): JsonResponse
     {
-        $this->requireAuthenticatedUser();
+        $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
+        $worker = Personal::query()->findOrFail((string) $request->query('personal_id', ''));
+        app(EppScopeService::class)->assertPersonalAccess($actor, $worker);
+        $data = $this->service->personalKardex($worker->id);
+        if (PermissionMatrix::userCanDirect($actor, 'epps', 'ver_evidencia')) {
+            $data['operations'] = app(EppKardexService::class)->forWorker($worker, $actor)['operations'];
+        }
 
         return response()->json([
-            'data' => $this->service->personalKardex((string) $request->query('personal_id', '')),
-        ]);
+            'data' => $data,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function descargarKardex(Request $request): StreamedResponse
@@ -82,6 +91,9 @@ class EppPageController extends WebPageController
         $validated = $request->validate([
             'personal_id' => ['required', 'string', 'exists:personal,id'],
         ]);
+
+        $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
+        app(EppScopeService::class)->assertPersonalAccess($actor, Personal::query()->findOrFail($validated['personal_id']));
 
         return $this->service->downloadPersonalKardex((string) $validated['personal_id']);
     }

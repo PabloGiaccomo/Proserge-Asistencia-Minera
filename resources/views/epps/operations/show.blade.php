@@ -13,6 +13,10 @@
     @include('epps.operations.messages')
     @include('epps.operations.summary')
     <div class="epp-operation-actions">
+        @if($operation->aceptacion)
+            @allowed('epps', 'ver_evidencia')<a class="epp-operation-button" href="{{ route('epps.evidence.verify', $operation->aceptacion->codigo_verificacion) }}">Verificar evidencia</a>@endallowed
+            @allowed('epps', 'descargar_constancia')<a class="epp-operation-button" href="{{ route('epps.evidence.receipt', $operation) }}">Descargar constancia PDF</a>@endallowed
+        @endif
         @allowed('epps', 'preparar_entrega')<a href="{{ route('epps.operations.create', ['personal_id' => $operation->personal_id, 'almacen_id' => $operation->almacen_id]) }}" class="epp-operation-button">Preparar nueva entrega</a>@endallowed
         @allowed('epps', 'preparar_devolucion')<a href="{{ route('epps.operations.returns.create', ['personal_id' => $operation->personal_id, 'almacen_id' => $operation->almacen_id]) }}" class="epp-operation-button">Preparar devolucion</a>@endallowed
         @if($operation->estado === 'LISTO_PARA_FIRMA')

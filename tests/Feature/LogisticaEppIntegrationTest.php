@@ -236,7 +236,7 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('id="kardexPersonalSearch"', false)
             ->assertSee('data-personal-search-url="/epps/personal/buscar"', false)
             ->assertSee('data-kardex-detail-url="/epps/kardex"', false)
-            ->assertSee('data-kardex-download-url="/epps/kardex/descargar"', false);
+            ->assertSee('data-kardex-download-url="/epps/kardex/verificable/descargar"', false);
     }
 
     public function test_logistica_oculta_pestanas_sin_permiso_visual_del_rol(): void

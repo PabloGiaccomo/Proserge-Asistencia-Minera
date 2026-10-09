@@ -2649,7 +2649,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     class="lgt-kardex-search-input"
                                     data-personal-search-url="{{ route('epps.personal.buscar', [], false) }}"
                                     data-kardex-detail-url="{{ route('epps.kardex.show', [], false) }}"
-                                    data-kardex-download-url="{{ route('epps.kardex.download', [], false) }}"
+                                    data-kardex-download-url="{{ route('epps.evidence.excel', [], false) }}"
                                     autocomplete="off"
                                     placeholder="Nombre, DNI o puesto..."
                                 >
@@ -2881,6 +2881,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         var payload = await response.json();
                         renderKardexMatrix((payload.data && payload.data.kardex) || {});
+                        var operations = (payload.data && payload.data.operations) || [];
+                        if (operations.length) {
+                            tableBody.insertAdjacentHTML('beforeend', operations.map(function(operation) {
+                                return '<tr><td colspan="100"><strong>' + escapeHtml(operation.type) + '</strong> ' + escapeHtml(operation.id) + ' — ' + escapeHtml(operation.evidence_state) + ' — ' + escapeHtml(operation.signed_at || 'Sin firma') + ' — ' + escapeHtml(operation.verification_code || '') + (operation.original_operation_id ? ' — Origen: ' + escapeHtml(operation.original_operation_id) : '') + '</td></tr>';
+                            }).join(''));
+                        }
                         downloadBtn.disabled = false;
                     } catch (e) {
                         tableBody.innerHTML = '<tr><td colspan="4" class="lgt-kardex-loading">No se pudo cargar el kardex del trabajador.</td></tr>';
