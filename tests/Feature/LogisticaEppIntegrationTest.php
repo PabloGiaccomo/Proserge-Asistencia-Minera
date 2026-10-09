@@ -478,7 +478,7 @@ class LogisticaEppIntegrationTest extends TestCase
 
         $this
             ->withSession($session)
-            ->get(route('logistica.index', ['tab' => 'entregas', 'per_page' => 10]))
+            ->get(route('logistica.index', ['tab' => 'entregas', 'q' => $personal->id, 'per_page' => 10]))
             ->assertOk()
             ->assertSee('Mostrando 1&ndash;10 de 12 registros', false)
             ->assertSee('<option value="10" selected>10 registros</option>', false)
@@ -489,14 +489,14 @@ class LogisticaEppIntegrationTest extends TestCase
 
         $this
             ->withSession($session)
-            ->get(route('logistica.index', ['tab' => 'entregas', 'per_page' => 10, 'page' => 2]))
+            ->get(route('logistica.index', ['tab' => 'entregas', 'q' => $personal->id, 'per_page' => 10, 'page' => 2]))
             ->assertOk()
             ->assertSee('Mostrando 11&ndash;12 de 12 registros', false)
             ->assertSee('<span class="epp-page-link is-current" aria-current="page">2</span>', false);
 
         $this
             ->withSession($session)
-            ->get(route('logistica.index', ['tab' => 'entregas', 'per_page' => 25]))
+            ->get(route('logistica.index', ['tab' => 'entregas', 'q' => $personal->id, 'per_page' => 25]))
             ->assertOk()
             ->assertSee('Mostrando 1&ndash;12 de 12 registros', false)
             ->assertSee('<option value="25" selected>25 registros</option>', false);

@@ -234,7 +234,7 @@ class EppCatalogTest extends TestCase
         $this->assertNull(app(EppService::class)->lastDeliverySummary($personal->id, (string) Str::uuid()));
     }
 
-    public function test_entrega_se_corrige_con_epp_vencimiento_cantidad_y_notas(): void
+    public function test_entrega_legacy_no_se_edita_y_conserva_su_snapshot(): void
     {
         $personal = Personal::query()->create([
             'id' => (string) Str::uuid(),
@@ -266,24 +266,23 @@ class EppCatalogTest extends TestCase
             'fecha_entrega' => '2026-07-03',
         ], null);
 
-        $service->updateEntrega($entrega->id, [
-            'epp_id' => $respirador->id,
-            'fecha_entrega' => '2026-07-05',
-            'fecha_vencimiento_calendario' => '2026-10-10',
-            'cantidad' => 2,
-            'motivo_cambio' => 'Correccion de item registrado',
-            'observacion' => 'Se habia elegido casco por error.',
-        ], null);
+        $original = $entrega->fresh()->getAttributes();
 
-        $entrega->refresh();
+        try {
+            $service->updateEntrega($entrega->id, [
+                'epp_id' => $respirador->id,
+                'fecha_entrega' => '2026-07-05',
+                'fecha_vencimiento_calendario' => '2026-10-10',
+                'cantidad' => 2,
+                'motivo_cambio' => 'Correccion de item registrado',
+                'observacion' => 'Se habia elegido casco por error.',
+            ], null);
+            $this->fail('Una entrega legacy no debe editarse directamente.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('no se edita', $exception->getMessage());
+        }
 
-        $this->assertSame($respirador->id, $entrega->epp_id);
-        $this->assertSame(90, $entrega->vida_util_dias_snapshot);
-        $this->assertSame('2026-07-05', $entrega->fecha_entrega->toDateString());
-        $this->assertSame('2026-10-10', $entrega->fecha_vencimiento_calendario->toDateString());
-        $this->assertSame(2, $entrega->cantidad);
-        $this->assertSame('Correccion de item registrado', $entrega->motivo_cambio);
-        $this->assertSame('Se habia elegido casco por error.', $entrega->observacion);
+        $this->assertSame($original, $entrega->fresh()->getAttributes());
     }
 
     public function test_entrega_guarda_talla_color_y_atributos_del_catalogo(): void
@@ -477,8 +476,8 @@ class EppCatalogTest extends TestCase
             ]);
         }
 
-        $defaultData = app(EppService::class)->pageData();
-        $selectedData = app(EppService::class)->pageData(['per_page' => 25]);
+        $defaultData = app(EppService::class)->pageData(['q' => $personal->id]);
+        $selectedData = app(EppService::class)->pageData(['q' => $personal->id, 'per_page' => 25]);
 
         $this->assertSame(10, $defaultData['entregas']->perPage());
         $this->assertCount(10, $defaultData['entregas']->items());

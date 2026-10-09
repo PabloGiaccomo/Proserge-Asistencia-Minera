@@ -277,6 +277,8 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/epps/operaciones/{operation}/revisar', [EppOperationPageController::class, 'review'])->middleware('web.permission:epps,confirmar_entrega|confirmar_devolucion|aprobar_excepcion_firma')->name('epps.operations.review');
     Route::post('/epps/operaciones/{operation}/firmar', [EppOperationPageController::class, 'sign'])->middleware('web.permission:epps,confirmar_entrega|confirmar_devolucion|aprobar_excepcion_firma')->name('epps.operations.sign');
     Route::post('/epps/operaciones/{operation}/rechazar', [EppOperationPageController::class, 'reject'])->middleware('web.permission:epps,preparar_entrega|preparar_devolucion')->name('epps.operations.reject');
+    Route::post('/epps/operaciones/{operation}/corregir', [EppOperationPageController::class, 'correct'])->middleware('web.permission:epps,corregir')->name('epps.operations.correct');
+    Route::post('/epps/operaciones/{operation}/anular', [EppOperationPageController::class, 'annul'])->middleware('web.permission:epps,anular')->name('epps.operations.annul');
     Route::get('/epps/operaciones/{operation}', [EppOperationPageController::class, 'show'])->middleware('web.permission:epps,ver_operaciones')->name('epps.operations.show');
     Route::get('/epps/personal/buscar', [EppPageController::class, 'buscarPersonal'])->middleware('web.permission:epps,ver')->name('epps.personal.buscar');
     Route::get('/epps/entregas/ultima', [EppPageController::class, 'ultimaEntrega'])->middleware('web.permission:epps,ver')->name('epps.entregas.ultima');

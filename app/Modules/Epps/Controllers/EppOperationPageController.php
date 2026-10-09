@@ -9,11 +9,14 @@ use App\Models\EppOperacion;
 use App\Models\EppRegistro;
 use App\Models\Personal;
 use App\Models\Usuario;
+use App\Modules\Epps\Requests\AnnulEppOperationRequest;
+use App\Modules\Epps\Requests\CorrectEppOperationRequest;
 use App\Modules\Epps\Requests\SignEppOperationRequest;
 use App\Modules\Epps\Requests\StoreEppOperationRequest;
 use App\Modules\Epps\Requests\StoreEppReturnRequest;
 use App\Modules\Epps\Requests\UpdateEppOperationRequest;
 use App\Modules\Epps\Services\EppBalanceService;
+use App\Modules\Epps\Services\EppCorrectionService;
 use App\Modules\Epps\Services\EppOperationConfirmationService;
 use App\Modules\Epps\Services\EppOperationService;
 use App\Modules\Epps\Services\EppScopeService;
@@ -32,7 +35,7 @@ use InvalidArgumentException;
 
 class EppOperationPageController extends WebPageController
 {
-    public function __construct(private readonly EppOperationService $operations, private readonly EppOperationConfirmationService $confirmations, private readonly EppScopeService $scope) {}
+    public function __construct(private readonly EppOperationService $operations, private readonly EppOperationConfirmationService $confirmations, private readonly EppScopeService $scope, private readonly EppCorrectionService $corrections) {}
 
     public function create(Request $request): View
     {
@@ -206,6 +209,30 @@ class EppOperationPageController extends WebPageController
             'operation' => $operation->fresh()->load('detalles'), 'payload' => $payload,
             'integrityState' => $operation->aceptacion()->value('estado_integridad'),
         ]);
+    }
+
+    public function correct(CorrectEppOperationRequest $request, EppOperacion $operation): RedirectResponse
+    {
+        $actor = $this->actor();
+        try {
+            $correction = $this->corrections->correct($operation, $request->validated(), $actor, $request->validated('motivo'));
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['correccion' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('epps.operations.show', $correction)->with('success', 'Correccion compensatoria registrada. La operacion original se conserva sin cambios.');
+    }
+
+    public function annul(AnnulEppOperationRequest $request, EppOperacion $operation): RedirectResponse
+    {
+        $actor = $this->actor();
+        try {
+            $annulment = $this->corrections->annul($operation, $actor, $request->validated('motivo'));
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['anulacion' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('epps.operations.show', $annulment)->with('success', 'Anulacion compensatoria registrada. La operacion original se conserva sin cambios.');
     }
 
     private function form(Request $request, Usuario $actor, ?EppOperacion $operation = null): View

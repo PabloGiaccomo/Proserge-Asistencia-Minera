@@ -20,6 +20,31 @@
                 <a href="{{ route('epps.operations.review', $operation) }}" class="epp-operation-button is-primary">Revisar y firmar</a>
             @endallowed
         @endif
+        @if(in_array($operation->tipo, ['ENTREGA', 'DEVOLUCION'], true) && in_array($operation->estado, ['FIRMADO', 'FIRMADO_PARCIAL'], true))
+            @allowed('epps', 'corregir')
+                <details class="epp-operation-card">
+                    <summary>Registrar correccion compensatoria</summary>
+                    <form method="POST" action="{{ route('epps.operations.correct', $operation) }}">
+                        @csrf
+                        @foreach($operation->detalles as $index => $detail)
+                            <input type="hidden" name="lines[{{ $index }}][detalle_origen_id]" value="{{ $detail->id }}">
+                            <label>{{ data_get($detail->snapshot_json, 'real.nombre', 'EPP') }}: cantidad a compensar
+                                <input type="number" name="lines[{{ $index }}][cantidad]" min="1" max="{{ $detail->cantidad_procesada }}" value="{{ $detail->cantidad_procesada }}" required>
+                            </label>
+                        @endforeach
+                        <label>Motivo <textarea name="motivo" maxlength="1000" required></textarea></label>
+                        <button type="submit" class="epp-operation-button">Registrar correccion</button>
+                    </form>
+                </details>
+            @endallowed
+            @allowed('epps', 'anular')
+                <form method="POST" action="{{ route('epps.operations.annul', $operation) }}">
+                    @csrf
+                    <label>Motivo de anulacion <textarea name="motivo" maxlength="1000" required></textarea></label>
+                    <button type="submit" class="epp-operation-button">Anular mediante compensacion</button>
+                </form>
+            @endallowed
+        @endif
         <a href="{{ route('logistica.index', ['tab' => 'entregas']) }}" class="epp-operation-button">Volver a Logistica</a>
     </div>
 </div>

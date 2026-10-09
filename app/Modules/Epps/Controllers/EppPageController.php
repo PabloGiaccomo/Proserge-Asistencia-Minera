@@ -22,9 +22,7 @@ class EppPageController extends WebPageController
     public function __construct(
         private readonly EppService $service,
         private readonly ParadaHerramientaService $toolCatalogService
-    )
-    {
-    }
+    ) {}
 
     public function index(Request $request): RedirectResponse
     {
@@ -237,6 +235,8 @@ class EppPageController extends WebPageController
     public function updateEntrega(Request $request, string $id): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
+        $entrega = EppEntrega::query()->findOrFail($id);
+        abort_if($entrega->operacion_id !== null || $entrega->es_legacy, 409, 'El historial firmado o legado no se edita. Registra una correccion compensatoria.');
 
         $validated = $request->validate([
             'epp_id' => ['nullable', 'string', 'exists:epp_registro,id'],
@@ -260,6 +260,8 @@ class EppPageController extends WebPageController
     public function destroyEntrega(string $id): RedirectResponse
     {
         $this->requireAuthenticatedUser();
+        $entrega = EppEntrega::query()->findOrFail($id);
+        abort_if($entrega->operacion_id !== null || $entrega->es_legacy, 409, 'El historial firmado o legado no se elimina. Registra una anulacion compensatoria.');
 
         $this->service->destroyEntrega($id);
 
@@ -319,7 +321,7 @@ class EppPageController extends WebPageController
 
         if ($duplicado) {
             return back()
-                ->withInput($request->input() + ['catalog_edit_id' => 'herramienta-catalogo-' . $id])
+                ->withInput($request->input() + ['catalog_edit_id' => 'herramienta-catalogo-'.$id])
                 ->with('error', 'Ya existe otro item con ese nombre.');
         }
 

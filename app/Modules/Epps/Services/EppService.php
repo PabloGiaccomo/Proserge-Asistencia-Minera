@@ -115,7 +115,7 @@ class EppService
                             $eppQuery
                                 ->where('nombre', 'like', "%{$search}%")
                                 ->orWhere('codigo', 'like', "%{$search}%");
-                    });
+                        });
                 });
             })
             ->when($minaId !== '', function ($query) use ($minaId): void {
@@ -334,7 +334,7 @@ class EppService
             ->orderByDesc('created_at')
             ->first();
 
-        if (!$entrega) {
+        if (! $entrega) {
             return null;
         }
 
@@ -455,7 +455,7 @@ class EppService
         $frontItems = $matrix['items']->where('side', 'anterior')->values();
         $backItems = $matrix['items']->where('side', 'posterior')->values();
 
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $frontSheet = $spreadsheet->getActiveSheet();
         $frontSheet->setTitle('Anterior');
         $backSheet = $spreadsheet->createSheet();
@@ -466,7 +466,7 @@ class EppService
         $spreadsheet->setActiveSheetIndex(0);
 
         $writer = new Xlsx($spreadsheet);
-        $filename = 'SGC-FOR-59_kardex_epp_' . Str::slug((string) $worker['nombre'], '_') . '_' . now()->format('Ymd_His') . '.xlsx';
+        $filename = 'SGC-FOR-59_kardex_epp_'.Str::slug((string) $worker['nombre'], '_').'_'.now()->format('Ymd_His').'.xlsx';
 
         return response()->streamDownload(function () use ($writer): void {
             $writer->save('php://output');
@@ -477,7 +477,7 @@ class EppService
 
     public function storeCatalog(array $payload): EppRegistro
     {
-        return app(EppCatalogService::class)->save(new EppRegistro(), $payload);
+        return app(EppCatalogService::class)->save(new EppRegistro, $payload);
     }
 
     public function updateCatalog(string $id, array $payload): EppRegistro
@@ -524,7 +524,7 @@ class EppService
         }
 
         $estado = strtoupper(trim((string) ($payload['estado'] ?? EppEntrega::ESTADO_DEVUELTO)));
-        if (!in_array($estado, [
+        if (! in_array($estado, [
             EppEntrega::ESTADO_CAMBIADO,
             EppEntrega::ESTADO_DEVUELTO,
             EppEntrega::ESTADO_USO_INCORRECTO,
@@ -576,8 +576,11 @@ class EppService
 
     public function updateEntrega(string $id, array $payload, ?Usuario $usuario): EppEntrega
     {
-        return DB::transaction(function () use ($id, $payload, $usuario): EppEntrega {
+        return DB::transaction(function () use ($id, $payload): EppEntrega {
             $entrega = EppEntrega::query()->with('epp')->findOrFail($id);
+            if ($entrega->operacion_id !== null || $entrega->es_legacy) {
+                throw new InvalidArgumentException('El historial firmado o legado no se edita. Registra una correccion compensatoria.');
+            }
 
             $data = [];
             $selectedEpp = $entrega->epp;
@@ -644,6 +647,9 @@ class EppService
     public function destroyEntrega(string $id): void
     {
         $entrega = EppEntrega::query()->findOrFail($id);
+        if ($entrega->operacion_id !== null || $entrega->es_legacy) {
+            throw new InvalidArgumentException('El historial firmado o legado no se elimina. Registra una anulacion compensatoria.');
+        }
         $entrega->delete();
     }
 
@@ -1046,7 +1052,7 @@ class EppService
 
         $logoPath = public_path('img/LogoProserge.png');
         if (is_file($logoPath)) {
-            $drawing = new Drawing();
+            $drawing = new Drawing;
             $drawing->setName('Logo Proserge');
             $drawing->setDescription('Logo Proserge');
             $drawing->setPath($logoPath);
@@ -1091,6 +1097,7 @@ class EppService
 
         if ($items->isEmpty()) {
             $sheet->setCellValue("C{$headerRow}", 'Sin EPP registrado');
+
             return;
         }
 
@@ -1282,7 +1289,7 @@ class EppService
 
     private function calculateUsage(EppEntrega $entrega): array
     {
-        if (!$entrega->personal_id || !$entrega->fecha_entrega) {
+        if (! $entrega->personal_id || ! $entrega->fecha_entrega) {
             return ['dias' => 0, 'periodos' => []];
         }
 
@@ -1307,7 +1314,7 @@ class EppService
 
         foreach ($detalles as $detalle) {
             $range = $this->assignmentRange($detalle);
-            if (!$range) {
+            if (! $range) {
                 continue;
             }
 
@@ -1360,7 +1367,7 @@ class EppService
         $inicio = $detalle->fecha_inicio ?: $rqMina?->fecha_inicio;
         $fin = $detalle->fecha_fin ?: $rqMina?->fecha_fin ?: $inicio;
 
-        if (!$inicio || !$fin) {
+        if (! $inicio || ! $fin) {
             return null;
         }
 
@@ -1388,6 +1395,7 @@ class EppService
         foreach ($intervals as $interval) {
             if ($merged === []) {
                 $merged[] = $interval;
+
                 continue;
             }
 
@@ -1396,6 +1404,7 @@ class EppService
                 if ($interval['hasta']->gt($merged[$lastIndex]['hasta'])) {
                     $merged[$lastIndex]['hasta'] = $interval['hasta'];
                 }
+
                 continue;
             }
 
@@ -1442,11 +1451,10 @@ class EppService
 
     private function usuarioLabel(?Usuario $usuario): string
     {
-        if (!$usuario) {
+        if (! $usuario) {
             return 'No registrado';
         }
 
         return (string) ($usuario->personal?->nombre_completo ?: $usuario->email ?: 'No registrado');
     }
 }
-

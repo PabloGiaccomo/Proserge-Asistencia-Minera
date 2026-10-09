@@ -121,6 +121,11 @@ class EppOperacion extends Model
         return $this->belongsTo(EppOperacion::class, 'operacion_origen_id');
     }
 
+    public function operacionesCompensatorias(): HasMany
+    {
+        return $this->hasMany(EppOperacion::class, 'operacion_origen_id');
+    }
+
     public function registradoPor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'registrado_por_usuario_id');

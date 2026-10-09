@@ -268,6 +268,7 @@
                             $personal = $item['personal'];
                             $epp = $item['epp'];
                             $isActive = $entrega->estado === \App\Models\EppEntrega::ESTADO_ENTREGADO;
+                            $isProtectedHistory = $entrega->operacion_id !== null || $entrega->es_legacy;
                             $editableEpps = collect($eppsActivos ?? []);
                             if ($epp && ! $editableEpps->contains('id', $epp->id)) {
                                 $editableEpps = $editableEpps->push($epp);
@@ -348,7 +349,7 @@
                             </td>
                             <td class="epp-actions-cell">
                                 <div class="epp-row-actions">
-                                    @if($canRegisterEpps && $isActive)
+                                    @if($canRegisterEpps && $isActive && !$isProtectedHistory)
                                         <button type="button" class="epp-btn epp-btn-sm epp-btn-outline" data-epp-open-modal="eppCloseModal{{ $entrega->id }}" title="Registrar devolucion o cambio">
                                             Cerrar
                                         </button>
@@ -409,7 +410,7 @@
                                         </div>
                                     @endif
 
-                                    @if($canUpdateEpps)
+                                    @if($canUpdateEpps && !$isProtectedHistory)
                                         <button type="button" class="epp-btn epp-btn-sm epp-btn-ghost" data-epp-open-modal="eppEditModal{{ $entrega->id }}" title="Editar datos de la entrega">
                                             Editar
                                         </button>
@@ -502,7 +503,7 @@
                                         </div>
                                     @endif
 
-                                    @if($canDeleteEpps)
+                                    @if($canDeleteEpps && !$isProtectedHistory)
                                         <button type="button" class="epp-btn epp-btn-sm epp-btn-danger-ghost" data-epp-open-modal="eppDeleteModal{{ $entrega->id }}" title="Eliminar entrega">
                                             Eliminar
                                         </button>
@@ -541,7 +542,9 @@
                                         </div>
                                     @endif
 
-                                    @if(!$canRegisterEpps && !$canUpdateEpps && !$canDeleteEpps)
+                                    @if($isProtectedHistory)
+                                        <span class="epp-no-action">{{ $entrega->es_legacy ? 'Legado sin firma: historial protegido' : 'Firmado: usa correccion o anulacion' }}</span>
+                                    @elseif(!$canRegisterEpps && !$canUpdateEpps && !$canDeleteEpps)
                                         <span class="epp-no-action">Sin accion</span>
                                     @endif
                                 </div>
