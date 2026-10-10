@@ -79,6 +79,10 @@ class EvaluacionesDashboardService
                 ->whereDate('fecha', '>=', $filters['desde'])
                 ->whereDate('fecha', '<=', $filters['hasta']);
 
+            if ($type === 'supervisores') {
+                $query->where('estado', '<>', EvaluacionSupervisor::PENDING_REGULARIZATION);
+            }
+
             if ($type !== 'residentes') {
                 $query->with('mina:id,nombre');
                 if (!$this->policy->isPrivileged($user)) {
@@ -97,7 +101,7 @@ class EvaluacionesDashboardService
                         }
                         if ($this->policy->canViewOthers($user)) {
                             $marker = $type === 'desempeno' ? 'origen' : 'calculo_version';
-                            $scope->orWhere(fn ($history) => $history->where($marker, 'HISTORICA')->whereNull('mina_id'));
+                            $scope->orWhere(fn ($history) => $history->whereIn($marker, $type === 'supervisores' ? ['HISTORICA', 'REGULARIZADA'] : ['HISTORICA'])->whereNull('mina_id'));
                         }
                     });
                 }
@@ -115,7 +119,7 @@ class EvaluacionesDashboardService
                 $rows->push([
                     'type' => $type,
                     'origin' => $type === 'desempeno' ? ($evaluation->origen ?: 'LEGADO')
-                        : ($evaluation->calculo_version === 'HISTORICA' ? 'HISTORICA' : 'ACTUAL'),
+                        : (in_array($evaluation->calculo_version, ['HISTORICA', 'REGULARIZADA'], true) ? 'HISTORICA' : 'ACTUAL'),
                     'label' => $label,
                     'color' => $color,
                     'max' => $max,

@@ -2,6 +2,14 @@
 
 ## 1. Requisitos
 
+Para la convalidacion con equivalencias y nota opcional, aplicar antes de usar
+el flujo `2026_10_05_000500_add_mining_exam_convalidation_equivalences.php`.
+Agrega columnas JSON y auditoria sin cambiar resultados existentes. Desplegar
+tambien `public/build/manifest.json` y los assets generados por `npm run build`.
+Las reglas existentes mantienen sus valores; activar `Aceptar resultados de
+otras minas` y elegir equivalentes por requisito en la configuracion. Las
+convalidaciones historicas no se reescriben ni reciben snapshots inventados.
+
 - PHP 8.2 o superior con `pdo_mysql`, `mbstring`, `openssl`, `fileinfo`, `zip`
   y extensiones requeridas por Laravel/PhpSpreadsheet.
 - Composer.
@@ -261,6 +269,74 @@ migrar a SMTP.
 Confirmar fila de metadata, ruta registrada, existencia dentro de
 `storage/app/private` y permisos del directorio. No mover documentos a `public`
 como solucion rapida.
+
+## Organizacion de examenes mineros por FTP
+
+Seguir `docs/FTP_ORGANIZAR_EXAMENES.md`: nueva estructura incremental (o SQL
+equivalente en phpMyAdmin), archivos PHP/Blade y `public/build` completo. La
+pagina no ejecuta migraciones; si falta esquema muestra aviso y bloquea
+escrituras. No copiar la base local ni asociar cursos automaticamente al subir
+archivos. Respaldo y autorizacion preceden a cambios en bases operativas.
+
+## Corte de citas EMO y control de asistencia
+
+Migracion: `2026_10_07_000100_create_emo_appointments_and_clinics.php`.
+Es aditiva y no asigna clinicas a intentos historicos. La categoria existente
+queda `OTRO` hasta su clasificacion autorizada. El rollback operativo conserva
+las tablas y columnas nuevas; `down()` no elimina historial medico.
+
+Antes del corte, ensayar sobre una copia realista aislada: contar filas, medir
+duracion de ALTER/indices, bloqueos y espacio, comparar intentos/resultados y
+referencias a archivos antes/despues. La suite de `proserge_app_test` no
+sustituye ese ensayo. La consulta agrupada usa union/temporary/filesort;
+medir filtro por fecha y exportacion cercana al limite con volumen realista.
+
+Orden de despliegue:
+
+1. Respaldar MySQL y `storage/app/private`; confirmar restauracion disponible.
+2. Activar mantenimiento. Una estrategia sin mantenimiento requiere ensayo
+   escrito de compatibilidad de ambas versiones.
+3. Aplicar primero la migracion aditiva con `php artisan migrate --force`.
+4. Desplegar codigo y `public/build` compilado de la misma version.
+5. Ejecutar `php artisan optimize:clear` y reconstruir los caches usados.
+6. Registrar clinicas oficiales y clasificar categorias desde Acciones con
+   usuario autorizado. No deducirlas de nombres/tipo/lugar ni del Master.
+7. En staging comprobar dos clinicas/dos minas, cita compartida, resultado con
+   detalle, regularizacion, filtros y Excel con/sin ambos permisos, usando
+   fixtures ficticios. En produccion usar smoke no mutante; una escritura de
+   prueba requiere fixture expresamente autorizado y reconciliacion auditada.
+8. Salir de mantenimiento y vigilar errores, tiempos y auditoria.
+
+Si falla, volver al codigo anterior conservando esquema e historial aditivos.
+Reconciliar y documentar cualquier cita creada antes de reabrir la operacion.
+No usar rollback destructivo, `migrate:fresh` ni reclasificaciones masivas como
+solucion de emergencia. El ensayo y el despliegue requieren ambiente/backup
+identificados; este runbook no acredita que ya se hayan ejecutado.
+
+### Reparacion automatica de legado EMO y NO_APLICA (2026-10-10)
+
+Desplegar junto al codigo `2026_10_10_000100_add_attempt_cycle_boundary_to_personal_mina_examenes.php`
+y `2026_10_10_000200_repair_legacy_mining_emo_and_not_applicable.php`, y el servicio
+`LegacyMiningDeployRepairService`. El comando habitual `php artisan migrate --force`
+aplica la reparacion; no depende de visitar una pagina ni ejecutar un comando
+posterior con actor humano. Respaldar y ensayar antes del despliegue, siguiendo
+el orden anterior y publicando los assets compilados de la misma version.
+
+Solo `OTRO` con nombre normalizado exacto `EXAMEN MEDICO` se clasifica como EMO
+con auditoria de sistema. Se conservan categorias explicitas y nombres parecidos.
+Para esos catalogos EMO, corrige resultados medicos habilitantes inequivocos
+del legado, usando fecha Lima y recalculando la asignacion. Los pendientes
+contradictorios de `NO_APLICA` se anulan sin borrar historial y cierran su ciclo.
+Las transacciones por catalogo/examen permiten reintentar despues de una ejecucion
+parcial sin duplicar auditoria ni mover otra vez el limite de ciclo.
+
+Los esquemas historicos sin columnas/tablas indispensables se omiten sin
+modificacion no auditada. Si falta el esquema de citas/auditoria, se omite un
+pendiente con enlace EMO; los pendientes sin enlace siguen siendo reparables.
+`down()` no revierte datos de negocio ni elimina evidencia. Tras desplegar,
+verificar categoria/historial, avance, vigencia y nuevas programaciones desde
+`NO_APLICA`, ademas del smoke autenticado habitual. Esta documentacion no
+acredita que el despliegue o el ensayo sobre copia realista ya se hayan realizado.
 
 ## 12. Seguridad operativa
 

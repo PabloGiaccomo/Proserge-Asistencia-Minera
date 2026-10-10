@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
     try {
         const manifest = JSON.parse(fs.readFileSync('public/build/manifest.json', 'utf8'));
-        for (const mode of ['form', 'return-form', 'review', 'return-review', 'witness', 'show', 'loss', 'verify', 'dashboard', 'personal-public', 'personal-ingreso']) {
+        for (const mode of ['catalog-review', 'catalog-return-review', 'form', 'return-form', 'review', 'return-review', 'witness', 'show', 'loss', 'verify', 'dashboard', 'personal-public', 'personal-ingreso']) {
             const page = await browser.newPage({ deviceScaleFactor: 2 });
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
@@ -19,6 +19,14 @@ const assert = require('node:assert/strict');
             await page.addStyleTag({ path: 'public/build/' + manifest['resources/css/app.css'].file });
             await page.addScriptTag({ path: 'public/build/' + manifest['resources/js/app.js'].file });
             await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
+            if (['catalog-review', 'review', 'witness'].includes(mode)) {
+                const declaration = page.locator('[data-epp-delivery-declaration]');
+                assert.equal(await declaration.count(), 1);
+                assert.match(await declaration.textContent(), /DECLARO HABER RECIBIDO.*e\. Asimismo declara haberlos recibido/s);
+                assert.ok(await declaration.evaluate(element => Boolean(element.compareDocumentPosition(document.querySelector('[data-signature-pad]')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+            } else if (['catalog-return-review', 'return-review'].includes(mode)) {
+                assert.equal(await page.locator('[data-epp-delivery-declaration]').count(), 0);
+            }
             for (const width of mode.startsWith('personal-') ? [] : [320, 375, 390, 430, 1440]) {
                 await page.setViewportSize({ width, height: 1000 });
                 await page.waitForTimeout(400);
@@ -62,7 +70,17 @@ const assert = require('node:assert/strict');
                 await rows.first().locator('[data-return-select]').uncheck();
                 assert.equal(await rows.first().locator('[data-return-quantity]').isDisabled(), true);
                 assert.equal(await page.locator('[data-return-form]').evaluate(form => new FormData(form).has('lines[0][cantidad_solicitada]')), false);
-            } else if (mode === 'review' || mode === 'return-review' || mode === 'witness' || mode.startsWith('personal-')) {
+            } else if (mode === 'catalog-review' || mode === 'catalog-return-review' || mode === 'review' || mode === 'return-review' || mode === 'witness' || mode.startsWith('personal-')) {
+                if (mode === 'catalog-review' || mode === 'catalog-return-review') {
+                    assert.equal(await page.locator('[data-epp-signing-item]').count(), 2);
+                    assert.match(await page.locator('[data-epp-signing-item]').first().textContent(), /GUANTES DE REEMPLAZO.*Cantidad: 5.*Talla: M.*BLANCO/s);
+                    assert.match(await page.locator('[data-epp-signing-item]').last().textContent(), /CASCO DE SEGURIDAD.*Cantidad: 2.*TIPO: I/s);
+                }
+                if (mode === 'catalog-return-review') {
+                    assert.match(await page.locator('[name="confirmacion"]').locator('..').textContent(), /Confirmo haber devuelto/);
+                    assert.match(await page.locator('[data-epp-signing-item]').first().textContent(), /Saldo restante: 1/);
+                    assert.equal(await page.locator('input[type="number"]').count(), 0);
+                }
                 if (mode === 'return-review') {
                     assert.match(await page.locator('[name="confirmacion"]').locator('..').textContent(), /Confirmo haber devuelto/);
                     assert.match(await page.locator('.epp-operation').textContent(), /Saldo restante: 3/);

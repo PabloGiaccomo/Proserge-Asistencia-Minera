@@ -15,12 +15,14 @@ $batch = new EvaluacionesImportLote([
 ]);
 $entry = [
     'source_sheet' => 'EV SUPERVISORES', 'source_row' => 2, 'dni' => '12345678',
+    'dni_ref' => '00000000-0000-0000-0000-000000000002',
     'name' => 'PERSONA DE PRUEBA', 'date' => '2025-12-17',
     'payload' => ['resultado_final' => 61, 'calculo_version' => 'HISTORICA'],
     'review_status' => $blocked ? 'blocked' : 'proposed',
 ];
 if ($blocked) {
     $entry['reason'] = 'DNI inexistente o ambiguo en Personal. Corrige la referencia de origen.';
+    $entry['identity_suggestions'] = [['id' => '00000000-0000-0000-0000-000000000003', 'nombre_completo' => 'PERSONA DE PRUEBA', 'dni' => '87654321']];
 }
 $manifest = [
     'proposed' => $blocked ? [] : [$entry], 'blocked' => $blocked ? [$entry] : [],

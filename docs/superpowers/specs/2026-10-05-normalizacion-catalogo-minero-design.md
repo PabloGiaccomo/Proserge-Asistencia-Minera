@@ -1,6 +1,6 @@
 # Organizar examenes y nombres alternativos
 
-Fecha: 2026-10-05. Estado: propuesta para revision del usuario.
+Fecha: 2026-10-05. Estado: aprobado por el usuario en este chat.
 
 ## Objetivo y alcance
 

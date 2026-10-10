@@ -591,24 +591,8 @@ class UsuarioPageController extends Controller
 
     public function isSuperAdmin(): bool
     {
-        $sessionRole = strtoupper(trim((string) (session('user.rol') ?? '')));
-        if ($sessionRole === 'SUPERADMIN') {
-            return true;
-        }
-
-        $sessionRoles = array_map(fn ($r) => strtoupper(trim((string) $r)), session('user.roles', []));
-        if (in_array('SUPERADMIN', $sessionRoles, true)) {
-            return true;
-        }
-
-        $userId = session('user_id') ?: session('user.id');
-        if (!$userId) {
-            return false;
-        }
-
-        $usuario = Usuario::query()->with(['rol:id,nombre', 'rolesAdicionales:id,nombre'])->find($userId);
-
-        return $this->adminProtection->isSuperAdminUser($usuario);
+        $usuario = request()->user();
+        return $usuario instanceof Usuario && $this->adminProtection->isSuperAdminUser($usuario);
     }
 
     private function findUsuarioOrFail(string $id): Usuario

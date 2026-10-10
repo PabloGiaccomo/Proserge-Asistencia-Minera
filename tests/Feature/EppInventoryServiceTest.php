@@ -167,7 +167,7 @@ class EppInventoryServiceTest extends TestCase
         $this->assertDatabaseMissing('epp_registro', ['nombre' => 'CONSUMIBLE HTTP']);
         $this->post('/epps/catalogo', $payload + ['politica_revisada' => '1'])->assertRedirect()->assertSessionHasNoErrors();
         $epp = EppRegistro::query()->where('nombre', 'CONSUMIBLE HTTP')->firstOrFail();
-        $response = $this->get('/logistica?tab=identificacion')->assertOk()->assertSee('He revisado la política de devolución')->assertSee('Inventario por almacén');
+        $response = $this->get('/logistica?tab=identificacion')->assertOk()->assertSee('He revisado la política de devolución')->assertDontSee('Inventario por almacén');
         $dom = new \DOMDocument;
         @$dom->loadHTML($response->getContent());
         $xpath = new \DOMXPath($dom);

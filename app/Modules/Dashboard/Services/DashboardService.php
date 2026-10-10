@@ -550,7 +550,8 @@ class DashboardService
 
     private function evalSupBase(Usuario $usuario, array $filters): Builder
     {
-        $q = DB::table('evaluacion_supervisor as es');
+        $q = DB::table('evaluacion_supervisor as es')
+            ->where('es.estado', '<>', \App\Models\EvaluacionSupervisor::PENDING_REGULARIZATION);
 
         $this->applyDateRange($q, 'es.fecha', $filters, true);
 

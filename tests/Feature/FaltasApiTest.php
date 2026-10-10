@@ -73,7 +73,7 @@ class FaltasApiTest extends TestCase
         $this->assertEquals(1, $count);
     }
 
-    public function test_corregir_falta_actualiza_consistencia(): void
+    public function test_corregir_falta_registra_trazabilidad_en_falta_y_asistencia(): void
     {
         $usuarioId = $this->crearUsuario();
         [$minaId, $faltaId] = $this->crearContextoMinaFalta();
@@ -90,7 +90,48 @@ class FaltasApiTest extends TestCase
         $this->assertDatabaseHas('asistencia_detalle', [
             'id' => $response->json('data.asistencia_detalle_id'),
             'estado' => 'PRESENTE',
+            'hora_marcado' => '07:10:00',
+            'marcado_por_id' => $usuarioId,
+            'updated_by' => $usuarioId,
+            'origen_registro' => 'CORRECCION_FALTA',
         ]);
+        $this->assertNotNull(DB::table('asistencia_detalle')
+            ->where('id', $response->json('data.asistencia_detalle_id'))
+            ->value('marcado_at'));
+        $this->assertDatabaseHas('faltas', [
+            'id' => $faltaId,
+            'estado' => 'CORREGIDA',
+            'motivo_correccion' => 'Marco ingreso de forma tardia',
+            'corregido_por_usuario_id' => $usuarioId,
+        ]);
+        $this->assertNotNull(DB::table('faltas')->where('id', $faltaId)->value('corregido_at'));
+    }
+
+    public function test_no_permite_corregir_dos_veces_ni_sobrescribe_historial(): void
+    {
+        $usuarioId = $this->crearUsuario();
+        [$minaId, $faltaId] = $this->crearContextoMinaFalta();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/faltas/'.$faltaId.'/corregir-asistencia', [
+            'motivo_correccion' => 'Primera correccion valida',
+            'hora_marcado' => '07:10',
+        ])->assertOk();
+
+        $detalleId = DB::table('faltas')->where('id', $faltaId)->value('asistencia_detalle_id');
+        $faltaAntes = (array) DB::table('faltas')->where('id', $faltaId)->first();
+        $detalleAntes = (array) DB::table('asistencia_detalle')->where('id', $detalleId)->first();
+
+        $this->travel(5)->minutes();
+        $response = $this->withToken($token)->postJson('/api/v1/faltas/'.$faltaId.'/corregir-asistencia', [
+            'motivo_correccion' => 'Intento de sobrescribir historial',
+            'hora_marcado' => '08:45',
+        ]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'FALTA_ALREADY_CORRECTED');
+        $this->assertSame($faltaAntes, (array) DB::table('faltas')->where('id', $faltaId)->first());
+        $this->assertSame($detalleAntes, (array) DB::table('asistencia_detalle')->where('id', $detalleId)->first());
     }
 
     public function test_anular_exige_motivo(): void

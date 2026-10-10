@@ -2,6 +2,8 @@
 
 namespace App\Modules\Evaluaciones\Support;
 
+use Illuminate\Support\Facades\Validator;
+
 class SupervisorEvaluationTemplate
 {
     public const SECTION_TITLES = [
@@ -86,6 +88,32 @@ class SupervisorEvaluationTemplate
         }
 
         return $normalized;
+    }
+
+    public static function responseRules(): array
+    {
+        $keys = array_keys(self::WEIGHTS);
+        $rules = ['respuestas' => ['required', 'array:'.implode(',', $keys)]];
+        foreach ($keys as $key) {
+            $rules['respuestas.'.$key] = ['required', 'integer', 'between:1,5'];
+        }
+
+        return $rules;
+    }
+
+    public static function hasCompleteResponses(mixed $responses): bool
+    {
+        return Validator::make(['respuestas' => $responses], self::responseRules())->passes();
+    }
+
+    public static function responseMessages(): array
+    {
+        return [
+            'respuestas.required' => 'Completa los criterios de la evaluacion.',
+            'respuestas.*.required' => 'Selecciona una nota para este criterio.',
+            'respuestas.*.integer' => 'Selecciona una nota entera entre 1 y 5.',
+            'respuestas.*.between' => 'La nota debe estar entre 1 y 5.',
+        ];
     }
 
     public static function calculateFinalScore(array $responses): float

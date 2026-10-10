@@ -23,6 +23,7 @@ class PersonalMinaExamenIntento extends Model
         'id',
         'personal_mina_examen_id',
         'personal_curso_registro_id',
+        'emo_cita_id',
         'numero_intento',
         'fecha_programacion',
         'fecha_realizacion',
@@ -63,5 +64,10 @@ class PersonalMinaExamenIntento extends Model
     public function cursoRegistro(): BelongsTo
     {
         return $this->belongsTo(PersonalCursoRegistro::class, 'personal_curso_registro_id');
+    }
+
+    public function emoCita(): BelongsTo
+    {
+        return $this->belongsTo(PersonalEmoCita::class, 'emo_cita_id');
     }
 }

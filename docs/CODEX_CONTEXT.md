@@ -78,6 +78,18 @@ Trabajadores nuevos:
 
 ## Reglas ya definidas
 
+- Seguridad: GERENTE respeta los permisos configurados. Solo roles ACTIVO
+  aportan permisos y privilegios de scope; los roles adicionales activos se
+  combinan con el principal. ADMIN/SUPERADMIN activos conservan el mecanismo
+  global. Un privilegio de scope no concede por si solo marcacion o cierre de
+  asistencia. Auditoria en curso: `docs/security/authorization-audit.md`.
+- Seguridad (2026-10-09): en la pantalla de roles cada check es independiente.
+  Un formulario enviado reemplaza la matriz completa; los checks ausentes se
+  guardan como false. Un false explicito no se convierte en Dashboard, Ver,
+  otra accion de Administrar ni un permiso heredado entre modulos. Web recarga
+  los roles en cada peticion; no exige cerrar sesion. Otro rol ACTIVO puede
+  seguir concediendo el mismo permiso. Solo ADMIN/SUPERADMIN activos conservan
+  acceso total. Las preferencias de notificaciones no conceden permisos de rol.
 - Estado laboral y contrato son responsabilidades del modulo Personal/Contratos.
 - Habilitacion minera solo gestiona trabajador-mina-examenes-intentos.
 - Habilitacion minera no modifica cargo, supervisor, ficha, documentos
@@ -101,10 +113,31 @@ Trabajadores nuevos:
   intentos. El conteo conserva ambos valores, por ejemplo `3/2`.
 - Convalidaciones son sugeridas por el sistema y confirmadas por el usuario; no
   se aplican automaticamente.
-- Los cursos y EMO del historial global pertenecen al trabajador. Un resultado
-  confirmado se refleja automaticamente en cada asignacion minera activa que
-  tenga como requisito el mismo `examen_id`, incluso si la mina se asigna
-  despues. Esta propagacion exacta no se considera convalidacion.
+- Correccion minera 2026-10-06: curso historico sin mina no se propaga; alias
+  confirmado del Master conserva identidad; fallo de intento revierte toda la
+  importacion. Un duplicado no sobrescribe nota y un resultado anterior no
+  sustituye uno posterior. Renovacion pendiente/desaprobada conserva aprobacion
+  vigente hasta su vencimiento. Convalidacion conserva restricciones de origen;
+  una realizacion nueva archiva la evidencia anterior antes de limpiar su origen.
+  Ejecucion y pendientes:
+  `docs/superpowers/plans/2026-10-06-habilitacion-minera-ejecucion.md`.
+- Correccion minera 2026-10-07: editar/desactivar asignacion, generar examenes,
+  sincronizar cursos y recalcular guardan coordinadamente con historial en
+  transaccion. Las escrituras de examen bloquean primero su asignacion.
+  Fechas operativas de habilitacion y Master usan app.display_timezone (Lima),
+  sin cambiar timestamps ni timezone global. Una fecha DATE no se convierte
+  a otro dia por UTC; vence hoy sigue vigente hasta terminar el dia operativo.
+- Organizar examenes administra identidad principal, variantes y aliases
+  confirmados globales o por mina, sin fusionar IDs ni mover historial. Excel
+  resuelve el requisito de destino; ambiguedades y parecidos no confirmados se
+  observan. Convalidar entre variantes sigue exigiendo permisos, vigencia, nota
+  cuando corresponde y confirmacion. Despliegue: `docs/FTP_ORGANIZAR_EXAMENES.md`.
+- La convalidacion admite el mismo examen o equivalentes autorizados por
+  requisito de mina destino. Conserva la nota si existe; solo exige nota cuando
+  el destino la requiere y verifica su minimo. Guarda snapshot de origen/destino.
+- Los cursos y EMO del historial conservan el trabajador y la mina de origen.
+  Se aplican directamente solo a esa mina, tambien si se asigna posteriormente.
+  Aplicarlos en otra mina requiere convalidacion permitida y confirmada.
 - Documentos tienen estado propio y pueden estar pendientes, cargados,
   observados, aprobados o no aplicar.
 - Contratos antiguos y cerrados son solo lectura.
@@ -112,6 +145,25 @@ Trabajadores nuevos:
 - Excel historicos pueden servir de referencia, pero no siempre son fuente de
   verdad.
 - Las importaciones deben decir que crearon, actualizaron, omitieron o fallaron.
+
+## Citas EMO y control (2026-10-08)
+
+`EmoAppointmentService` concentra programar, completar, anular, reprogramar y
+regularizar citas, con bloqueo por trabajador y revision monotona. Una fecha
+solo admite una cita no anulada; varias minas comparten cita exclusivamente con
+el mismo `examen_id` y enlaces explicitos. El Master no crea citas.
+`EmoOutcome` conserva los cuatro resultados medicos; restriccion/observacion
+exigen detalle y aprueban. El intento conserva el resultado generico.
+
+`PersonalMinaScheduledControlService`, `ScheduledControlFilters` y
+`ScheduledControlRow` comparten la consulta entre pantalla y Excel. Filtros SQL
+antes de paginar, sin recorte de 500 filas; exportacion completa de hasta
+10 000 filas fisicas, independiente de pagina/limite. La clinica historica no
+se inventa. Permisos directos: `configurar` para clinicas/categoria, `programar`
+para programar/reprogramar/anular/regularizar, `registrar` para completar y
+`ver_programados` mas `exportar` para descargar. Ver reglas en
+`docs/BUSINESS_RULES_RRHH.md`, formatos en `docs/HABILITACION_CARGA_MASIVA.md`
+y corte de produccion en `docs/OPERACION_DESPLIEGUE.md`.
 
 ## Adopcion y UX
 
@@ -145,6 +197,10 @@ confirma firma/inventario/saldos; `EppCorrectionService` compensa sin borrar.
 `EppKardexService`, `EppReceiptPdfService`, `EppQrCodeService` y
 `EppEvidenceController` producen evidencia autenticada y verificable.
 Comando: `epp:backfill-legacy-traceability [--dry-run]`.
-El dashboard usa `es_requerido_cobertura`, existencias conciliadas y saldos
-retornables positivos. Las rutas individuales de escritura devuelven 409;
-no usarlas como flujo productivo. Firmas en disco privado `local`.
+Correccion operativa 2026-10-09: `EppDeliverySignatureService` agrega firma al
+formulario habitual de Entregas y cambios, con catalogo de Identificacion de
+items, sin exigir almacen ni apertura. Registrar/cerrar preparan una revision;
+solo la firma confirma el movimiento. Origen `ENTREGAS_CAMBIOS` y almacen nulo
+distinguen este flujo de las operaciones de inventario existentes. Editar/borrar
+historial permanece protegido. Kardex y PDF incluyen evidencia privada.
+El dashboard conserva `es_requerido_cobertura` y saldos retornables positivos.

@@ -253,7 +253,7 @@ class AsistenciaDashboardService
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        return in_array(strtoupper((string) optional($usuario->rol)->nombre), ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
             || PermissionMatrix::userCanDirect($usuario, 'asistencias', 'administrar');
     }
 

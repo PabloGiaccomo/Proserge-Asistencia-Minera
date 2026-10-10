@@ -4,6 +4,7 @@ namespace App\Modules\Evaluaciones\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\EvaluacionesImportLote;
+use App\Models\EvaluacionSupervisor;
 use App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
@@ -22,7 +23,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         $filters = $request->validate([
             'lote' => ['nullable', 'uuid'],
             'estado' => ['nullable', 'in:proposed,blocked,unchanged,warnings,all'],
-            'tipo' => ['nullable', 'in:daily,attendance,supervisor,resident'],
+            'tipo' => ['nullable', 'in:supervisor'],
             'q' => ['nullable', 'string', 'max:191'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
@@ -30,6 +31,9 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         $manifest = ['proposed' => [], 'blocked' => [], 'unchanged' => [], 'warnings' => []];
         if (! empty($filters['lote'])) {
             [$batch, $manifest] = $this->loadManifest($filters['lote']);
+            if (($manifest['scope'] ?? null) !== 'SUPERVISORS') {
+                return redirect()->route('evaluaciones.historico.importar')->withErrors(['importacion' => 'La carga ahora es solo de supervisores. Revisa nuevamente el archivo Control.']);
+            }
         }
         $status = $filters['estado'] ?? ($manifest['blocked'] ? 'blocked' : 'proposed');
         $rows = collect();
@@ -60,13 +64,9 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
         abort_unless($this->service->isOpen(), 409, 'La carga historica esta cerrada.');
         $request->validate([
             'control' => ['required', 'file', 'mimes:xlsx', 'max:20480'],
-            'consolidado' => ['required', 'file', 'mimes:xlsx', 'max:20480'],
         ]);
         try {
-            $result = $this->service->preview($actor, [
-                'control' => $request->file('control')->getRealPath(),
-                'consolidado' => $request->file('consolidado')->getRealPath(),
-            ]);
+            $result = $this->service->previewSupervisors($actor, $request->file('control')->getRealPath());
         } catch (\Throwable $exception) {
             Log::warning('evaluaciones.historical_preview_failed', ['exception_class' => $exception::class]);
 
@@ -87,7 +87,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
             'confirmacion' => ['accepted'],
         ]);
         try {
-            $result = $this->service->confirm($actor, $payload['lote_id'], $payload['hash']);
+            $result = $this->service->confirmSupervisors($actor, $payload['lote_id'], $payload['hash']);
         } catch (\Throwable $exception) {
             Log::warning('evaluaciones.historical_confirmation_failed', ['lote_id' => $payload['lote_id'], 'exception_class' => $exception::class]);
 
@@ -97,7 +97,7 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
             return back()->withErrors(['importacion' => $result['message']]);
         }
 
-        return redirect()->route('evaluaciones.index')->with('success',
+        return redirect()->route('evaluaciones.index', ['tipo' => 'supervisores'])->with('success',
             'Carga historica completada: '.$result['counts']['proposed'].' registros guardados. La carga ha quedado cerrada.');
     }
 
@@ -105,16 +105,23 @@ class EvaluacionesHistoricalImportPageController extends WebPageController
     {
         $this->authorizeImport();
         [$batch, $manifest] = $this->loadManifest($lote);
+        $saved = EvaluacionSupervisor::query()->where('import_lote_id', $batch->id)->get()->keyBy('source_key');
 
-        return response()->streamDownload(function () use ($manifest): void {
+        return response()->streamDownload(function () use ($manifest, $saved): void {
             $output = fopen('php://output', 'w');
-            fputcsv($output, ['Estado', 'Tipo', 'Libro', 'Hoja', 'Fila', 'DNI', 'Fecha', 'Nota', 'Motivo'], ',', '"', '');
+            fputcsv($output, ['Estado revision', 'Tipo', 'Libro', 'Hoja', 'Fila', 'DNI', 'Fecha', 'Nota original', 'Motivo revision', 'Referencia original', 'Coincidencias por nombre sin asignar', 'Estado actual', 'Criterios pendientes', 'Seguimiento', 'Nota actual', 'Version calculo'], ',', '"', '');
             foreach (['proposed', 'blocked', 'unchanged', 'warnings'] as $group) {
                 foreach ($manifest[$group] as $row) {
+                    $item = $saved->get($row['source_key'] ?? '');
                     $cells = [
                         $group, $row['type'] ?? '', $row['source_file'] ?? '', $row['source_sheet'] ?? '',
                         $row['source_row'] ?? '', $row['dni'] ?? '', $row['date'] ?? '',
                         $row['payload']['resultado_final'] ?? $row['payload']['total'] ?? $row['total'] ?? '', $row['reason'] ?? '',
+                        $row['dni_ref'] ?? '',
+                        implode(' | ', array_map(fn ($person) => $person['nombre_completo'].' / '.$person['dni'], $row['identity_suggestions'] ?? [])),
+                        $item?->estado ?? '', implode(', ', $item?->missingCriteria() ?? []),
+                        implode(' | ', array_map(fn ($event) => $event['fecha'].' '.$event['accion'].' / '.($event['motivo'] ?? '').' / '.($event['actor'] ?? $event['usuario_id']), $item?->regularizationEvents() ?? [])),
+                        $item?->resultado_final ?? '', $item?->calculo_version ?? '',
                     ];
                     $cells = array_map(fn ($value) => preg_match('/^[=+@\-\t\r]/', (string) $value) ? "'".$value : $value, $cells);
                     fputcsv($output, $cells, ',', '"', '');

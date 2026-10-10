@@ -4,6 +4,8 @@ namespace App\Modules\Personal\Controllers;
 
 use App\Http\Controllers\WebPageController;
 use App\Models\ExamenMinero;
+use App\Models\ClinicaEmo;
+use App\Models\PersonalEmoCita;
 use App\Models\MinaRequisito;
 use App\Models\PersonalMinaExamen;
 use App\Models\PersonalMinaExamenIntento;
@@ -14,6 +16,17 @@ use App\Modules\Personal\Services\PersonalMinaDashboardService;
 use App\Modules\Personal\Services\PersonalMinaImportPreviewStore;
 use App\Modules\Personal\Services\MineRequirementSyncService;
 use App\Modules\Personal\Services\MiningExamCatalogAuditService;
+use App\Modules\Personal\Services\EmoAppointmentService;
+use App\Modules\Personal\Services\EmoClinicService;
+use App\Modules\Personal\Services\ExamOperationalCategoryService;
+use App\Modules\Personal\Services\PersonalMinaScheduledControlService;
+use App\Modules\Personal\Requests\StoreClinicaEmoRequest;
+use App\Modules\Personal\Requests\ScheduleEmoRequest;
+use App\Modules\Personal\Requests\CompleteEmoAppointmentRequest;
+use App\Modules\Personal\Requests\ReprogramEmoAppointmentRequest;
+use App\Modules\Personal\Requests\UpdateExamOperationalCategoryRequest;
+use App\Modules\Personal\Support\ScheduledControlFilters;
+use Carbon\CarbonImmutable;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -154,9 +167,22 @@ class PersonalMinaHabilitacionController extends WebPageController
         return view('personal.habilitacion-minera.bulk-preview', compact('rows', 'report', 'token', 'canConfigure', 'canViewManagement', 'canCreateExam', 'canEditExam'));
     }
 
+    public function scheduledControl(Request $request): View
+    {
+        $this->assertEmoPermission('ver_programados');
+        $request->merge(['vista' => 'scheduled']);
+
+        return $this->index($request);
+    }
+
     public function index(Request $request): View
     {
-        $this->assertMiningPermission('ver');
+        if (! $request->routeIs('personal.habilitacion-minera.scheduled')) {
+            $this->assertMiningPermission('ver');
+        }
+        if ($request->input('vista') === 'scheduled') {
+            $this->assertEmoPermission('ver_programados');
+        }
 
         $allowedViews = array_filter([
             'worker',
@@ -209,6 +235,11 @@ class PersonalMinaHabilitacionController extends WebPageController
             ? $this->service->listRequirements($filters['mina_id'] ?: null)
             : collect();
         $mines = ($needsWorker || $needsMatrix || $needsDashboard) ? $this->service->activeMines() : collect();
+        $scheduledControlFilters = $needsScheduled ? ScheduledControlFilters::fromValidated($request->query(), CarbonImmutable::now()) : null;
+        $scheduledControlService = $needsScheduled ? app(PersonalMinaScheduledControlService::class) : null;
+        $scheduledControl = $needsScheduled
+            ? $scheduledControlService->paginate($scheduledControlFilters, $scheduledControlFilters->limit)
+            : null;
 
         return view('personal.habilitacion-minera.index', [
             'filters' => $filters,
@@ -225,7 +256,13 @@ class PersonalMinaHabilitacionController extends WebPageController
             'upcomingExpirationDays' => $upcomingExpirationDays,
             'upcomingExpirations' => $needsExpiring ? $this->service->upcomingExamExpirations($upcomingExpirationDays) : collect(),
             'scheduledExamDays' => $scheduledExamDays,
-            'scheduledExams' => $needsScheduled ? $this->service->scheduledExamAttempts($scheduledExamDays) : collect(),
+            // Task 8 replaces the legacy Blade arrays with scheduledControl's paginator/DTOs.
+            // Keep this temporary bridge empty; never execute the former limited query.
+            'scheduledExams' => collect(),
+            'scheduledControl' => $scheduledControl,
+            'scheduledControlFilters' => $scheduledControlFilters,
+            'scheduledControlOptions' => $needsScheduled ? $scheduledControlService->filterOptions($scheduledControlFilters) : [],
+            'emoClinics' => !$partial ? ClinicaEmo::orderBy('nombre')->get() : collect(),
             'stateOptions' => $this->service->habilitationStateOptions(),
             'examStateOptions' => $this->service->examStateOptions(),
             'attemptResultOptions' => $this->service->attemptResultOptions(),
@@ -238,6 +275,123 @@ class PersonalMinaHabilitacionController extends WebPageController
                 ? app(MineRequirementSyncService::class)->statusesByMine()
                 : collect(),
         ]);
+    }
+
+    public function storeClinic(StoreClinicaEmoRequest $request, EmoClinicService $clinics): RedirectResponse
+    {
+        $this->assertEmoPermission('configurar');
+
+        return $this->emoAction($request, 'clinics', fn () => $clinics->create($request->validated(), $this->requireAuthenticatedUser()), 'Clinica registrada correctamente.');
+    }
+
+    public function updateClinic(StoreClinicaEmoRequest $request, string $clinicId, EmoClinicService $clinics): RedirectResponse
+    {
+        $this->assertEmoPermission('configurar');
+        $clinic = ClinicaEmo::findOrFail($clinicId);
+
+        return $this->emoAction($request, 'clinics', fn () => $clinics->update($clinic, $request->validated(), $this->requireAuthenticatedUser()), 'Nombre de clinica actualizado.');
+    }
+
+    public function deactivateClinic(Request $request, string $clinicId, EmoClinicService $clinics): RedirectResponse
+    {
+        $this->assertEmoPermission('configurar');
+        $clinic = ClinicaEmo::findOrFail($clinicId);
+
+        return $this->emoAction($request, 'clinics', fn () => $clinics->deactivate($clinic, $this->requireAuthenticatedUser()), 'Clinica desactivada. Las citas e historial se conservan.');
+    }
+
+    public function updateExamCategory(UpdateExamOperationalCategoryRequest $request, string $examId, ExamOperationalCategoryService $categories): RedirectResponse
+    {
+        $this->assertEmoPermission('configurar');
+        $exam = ExamenMinero::findOrFail($examId);
+        $data = $request->validated();
+
+        return $this->emoAction($request, 'category', fn () => $categories->update($exam, $data['categoria_operativa'], $data['motivo'], $this->requireAuthenticatedUser()), 'Categoria operativa guardada con historial.');
+    }
+
+    public function scheduleEmo(ScheduleEmoRequest $request, string $workerExamId, EmoAppointmentService $appointments): RedirectResponse
+    {
+        $this->assertEmoPermission('programar');
+        $exam = PersonalMinaExamen::findOrFail($workerExamId);
+
+        return $this->emoAction($request, 'schedule', fn () => $appointments->schedule($exam, $request->toData(), $this->requireAuthenticatedUser()), 'Cita EMO programada correctamente.');
+    }
+
+    public function completeEmo(CompleteEmoAppointmentRequest $request, string $appointmentId, EmoAppointmentService $appointments): RedirectResponse
+    {
+        $this->assertEmoPermission('registrar');
+
+        return $this->emoAction($request, 'complete', fn () => $appointments->complete(
+            $this->appointmentForCommand($appointmentId, (int) $request->validated('revision')),
+            $request->toData(), $this->requireAuthenticatedUser(),
+        ), 'Resultado EMO registrado correctamente.');
+    }
+
+    public function cancelEmo(ReprogramEmoAppointmentRequest $request, string $appointmentId, EmoAppointmentService $appointments): RedirectResponse
+    {
+        $this->assertEmoPermission('programar');
+
+        return $this->emoAction($request, 'cancel', fn () => $appointments->cancel(
+            $this->appointmentForCommand($appointmentId, (int) $request->validated('revision')),
+            $request->validated('motivo'), $this->requireAuthenticatedUser(),
+        ), 'Cita EMO anulada. Se conserva el historial.');
+    }
+
+    public function reprogramEmo(ReprogramEmoAppointmentRequest $request, string $appointmentId, EmoAppointmentService $appointments): RedirectResponse
+    {
+        $this->assertEmoPermission('programar');
+
+        return $this->emoAction($request, 'reprogram', fn () => $appointments->reprogram(
+            $this->appointmentForCommand($appointmentId, (int) $request->validated('revision')),
+            $request->toData(), $this->requireAuthenticatedUser(),
+        ), 'Cita EMO reprogramada correctamente.');
+    }
+
+    public function regularizeEmo(ScheduleEmoRequest $request, string $attemptId, EmoAppointmentService $appointments): RedirectResponse
+    {
+        $this->assertEmoPermission('programar');
+        $attempt = PersonalMinaExamenIntento::findOrFail($attemptId);
+        $clinic = ClinicaEmo::find($request->validated('clinica_id'));
+
+        return $this->emoAction($request, 'regularize', function () use ($attempt, $clinic, $appointments) {
+            if (!$clinic) {
+                throw ValidationException::withMessages(['clinica_id' => 'Seleccione una clinica activa.']);
+            }
+
+            return $appointments->regularizeLegacyAttempt($attempt, $clinic, $this->requireAuthenticatedUser());
+        }, 'Clinica vinculada al EMO historico.');
+    }
+
+    private function assertEmoPermission(string $action): void
+    {
+        abort_unless(PermissionMatrix::allowsDirect(session('user.permissions', []), 'habilitacion_minera', $action), 403, 'No tienes permiso para realizar esta accion.');
+    }
+
+    private function appointmentForCommand(string $id, int $revision): PersonalEmoCita
+    {
+        $appointment = PersonalEmoCita::findOrFail($id);
+        // Carry the revision seen in the form; the service rechecks it under its locks.
+        $appointment->revision = $revision;
+
+        return $appointment;
+    }
+
+    private function emoAction(Request $request, string $modal, callable $operation, string $message): RedirectResponse
+    {
+        try {
+            $operation();
+        } catch (ValidationException $exception) {
+            if ($request->expectsJson()) {
+                throw $exception;
+            }
+
+            return redirect()->route('personal.habilitacion-minera.index', $request->query())
+                ->withErrors($exception->errors())->withInput($request->except('archivo'))
+                ->with('habilitacion_mina_emo_modal', $modal)
+                ->with('habilitacion_mina_emo_context', $request->route()->parameters());
+        }
+
+        return redirect()->route('personal.habilitacion-minera.index', $request->query())->with('success', $message);
     }
 
     public function dashboardExamWorkers(Request $request): JsonResponse
@@ -405,6 +559,8 @@ class PersonalMinaHabilitacionController extends WebPageController
             'permite_no_aplica' => ['nullable', 'boolean'],
             'permite_convalidacion_mina' => ['nullable', 'boolean'],
             'fecha_inicio_convalidacion' => ['nullable', 'date'],
+            'examenes_equivalentes' => ['nullable', 'array', 'max:100'],
+            'examenes_equivalentes.*' => ['required', 'uuid', 'distinct'],
             'fecha_fin_convalidacion' => ['nullable', 'date', 'after_or_equal:fecha_inicio_convalidacion'],
             'convalidar_desde_otras_minas' => ['nullable', 'boolean'],
             'minas_origen_convalidacion' => ['nullable', 'array'],
@@ -425,6 +581,22 @@ class PersonalMinaHabilitacionController extends WebPageController
         return redirect()
             ->route('personal.habilitacion-minera.index', ['mina_id' => $validated['mina_id']])
             ->with('success', 'Requisito registrado. Las habilitaciones de la mina se estan actualizando.');
+    }
+
+    public function configureConvalidation(Request $request, string $requirementId): RedirectResponse
+    {
+        $this->assertMiningPermission('configurar');
+        $validated = $request->validate([
+            'permite_convalidacion_mina' => ['required', 'boolean'],
+            'convalidar_desde_otras_minas' => ['required', 'boolean'],
+            'examenes_equivalentes' => ['nullable', 'array', 'max:100'],
+            'examenes_equivalentes.*' => ['required', 'uuid', 'distinct'],
+        ]);
+        $requirement = MinaRequisito::query()->findOrFail($requirementId);
+        $this->service->configureConvalidation($requirement, $validated, $this->requireAuthenticatedUser());
+
+        return redirect()->route('personal.habilitacion-minera.index', $request->query())
+            ->with('success', 'Reglas de convalidacion guardadas. Cada resultado debe confirmarse por trabajador.');
     }
 
     public function catalogAudit(MiningExamCatalogAuditService $audit): JsonResponse
@@ -593,6 +765,12 @@ class PersonalMinaHabilitacionController extends WebPageController
         $attempt = PersonalMinaExamenIntento::query()->find($attemptId);
         abort_if(!$attempt, 404);
 
+        if ($attempt->emo_cita_id || $attempt->examenTrabajador?->examen?->categoria_operativa === ExamenMinero::CATEGORIA_EMO) {
+            throw ValidationException::withMessages([
+                'cita' => 'Registre el resultado desde la cita EMO en Ver programados; si es historica, regularice primero su clinica.',
+            ]);
+        }
+
         $validated = $request->validate([
             'fecha_realizacion' => ['required', 'date'],
             'fecha_vencimiento' => ['nullable', 'date'],
@@ -660,6 +838,7 @@ class PersonalMinaHabilitacionController extends WebPageController
 
         $validated = $request->validate([
             'examen_origen_id' => ['required', 'string', 'size:36'],
+            'confirmar' => ['required', 'accepted'],
             'observacion' => ['nullable', 'string', 'max:5000'],
         ]);
 

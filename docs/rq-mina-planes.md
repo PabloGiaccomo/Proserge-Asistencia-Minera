@@ -110,6 +110,13 @@ camion, documentos, estado logistico, incidencias y recepcion. La logica vive en
 `aplicarDatosLogisticosReservados()`, que emparejan cada requerimiento nuevo por
 posicion dentro del grupo y por firma `alcance + unidad de carga`.
 
+Los documentos se entregan al modelo como una lista de metadatos con `path`;
+Eloquent serializa esa lista una sola vez mediante el cast `array`. El rescate
+del payload legacy tambien acepta las listas JSON que una version anterior
+codifico dos veces. Dos guardados consecutivos sin ids conservan las mismas
+rutas y metadatos: no se mueven ni borran los archivos privados. Esta correccion
+no ejecuta una reparacion masiva de registros existentes.
+
 Quitar del plan un requerimiento ya atendido borra su placa, documentos y
 recepcion. Para evitarlo sin bloquear la operacion, el editor muestra un aviso
 `Logistica: <estado>` con placa y recepcion, y pide confirmacion antes de

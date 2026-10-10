@@ -6,21 +6,38 @@ use Illuminate\Validation\ValidationException;
 
 class CursoResultado
 {
-    public static function payload(array $payload): array
+    public static function payload(array $payload, bool $isEmo = false): array
     {
-        $result = str_replace('_', ' ', strtoupper(trim((string) ($payload['resultado'] ?? ''))));
-        if ($result === 'APTO CON RESTRICCION') {
+        if ($isEmo) {
+            $outcome = EmoOutcome::fromInput($payload['resultado'] ?? null);
+            if ($outcome->requiresDetail()) {
+                $observation = trim((string) ($payload['observacion'] ?? ''));
+                if ($observation === '') {
+                    throw ValidationException::withMessages(['observacion' => $outcome->label().' requiere detallar el resultado.']);
+                }
+                // Preserve the visible legacy contract; the appointment owns the structured detail.
+                $prefix = strtoupper($outcome->label()).': ';
+                $payload['observacion'] = str_starts_with($observation, $prefix)
+                    ? $observation : $prefix.$observation;
+            }
+            $payload['resultado'] = $outcome->genericResult();
+
+            return $payload;
+        }
+
+        $legacy = EmoOutcome::fromLegacyText($payload['resultado'] ?? null);
+        if ($legacy && $legacy['outcome']->requiresDetail()) {
             $observation = trim((string) ($payload['observacion'] ?? ''));
             if ($observation === '') {
-                throw ValidationException::withMessages(['observacion' => 'Apto con restriccion requiere detallar la restriccion.']);
+                throw ValidationException::withMessages(['observacion' => $legacy['outcome']->label().' requiere detallar el resultado.']);
             }
             $payload['resultado'] = 'APROBADO';
-            $payload['observacion'] = str_starts_with($observation, 'APTO CON RESTRICCION: ')
-                ? $observation : 'APTO CON RESTRICCION: '.$observation;
-        } elseif ($result === 'APTO') {
-            $payload['resultado'] = 'APROBADO';
-        } elseif ($result === 'NO APTO') {
-            $payload['resultado'] = 'DESAPROBADO';
+            $alreadyStructured = EmoOutcome::fromLegacyText($observation);
+            $payload['observacion'] = $alreadyStructured && $alreadyStructured['outcome'] === $legacy['outcome']
+                ? $legacy['outcome']->legacyObservation($alreadyStructured['detail'])
+                : $legacy['outcome']->legacyObservation($observation);
+        } elseif ($legacy) {
+            $payload['resultado'] = $legacy['outcome']->genericResult();
         }
 
         return $payload;

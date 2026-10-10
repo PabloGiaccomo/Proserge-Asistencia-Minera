@@ -1,3 +1,4 @@
+@import './modules/mining-scheduled-control.css';
 @import "tailwindcss";
 @import "./modules/mining-catalog-organization.css";
 @import "./modules/man-power.css";

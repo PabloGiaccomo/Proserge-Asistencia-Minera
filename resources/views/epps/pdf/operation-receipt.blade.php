@@ -3,11 +3,15 @@
 <h1>Constancia EPP — {{ $operation->tipo }}</h1>
 <p>Operacion: {{ $operation->id }}</p>
 <p>{{ data_get($payload, 'worker.name') }} — Documento: {{ data_get($payload, 'worker.document') }}</p>
-<p>Almacen: {{ data_get($payload, 'warehouse.name') }}</p>
+@if(data_get($payload, 'warehouse.name'))<p>Almacen: {{ data_get($payload, 'warehouse.name') }}</p>@endif
+@if(data_get($payload, 'origin') === 'ENTREGAS_CAMBIOS')<p>Fecha del movimiento: {{ $payload['date'] }}. {{ str_replace('_', ' ', data_get($payload, 'input.estado', $operation->tipo)) }}</p>@endif
 <p>Estado evidencia: {{ $verification['valid'] ? 'FIRMADO_VALIDO' : 'EVIDENCIA_INVALIDA' }}</p>
 @unless($verification['valid'])<p class="warning">Evidencia invalida. Solicita revision de la firma.</p>@endunless
 @include('epps.operations.evidence-lines')
-<p>{{ $acceptance->declaracion_version === 'RETURN_V1' ? 'Confirmo la devolucion de las unidades y condiciones revisadas.' : 'Confirmo haber recibido unicamente los articulos mostrados como procesados. Las unidades pendientes no han sido entregadas.' }}</p>
+@if(!empty($payload['declaration_text']))
+    @foreach(explode("\n", $payload['declaration_text']) as $paragraph)<p>{{ $paragraph }}</p>@endforeach
+@endif
+<p>{{ $acceptance->declaracion_version === 'MOVEMENT_V1' ? 'Confirmo el movimiento y los articulos indicados en este documento.' : ($acceptance->declaracion_version === 'RETURN_V1' ? 'Confirmo la devolucion de las unidades y condiciones revisadas.' : 'Confirmo haber recibido unicamente los articulos mostrados como procesados. Las unidades pendientes no han sido entregadas.') }}</p>
 <p>Declaracion: {{ $acceptance->declaracion_version }}. Firmante: {{ $acceptance->firmante_nombre }} ({{ $acceptance->tipo_firmante }}).</p>
 <p>Firma: {{ $acceptance->firmado_at }} {{ $acceptance->zona_horaria }}</p>
 <h3>{{ $acceptance->tipo_firmante === 'TRABAJADOR' ? 'Firma del trabajador' : 'Firma del testigo autorizado' }}</h3>

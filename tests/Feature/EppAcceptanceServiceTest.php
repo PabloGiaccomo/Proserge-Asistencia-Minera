@@ -370,7 +370,8 @@ class EppAcceptanceServiceTest extends TestCase
             $this->assertSame('America/Lima', $acceptance->zona_horaria);
             $this->assertSame('EPP Test Browser', $acceptance->user_agent);
             $this->assertSame(hash_hmac('sha256', '192.0.2.55', config('app.key')), $acceptance->ip_sha256);
-            $this->assertSame('DELIVERY_V1', $acceptance->declaracion_version);
+            $this->assertSame('DELIVERY_SGC_FOR59_V1', $acceptance->declaracion_version);
+            $this->assertStringContainsString('DECLARO HABER RECIBIDO', $acceptance->contenido_json['declaration_text']);
             $this->assertStringNotContainsString('base64', json_encode($acceptance->getAttributes()));
             $this->assertArrayNotHasKey('firma_path', $acceptance->toArray());
         } finally {

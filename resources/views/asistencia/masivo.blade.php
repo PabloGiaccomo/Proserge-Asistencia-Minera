@@ -12,10 +12,9 @@
 
         <form action="{{ route('asistencia.marcar-masivo-post', $grupo['grupo_id']) }}" method="POST" class="ops-panel attendance-form-panel">
             @csrf
-            <div class="ops-panel-head"><div><h2>Estado común</h2><p>El mismo estado se aplicará únicamente a las personas seleccionadas.</p></div></div>
+            <div class="ops-panel-head"><div><h2>Estado común</h2><p>El mismo estado se aplicará únicamente a las personas seleccionadas. La hora de marcación se registra automáticamente con la hora del servidor.</p></div></div>
             <div class="attendance-form-grid compact-grid">
                 <div class="ops-field"><label for="bulk-state">Estado</label><select name="estado" id="bulk-state" required>@foreach(['PRESENTE' => 'Presente', 'TARDANZA' => 'Tardanza', 'AUSENTE' => 'Ausente', 'JUSTIFICADO' => 'Justificado', 'NO_CORRESPONDE' => 'No corresponde'] as $value => $label)<option value="{{ $value }}" @selected(old('estado', 'PRESENTE') === $value)>{{ $label }}</option>@endforeach</select></div>
-                <div class="ops-field"><label for="bulk-time">Hora</label><input type="time" name="hora_marcado" id="bulk-time" value="{{ old('hora_marcado', now()->format('H:i')) }}"></div>
                 <div class="ops-field wide attendance-reason-field"><label for="bulk-reason">Motivo</label><input type="text" name="motivo_estado" id="bulk-reason" value="{{ old('motivo_estado') }}" placeholder="Obligatorio para justificado o no corresponde"></div>
             </div>
 

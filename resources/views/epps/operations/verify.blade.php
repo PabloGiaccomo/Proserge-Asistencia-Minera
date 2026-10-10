@@ -9,6 +9,7 @@
 <p>Trabajador: {{ data_get($acceptance->contenido_json, 'worker.name') }}</p>
 <p>Firmante: {{ $acceptance->firmante_nombre }} — {{ $acceptance->tipo_firmante }}</p>
 <p>Fecha: {{ $acceptance->firmado_at }} {{ $acceptance->zona_horaria }}</p>
+@if($verification['valid'] && !empty($signature))<img src="{{ $signature }}" alt="Firma del trabajador" style="max-width:100%;width:300px;height:auto">@endif
 @unless($verification['valid'])<p role="alert">La evidencia requiere revision. No repitas la operacion para corregir esta alerta.</p>@endunless
 <div style="overflow-x:auto"><div style="min-width:640px">@include('epps.operations.evidence-lines', ['payload' => $acceptance->contenido_json])</div></div>
 @foreach($operation->operacionesCompensatorias as $correction)<p>{{ $correction->tipo }}: {{ $correction->id }} — {{ $correction->motivo }}</p>@endforeach

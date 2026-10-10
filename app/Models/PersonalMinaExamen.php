@@ -48,6 +48,7 @@ class PersonalMinaExamen extends Model
         'fecha_realizacion',
         'fecha_vencimiento',
         'es_convalidado',
+        'contexto_convalidacion_json',
         'examen_origen_convalidado_id',
         'mina_origen_convalidacion_id',
         'fecha_aprobacion_origen',
@@ -56,6 +57,8 @@ class PersonalMinaExamen extends Model
         'observacion',
         'usuario_actualizacion_id',
         'fecha_actualizacion',
+        'intentos_ciclo_desde',
+        'intentos_ciclo_numero_desde',
     ];
 
     protected $casts = [
@@ -73,9 +76,12 @@ class PersonalMinaExamen extends Model
         'fecha_realizacion' => 'date',
         'fecha_vencimiento' => 'date',
         'es_convalidado' => 'boolean',
+        'contexto_convalidacion_json' => 'array',
         'fecha_aprobacion_origen' => 'date',
         'fecha_convalidacion' => 'datetime',
         'fecha_actualizacion' => 'datetime',
+        'intentos_ciclo_desde' => 'datetime',
+        'intentos_ciclo_numero_desde' => 'integer',
     ];
 
     public function asignacion(): BelongsTo

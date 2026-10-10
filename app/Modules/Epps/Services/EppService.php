@@ -8,7 +8,10 @@ use App\Models\Mina;
 use App\Models\Personal;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
+use App\Modules\Epps\Support\EppKardexRowGrouper;
+use App\Modules\Epps\Support\EppKardexTemplateColumns;
 use App\Modules\Personal\Resources\PersonalIndexResource;
+use App\Shared\Support\SearchTerms;
 use App\Support\Rbac\MinaScopeAccess;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -101,33 +104,35 @@ class EppService
                 'registradoPor.personal:id,nombre_completo',
                 'cerradoPor:id,email,personal_id',
                 'cerradoPor.personal:id,nombre_completo',
+                'operacion.aceptacion',
             ])
             ->when($estado !== '', fn ($query) => $query->where('estado', $estado))
             ->when($search !== '', function ($query) use ($search): void {
                 $query->where(function ($subQuery) use ($search): void {
                     $subQuery
                         ->whereHas('personal', function ($personalQuery) use ($search): void {
-                            $personalQuery
-                                ->where('nombre_completo', 'like', "%{$search}%")
-                                ->orWhere('dni', 'like', "%{$search}%")
-                                ->orWhere('numero_documento', 'like', "%{$search}%")
-                                ->orWhere('puesto', 'like', "%{$search}%")
-                                ->orWhere('id', $search);
+                            SearchTerms::apply($personalQuery, $search, ['nombre_completo', 'dni', 'numero_documento', 'puesto', 'id']);
                         })
                         ->orWhereHas('epp', function ($eppQuery) use ($search): void {
-                            $eppQuery
-                                ->where('nombre', 'like', "%{$search}%")
-                                ->orWhere('codigo', 'like', "%{$search}%");
+                            SearchTerms::apply($eppQuery, $search, ['nombre', 'codigo']);
                         });
                 });
             })
-            ->when($minaId !== '', function ($query) use ($minaId): void {
-                $query->whereHas('personal.relacionesMina', function ($relation) use ($minaId): void {
-                    $relation
-                        ->where('mina_id', $minaId)
-                        ->where(function ($active): void {
-                            $active->where('activo', true)->orWhereNull('activo');
-                        });
+            ->when($minaId !== '', function ($query) use ($minaId, $actor, $minas): void {
+                if ($actor && ! $minas->contains('id', $minaId)) {
+                    $query->whereRaw('1 = 0');
+                }
+                $query->whereExists(function ($usage) use ($minaId): void {
+                    $start = 'COALESCE(usage_detail.fecha_inicio, usage_mine.fecha_inicio)';
+                    $end = 'COALESCE(usage_detail.fecha_fin, usage_mine.fecha_fin, usage_detail.fecha_inicio, usage_mine.fecha_inicio)';
+                    $usage->selectRaw('1')->from('rq_proserge_detalle as usage_detail')
+                        ->join('rq_proserge as usage_rq', 'usage_rq.id', '=', 'usage_detail.rq_proserge_id')
+                        ->leftJoin('rq_mina as usage_mine', 'usage_mine.id', '=', 'usage_rq.rq_mina_id')
+                        ->whereColumn('usage_detail.personal_id', 'epp_entregas.personal_id')
+                        ->whereRaw('COALESCE(usage_rq.mina_id, usage_mine.mina_id) = ?', [$minaId])
+                        ->whereRaw($start.' <= COALESCE(epp_entregas.devuelto_at, ?)', [today()->toDateString()])
+                        ->whereRaw($end.' >= epp_entregas.fecha_entrega')
+                        ->whereRaw($end.' >= '.$start);
                 });
             })
             ->when($eppId !== '', fn ($query) => $query->where('epp_id', $eppId))
@@ -141,7 +146,7 @@ class EppService
 
         /** @var LengthAwarePaginator $entregas */
         $entregas->getCollection()->transform(
-            fn (EppEntrega $entrega): array => $this->presentEntrega($entrega)
+            fn (EppEntrega $entrega): array => $this->presentEntrega($entrega, $minaId ?: null)
         );
 
         return [
@@ -397,7 +402,7 @@ class EppService
         };
     }
 
-    public function personalKardex(string $personalId, ?Usuario $actor = null): array
+    public function personalKardex(string $personalId, ?Usuario $actor = null, ?array $pagination = null): array
     {
         $personal = Personal::query()
             ->with(['relacionesMina.mina:id,nombre'])
@@ -406,10 +411,35 @@ class EppService
         if ($actor) {
             app(EppScopeService::class)->assertPersonalAccess($actor, $personal);
         }
-        $rows = $this->kardexDeliveries($personal->id, $actor)
+        $rows = $pagination ? collect() : $this->kardexDeliveries($personal->id, $actor)
             ->map(fn (EppEntrega $entrega): array => $this->presentKardexEntrega($entrega))
             ->values();
-        $matrix = $this->buildKardexMatrix($rows);
+        $matrixRows = $rows;
+        if ($actor) {
+            $columns = EppKardexTemplateColumns::definitions();
+            $matrixRows = collect(app(EppKardexMovementService::class)->events($personal, $actor, '0001-01-01', '9999-12-31'))
+                ->filter(fn ($event) => in_array($event['code'], ['N', 'C', 'I', 'P', 'D'], true))
+                ->map(function ($event) use ($columns) {
+                    $column = EppKardexTemplateColumns::match($event['name'], $columns);
+
+                    return $event + [
+                        'epp' => $column ? trim(preg_replace('/[.…]+/u', '', $column['label'])) : $event['name'],
+                        'epp_id' => $column ? $column['side'].':'.$column['col'] : 'name:'.$event['name'],
+                    ];
+                })->values();
+        }
+        $matrix = $this->buildKardexMatrix($matrixRows, $pagination);
+
+        if ($pagination) {
+            return ['kardex' => [
+                'items' => $matrix['items']->map(fn (array $item): array => [
+                    'key' => $item['key'], 'label' => $item['label'], 'sheet' => $item['side'],
+                ])->values()->all(),
+                'rows' => $matrix['rows']->values()->all(),
+                'has_observations' => $matrix['has_observations'],
+                'pagination' => $matrix['pagination'],
+            ]];
+        }
 
         $activeRows = $rows->where('estado', EppEntrega::ESTADO_ENTREGADO);
         $overdueRows = $activeRows->filter(function (array $row): bool {
@@ -680,7 +710,7 @@ class EppService
             ->all();
     }
 
-    private function normalizeDeliveryAttributes(?EppRegistro $epp, array $payload): array
+    public function normalizeDeliveryAttributes(?EppRegistro $epp, array $payload): array
     {
         if (! $epp) {
             return [
@@ -761,9 +791,9 @@ class EppService
         return $allowedByKey[$valueKey] ?? null;
     }
 
-    public function presentEntrega(EppEntrega $entrega): array
+    public function presentEntrega(EppEntrega $entrega, ?string $minaId = null): array
     {
-        $usage = $this->calculateUsage($entrega);
+        $usage = $this->calculateUsage($entrega, $minaId);
         $vidaDias = (int) ($entrega->vida_util_dias_snapshot ?: $entrega->epp?->vida_util_dias ?: 0);
         $fechaCierre = $entrega->devuelto_at ? Carbon::parse($entrega->devuelto_at)->format('d/m/Y') : null;
         $movimientoCierre = match ($entrega->estado) {
@@ -872,7 +902,7 @@ class EppService
         ];
     }
 
-    private function buildKardexMatrix($rows): array
+    private function buildKardexMatrix($rows, ?array $pagination = null): array
     {
         $items = collect($rows)
             ->map(function (array $row, int $index): array {
@@ -906,30 +936,43 @@ class EppService
             $back = $back->concat($overflow)->values();
         }
 
-        $items = $front->concat($back->take(self::KARDEX_MAX_ITEMS_PER_SHEET))->values();
-        $hasObservations = collect($rows)->contains(fn (array $row): bool => $this->kardexObservation($row) !== '');
+        $items = isset(collect($rows)->first()['code'])
+            ? $items
+            : $front->concat($back->take(self::KARDEX_MAX_ITEMS_PER_SHEET))->values();
         $firstDeliveryDate = collect($rows)
             ->pluck('fecha_entrega_iso')
             ->filter()
             ->sort()
             ->first();
-        $matrixRows = collect($rows)->values()->map(function (array $row, int $index) use ($firstDeliveryDate): array {
+        $events = collect($rows)->values()->map(function (array $row) use ($firstDeliveryDate): array {
             $itemKey = $this->kardexItemKey($row);
-            $code = $this->kardexMovementCode($row, $firstDeliveryDate !== '' && ($row['fecha_entrega_iso'] ?? '') === $firstDeliveryDate);
+            $code = $row['code'] ?? $this->kardexMovementCode($row, $firstDeliveryDate !== '' && ($row['fecha_entrega_iso'] ?? '') === $firstDeliveryDate);
 
             return [
-                'number' => $index + 1,
-                'date' => (string) ($row['fecha_entrega'] ?? '-'),
-                'item_key' => $itemKey,
-                'codes' => [$itemKey => $code],
-                'observation' => $this->kardexObservation($row),
+                'date' => $row['date'] ?? $row['fecha_entrega_iso'] ?? '',
+                'column_key' => $itemKey,
+                'code' => $code,
+                'quantity' => (int) ($row['quantity'] ?? $row['cantidad'] ?? 0),
+                'batch_id' => $row['batch_id'] ?? null,
+                'description' => $row['description'] ?? $this->kardexObservation($row),
             ];
         });
+        $result = $pagination ? EppKardexRowGrouper::paginate($events, $pagination['page'], $pagination['per_page']) : null;
+        $numberOffset = $result && $result['pagination']['total'] ? $result['pagination']['from'] - 1 : 0;
+        $matrixRows = collect($result ? $result['rows'] : EppKardexRowGrouper::group($events))
+            ->map(fn ($row, $index) => [
+                'number' => $numberOffset + $index + 1,
+                'date' => $row['date'] !== '' ? Carbon::parse($row['date'])->format('d/m/Y') : '-',
+                'codes' => collect($row['cells'])->map(fn ($event) => $event['code'])->all(),
+                'observation' => collect($row['cells'])->pluck('description')->filter()->unique()->implode(' | '),
+            ]);
+        $hasObservations = $matrixRows->contains(fn ($row) => $row['observation'] !== '');
 
         return [
             'items' => $items,
             'rows' => $matrixRows,
             'has_observations' => $hasObservations,
+            'pagination' => $result['pagination'] ?? null,
         ];
     }
 
@@ -1299,7 +1342,7 @@ class EppService
             ->implode(', ');
     }
 
-    private function calculateUsage(EppEntrega $entrega): array
+    private function calculateUsage(EppEntrega $entrega, ?string $minaId = null): array
     {
         if (! $entrega->personal_id || ! $entrega->fecha_entrega) {
             return ['dias' => 0, 'periodos' => []];
@@ -1325,6 +1368,10 @@ class EppService
         $periodos = [];
 
         foreach ($detalles as $detalle) {
+            $assignmentMine = $detalle->rqProserge?->mina_id ?: $detalle->rqProserge?->rqMina?->mina_id;
+            if ($minaId !== null && $assignmentMine !== $minaId) {
+                continue;
+            }
             $range = $this->assignmentRange($detalle);
             if (! $range) {
                 continue;

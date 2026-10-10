@@ -12,7 +12,7 @@
 
         <form action="{{ route('asistencia.marcar-post', $grupo['grupo_id']) }}" method="POST" class="ops-panel attendance-form-panel">
             @csrf
-            <div class="ops-panel-head"><div><h2>Datos de la marcación</h2><p>Selecciona al trabajador y el estado que corresponde.</p></div></div>
+            <div class="ops-panel-head"><div><h2>Datos de la marcación</h2><p>Selecciona al trabajador y el estado que corresponde. La hora de marcación se registra automáticamente con la hora del servidor.</p></div></div>
             <div class="attendance-form-grid">
                 <div class="ops-field wide">
                     <label for="group-detail">Trabajador</label>
@@ -30,10 +30,6 @@
                             <option value="{{ $value }}" @selected(old('estado', 'PRESENTE') === $value)>{{ $label }}</option>
                         @endforeach
                     </select>
-                </div>
-                <div class="ops-field">
-                    <label for="marked-time">Hora</label>
-                    <input type="time" name="hora_marcado" id="marked-time" value="{{ old('hora_marcado', now()->format('H:i')) }}">
                 </div>
                 <div class="ops-field wide attendance-reason-field">
                     <label for="attendance-reason">Motivo</label>

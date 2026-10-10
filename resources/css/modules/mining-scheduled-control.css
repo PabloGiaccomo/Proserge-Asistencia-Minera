@@ -1,0 +1,62 @@
+.mining-control { padding: 20px; min-width: 0; }
+.mining-control-heading { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.mining-control-heading > div { flex: 1 1 360px; min-width: 0; }
+.mining-control-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.mining-control-filters label, .mining-emo-form label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-weight: 600; font-size: 13px; }
+.mining-control-filters input, .mining-control-filters select, .mining-emo-form input, .mining-emo-form select, .mining-emo-form textarea { width: 100%; min-width: 0; padding: 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; color: #0f172a; box-sizing: border-box; }
+.mining-control-search { grid-column: span 2; }
+.mining-control-filter-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.mining-control-count { margin: 16px 0; }
+.mining-control-table { width: 100%; table-layout: fixed; }
+.mining-control-table th, .mining-control-table td { overflow-wrap: anywhere; vertical-align: top; padding: 12px 8px; }
+.mining-control-table td > span, .mining-control-table td > strong, .mining-control-table details > span { display: block; margin-bottom: 6px; }
+.mining-control-row-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.mining-control-row-actions .btn { white-space: normal; text-align: center; }
+.mining-control-table summary { cursor: pointer; }
+.mining-emo-outcome[tabindex="0"] { cursor: help; position: relative; }
+.mining-emo-outcome[tabindex="0"]:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.mining-emo-outcome[data-emo-tooltip]::after {
+    content: attr(data-emo-tooltip);
+    position: absolute;
+    z-index: 20;
+    left: 0;
+    bottom: calc(100% + 8px);
+    width: max-content;
+    max-width: min(320px, calc(100vw - 48px));
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    box-shadow: 0 8px 24px rgb(15 23 42 / 24%);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+.mining-emo-outcome[data-emo-tooltip]:hover::after,
+.mining-emo-outcome[data-emo-tooltip]:focus-visible::after { opacity: 1; transform: translateY(0); }
+.mining-control-empty { text-align: center; padding: 28px !important; }
+.mining-emo-dialog { width: min(640px, calc(100vw - 24px)); max-width: calc(100vw - 24px); box-sizing: border-box; }
+.mining-emo-dialog .mine-dialog-body { overflow-wrap: anywhere; }
+.mining-emo-form { display: grid; gap: 14px; margin: 12px 0; min-width: 0; }
+.mining-emo-form textarea { min-height: 80px; resize: vertical; }
+.mining-emo-clinic-row { border-top: 1px solid #e2e8f0; padding: 12px 0; }
+.mining-control-pagination { margin-top: 16px; }
+@media (max-width: 700px) {
+    .mining-control { padding: 12px; }
+    .mining-control-heading > div { flex-basis: 100%; }
+    .mining-control-export { width: 100%; justify-content: center; }
+    .mining-control-filters { grid-template-columns: minmax(0, 1fr); }
+    .mining-control-search { grid-column: auto; }
+    .mining-control-filter-actions > * { flex: 1; }
+    .mining-control-table, .mining-control-table tbody, .mining-control-table tr, .mining-control-table td { display: block; width: auto; }
+    .mining-control .mining-control-table { width: 100%; min-width: 0; }
+    .mining-control-table thead { display: none; }
+    .mining-control-table tr { border: 1px solid #cbd5e1; border-radius: 12px; margin: 12px 0; padding: 8px; background: white; }
+    .mining-control-table td { border: 0; padding: 8px; }
+    .mining-control-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; }
+}

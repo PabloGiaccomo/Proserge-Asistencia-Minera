@@ -26,4 +26,9 @@ class PersonalCursoRegistro extends Model
     {
         return $this->belongsTo(Mina::class, 'mina_id');
     }
+
+    public function emoCita(): BelongsTo
+    {
+        return $this->belongsTo(PersonalEmoCita::class, 'emo_cita_id');
+    }
 }

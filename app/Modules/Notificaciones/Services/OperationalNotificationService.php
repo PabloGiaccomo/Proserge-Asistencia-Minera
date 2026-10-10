@@ -8,6 +8,7 @@ use App\Models\PersonalContrato;
 use App\Models\PersonalFicha;
 use App\Models\PersonalMina;
 use App\Models\PersonalMinaExamen;
+use App\Models\PersonalMinaExamenIntento;
 use App\Models\RQMina;
 use App\Models\RQProserge;
 use App\Models\Usuario;
@@ -162,11 +163,12 @@ class OperationalNotificationService
         ]);
     }
 
-    public function examenProgramado(PersonalMinaExamen $workerExam, Usuario $actor): void
+    public function examenProgramado(PersonalMinaExamen $workerExam, Usuario $actor, ?PersonalMinaExamenIntento $attempt = null): void
     {
         $workerExam->loadMissing(['asignacion.personal', 'asignacion.mina']);
 
-        if (!$workerExam->fecha_programacion) {
+        $scheduledDate = $attempt?->fecha_programacion ?? $workerExam->fecha_programacion;
+        if (!$scheduledDate) {
             return;
         }
 
@@ -180,7 +182,7 @@ class OperationalNotificationService
                 '%s tiene %s programado para %s en %s.',
                 $workerExam->asignacion?->personal?->nombre_completo ?: 'Trabajador',
                 $workerExam->nombre_snapshot ?: 'examen',
-                $workerExam->fecha_programacion->format('d/m/Y'),
+                $scheduledDate->format('d/m/Y'),
                 $workerExam->asignacion?->mina?->nombre ?: 'mina'
             ),
             'payload' => [
@@ -188,9 +190,9 @@ class OperationalNotificationService
                 'mina_id' => (string) $workerExam->asignacion?->mina_id,
                 'personal_mina_id' => (string) $workerExam->personal_mina_id,
                 'examen_id' => (string) $workerExam->id,
-                'fecha_programacion' => $workerExam->fecha_programacion->toDateString(),
+                'fecha_programacion' => $scheduledDate->toDateString(),
             ],
-            'dedupe_key' => 'habilitacion_examen_programado:' . $workerExam->id . ':' . $workerExam->fecha_programacion->format('Ymd'),
+            'dedupe_key' => 'habilitacion_examen_programado:' . $workerExam->id . ':' . $scheduledDate->format('Ymd'),
         ]);
     }
 

@@ -46,9 +46,7 @@
     $upcomingExpirationAllRows = collect($upcomingExpirations ?? []);
     $upcomingExpirationRows = $upcomingExpirationAllRows;
     $upcomingExpirationCount = $upcomingExpirationRows->count();
-    $scheduledExamAllRows = collect($scheduledExams ?? []);
-    $scheduledExamRows = $scheduledExamAllRows;
-    $scheduledExamCount = $scheduledExamRows->count();
+
 
     $formatDate = function ($date): string {
         if (!$date) {
@@ -121,14 +119,12 @@
         };
     };
 
-    $attemptCountFor = function ($exam): int {
+    $attemptCountFor = function ($exam) use ($service): int {
         if (!$exam || !$exam->relationLoaded('intentos')) {
             return 0;
         }
 
-        return $exam->intentos
-            ->where('resultado', '!=', \App\Models\PersonalMinaExamenIntento::RESULTADO_ANULADO)
-            ->count();
+        return $service->operationalAttemptCount($exam);
     };
 
     $visualAssignmentState = function ($assignment, $requirementsForMine) use ($resolvedExamStates, $service): string {
@@ -477,167 +473,6 @@
         ['vista' => 'expiring']
     ));
 
-    $scheduledExamWorkerSearch = trim((string) request('scheduled_worker', ''));
-    $scheduledExamExamFilter = trim((string) request('scheduled_exam', ''));
-    $scheduledExamMineFilter = trim((string) request('scheduled_mine', ''));
-    $scheduledExamDateFilter = trim((string) request('scheduled_date', ''));
-    $scheduledExamStateFilter = trim((string) request('scheduled_state', ''));
-
-    $scheduledExamExamOptions = $scheduledExamAllRows
-        ->pluck('exam_name')
-        ->filter()
-        ->unique()
-        ->sort()
-        ->values();
-    $scheduledExamMineOptions = $scheduledExamAllRows
-        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->map(fn ($mineRow) => $mineRow['mine']?->nombre)->filter())
-        ->unique()
-        ->sort()
-        ->values();
-    $scheduledExamDateOptions = $scheduledExamAllRows
-        ->map(fn ($row) => $dateForFilter($row['fecha_programacion'] ?? null))
-        ->filter()
-        ->unique()
-        ->sort()
-        ->values();
-    $scheduledExamStateOptions = $scheduledExamAllRows
-        ->pluck('estado')
-        ->filter()
-        ->unique()
-        ->sortBy(fn ($state) => $examStateLabel($state))
-        ->values();
-
-    $scheduledExamRows = $scheduledExamAllRows
-        ->filter(function ($row) use (
-            $dateForFilter,
-            $normalizeForFilter,
-            $scheduledExamDateFilter,
-            $scheduledExamExamFilter,
-            $scheduledExamMineFilter,
-            $scheduledExamStateFilter,
-            $scheduledExamWorkerSearch
-        ) {
-            $worker = $row['worker'] ?? null;
-            $mineNames = collect($row['mines'] ?? [])
-                ->map(fn ($mineRow) => $mineRow['mine']?->nombre)
-                ->filter()
-                ->values();
-
-            if ($scheduledExamWorkerSearch !== '') {
-                $needleTokens = collect(explode(' ', $normalizeForFilter($scheduledExamWorkerSearch)))
-                    ->filter()
-                    ->values();
-                $haystack = $normalizeForFilter(implode(' ', [
-                    $worker?->nombre_completo,
-                    $worker?->tipo_documento,
-                    $worker?->numero_documento,
-                    $worker?->dni,
-                    $worker?->puesto,
-                ]));
-
-                if ($needleTokens->contains(fn ($token) => !str_contains($haystack, $token))) {
-                    return false;
-                }
-            }
-
-            if ($scheduledExamExamFilter !== '' && (string) ($row['exam_name'] ?? '') !== $scheduledExamExamFilter) {
-                return false;
-            }
-
-            if ($scheduledExamMineFilter !== '' && !$mineNames->contains(fn ($mineName) => (string) $mineName === $scheduledExamMineFilter)) {
-                return false;
-            }
-
-            if ($scheduledExamDateFilter !== '' && $dateForFilter($row['fecha_programacion'] ?? null) !== $scheduledExamDateFilter) {
-                return false;
-            }
-
-            if ($scheduledExamStateFilter !== '' && (string) ($row['estado'] ?? '') !== $scheduledExamStateFilter) {
-                return false;
-            }
-
-            return true;
-        })
-        ->values();
-    $scheduledExamCount = $scheduledExamRows->count();
-    $scheduledExamActiveFilterCount = collect([
-        $scheduledExamWorkerSearch,
-        $scheduledExamExamFilter,
-        $scheduledExamMineFilter,
-        $scheduledExamDateFilter,
-        $scheduledExamStateFilter,
-    ])->filter(fn ($value) => $value !== '')->count();
-
-    $scheduledExamLimitOptions = [10, 20, 50, 100, 200];
-    $scheduledExamLimit = (int) request('scheduled_limit', 10);
-    if (!in_array($scheduledExamLimit, $scheduledExamLimitOptions, true)) {
-        $scheduledExamLimit = 10;
-    }
-
-    $scheduledExamPage = max(1, (int) request('scheduled_page', 1));
-    $scheduledExamLastPage = max(1, (int) ceil($scheduledExamCount / max(1, $scheduledExamLimit)));
-    if ($scheduledExamPage > $scheduledExamLastPage) {
-        $scheduledExamPage = $scheduledExamLastPage;
-    }
-
-    $scheduledExamOffset = ($scheduledExamPage - 1) * $scheduledExamLimit;
-    $scheduledExamRows = $scheduledExamRows
-        ->slice($scheduledExamOffset, $scheduledExamLimit)
-        ->values();
-    $scheduledExamVisibleCount = $scheduledExamRows->count();
-    $scheduledExamFirstItem = $scheduledExamCount > 0 ? $scheduledExamOffset + 1 : 0;
-    $scheduledExamLastItem = $scheduledExamCount > 0
-        ? min($scheduledExamOffset + $scheduledExamVisibleCount, $scheduledExamCount)
-        : 0;
-    $scheduledExamPaginationWindow = $scheduledExamLastPage <= 1
-        ? []
-        : ($scheduledExamLastPage <= 9
-            ? range(1, $scheduledExamLastPage)
-            : collect([1, 2, $scheduledExamPage - 1, $scheduledExamPage, $scheduledExamPage + 1, $scheduledExamLastPage - 1, $scheduledExamLastPage])
-                ->filter(fn ($page) => $page >= 1 && $page <= $scheduledExamLastPage)
-                ->unique()
-                ->sort()
-                ->values()
-                ->reduce(function (array $window, int $page): array {
-                    $previous = collect($window)->last(fn ($item) => is_int($item));
-                    if ($previous !== null && $page > $previous + 1) {
-                        $window[] = '...';
-                    }
-                    $window[] = $page;
-                    return $window;
-                }, []));
-    $scheduledExamPageUrl = function (int $page) use ($currentQuery, $scheduledExamLimit): string {
-        return route('personal.habilitacion-minera.index', array_merge($currentQuery, [
-            'vista' => 'scheduled',
-            'scheduled_limit' => $scheduledExamLimit,
-            'scheduled_page' => $page,
-        ]));
-    };
-    $scheduledExamFormQuery = array_merge(
-        collect($currentQuery)->except([
-            'scheduled_limit',
-            'scheduled_page',
-            'scheduled_worker',
-            'scheduled_exam',
-            'scheduled_mine',
-            'scheduled_date',
-            'scheduled_state',
-        ])->all(),
-        ['vista' => 'scheduled']
-    );
-    $scheduledExamClearUrl = route('personal.habilitacion-minera.index', array_merge(
-        collect($currentQuery)->except([
-            'scheduled_limit',
-            'scheduled_page',
-            'scheduled_worker',
-            'scheduled_exam',
-            'scheduled_mine',
-            'scheduled_date',
-            'scheduled_state',
-        ])->all(),
-        ['vista' => 'scheduled']
-    ));
-
     $workerActiveFilters = [
         'trabajador' => filled($filters['trabajador'] ?? request('trabajador')),
     ];
@@ -667,14 +502,10 @@
     $upcomingAssignmentSource = $upcomingExpirationRows
         ->flatMap(fn ($row) => collect($row['mines'] ?? [])->pluck('assignment'))
         ->filter();
-    $scheduledAssignmentSource = $scheduledExamRows
-        ->flatMap(fn ($row) => collect($row['mines'] ?? [])->pluck('assignment'))
-        ->filter();
     $assignmentSource = $assignmentSource
         ->flatten(1)
         ->concat($selectedWorkerAssignmentsForJson)
         ->concat($upcomingAssignmentSource)
-        ->concat($scheduledAssignmentSource)
         ->filter()
         ->unique(fn ($assignment) => $assignment->id)
         ->values();
@@ -688,13 +519,16 @@
             'mina_nombre' => $a->mina?->nombre,
             'estado_habilitacion' => $a->estadoHabilitacionActual(),
             'generate_exams_url' => route('personal.habilitacion-minera.generate-exams', array_merge(['assignmentId' => $a->id], $currentQuery)),
-            'examenes' => $a->examenes->map(function ($e) use ($a, $attemptCountFor) {
+            'examenes' => $a->examenes->map(function ($e) use ($a, $service, $attemptCountFor) {
                 $attempts = $e->intentos;
                 $attemptCount = $attemptCountFor($e);
 
                 return [
                     'id' => $e->id,
                     'nombre' => $e->nombre_snapshot,
+                    'categoria_operativa' => $e->examen?->categoria_operativa,
+                    'nota' => $e->nota_obtenida,
+                    'convalidation_context' => $e->contexto_convalidacion_json,
                     'estado' => $e->estado,
                     'can_convalidate' => $a->estadoHabilitacionActual() === \App\Models\PersonalMina::ESTADO_EN_PROCESO
                         && (bool) $a->activo
@@ -712,10 +546,22 @@
                     'fecha_programacion' => $e->fecha_programacion ? $e->fecha_programacion->format('d/m/Y') : null,
                     'fecha_realizacion' => $e->fecha_realizacion ? $e->fecha_realizacion->format('d/m/Y') : null,
                     'fecha_vencimiento' => $e->fecha_vencimiento ? $e->fecha_vencimiento->format('d/m/Y') : null,
-                    'intentos' => $attempts->map(function ($att) {
+                    'intentos' => $attempts->map(function ($att) use ($service) {
+                        $legacyMedical = !$att->emoCita
+                            ? \App\Modules\Personal\Support\EmoOutcome::fromLegacyText($att->observacion)
+                            : null;
                         return [
                             'id' => $att->id,
-                            'numero' => $att->numero_intento,
+                            'numero' => $service->operationalAttemptNumber($att),
+                            'numero_fisico' => $att->numero_intento,
+                            'legacy_emo_outcome' => $legacyMedical['outcome']->value ?? null,
+                            'legacy_emo_detail' => $legacyMedical['detail'] ?? null,
+                            'emo_cita' => $att->emoCita ? [
+                                'id' => $att->emoCita->id, 'revision' => $att->emoCita->revision, 'estado' => $att->emoCita->estado,
+                                'clinica_id' => $att->emoCita->clinica_id, 'clinica_nombre' => $att->emoCita->clinica_nombre_snapshot,
+                                'fecha_programacion' => $att->emoCita->fecha_programacion?->toDateString(),
+                                'resultado_emo' => $att->emoCita->resultado_emo, 'detalle_resultado_emo' => $att->emoCita->detalle_resultado_emo,
+                            ] : null,
                             'fecha_programacion' => $att->fecha_programacion ? $att->fecha_programacion->format('d/m/Y') : null,
                             'fecha_programacion_iso' => $att->fecha_programacion ? $att->fecha_programacion->toDateString() : null,
                             'fecha_realizacion' => $att->fecha_realizacion ? $att->fecha_realizacion->format('d/m/Y') : null,
@@ -775,10 +621,16 @@
                             </button>
                             @endif
                             @if($canConfigureMining)
+                            <button type="button" class="mine-action-item" data-emo-management="modal-emo-clinics"><span class="mine-action-item-title">Clinicas EMO</span><span class="mine-action-item-copy">Agregar, renombrar o desactivar clinicas.</span></button>
+                            <button type="button" class="mine-action-item" data-emo-management="modal-emo-category"><span class="mine-action-item-title">Categorias de cursos y EMO</span><span class="mine-action-item-copy">Clasificar examen con motivo e historial.</span></button>
                             <button type="button" class="mine-action-item" onclick="openDialog('modal-configuracion')">
                                 <span class="mine-action-item-title">Configurar exámenes por mina</span>
                                 <span class="mine-action-item-copy">Define qué requisitos corresponden a cada mina.</span>
                             </button>
+                            <a class="mine-action-item" href="{{ route('personal.habilitacion-minera.catalogo.index') }}">
+                                <span class="mine-action-item-title">Organizar exámenes</span>
+                                <span class="mine-action-item-copy">Revisa duplicados y nombres alternativos sin perder historial.</span>
+                            </a>
                             @endif
                             @if($canImportMining)
                             <a class="mine-action-item" href="{{ route('personal.habilitacion-minera.bulk-preview') }}">
@@ -830,7 +682,7 @@
         @endif
         @if($canViewMiningScheduled)
             <button type="button" @class(['mine-view-tab', 'is-active' => $activeMineView === 'scheduled']) data-mine-view-tab="scheduled" aria-selected="{{ $activeMineView === 'scheduled' ? 'true' : 'false' }}">
-                Examenes programados
+                Control de asistencia de cursos y EMO
             </button>
         @endif
     </div>
@@ -1955,310 +1807,9 @@
     @endif
 
     @if($canViewMiningScheduled)
-    <div @class(['card', 'mine-scheduled-card', 'is-hidden' => $activeMineView !== 'scheduled']) data-mine-view-panel="scheduled">
-        <div class="card-header mine-list-header">
-            <div>
-                <span class="card-title">Examenes programados</span>
-                <p class="mine-header-copy">
-                    Programaciones pendientes dentro de los proximos {{ (int) ($scheduledExamDays ?? 60) }} dias y pendientes recientes.
-                </p>
-            </div>
-
-            <span class="mine-filter-count">
-                {{ $scheduledExamCount }} programado{{ $scheduledExamCount === 1 ? '' : 's' }}
-            </span>
-        </div>
-
-        <div class="card-body">
-            <form
-                method="GET"
-                action="{{ route('personal.habilitacion-minera.index') }}"
-                id="scheduledPaginationForm"
-                class="sr-only"
-                autocomplete="off"
-            >
-                @foreach($scheduledExamFormQuery as $key => $value)
-                    @continue(is_array($value))
-                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
-                @endforeach
-            </form>
-
-            <div class="mine-expiring-filter-panel" aria-label="Filtros de examenes programados">
-                <div class="mine-filter-row">
-                    <label @class(['mine-filter-group', 'is-wide', 'is-active' => filled($scheduledExamWorkerSearch)])>
-                        <span class="mine-filter-label">Buscar trabajador</span>
-                        <input
-                            type="search"
-                            id="scheduledWorkerInput"
-                            name="scheduled_worker"
-                            value="{{ $scheduledExamWorkerSearch }}"
-                            class="mine-filter-control"
-                            form="scheduledPaginationForm"
-                            placeholder="Buscar por nombre, DNI o puesto"
-                            data-scheduled-filter-input
-                            data-ignore-active="true"
-                        >
-                    </label>
-
-                    @if($scheduledExamActiveFilterCount > 0)
-                        <a class="mine-filter-clear-link" href="{{ $scheduledExamClearUrl }}">
-                            Limpiar filtros
-                        </a>
-                    @endif
-                </div>
-            </div>
-
-            <div class="mine-view-toolbar" aria-label="Control de visualizacion de examenes programados">
-                <label class="mine-view-size">
-                    <span>Mostrar</span>
-                    <select
-                        name="scheduled_limit"
-                        class="mine-view-select"
-                        form="scheduledPaginationForm"
-                        data-external-filter-change
-                        data-ignore-active="true"
-                    >
-                        @foreach($scheduledExamLimitOptions as $amount)
-                            <option value="{{ $amount }}" @selected($scheduledExamLimit === $amount)>
-                                {{ $amount }}
-                            </option>
-                        @endforeach
-                    </select>
-                    <span>programados</span>
-                </label>
-
-                <span class="mine-view-summary">
-                    @if($scheduledExamCount > 0)
-                        Mostrando {{ $scheduledExamFirstItem }}-{{ $scheduledExamLastItem }} de {{ $scheduledExamCount }}
-                    @else
-                        Sin examenes programados para mostrar
-                    @endif
-                </span>
-            </div>
-
-            <div class="mine-table-wrap">
-                    <table class="mine-table mine-expiring-table" data-testid="mine-scheduled-exams">
-                        <thead>
-                            <tr>
-                                <th>Trabajador</th>
-                                <th>Examen</th>
-                                <th>Mina(s) asignadas</th>
-                                <th>Programacion</th>
-                                <th>Estado examen</th>
-                                <th>Accion</th>
-                            </tr>
-                            <tr class="mine-table-filter-row">
-                                <th>
-                                    <span class="mine-muted">Usa el buscador superior</span>
-                                </th>
-                                <th>
-                                    <select
-                                        name="scheduled_exam"
-                                        class="mine-table-filter-control"
-                                        form="scheduledPaginationForm"
-                                        data-external-filter-change
-                                        data-ignore-active="true"
-                                        aria-label="Filtrar por examen programado"
-                                    >
-                                        <option value="">Todos los examenes</option>
-                                        @foreach($scheduledExamExamOptions as $examName)
-                                            <option value="{{ $examName }}" @selected($scheduledExamExamFilter === (string) $examName)>
-                                                {{ $examName }}
-                                            </option>
-                                        @endforeach
-                                    </select>
-                                </th>
-                                <th>
-                                    <select
-                                        name="scheduled_mine"
-                                        class="mine-table-filter-control"
-                                        form="scheduledPaginationForm"
-                                        data-external-filter-change
-                                        data-ignore-active="true"
-                                        aria-label="Filtrar por mina programada"
-                                    >
-                                        <option value="">Todas las minas</option>
-                                        @foreach($scheduledExamMineOptions as $mineName)
-                                            <option value="{{ $mineName }}" @selected($scheduledExamMineFilter === (string) $mineName)>
-                                                {{ $mineName }}
-                                            </option>
-                                        @endforeach
-                                    </select>
-                                </th>
-                                <th>
-                                    <select
-                                        name="scheduled_date"
-                                        class="mine-table-filter-control"
-                                        form="scheduledPaginationForm"
-                                        data-external-filter-change
-                                        data-ignore-active="true"
-                                        aria-label="Filtrar por fecha programada"
-                                    >
-                                        <option value="">Todas las fechas</option>
-                                        @foreach($scheduledExamDateOptions as $scheduledDate)
-                                            <option value="{{ $scheduledDate }}" @selected($scheduledExamDateFilter === (string) $scheduledDate)>
-                                                {{ $formatDate($scheduledDate) }}
-                                            </option>
-                                        @endforeach
-                                    </select>
-                                </th>
-                                <th>
-                                    <select
-                                        name="scheduled_state"
-                                        class="mine-table-filter-control"
-                                        form="scheduledPaginationForm"
-                                        data-external-filter-change
-                                        data-ignore-active="true"
-                                        aria-label="Filtrar por estado de examen programado"
-                                    >
-                                        <option value="">Todos los estados</option>
-                                        @foreach($scheduledExamStateOptions as $state)
-                                            <option value="{{ $state }}" @selected($scheduledExamStateFilter === (string) $state)>
-                                                {{ $examStateLabel($state) }}
-                                            </option>
-                                        @endforeach
-                                    </select>
-                                </th>
-                                <th>
-                                    <span class="mine-muted">Abrir gestion</span>
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse($scheduledExamRows as $row)
-                                @php
-                                    $worker = $row['worker'] ?? null;
-                                    $scheduledDays = $row['dias_para_programacion'];
-                                    $examState = $row['estado'] ?? null;
-                                    $examBadge = $badgeForExamState($examState);
-                                    $scheduledLabel = $formatDate($row['fecha_programacion'] ?? null);
-                                    $scheduledStatusLabel = $scheduledDays === null
-                                        ? '-'
-                                        : ($scheduledDays === 0
-                                            ? 'Programado hoy'
-                                            : ($scheduledDays < 0
-                                                ? 'Pendiente hace ' . abs($scheduledDays) . ' dia(s)'
-                                                : 'Faltan ' . $scheduledDays . ' dia(s)'));
-                                    $firstMineRow = collect($row['mines'] ?? [])->first();
-                                @endphp
-
-                                <tr>
-                                    <td>
-                                        <div class="mine-expiring-worker">
-                                            <strong>{{ $worker?->nombre_completo ?: '-' }}</strong>
-                                            <span class="mine-muted">
-                                                {{ $worker?->tipo_documento ?: 'DNI' }} {{ $worker?->numero_documento ?: $worker?->dni ?: '-' }}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <strong>{{ $row['exam_name'] ?? 'Examen' }}</strong>
-                                    </td>
-                                    <td>
-                                        <div class="mine-expiring-mines">
-                                            @foreach(collect($row['mines'] ?? []) as $mineRow)
-                                                @php
-                                                    $assignment = $mineRow['assignment'] ?? null;
-                                                    $mine = $mineRow['mine'] ?? null;
-                                                    $exam = $mineRow['exam'] ?? null;
-                                                    $attemptNumber = $mineRow['numero_intento'] ?? null;
-                                                    $assignmentState = $assignment?->estadoHabilitacionActual();
-                                                @endphp
-
-                                                @if($assignment && $mine)
-                                                    <button
-                                                        type="button"
-                                                        class="mine-badge {{ $badgeForHabilitationState($assignmentState) }} mine-btn-link"
-                                                        onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($mine->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($exam?->id) }})"
-                                                        title="Abrir programados de {{ $worker?->nombre_completo }} en {{ $mine->nombre }}"
-                                                    >
-                                                        {{ $mine->nombre }}{{ $attemptNumber ? ' - I' . $attemptNumber : '' }}
-                                                    </button>
-                                                @endif
-                                            @endforeach
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="mine-expiring-date">
-                                            <span class="mine-state-chip {{ $scheduledDays !== null && $scheduledDays < 0 ? 'danger' : 'warn' }}">
-                                                {{ $scheduledLabel }}
-                                            </span>
-                                            <span class="mine-muted">{{ $scheduledStatusLabel }}</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="mine-state-chip {{ $examBadge }}">{{ $examStateLabel($examState) }}</span>
-                                    </td>
-                                    <td>
-                                        @if($firstMineRow)
-                                            @php
-                                                $assignment = $firstMineRow['assignment'] ?? null;
-                                                $mine = $firstMineRow['mine'] ?? null;
-                                                $exam = $firstMineRow['exam'] ?? null;
-                                            @endphp
-
-                                            @if($assignment && $mine)
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-outline btn-xs"
-                                                    onclick="openWorkerExams({{ \Illuminate\Support\Js::from($assignment->id) }}, {{ \Illuminate\Support\Js::from($worker?->nombre_completo ?: '') }}, {{ \Illuminate\Support\Js::from($mine->nombre ?: '') }}, {{ \Illuminate\Support\Js::from($exam?->id) }})"
-                                                >
-                                                    Ver programados
-                                                </button>
-                                            @endif
-                                        @endif
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="6">
-                                        <div class="mine-operational-note">
-                                            <strong>Sin resultados con estos filtros.</strong>
-                                            <span>Cambia un filtro o usa "Limpiar filtros" para volver a mostrar programaciones.</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-            </div>
-
-                @if($scheduledExamLastPage > 1)
-                    <div class="mine-pagination-controls">
-                        <div class="mine-pagination-summary">
-                            Mostrando {{ $scheduledExamFirstItem }} - {{ $scheduledExamLastItem }} de {{ $scheduledExamCount }} programados
-                        </div>
-
-                        <div class="mine-pagination-links">
-                            <nav class="mine-page-buttons" aria-label="Paginacion de examenes programados">
-                                @if($scheduledExamPage <= 1)
-                                    <span class="mine-page-button is-disabled" aria-disabled="true">&lsaquo;</span>
-                                @else
-                                    <a class="mine-page-button" href="{{ $scheduledExamPageUrl($scheduledExamPage - 1) }}" rel="prev" aria-label="Pagina anterior">&lsaquo;</a>
-                                @endif
-
-                                @foreach($scheduledExamPaginationWindow as $page)
-                                    @if($page === '...')
-                                        <span class="mine-page-ellipsis" aria-hidden="true">...</span>
-                                    @elseif((int) $page === $scheduledExamPage)
-                                        <span class="mine-page-button is-active" aria-current="page">{{ $page }}</span>
-                                    @else
-                                        <a class="mine-page-button" href="{{ $scheduledExamPageUrl((int) $page) }}" aria-label="Ir a pagina {{ $page }}">{{ $page }}</a>
-                                    @endif
-                                @endforeach
-
-                                @if($scheduledExamPage < $scheduledExamLastPage)
-                                    <a class="mine-page-button" href="{{ $scheduledExamPageUrl($scheduledExamPage + 1) }}" rel="next" aria-label="Pagina siguiente">&rsaquo;</a>
-                                @else
-                                    <span class="mine-page-button is-disabled" aria-disabled="true">&rsaquo;</span>
-                                @endif
-                            </nav>
-                        </div>
-                    </div>
-                @endif
-        </div>
-    </div>
+        @include('personal.habilitacion-minera._scheduled-control')
     @endif
+    @include('personal.habilitacion-minera._emo-dialogs')
 
     @if($selectedWorker && ($canAssignMining || $canUnassignMining))
         <dialog id="modal-asignar-mina" class="mine-dialog is-wide">
@@ -2614,7 +2165,8 @@
                     <input type="hidden" name="orden" value="0">
                     <label class="mine-checkline"><input type="hidden" name="obligatorio" value="0"><input type="checkbox" name="obligatorio" value="1" checked><span>Obligatorio</span></label>
                     <label class="mine-checkline"><input type="hidden" name="permite_no_aplica" value="0"><input type="checkbox" name="permite_no_aplica" value="1" checked><span>Puede marcarse como no aplica por área</span></label>
-                    <label class="mine-checkline"><input type="hidden" name="permite_convalidacion_mina" value="0"><input type="checkbox" name="permite_convalidacion_mina" value="1"><span>Puede convalidarse desde otra mina compatible</span></label>
+                    <label class="mine-checkline"><input type="hidden" name="permite_convalidacion_mina" value="0"><input type="checkbox" name="permite_convalidacion_mina" value="1"><span>Permitir convalidación para este requisito</span></label>
+                    <label class="mine-checkline"><input type="hidden" name="convalidar_desde_otras_minas" value="0"><input type="checkbox" name="convalidar_desde_otras_minas" value="1" checked><span>Aceptar resultados de otras minas</span></label>
                     <label>Días de vigencia solo para esta mina<input type="number" min="1" name="vigencia_dias_override" placeholder="Opcional"></label>
                     <label class="is-wide">Observación<input type="text" name="observacion_mina"></label>
                     <div class="mine-form-actions">
@@ -2685,6 +2237,8 @@
                                             <span class="mine-muted">Vigencia para esta mina: {{ $requirement->vigencia_dias_override }} días</span>
                                         @endif
 
+                                        <button type="button" class="btn btn-outline btn-xs" onclick="openMiningConvalidationRules({{ \Illuminate\Support\Js::from($requirement->id) }})">Convalidación y equivalencias</button>
+
                                         <form method="POST" action="{{ route('personal.habilitacion-minera.requisitos.deactivate', array_merge(['requirementId' => $requirement->id], $currentQuery)) }}" data-loading-message="Quitando requisito de la mina..." data-requirement-deactivate-form>
                                             @csrf
                                             <button type="submit" class="btn btn-outline btn-xs">Quitar</button>
@@ -2701,6 +2255,7 @@
                 </div>
             </div>
         </dialog>
+        @include('personal.habilitacion-minera._convalidation-rules')
         @endif
 
         @if($canImportMining)
@@ -3974,7 +3529,7 @@ document.addEventListener('click', function(event) {
     }
 
     const link = event.target.closest('.mine-mines-card a[href], .mine-worker-card a[href], .mine-assignments-card a[href], .mine-expiring-card a[href], .mine-scheduled-card a[href]');
-    if (!link || link.target || link.hasAttribute('download')) return;
+    if (!link || link.target || link.hasAttribute('download') || link.hasAttribute('data-no-ajax')) return;
 
     const url = new URL(link.href, window.location.origin);
     if (url.origin !== window.location.origin || url.pathname !== window.location.pathname) return;
@@ -4178,6 +3733,7 @@ function formField(label, html, className) {
 }
 
 function renderScheduleForm(exam, canSchedule) {
+    if (exam.categoria_operativa === 'EMO' && canSchedule) return window.renderMiningEmoSchedule?.(exam) || '<p>Actualiza la pagina para programar EMO.</p>';
     if (!canSchedule) {
         return '<div class="mine-exam-empty-panel">No se puede programar otro intento porque ya existe una programación pendiente o el examen está resuelto.</div>';
     }
@@ -4216,8 +3772,9 @@ function renderProgrammedPanel(exam, scheduledAttempts) {
     let html = '<div class="mine-programmed-list">';
     scheduledAttempts.forEach(function(attempt) {
         const days = daysUntilDisplayDate(attempt.fecha_programacion);
-        const isDue = days !== null && days <= 0;
-        const dueText = isDue
+        const isCancelled = attempt.emo_cita?.estado === 'ANULADA';
+        const isDue = !isCancelled && days !== null && days <= 0;
+        const dueText = isCancelled ? 'Cita anulada: puede reprogramarse' : isDue
             ? 'Ya corresponde registrar resultado'
             : 'Faltan ' + escHtml(days) + ' día(s)';
 
@@ -4231,7 +3788,9 @@ function renderProgrammedPanel(exam, scheduledAttempts) {
             html += '<span class="mine-muted">' + escHtml(attempt.observacion) + '</span>';
         }
 
-        if (isDue && canRegisterMining) {
+        if (exam.categoria_operativa === 'EMO') {
+            html += window.renderMiningEmoProgrammed?.(exam, attempt) || '';
+        } else if (isDue && canRegisterMining) {
             html += renderCompleteScheduledForm(attempt);
         } else if (!isDue) {
             html += '<span class="mine-muted">Aún no se habilita la carga de resultado porque la fecha programada no ha pasado.</span>';
@@ -4247,6 +3806,7 @@ function renderProgrammedPanel(exam, scheduledAttempts) {
 }
 
 function renderPerformedForm(exam, canRegister) {
+    if (exam.categoria_operativa === 'EMO') return '<p>Programa primero una cita EMO con clinica y registra su resultado desde Ver programados.</p>';
     if (!canRegister) {
         return '<div class="mine-exam-empty-panel">No se puede registrar otro resultado porque este examen ya esta resuelto.</div>';
     }
@@ -4268,13 +3828,11 @@ function renderPerformedForm(exam, canRegister) {
 function renderWorkerExamCard(exam, focusExamId) {
     const attemptsUsed = Number(exam.attempt_count || 0);
     const attemptsMax = Number(exam.max_intentos || 1);
-    const resolvedStates = ['APROBADO', 'VIGENTE', 'CONVALIDADO', 'NO_APLICA'];
+    const resolvedStates = ['APROBADO', 'VIGENTE', 'CONVALIDADO'];
     const resolved = resolvedStates.includes(exam.estado);
     const canRegisterAttempt = canRegisterMining && !resolved;
-    const scheduledAttempts = (exam.intentos || []).filter(function(attempt) {
-        return attempt.fecha_programacion && attempt.resultado === 'PENDIENTE';
-    });
-    const canSchedule = canProgramMining && !resolved && scheduledAttempts.length === 0;
+    const scheduledAttempts = window.miningProgrammedAttempts(exam);
+    const canSchedule = window.miningExamCanSchedule(exam, canProgramMining);
     const badgeClass = examBadgeClass(exam);
     const stateLabel = examStateLabels[exam.estado] || exam.estado;
     const expirationLabel = expirationTextForExam(exam);
@@ -4285,6 +3843,7 @@ function renderWorkerExamCard(exam, focusExamId) {
     if (exam.precio !== null && exam.precio !== undefined) details.push('Precio: ' + exam.precio);
     if (exam.fecha_programacion) details.push('Última programación: ' + exam.fecha_programacion);
     if (exam.fecha_realizacion) details.push('Última realización: ' + exam.fecha_realizacion);
+    if (exam.nota !== null && exam.nota !== undefined) details.push('Nota: ' + exam.nota);
     if (expirationLabel) details.push(expirationLabel);
 
     let html = '<div class="mine-exam-item' + (focused ? ' is-focused' : '') + '" data-worker-exam-card="' + escAttr(exam.id) + '">';
@@ -4293,6 +3852,12 @@ function renderWorkerExamCard(exam, focusExamId) {
     html += '<span class="mine-muted' + (attemptsUsed > attemptsMax ? ' mine-attempts-exceeded' : '') + '">Intentos: ' + escHtml(attemptsUsed) + '/' + escHtml(attemptsMax) + (attemptsUsed > attemptsMax ? ' · excedido' : '') + '</span>';
     html += '</div>';
     html += '<div class="mine-muted">' + escHtml(details.join(' · ')) + '</div>';
+    if (exam.convalidation_context) {
+        const origin = exam.convalidation_context;
+        html += '<p class="mine-helper-card">' + escHtml('Convalidado desde ' + origin.examen_origen + ' — ' + origin.mina_origen
+            + ' hacia ' + origin.examen_destino + ' — ' + origin.mina_destino
+            + '. ' + (origin.nota === null ? 'Sin nota.' : 'Nota: ' + origin.nota)) + '</p>';
+    }
     html += '<div class="mine-exam-action-row">';
     if (canProgramMining) {
         html += '<button type="button" class="btn btn-outline btn-xs" data-exam-action-toggle="schedule">Programar examen</button>';
@@ -4313,21 +3878,31 @@ function renderWorkerExamCard(exam, focusExamId) {
         html += '<div class="mine-exam-panel" data-exam-action-panel="performed">' + renderPerformedForm(exam, canRegisterAttempt) + '</div>';
     }
     if (canConvalidateMining && exam.can_convalidate) {
-        html += '<div class="mine-exam-panel" data-exam-action-panel="convalidation"><p class="mine-muted">Selecciona un resultado vigente del mismo examen.</p></div>';
+        html += '<div class="mine-exam-panel" data-exam-action-panel="convalidation"><p class="mine-muted">Selecciona un resultado vigente del mismo examen o de un equivalente autorizado para esta mina.</p></div>';
     }
 
     if (exam.intentos && exam.intentos.length) {
         html += '<div class="mine-attempt-list">';
         exam.intentos.forEach(function(attempt) {
+            const emoOutcome = attempt.emo_cita?.resultado_emo || attempt.legacy_emo_outcome;
+            const emoDetail = attempt.emo_cita?.resultado_emo ? attempt.emo_cita.detalle_resultado_emo : attempt.legacy_emo_detail;
+            const emoOutcomeBadge = exam.categoria_operativa === 'EMO' && emoOutcome
+                ? window.renderMiningEmoOutcomeBadge?.(emoOutcome, emoDetail)
+                : '';
             const result = attemptResultLabels[attempt.resultado] || attempt.resultado || '-';
-            const parts = ['Intento ' + attempt.numero + ': ' + result];
+            const attemptLabel = attempt.numero
+                ? 'Intento ' + attempt.numero
+                : (attempt.resultado === 'PENDIENTE' ? 'Programacion pendiente'
+                    : (attempt.resultado === 'ANULADO' ? 'Programacion anulada' : 'Resultado historico'));
+            const parts = [attemptLabel + (emoOutcomeBadge ? '' : ': ' + result)];
 
             if (attempt.fecha_programacion) parts.push('Prog. ' + attempt.fecha_programacion);
             if (attempt.fecha_realizacion) parts.push('Real. ' + attempt.fecha_realizacion);
             if (attempt.nota !== null && attempt.nota !== undefined) parts.push('Nota: ' + attempt.nota);
-            if (attempt.observacion) parts.push(attempt.observacion);
+            if (attempt.observacion && !emoOutcomeBadge) parts.push(attempt.observacion);
 
             html += '<div class="mine-muted">' + escHtml(parts.join(' · ')) + '</div>';
+            if (emoOutcomeBadge) html += '<div class="mine-attempt-emo-outcome">' + emoOutcomeBadge + '</div>';
             if (attempt.archivo_url) {
                 html += '<a class="btn btn-outline btn-xs" href="' + escHtml(attempt.archivo_url) + '">Descargar archivo</a>';
             }
@@ -4352,45 +3927,11 @@ function renderWorkerExamCard(exam, focusExamId) {
 }
 
 async function loadConvalidationOptions(card, panel) {
-    if (panel.dataset.loading === 'true' || panel.dataset.loaded === 'true') return;
-
-    panel.dataset.loading = 'true';
-    panel.innerHTML = '<p class="mine-muted" role="status">Buscando resultados vigentes...</p>';
-    const examId = card.dataset.workerExamCard;
-
-    try {
-        const response = await fetch(convalidationOptionsUrlTemplate.replace('__EXAM__', encodeURIComponent(examId)), {
-            headers: { 'Accept': 'application/json' },
-            credentials: 'same-origin',
-        });
-        if (!response.ok) throw new Error('No se pudieron consultar los resultados. Intenta nuevamente.');
-
-        const payload = await response.json();
-        if (!payload.available || !Array.isArray(payload.options) || !payload.options.length) {
-            panel.innerHTML = '<p class="mine-muted" role="status">' + escHtml(payload.message || 'No hay resultados aptos para convalidar.') + '</p>';
-            panel.dataset.loaded = 'true';
-            return;
-        }
-
-        const options = payload.options.map(function(origin) {
-            const label = [origin.mina, 'Realizado: ' + (origin.fecha_realizacion || '-'),
-                'Vence: ' + (origin.fecha_vencimiento || 'Sin vencimiento')].join(' · ');
-            return '<option value="' + escAttr(origin.id) + '">' + escHtml(label) + '</option>';
-        }).join('');
-        const action = new URL(convalidateUrlTemplate.replace('__EXAM__', encodeURIComponent(examId)), window.location.href);
-        action.search = window.location.search;
-        panel.innerHTML = '<form method="POST" action="' + escAttr(action.toString()) + '" class="mine-form" data-loading-message="Convalidando examen..." onsubmit="return confirm(\'¿Confirmas la convalidación con el resultado seleccionado?\');">'
-            + '<input type="hidden" name="_token" value="' + escAttr(csrfToken) + '">'
-            + formField('Resultado de origen', '<select name="examen_origen_id" required>' + options + '</select>', 'is-wide')
-            + formField('Observación', '<input type="text" name="observacion" maxlength="5000">', 'is-wide')
-            + '<button type="submit" class="btn btn-primary btn-xs" style="grid-column:1/-1;">Convalidar examen</button>'
-            + '</form>';
-        panel.dataset.loaded = 'true';
-    } catch (error) {
-        panel.innerHTML = '<p class="mine-config-inline-error" role="alert">' + escHtml(error.message) + '</p>';
-    } finally {
-        panel.dataset.loading = 'false';
-    }
+    return window.loadMiningConvalidationOptions(card, panel, {
+        optionsUrl: convalidationOptionsUrlTemplate,
+        submitUrl: convalidateUrlTemplate,
+        csrfToken,
+    });
 }
 
 function openWorkerExams(assignmentId, workerName, mineName, focusExamId) {

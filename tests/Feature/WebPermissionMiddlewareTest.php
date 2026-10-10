@@ -17,7 +17,13 @@ class WebPermissionMiddlewareTest extends TestCase
 {
     use DatabaseTransactions;
 
-    public function test_operational_module_permission_implies_view_permission(): void
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->assertSame('proserge_app_test', DB::connection()->getDatabaseName());
+    }
+
+    public function test_operational_module_permission_respects_explicit_view_revocation(): void
     {
         $permissions = PermissionMatrix::normalize([
             'rq_mina' => [
@@ -27,7 +33,7 @@ class WebPermissionMiddlewareTest extends TestCase
         ]);
 
         $this->assertTrue($permissions['rq_mina']['crear']);
-        $this->assertTrue($permissions['rq_mina']['ver']);
+        $this->assertFalse($permissions['rq_mina']['ver']);
     }
 
     public function test_permission_catalog_includes_sidebar_modules_without_legacy_duplicates(): void
@@ -63,36 +69,28 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_canonical_permissions_keep_legacy_module_access(): void
     {
-        $legacyLogistica = PermissionCatalog::matrixFromSelections([
-            'epps' => ['ver', 'actualizar'],
-        ]);
+        $legacyLogistica = ['epps' => ['ver' => true, 'actualizar' => true]];
         $this->assertTrue(PermissionMatrix::allows($legacyLogistica, 'logistica', 'ver'));
         $this->assertTrue(PermissionMatrix::allows($legacyLogistica, 'logistica', 'actualizar'));
         $this->assertFalse(PermissionMatrix::allows($legacyLogistica, 'herramientas', 'ver'));
 
-        $canonicalLogistica = PermissionCatalog::matrixFromSelections([
-            'logistica' => ['ver', 'actualizar'],
-        ]);
+        $canonicalLogistica = ['logistica' => ['ver' => true, 'actualizar' => true]];
         $this->assertTrue(PermissionMatrix::allows($canonicalLogistica, 'epps', 'ver'));
         $this->assertTrue(PermissionMatrix::allows($canonicalLogistica, 'herramientas', 'actualizar'));
 
         $logisticaEntregas = PermissionCatalog::matrixFromSelections([
             'logistica' => ['ver', 'ver_logistica_entregas'],
         ]);
-        $this->assertTrue(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'ver'));
+        $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'ver'));
         $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'registrar'));
         $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'editar'));
         $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'actualizar'));
         $this->assertFalse(PermissionMatrix::allowsDirect($logisticaEntregas, 'epps', 'eliminar'));
 
-        $legacyVencimientos = PermissionCatalog::matrixFromSelections([
-            'personal_vencimientos' => ['ver'],
-        ]);
+        $legacyVencimientos = ['personal_vencimientos' => ['ver' => true]];
         $this->assertTrue(PermissionMatrix::allows($legacyVencimientos, 'vencimientos', 'ver'));
 
-        $canonicalVencimientos = PermissionCatalog::matrixFromSelections([
-            'vencimientos' => ['renovar'],
-        ]);
+        $canonicalVencimientos = ['vencimientos' => ['renovar' => true]];
         $this->assertTrue(PermissionMatrix::allows($canonicalVencimientos, 'personal_vencimientos', 'renovar'));
     }
 
@@ -145,7 +143,7 @@ class WebPermissionMiddlewareTest extends TestCase
             'epps' => ['ver', 'actualizar'],
         ]);
 
-        $this->assertTrue(PermissionMatrix::allows($legacyPermissions, 'logistica', 'ver'));
+        $this->assertFalse(PermissionMatrix::allows($legacyPermissions, 'logistica', 'ver'));
 
         $this
             ->withSession([
@@ -205,7 +203,7 @@ class WebPermissionMiddlewareTest extends TestCase
             'man-power.index' => 'web.permission:man_power,ver',
             'logistica.index' => 'web.permission:logistica,ver',
             'mi-asistencia.index' => 'web.permission:mi_asistencia,ver',
-            'evaluaciones.index' => 'web.permission:evaluaciones,ver',
+            'evaluaciones.index' => 'web.permission:evaluaciones,ver_desempeno|evaluar_desempeno|ver_supervisores|evaluar_supervisores|ver_residentes|evaluar_residentes',
             'asistencia.index' => 'web.permission:asistencias,ver',
             'faltas.index' => 'web.permission:faltas,ver',
             'catalogos.index' => 'web.permission:catalogos,ver',
@@ -530,7 +528,7 @@ class WebPermissionMiddlewareTest extends TestCase
         $this->assertTrue($stored['personal']['editar']);
         $this->assertFalse($stored['personal']['crear']);
         $this->assertTrue($stored['logistica']['registrar']);
-        $this->assertTrue($stored['logistica']['ver']);
+        $this->assertFalse($stored['logistica']['ver']);
     }
 
     public function test_role_update_without_permission_payload_preserves_existing_permissions(): void
@@ -591,15 +589,8 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_admin_role_cannot_drop_users_and_roles_permissions(): void
     {
-        $adminRoleId = (string) Str::uuid();
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
         $adminUserId = (string) Str::uuid();
-
-        DB::table('roles')->insert([
-            'id' => $adminRoleId,
-            'nombre' => 'ADMIN',
-            'permisos' => json_encode(PermissionCatalog::fullAccessMatrix()),
-            'estado' => 'ACTIVO',
-        ]);
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
@@ -647,15 +638,8 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_admin_role_cannot_be_deactivated(): void
     {
-        $adminRoleId = (string) Str::uuid();
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
         $adminUserId = (string) Str::uuid();
-
-        DB::table('roles')->insert([
-            'id' => $adminRoleId,
-            'nombre' => 'ADMIN',
-            'permisos' => json_encode(PermissionCatalog::fullAccessMatrix()),
-            'estado' => 'ACTIVO',
-        ]);
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
@@ -687,15 +671,8 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_last_active_admin_user_cannot_be_deactivated(): void
     {
-        $adminRoleId = (string) Str::uuid();
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
         $adminUserId = (string) Str::uuid();
-
-        DB::table('roles')->insert([
-            'id' => $adminRoleId,
-            'nombre' => 'ADMIN',
-            'permisos' => json_encode(PermissionCatalog::fullAccessMatrix()),
-            'estado' => 'ACTIVO',
-        ]);
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
@@ -705,6 +682,8 @@ class WebPermissionMiddlewareTest extends TestCase
             'personal_id' => null,
             'estado' => 'ACTIVO',
         ]);
+
+        $this->keepOnlyActiveAdmin($adminUserId);
 
         $response = $this
             ->withSession([
@@ -727,26 +706,9 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_last_active_admin_user_cannot_be_moved_to_non_admin_role(): void
     {
-        $adminRoleId = (string) Str::uuid();
-        $regularRoleId = (string) Str::uuid();
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
+        $regularRoleId = $this->createPermissionRole('OPERADOR_TEST', ['inicio' => ['ver']]);
         $adminUserId = (string) Str::uuid();
-
-        DB::table('roles')->insert([
-            [
-                'id' => $adminRoleId,
-                'nombre' => 'ADMIN',
-                'permisos' => json_encode(PermissionCatalog::fullAccessMatrix()),
-                'estado' => 'ACTIVO',
-            ],
-            [
-                'id' => $regularRoleId,
-                'nombre' => 'OPERADOR_TEST',
-                'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                    'inicio' => ['ver'],
-                ])),
-                'estado' => 'ACTIVO',
-            ],
-        ]);
 
         DB::table('usuarios')->insert([
             'id' => $adminUserId,
@@ -756,6 +718,8 @@ class WebPermissionMiddlewareTest extends TestCase
             'personal_id' => null,
             'estado' => 'ACTIVO',
         ]);
+
+        $this->keepOnlyActiveAdmin($adminUserId);
 
         $response = $this
             ->from(route('usuarios.show', $adminUserId))
@@ -819,7 +783,8 @@ class WebPermissionMiddlewareTest extends TestCase
             ->withSession($this->sessionForPermissionUser($scopeUserId))
             ->get(route('usuarios.scope', $targetUserId))
             ->assertOk()
-            ->assertSee('Minas disponibles');
+            ->assertSee('Minas asignadas al usuario')
+            ->assertSee(route('usuarios.scope-update', $targetUserId), false);
     }
 
     public function test_usuario_role_change_requires_asignar_permission(): void
@@ -1010,15 +975,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_eliminar_usuario_is_restricted_to_superadmin(): void
     {
-        $adminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $adminRoleId,
-            'nombre' => 'ADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
 
         $targetRoleId = $this->createPermissionRole('USUARIO_DISPOSABLE_TEST', [
             'inicio' => ['ver'],
@@ -1037,15 +994,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_eliminar_usuario_blocks_self_deletion_and_last_admin(): void
     {
-        $superAdminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $superAdminRoleId,
-            'nombre' => 'SUPERADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
+        $superAdminRoleId = $this->createNamedAdminRole('SUPERADMIN');
 
         $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'self-superadmin');
 
@@ -1060,7 +1009,7 @@ class WebPermissionMiddlewareTest extends TestCase
         $adminProtection = app(AdminProtectionService::class);
         $userModel = Usuario::query()->findOrFail($superAdminUserId);
 
-        DB::table('usuarios')->where('id', '!=', $superAdminUserId)->update(['estado' => 'INACTIVO']);
+        $this->keepOnlyActiveAdmin($superAdminUserId);
 
         $this->expectException(ValidationException::class);
         $adminProtection->assertUserDeleteAllowed($userModel);
@@ -1068,15 +1017,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_eliminar_usuario_blocks_deletion_with_transactional_dependencies(): void
     {
-        $superAdminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $superAdminRoleId,
-            'nombre' => 'SUPERADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
+        $superAdminRoleId = $this->createNamedAdminRole('SUPERADMIN');
 
         $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'superadmin-dep');
         $targetRoleId = $this->createPermissionRole('DEP_ROLE_TEST', ['inicio' => ['ver']]);
@@ -1096,15 +1037,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_eliminar_usuario_successfully_removes_accidental_user(): void
     {
-        $superAdminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $superAdminRoleId,
-            'nombre' => 'SUPERADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
+        $superAdminRoleId = $this->createNamedAdminRole('SUPERADMIN');
 
         $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'superadmin-cleaner');
         $targetRoleId = $this->createPermissionRole('ACCIDENTAL_TEST', ['inicio' => ['ver']]);
@@ -1148,6 +1081,7 @@ class WebPermissionMiddlewareTest extends TestCase
         DB::table('minas')->insert([
             'id' => $minaId,
             'nombre' => 'MINA_SCOPE_'.Str::upper(Str::random(4)),
+            'unidad_minera' => 'UM_SCOPE_TEST',
             'estado' => 'ACTIVO',
             'created_at' => now(),
             'updated_at' => now(),
@@ -1175,31 +1109,15 @@ class WebPermissionMiddlewareTest extends TestCase
             ->withSession($this->sessionForPermissionUser($scopeUserId))
             ->get(route('usuarios.scope', $targetUserId))
             ->assertOk()
-            ->assertSee('Scope Vacío (Acceso Local)')
+            ->assertSee('Aviso de Scope Vacío')
             ->assertSee('Marcar todas')
             ->assertSee('Desmarcar todas');
     }
 
     public function test_api_eliminar_usuario_endpoints(): void
     {
-        $superAdminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $superAdminRoleId,
-            'nombre' => 'SUPERADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
-        $adminRoleId = (string) Str::uuid();
-        DB::table('roles')->insert([
-            'id' => $adminRoleId,
-            'nombre' => 'ADMIN',
-            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
-                'usuarios' => ['ver', 'eliminar'],
-            ])),
-            'estado' => 'ACTIVO',
-        ]);
+        $superAdminRoleId = $this->createNamedAdminRole('SUPERADMIN');
+        $adminRoleId = $this->createNamedAdminRole('ADMIN');
         $targetRoleId = $this->createPermissionRole('API_DISP_ROLE_TEST', ['inicio' => ['ver']]);
 
         $superAdminUserId = $this->createPermissionUser($superAdminRoleId, 'api-super-cleaner');
@@ -1404,6 +1322,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
     public function test_bienestar_bloqueo_actions_respect_specific_permissions(): void
     {
+        $this->travelTo(\Carbon\Carbon::parse('2026-07-11'));
         $viewerRoleId = $this->createPermissionRole('BIENESTAR_VIEWER_TEST', [
             'bienestar' => ['ver'],
         ]);
@@ -1486,6 +1405,59 @@ class WebPermissionMiddlewareTest extends TestCase
             'id' => $bloqueoId,
             'estado' => 'ANULADO',
         ]);
+    }
+
+    public function test_habilitacion_scheduled_export_requires_both_permissions_independently(): void
+    {
+        $route = Route::getRoutes()->getByName('personal.habilitacion-minera.scheduled.export');
+        $this->assertNotNull($route);
+        $middleware = $route->gatherMiddleware();
+        $this->assertContains('web.auth', $middleware);
+        $this->assertSame([
+            'web.permission:habilitacion_minera,ver_programados',
+            'web.permission:habilitacion_minera,exportar',
+        ], array_values(array_filter($middleware, fn ($value) => str_starts_with($value, 'web.permission:'))));
+    }
+
+    public function test_habilitacion_emo_routes_require_exact_action_middleware(): void
+    {
+        foreach ([
+            'clinics.store' => 'configurar',
+            'clinics.update' => 'configurar',
+            'clinics.deactivate' => 'configurar',
+            'exams.category' => 'configurar',
+            'emo.schedule' => 'programar',
+            'emo.complete' => 'registrar',
+            'emo.cancel' => 'programar',
+            'emo.reprogram' => 'programar',
+            'emo.regularize' => 'programar',
+            'scheduled' => 'ver_programados',
+        ] as $suffix => $action) {
+            $route = Route::getRoutes()->getByName('personal.habilitacion-minera.'.$suffix);
+            $this->assertNotNull($route, 'Falta ruta '.$suffix);
+            $middleware = $route->gatherMiddleware();
+            $this->assertContains('web.auth', $middleware);
+            $this->assertSame(['web.permission:habilitacion_minera,'.$action], array_values(array_filter($middleware, fn ($value) => str_starts_with($value, 'web.permission:'))));
+            $this->assertFalse(collect($middleware)->contains(fn ($value) => str_starts_with($value, 'mina.scope')));
+        }
+    }
+
+    private function createNamedAdminRole(string $name): string
+    {
+        $role = \App\Models\Rol::firstOrCreate(['nombre' => $name], ['id' => (string) Str::uuid()]);
+        $role->update(['estado' => 'ACTIVO', 'permisos' => PermissionCatalog::fullAccessMatrix()]);
+
+        return (string) $role->id;
+    }
+
+    private function keepOnlyActiveAdmin(string $userId): void
+    {
+        // Isolate this scenario without deleting existing test fixtures; the transaction rolls it back.
+        \App\Models\Usuario::where('id', '!=', $userId)
+            ->where(fn ($query) => $query->whereHas('rol', fn ($role) => $role->whereIn('nombre', ['ADMIN', 'SUPERADMIN']))
+                ->orWhereHas('rolesAdicionales', fn ($role) => $role->whereIn('nombre', ['ADMIN', 'SUPERADMIN'])))
+            ->update(['estado' => 'INACTIVO']);
+        $this->assertSame(1, app(AdminProtectionService::class)->activeAdminUserCount());
     }
 
     private function createPermissionRole(string $name, array $permissions): string

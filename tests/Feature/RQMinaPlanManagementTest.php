@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\RQMina;
+use App\Models\Rol;
 use App\Models\RQMinaActividadTransporte;
 use App\Models\RQMinaPlan;
 use App\Models\Usuario;
@@ -28,27 +29,24 @@ class RQMinaPlanManagementTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->assertSame('proserge_app_test', DB::connection()->getDatabaseName());
 
-        $this->adminRoleId = (string) Str::uuid();
+        $admin = Rol::firstOrCreate(['nombre' => 'ADMIN'], ['id' => (string) Str::uuid()]);
+        $admin->update(['estado' => 'ACTIVO', 'permisos' => []]);
+        $this->adminRoleId = (string) $admin->id;
         $this->plannerRoleId = (string) Str::uuid();
         $this->readOnlyRoleId = (string) Str::uuid();
 
         DB::table('roles')->insert([
             [
-                'id' => $this->adminRoleId,
-                'nombre' => 'ADMIN',
-                'permisos' => json_encode([]),
-                'estado' => 'ACTIVO',
-            ],
-            [
                 'id' => $this->plannerRoleId,
-                'nombre' => 'PLANNER',
+                'nombre' => 'PLANNER_RQ_PLAN_'.Str::random(8),
                 'permisos' => json_encode(['rq_mina.read', 'rq_mina.write']),
                 'estado' => 'ACTIVO',
             ],
             [
                 'id' => $this->readOnlyRoleId,
-                'nombre' => 'LECTOR_RQ',
+                'nombre' => 'LECTOR_RQ_'.Str::random(8),
                 'permisos' => json_encode(['rq_mina.read']),
                 'estado' => 'ACTIVO',
             ],
@@ -266,7 +264,7 @@ class RQMinaPlanManagementTest extends TestCase
         $planService = app(RQMinaPlanService::class);
         $rqService = app(RQMinaService::class);
         $plan = $planService->ensureDefaultPlan($rq, $usuario);
-        $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
+        $estructura = $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
 
         // RQ Mina reenvia el plan sin los datos que administra Logistica.
         $actualizado = $rqService->updatePlanOperativo($usuario, $rq->fresh(), [
@@ -311,8 +309,55 @@ class RQMinaPlanManagementTest extends TestCase
         $this->assertSame(12, (int) $transporte->capacidad_requerida);
 
         if (Schema::hasColumn('rq_mina_actividad_transportes', 'documentos')) {
-            $this->assertNotNull($transporte->documentos);
+            $documents = RQMinaActividadTransporte::findOrFail($transporte->id)->documentos;
+            $this->assertIsArray($documents);
+            $this->assertSame('logistica/transportes/'.$estructura['transporte_id'].'/archivo.pdf', $documents[0]['path']);
+            $this->assertSame('Documento de ensayo', $documents[0]['nombre']);
         }
+    }
+
+    public function test_guardar_plan_preserva_documentos_tras_repetir_guardado_sin_ids(): void
+    {
+        $this->assertTrue(Schema::hasColumn('rq_mina_actividad_transportes', 'documentos'));
+        $mine = $this->createMina();
+        $userId = $this->createUsuario($this->plannerRoleId);
+        $this->assignMinaScope($userId, $mine);
+        $user = Usuario::findOrFail($userId);
+        $rq = $this->createRQMina($mine, $userId, '2026-04-01', '2026-04-30');
+        $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq, $user);
+        $source = $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
+        $expected = RQMinaActividadTransporte::findOrFail($source['transporte_id'])->documentos;
+        $payload = [['nombre' => 'Grupo operativo', 'actividades' => [['sait' => 'SAIT-100']],
+            'transportes' => [['alcance' => 'SAIT-100', 'unidad_carga' => 'Grua 80T']]]];
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            app(RQMinaService::class)->updatePlanOperativo($user, $rq->fresh(), $payload, null, (string) $plan->id);
+            $transport = RQMinaActividadTransporte::where('rq_mina_plan_id', $plan->id)->firstOrFail();
+            $this->assertSame($expected, $transport->documentos);
+        }
+    }
+
+    public function test_guardar_plan_recupera_documentos_historicos_codificados_dos_veces(): void
+    {
+        $this->assertTrue(Schema::hasColumn('rq_mina_actividad_transportes', 'documentos'));
+        $mine = $this->createMina();
+        $userId = $this->createUsuario($this->plannerRoleId);
+        $this->assignMinaScope($userId, $mine);
+        $user = Usuario::findOrFail($userId);
+        $rq = $this->createRQMina($mine, $userId, '2026-04-01', '2026-04-30');
+        $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq, $user);
+        $source = $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
+        $expected = RQMinaActividadTransporte::findOrFail($source['transporte_id'])->documentos;
+        DB::table('rq_mina_actividad_transportes')->where('id', $source['transporte_id'])
+            ->update(['documentos' => json_encode(json_encode($expected))]);
+
+        app(RQMinaService::class)->updatePlanOperativo($user, $rq->fresh(), [
+            ['nombre' => 'Grupo operativo', 'actividades' => [['sait' => 'SAIT-100']],
+                'transportes' => [['alcance' => 'SAIT-100', 'unidad_carga' => 'Grua 80T']]],
+        ], null, (string) $plan->id);
+
+        $transport = RQMinaActividadTransporte::where('rq_mina_plan_id', $plan->id)->firstOrFail();
+        $this->assertSame($expected, $transport->documentos);
     }
 
     public function test_guardar_plan_con_ids_reutiliza_las_filas_y_conserva_el_historial(): void
@@ -671,7 +716,12 @@ class RQMinaPlanManagementTest extends TestCase
         ];
 
         if (Schema::hasColumn('rq_mina_actividad_transportes', 'documentos')) {
-            $transport['documentos'] = json_encode(['doc' => 'archivo.pdf']);
+            $transport['documentos'] = json_encode([[
+                'tipo' => 'adicional',
+                'nombre' => 'Documento de ensayo',
+                'path' => 'logistica/transportes/'.$transporteId.'/archivo.pdf',
+                'original_name' => 'archivo.pdf',
+            ]]);
         }
 
         DB::table('rq_mina_actividad_transportes')->insert($transport);

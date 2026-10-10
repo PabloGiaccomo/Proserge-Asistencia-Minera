@@ -8,6 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ExamenMinero extends Model
 {
+    public const CATEGORIA_CURSO = 'CURSO';
+
+    public const CATEGORIA_EMO = 'EMO';
+
+    public const CATEGORIA_OTRO = 'OTRO';
+
     protected $table = 'examenes_mineros';
 
     public $incrementing = false;
@@ -19,6 +25,7 @@ class ExamenMinero extends Model
         'nombre',
         'descripcion',
         'tipo',
+        'categoria_operativa',
         'requiere_lugar',
         'lugar',
         'empresa_paga',
@@ -70,6 +77,11 @@ class ExamenMinero extends Model
     {
         return $this->hasMany(ExamenMineroPrecio::class, 'examen_id')
             ->orderByDesc('fecha_inicio');
+    }
+
+    public function categoriaHistorial(): HasMany
+    {
+        return $this->hasMany(ExamenMineroCategoriaHistorial::class, 'examen_id')->orderBy('fecha_cambio');
     }
 
     public function creadoPor(): BelongsTo

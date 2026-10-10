@@ -41,6 +41,9 @@
         @if(\App\Support\Rbac\PermissionMatrix::userCanDirect($user, 'evaluaciones', 'administrar') && app(\App\Modules\Evaluaciones\Services\EvaluacionesHistoricalImportService::class)->isOpen())
             <a class="btn btn-outline" href="{{ route('evaluaciones.historico.importar') }}">Cargar datos históricos</a>
         @endif
+        @foreach(($historicalReports ?? collect()) as $report)
+            <a class="btn btn-outline" href="{{ route('evaluaciones.historico.reporte', $report->id) }}">Descargar reporte{{ $report->confirmed_at ? ' · '.$report->confirmed_at->format('d/m/Y') : '' }}</a>
+        @endforeach
     </header>
 
     @if($availableTypes->count() > 1)
@@ -253,26 +256,32 @@
             @include('evaluaciones.partials.daily-history', ['items' => $dailyHistory])
         </section>
     @elseif($activeType === 'supervisores')
-        @if($canEvaluate['supervisores'])
+        @php($regularizingSupervisor = $regularizingSupervisor ?? null)
+        @if($canEvaluate['supervisores'] || $regularizingSupervisor)
             <section class="eval-section">
                 <div class="eval-section-heading">
-                    <div><h2>Nueva evaluación de supervisor</h2><p>Evaluación por unidad minera, sin requerir asignación a una parada.</p></div>
+                    <div><h2>{{ $regularizingSupervisor ? 'Regularizar evaluación histórica' : 'Nueva evaluación de supervisor' }}</h2><p>{{ $regularizingSupervisor ? 'Completa los criterios faltantes. La nota y las respuestas originales se conservan; el resultado regularizado usa la fórmula actual.' : 'Evaluación por unidad minera, sin requerir asignación a una parada.' }}</p></div>
                 </div>
-                <form method="POST" action="{{ route('evaluaciones.supervisores.store') }}" class="eval-form">
+                <form method="POST" action="{{ $regularizingSupervisor ? route('evaluaciones.supervisores.regularizar', $regularizingSupervisor->id) : route('evaluaciones.supervisores.store') }}" class="eval-form" data-supervisor-submit>
                     @csrf
+                    @if($regularizingSupervisor)
+                        <div class="eval-alert" role="status"><strong>{{ $regularizingSupervisor->evaluado?->nombre_completo }}</strong> · {{ $regularizingSupervisor->fecha?->format('d/m/Y') }}<br>Faltan: {{ implode(', ', $regularizingSupervisor->missingCriteria()) }}. Fuera de indicadores hasta regularizar.</div>
+                    @else
                     <div class="eval-form-grid eval-form-grid-3">
-                        <div class="eval-field"><label>Unidad minera</label><select name="mina_id" required data-mine-select><option value="">Seleccionar mina</option>@foreach($mines as $mine)<option value="{{ $mine->id }}">{{ $mine->nombre }}</option>@endforeach</select></div>
+                        <div class="eval-field"><label>Unidad minera</label><select name="mina_id" required data-mine-select><option value="">Seleccionar mina</option>@foreach($mines as $mine)<option value="{{ $mine->id }}" @selected(old('mina_id') === $mine->id)>{{ $mine->nombre }}</option>@endforeach</select>@error('mina_id')<small class="eval-field-error">{{ $message }}</small>@enderror</div>
                         @include('evaluaciones.partials.person-search', ['name' => 'evaluado_id', 'label' => 'Supervisor evaluado', 'evaluationType' => 'supervisores'])
-                        <div class="eval-field"><label>Fecha</label><input type="date" name="fecha" value="{{ now()->toDateString() }}" required></div>
+                        <div class="eval-field"><label>Fecha</label><input type="date" name="fecha" value="{{ old('fecha', now()->toDateString()) }}" required></div>
                     </div>
+                    @endif
 
                     <div class="eval-template">
                         @foreach($supervisorTemplate as $section => $items)
-                            <details {{ $loop->first ? 'open' : '' }}>
+                            <details {{ $loop->first || collect(array_keys($items))->contains(fn ($key) => $errors->has('respuestas.'.$key)) ? 'open' : '' }}>
                                 <summary>Bloque {{ $section }}: {{ $supervisorSectionTitles[$section] }} <span>{{ count($items) }} criterios</span></summary>
                                 <div class="eval-template-items">
                                     @foreach($items as $key => $label)
-                                        <label class="eval-template-item"><span><b>{{ $key }}</b> {{ $label }}</span><select name="respuestas[{{ $key }}]" required><option value="">-</option>@foreach(range(1, 5) as $score)<option value="{{ $score }}">{{ $score }}</option>@endforeach</select></label>
+                                        <label class="eval-template-item"><span><b>{{ $key }}</b> {{ $label }}</span><select name="respuestas[{{ $key }}]" required @if($errors->has('respuestas.'.$key)) aria-invalid="true" @endif><option value="">-</option>@foreach(range(1, 5) as $score)<option value="{{ $score }}" @selected((string) old('respuestas.'.$key, $regularizingSupervisor?->respuestas[$key] ?? '') === (string) $score)>{{ $score }}</option>@endforeach</select></label>
+                                        @error('respuestas.'.$key)<small class="eval-field-error">{{ $message }}</small>@enderror
                                     @endforeach
                                 </div>
                             </details>
@@ -280,17 +289,32 @@
                     </div>
 
                     <div class="eval-form-grid">
-                        <div class="eval-field"><label>Aspectos positivos</label><textarea name="aspectos_positivos" rows="3"></textarea></div>
-                        <div class="eval-field"><label>Capacitaciones recomendadas</label><textarea name="capacitaciones_recomendadas" rows="3"></textarea></div>
+                        <div class="eval-field"><label>Aspectos positivos</label><textarea name="aspectos_positivos" rows="3">{{ old('aspectos_positivos', $regularizingSupervisor?->aspectos_positivos) }}</textarea></div>
+                        <div class="eval-field"><label>Capacitaciones recomendadas</label><textarea name="capacitaciones_recomendadas" rows="3">{{ old('capacitaciones_recomendadas', $regularizingSupervisor?->capacitaciones_recomendadas) }}</textarea></div>
                     </div>
-                    <div class="eval-field"><label>Comentarios finales</label><textarea name="comentarios_finales" rows="3"></textarea></div>
-                    <div class="eval-actions"><button class="btn btn-primary" type="submit">Guardar evaluación</button></div>
+                    <div class="eval-field"><label>Comentarios finales</label><textarea name="comentarios_finales" rows="3">{{ old('comentarios_finales', $regularizingSupervisor?->comentarios_finales) }}</textarea></div>
+                    <div class="eval-actions">@if($regularizingSupervisor)<a class="btn btn-outline" href="{{ route('evaluaciones.index', ['tipo' => 'supervisores']) }}">Cancelar</a>@endif<button class="btn btn-primary" type="submit">{{ $regularizingSupervisor ? 'Guardar regularización' : 'Guardar evaluación' }}</button></div>
                 </form>
+                @if($regularizingSupervisor)
+                    <form method="POST" action="{{ route('evaluaciones.supervisores.seguimiento', $regularizingSupervisor->id) }}" class="eval-form" data-supervisor-submit>
+                        @csrf
+                        <div class="eval-field"><label for="regularization-reason">Motivo por el que sigue pendiente</label><textarea id="regularization-reason" name="motivo" rows="2" maxlength="3000" required>{{ old('motivo') }}</textarea>@error('motivo')<small class="eval-field-error">{{ $message }}</small>@enderror</div>
+                        <div class="eval-actions"><button class="btn btn-outline" type="submit">Guardar seguimiento</button></div>
+                    </form>
+                @endif
             </section>
         @endif
 
         <section class="eval-section">
-            <div class="eval-section-heading"><div><h2>Evaluaciones de supervisores</h2><p>Registros disponibles dentro de tu alcance.</p></div></div>
+            <div class="eval-section-heading"><div><h2>Evaluaciones de supervisores</h2><p>Historial, pendientes de regularización y motivos de seguimiento.</p></div></div>
+            <form method="GET" action="{{ route('evaluaciones.index') }}" class="eval-form">
+                <input type="hidden" name="tipo" value="supervisores">
+                <div class="eval-form-grid eval-form-grid-3">
+                    <div class="eval-field"><label for="supervisor-history-search">DNI o nombre</label><input id="supervisor-history-search" name="buscar_supervisor" value="{{ $supervisorHistoryFilters['buscar_supervisor'] ?? '' }}"></div>
+                    <div class="eval-field"><label for="supervisor-history-status">Estado</label><select id="supervisor-history-status" name="estado_supervisor"><option value="">Todas</option><option value="pendientes" @selected(($supervisorHistoryFilters['estado_supervisor'] ?? '') === 'pendientes')>Pendientes de regularización</option><option value="regularizadas" @selected(($supervisorHistoryFilters['estado_supervisor'] ?? '') === 'regularizadas')>Regularizadas</option></select></div>
+                    <div class="eval-actions"><button class="btn btn-outline" type="submit">Filtrar</button><a class="btn btn-outline" href="{{ route('evaluaciones.index', ['tipo' => 'supervisores']) }}">Limpiar</a></div>
+                </div>
+            </form>
             @include('evaluaciones.partials.supervisor-history', ['items' => $supervisorHistory])
         </section>
     @elseif($activeType === 'dashboard')
@@ -573,6 +597,10 @@ document.querySelectorAll('[data-resident-evaluation]').forEach((evaluation) => 
     };
 
     evaluation.querySelectorAll('[data-resident-multi]').forEach((group) => {
+        const boxes = [...group.querySelectorAll('input[type="checkbox"]')];
+        const requireChoice = () => { if (boxes[0]) boxes[0].required = !boxes.some(input => input.checked); };
+        group.addEventListener('change', requireChoice);
+        requireChoice();
         group.addEventListener('change', (event) => {
             const changed = event.target.closest('input[type="checkbox"]');
             if (!changed || !changed.checked) return;
@@ -583,6 +611,7 @@ document.querySelectorAll('[data-resident-evaluation]').forEach((evaluation) => 
             } else if (none) {
                 none.checked = false;
             }
+            requireChoice();
             calculate();
         });
     });
@@ -593,6 +622,17 @@ document.querySelectorAll('[data-resident-evaluation]').forEach((evaluation) => 
         const submit = form.querySelector('button[type="submit"]');
         submit.disabled = true;
         submit.textContent = 'Guardando...';
+    });
+});
+document.querySelectorAll('.eval-template select[required]').forEach(select => {
+    select.addEventListener('invalid', () => { select.closest('details').open = true; });
+});
+document.querySelectorAll('[data-supervisor-submit]').forEach(form => {
+    form.addEventListener('submit', event => {
+        if (event.defaultPrevented) return;
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        button.textContent = 'Guardando...';
     });
 });
 </script>

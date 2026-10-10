@@ -1,7 +1,9 @@
 @php
     $isEdit = $mode === 'edit';
     $actionUrl = $isEdit ? route('seguridad.roles.update', $rol->id) : route('seguridad.roles.store');
-    $permissions = old('permisos', $rol->permisos ?? []);
+    $permissions = old('permisos_present')
+        ? array_replace_recursive(\App\Support\Rbac\PermissionCatalog::emptyMatrix(), old('permisos', []))
+        : ($rol->permisos ?? []);
     $moduleActions = $moduleActions ?? [];
     $notificationModules = $notificationModules ?? [];
     $notificationActions = $notificationActions ?? [];
@@ -18,7 +20,6 @@
     $currentRoleEstado = $canChangeRoleStatus
         ? strtoupper((string) old('estado', $storedRoleEstado))
         : $storedRoleEstado;
-    $logisticsTabActions = array_values(\App\Support\Rbac\PermissionCatalog::logisticsTabActions());
 @endphp
 
 @if($errors->any())
@@ -61,7 +62,7 @@
         <div class="card">
             <div class="card-header"><span class="card-title">Ayuda</span></div>
             <div class="card-body">
-                <p style="color:var(--color-text-secondary); margin:0;">Marca en cada pantalla las acciones que puede realizar el rol. Esta base alimenta sidebar, vistas y acciones administrativas.</p>
+                <p style="color:var(--color-text-secondary); margin:0;">Cada check concede solo ese permiso. Los cambios se aplican en la siguiente petición, sin cerrar sesión. Si otro rol activo concede el permiso, el usuario lo conserva. ADMIN y SUPERADMIN mantienen acceso total.</p>
             </div>
         </div>
     </div>
@@ -108,9 +109,6 @@
                                 <div class="permission-action-caption">Acciones</div>
                                 @forelse($extraActions as $action)
                                     <label class="permission-action-toggle">
-                                        @if($module === 'logistica' && in_array($action, $logisticsTabActions, true))
-                                            <input type="hidden" name="permisos[{{ $module }}][{{ $action }}]" value="0">
-                                        @endif
                                         <input type="checkbox" name="permisos[{{ $module }}][{{ $action }}]" value="1" data-action-toggle {{ old("permisos.$module.$action", $permissions[$module][$action] ?? false) ? 'checked' : '' }}>
                                         <span>{{ \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</span>
                                     </label>
@@ -236,52 +234,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return Array.from(card.querySelectorAll('input[type="checkbox"]'));
     };
 
-    const actionInputs = function (card) {
-        return Array.from(card.querySelectorAll('[data-action-toggle]'));
-    };
-
-    const syncCard = function (card) {
-        const viewInput = card.querySelector('[data-view-toggle]');
-        const actions = actionInputs(card);
-
-        if (actions.some(function (input) { return input.checked; }) && viewInput) {
-            viewInput.checked = true;
-        }
-
-        const enabled = !viewInput || viewInput.checked;
-        actions.forEach(function (input) {
-            input.disabled = !enabled;
-            const label = input.closest('.permission-action-toggle');
-            if (label) {
-                label.classList.toggle('is-disabled', !enabled);
-            }
-            if (!enabled) {
-                input.checked = false;
-            }
-        });
-    };
-
-    cards.forEach(function (card) {
-        const viewInput = card.querySelector('[data-view-toggle]');
-
-        if (viewInput) {
-            viewInput.addEventListener('change', function () {
-                syncCard(card);
-            });
-        }
-
-        actionInputs(card).forEach(function (input) {
-            input.addEventListener('change', function () {
-                if (input.checked && viewInput) {
-                    viewInput.checked = true;
-                }
-                syncCard(card);
-            });
-        });
-
-        syncCard(card);
-    });
-
     const visibleCards = function () {
         return cards.filter(function (card) {
             return !card.classList.contains('is-hidden');
@@ -314,7 +266,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     input.disabled = false;
                     input.checked = true;
                 });
-                syncCard(card);
             });
         });
     }
@@ -325,7 +276,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 checkboxInputs(card).forEach(function (input) {
                     input.checked = false;
                 });
-                syncCard(card);
             });
         });
     }

@@ -19,9 +19,6 @@ class EnsureWebPermission
 
         if ($module === 'notificaciones') {
             $notificationAccess = $this->notificationAccessFromUserSetting();
-            if ($notificationAccess === true) {
-                return $next($request);
-            }
             if ($notificationAccess === false) {
                 return $this->deny($request, $permissions, $module, $action);
             }
@@ -35,9 +32,6 @@ class EnsureWebPermission
 
         if ($module === 'notificaciones') {
             $notificationAccess = $this->notificationAccessFromUserSetting();
-            if ($notificationAccess === true) {
-                return $next($request);
-            }
             if ($notificationAccess === false) {
                 return $this->deny($request, $permissions, $module, $action);
             }
@@ -82,6 +76,12 @@ class EnsureWebPermission
         foreach ($this->routeActions($action) as $routeAction) {
             if (PermissionMatrix::allowsDirect($permissions, $module, $routeAction)) {
                 return true;
+            }
+
+            // Explicit unchecked actions cannot be resurrected by legacy aliases.
+            $matrix = $permissions['matrix'] ?? $permissions;
+            if (isset($matrix[$module]) && is_array($matrix[$module]) && array_key_exists($routeAction, $matrix[$module])) {
+                continue;
             }
 
             foreach ($this->routeFallbackPermissions($module, $routeAction) as [$fallbackModule, $fallbackAction]) {
@@ -165,6 +165,12 @@ class EnsureWebPermission
 
     private function notificationAccessFromUserSetting(): ?bool
     {
+        $usuario = request()->user();
+        if ($usuario instanceof Usuario
+            && array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'SUPERADMIN']) !== []) {
+            return null;
+        }
+
         $userId = (string) (session('user_id') ?: session('user.id') ?: '');
         if ($userId === '' || !Schema::hasTable('notification_user_settings')) {
             return null;
@@ -197,7 +203,7 @@ class EnsureWebPermission
         }
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'personal:id,nombre_completo'])
+            ->with(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos', 'personal:id,nombre_completo'])
             ->find($userId);
 
         if (!$usuario) {

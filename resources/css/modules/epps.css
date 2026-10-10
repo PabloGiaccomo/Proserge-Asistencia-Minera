@@ -993,6 +993,43 @@
     padding: 20px 24px 24px;
 }
 
+.epp-delivery-editor {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.epp-batch-summary h3 {
+    margin: 0 0 8px;
+}
+
+.epp-batch-summary p {
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 4px 0 12px;
+    overflow-wrap: anywhere;
+}
+
+.epp-batch-item {
+    align-items: start;
+    border: 1px solid #dce5ef;
+    border-radius: 12px;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 12px;
+}
+
+.epp-batch-item > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.epp-batch-item > button {
+    flex-shrink: 0;
+}
+
 .epp-delivery-field {
     color: #0f2544;
     display: grid;
@@ -1042,7 +1079,7 @@
 
 .epp-delivery-modal-form.is-change-replacement .epp-mini-kardex {
     grid-column: 2;
-    grid-row: 3 / span 4;
+    grid-row: 3;
     min-height: 0;
 }
 
@@ -1079,8 +1116,8 @@
 
 .epp-delivery-modal-form .epp-mini-kardex {
     grid-column: 2;
-    grid-row: 2 / span 3;
-    min-height: 100%;
+    grid-row: 2;
+    min-height: 0;
 }
 
 .epp-delivery-modal-form .epp-form-submit {

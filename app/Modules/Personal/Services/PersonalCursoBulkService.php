@@ -4,6 +4,11 @@ namespace App\Modules\Personal\Services;
 
 use App\Models\{Personal, ExamenMinero, Mina, PersonalCursoRegistro, PersonalMinaExamenIntento, Usuario};
 use App\Modules\Personal\Support\CursoResultado;
+use App\Modules\Personal\Support\CompleteEmoData;
+use App\Modules\Personal\Support\EmoOrigin;
+use App\Modules\Personal\Support\EmoOutcome;
+use App\Modules\Personal\Support\ScheduleEmoData;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\{DB, Schema};
 use Illuminate\Support\Str;
@@ -16,7 +21,8 @@ class PersonalCursoBulkService
         foreach ($rows as &$row) {
             $exam = $exams->get($row['examen_id']);
             if (!$row['issues'] && $exam) {
-                $approved = in_array($row['result'], ['APTO', 'APROBADO', 'APTO CON RESTRICCION'], true);
+                $medical = EmoOutcome::fromLegacyText($row['result'] ?? '');
+                $approved = ($medical && $medical['outcome']->genericResult() === 'APROBADO') || ($row['result'] ?? '') === 'APROBADO';
                 if ($row['type'] === 'Resultado' && $approved && $exam->requiere_nota
                     && (!is_numeric($row['score']) || ($exam->nota_minima !== null && (float) $row['score'] < (float) $exam->nota_minima))) {
                     $this->issue($row, 'La nota falta o es menor al minimo del catalogo para un resultado aprobatorio.');
@@ -31,6 +37,8 @@ class PersonalCursoBulkService
                     'permite_reintento','max_intentos','precio','moneda','precio_desde']);
             }
             $row['disposition'] = $row['issues'] ? 'issues' : (
+                ($row['appointment_action'] ?? null) === 'Sin cambios'
+                ||
                 str_contains($row['action'], 'no duplicar') || str_contains($row['action'], 'omitir duplicado')
                 || str_contains($row['action'], 'no crear otro intento') ? 'unchanged' : 'changes');
         }
@@ -52,6 +60,14 @@ class PersonalCursoBulkService
             $group = collect($indexes)->map(fn ($index) => $rows[$index]);
             $exam = $exams->get($group->first()['examen_id']);
             if (!$exam) continue;
+            if (($group->first()['operational_category'] ?? null) === ExamenMinero::CATEGORIA_EMO) {
+                foreach ($indexes as $index) {
+                    $rows[$index]['attempts_used'] = 0;
+                    $rows[$index]['attempts_limit'] = max(1, (int) $exam->max_intentos);
+                    $rows[$index]['attempts_exceeded'] = false;
+                }
+                continue;
+            }
             $events = $history->get($key, collect());
             $newRows = $group->where('disposition', 'changes')->filter(fn ($r) => !$r['existing_attempt_ids']);
             $dates = $events->map(fn ($e) => $e['scheduled'] ?: $e['done'])->filter()->unique();
@@ -96,7 +112,58 @@ class PersonalCursoBulkService
             $summary = ['creados'=>0,'actualizados'=>0,'omitidos'=>0,'errores'=>0,
                 'minas_actualizadas'=>0,'examenes_generados'=>0];
             $mineService = app(PersonalMinaHabilitacionService::class);
-            foreach ($rows as $row) {
+            $emoRows = collect($rows)->where('operational_category', ExamenMinero::CATEGORIA_EMO)
+                ->sortBy(fn (array $row): int => $row['type'] === 'Programacion' ? 0 : 1);
+            foreach ($emoRows as $row) {
+                if ($row['disposition'] !== 'changes') {
+                    $summary['omitidos']++;
+                    continue;
+                }
+                $workerExam = \App\Models\PersonalMinaExamen::query()
+                    ->where('examen_id', $row['examen_id'])
+                    ->whereHas('asignacion', fn ($query) => $query
+                        ->where('personal_id', $row['personal_id'])
+                        ->where('mina_id', $row['mina_id'])
+                        ->where('activo', true))
+                    ->first();
+                if (!$workerExam) {
+                    throw ValidationException::withMessages(['archivo' => 'La mina o el EMO del trabajador cambio desde la revision. Revise nuevamente el archivo.']);
+                }
+                $appointments = app(EmoAppointmentService::class);
+                if ($row['type'] === 'Programacion') {
+                    $appointments->schedule($workerExam, new ScheduleEmoData(
+                        CarbonImmutable::parse($row['scheduled_date'], config('app.display_timezone', 'America/Lima')),
+                        $row['clinic_id'], $row['observation'] ?: null, EmoOrigin::CARGA_MASIVA,
+                    ), $user);
+                    $summary['creados']++;
+                    continue;
+                }
+                $appointment = \App\Models\PersonalEmoCita::query()
+                    ->where('personal_id', $row['personal_id'])
+                    ->whereDate('fecha_programacion', $row['scheduled_date'])
+                    ->first();
+                if (!$appointment || $appointment->clinica_id !== $row['clinic_id']) {
+                    throw ValidationException::withMessages(['archivo' => 'La cita EMO cambio desde la revision. Revise nuevamente el archivo.']);
+                }
+                $score = $row['score'] === '' || $row['score'] === null ? null : (string) $row['score'];
+                $expiration = $row['expiry']
+                    ? CarbonImmutable::parse($row['expiry'], config('app.display_timezone', 'America/Lima'))
+                    : null;
+                $appointments->complete($appointment, new CompleteEmoData(
+                    CarbonImmutable::parse($row['performed_date'], config('app.display_timezone', 'America/Lima')),
+                    EmoOutcome::fromInput($row['result']), detail: $row['observation'] ?: null,
+                    score: $score, manualExpiration: $expiration,
+                    origin: EmoOrigin::CARGA_MASIVA,
+                ), $user);
+                $summary['actualizados']++;
+            }
+
+            $courseRows = collect($rows)->where('operational_category', '!=', ExamenMinero::CATEGORIA_EMO)->values();
+            \App\Models\PersonalMina::query()
+                ->whereIn('personal_id', $courseRows->pluck('personal_id')->filter()->unique())
+                ->whereIn('mina_id', $courseRows->pluck('mina_id')->filter()->unique())
+                ->orderBy('id')->lockForUpdate()->get();
+            foreach ($courseRows as $row) {
                 if ($row['disposition'] !== 'changes') { $summary['omitidos']++; continue; }
                 if (($row['mine_sync_only'] ?? false) === true) {
                     foreach (array_unique($row['sync_global_ids'] ?? []) as $recordId) {
@@ -188,15 +255,15 @@ class PersonalCursoBulkService
                 ->filter(fn ($id) => $records->has($id))
                 ->unique()
                 ->values();
+            if ($globalIds->contains(fn ($recordId) => blank($records->get($recordId)->mina_id))) {
+                $this->issue($row, 'El curso historico no tiene mina de origen. Revise su trazabilidad antes de aplicarlo.');
+                $row['disposition'] = 'issues';
+                $globalIds = $globalIds->filter(fn ($recordId) => filled($records->get($recordId)->mina_id))->values();
+            }
             $pendingAssignments = collect();
             foreach ($globalIds as $recordId) {
                 $record = $records->get($recordId);
-                $targets = $record->mina_id
-                    ? $targetsByPair->get($this->pairKey($record->personal_id, $record->examen_id, $record->mina_id), collect())
-                    : $targetsByPair
-                        ->filter(fn ($targets, $key) => str_starts_with($key, $record->personal_id.'|'.$record->examen_id.'|'))
-                        ->flatten()
-                        ->unique();
+                $targets = $targetsByPair->get($this->pairKey($record->personal_id, $record->examen_id, $record->mina_id), collect());
                 $pendingAssignments = $pendingAssignments->merge(
                     $targets->diff($syncedByRecord->get($recordId, collect()))
                 );

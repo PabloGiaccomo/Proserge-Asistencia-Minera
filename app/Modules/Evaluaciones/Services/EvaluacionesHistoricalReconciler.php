@@ -14,17 +14,51 @@ class EvaluacionesHistoricalReconciler
     {
         $map = $read['personal_map'] ?? [];
         $rows = $read['rows'] ?? [];
+        $references = [];
+        foreach ($rows as $row) {
+            foreach (['dni_ref', 'evaluator_ref'] as $field) {
+                $raw = trim((string) ($row[$field] ?? ''));
+                $references[] = $raw;
+                if (isset($map[$raw])) {
+                    $references[] = trim((string) $map[$raw]);
+                }
+            }
+        }
+        $uuidReferences = array_values(array_unique(array_filter($references,
+            fn ($value) => preg_match('/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i', $value))));
+        $idDni = [];
+        foreach (array_chunk($uuidReferences, 500) as $chunk) {
+            foreach (DB::table('personal')->whereIn('id', $chunk)->get(['id', 'dni']) as $person) {
+                $idDni[strtolower((string) $person->id)] = $this->normalizeDni($person->dni);
+            }
+        }
         $dniByRow = [];
         $evaluatorDniByRow = [];
         foreach ($rows as $index => $row) {
-            $dniByRow[$index] = $this->dni($row['dni_ref'] ?? null, $map);
-            $evaluatorDniByRow[$index] = $this->dni($row['evaluator_ref'] ?? null, $map);
+            $dniByRow[$index] = $this->dni($row['dni_ref'] ?? null, $map, $idDni);
+            $evaluatorDniByRow[$index] = $this->dni($row['evaluator_ref'] ?? null, $map, $idDni);
         }
 
         $people = [];
         foreach (array_chunk(array_values(array_unique(array_filter([...$dniByRow, ...$evaluatorDniByRow]))), 500) as $chunk) {
             foreach (DB::table('personal')->whereIn('dni', $chunk)->get(['id', 'dni', 'nombre_completo']) as $person) {
                 $people[$person->dni][] = $person;
+            }
+        }
+
+        $names = [];
+        foreach ($rows as $index => $row) {
+            if (count($people[$dniByRow[$index] ?? ''] ?? []) !== 1 && ! empty($row['name'])) {
+                $names[] = mb_strtoupper(trim((string) $row['name']), 'UTF-8');
+            }
+        }
+        $suggestions = [];
+        foreach (array_chunk(array_values(array_unique($names)), 500) as $chunk) {
+            foreach (DB::table('personal')->whereIn('nombre_completo', $chunk)->get(['id', 'dni', 'nombre_completo']) as $person) {
+                $key = PersonalNormalizer::normalizeKey((string) $person->nombre_completo);
+                if (count($suggestions[$key] ?? []) < 5) {
+                    $suggestions[$key][] = (array) $person;
+                }
             }
         }
 
@@ -66,6 +100,9 @@ class EvaluacionesHistoricalReconciler
                 ])),
             ];
             if ($reason !== null) {
+                if (count($person) !== 1 && ! empty($row['name'])) {
+                    $entry['identity_suggestions'] = $suggestions[PersonalNormalizer::normalizeKey((string) $row['name'])] ?? [];
+                }
                 $blocked[] = [...$entry, 'reason' => $reason];
 
                 continue;
@@ -214,15 +251,45 @@ class EvaluacionesHistoricalReconciler
         return ['proposed' => $newRows, 'unchanged' => $unchanged, 'blocked' => $blocked, 'warnings' => $warnings];
     }
 
-    private function dni(mixed $value, array $map): ?string
+    private function dni(mixed $value, array $map, array $idDni): ?string
     {
         $raw = trim((string) $value);
-        $raw = array_key_exists($raw, $map) ? trim((string) $map[$raw]) : $raw;
-        if (! preg_match('/^\d{8}(?:\.0+)?$/', $raw)) {
-            return null;
+        $direct = $idDni[strtolower($raw)] ?? null;
+        if (array_key_exists($raw, $map)) {
+            $mapped = trim((string) $map[$raw]);
+            $dni = $idDni[strtolower($mapped)] ?? $this->normalizeDni($mapped);
+
+            // Una referencia contradictoria no debe asignarse silenciosamente.
+            return $direct !== null && $direct !== $dni ? null : $dni;
         }
 
-        return PersonalNormalizer::dni($raw);
+        return $direct ?? $this->normalizeDni($raw);
+    }
+
+    private function normalizeDni(mixed $value): ?string
+    {
+        $raw = trim((string) $value);
+        $raw = preg_replace('/^\x27/', '', $raw);
+        if (preg_match('/^(\d+)(?:\.(\d+))?[eE]\+?(\d+)$/', $raw, $parts)) {
+            $exponent = (int) $parts[3];
+            if ($exponent > 16) {
+                return null;
+            }
+            $digits = $parts[1].($parts[2] ?? '');
+            $position = strlen($parts[1]) + $exponent;
+            $whole = ltrim(substr(str_pad($digits, $position, '0'), 0, $position), '0');
+            if (strlen($whole) !== 8 || trim(substr($digits, $position), '0') !== '') {
+                return null;
+            }
+            $raw = $whole;
+        }
+        $raw = preg_replace('/^(\d{8})\.0+$/', '$1', $raw);
+        if (! preg_match('/^[\d\s.\-]+$/u', $raw)) {
+            return null;
+        }
+        $digits = preg_replace('/[\s.\-]+/u', '', $raw);
+
+        return preg_match('/^\d{8}$/', $digits) ? $digits : null;
     }
 
     private function date(mixed $value): ?string

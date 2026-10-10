@@ -69,6 +69,11 @@ Para cualquier carpeta de `app/Modules/<Modulo>`:
 | Formatos Excel | `PersonalContratoFormatoController`, `PersonalContratoFormatoService`, `resources/contract-templates` |
 | Importar/exportar | `ImportPersonalService`, `ExportPersonalService`, `PersonalFichaExportService`, `PersonalFichaMacroExtractor` |
 | PDF ficha | `PersonalFichaPdfService` |
+| Citas EMO y clinicas | `EmoAppointmentService`, `EmoClinicService`, `PersonalEmoCita`, `ClinicaEmo`, `PersonalEmoCitaHistorial` |
+| Categoria operativa de examen | `ExamOperationalCategoryService`, `ExamenMineroCategoriaHistorial` |
+| Control y filtros compartidos | `PersonalMinaScheduledControlService`, `ScheduledControlFilters`, `ScheduledControlRow`, `PersonalMinaScheduledControlRequest` |
+| Excel de asistencia | `PersonalMinaScheduledControlExcelService`, `PersonalMinaScheduledControlExportController`, `PersonalEmoExportAudit` |
+| Interfaz de citas y asistencia | `resources/views/personal/habilitacion-minera/_scheduled-control.blade.php`, `_emo-dialogs.blade.php`, `resources/js/modules/mining-scheduled-control.js`, `resources/css/modules/mining-scheduled-control.css` |
 | Correo de ficha | `OutlookMailService`, `PersonalFichaEmailTemplateService`, `storage/scripts/send-outlook-email.ps1` |
 | Catalogos de ficha | `PersonalFichaCatalog`, `PersonalNormalizer`, `PersonalExportConfig` |
 
@@ -219,6 +224,31 @@ confirma firma/inventario/saldos; `EppCorrectionService` compensa sin borrar.
 `EppKardexService`, `EppReceiptPdfService`, `EppQrCodeService` y
 `EppEvidenceController` producen evidencia autenticada y verificable.
 Comando: `epp:backfill-legacy-traceability [--dry-run]`.
-El dashboard usa `es_requerido_cobertura`, existencias conciliadas y saldos
-retornables positivos. Las rutas individuales de escritura devuelven 409;
-no usarlas como flujo productivo. Firmas en disco privado `local`.
+Correccion operativa 2026-10-09: `EppDeliverySignatureService` agrega firma al
+formulario habitual de Entregas y cambios, con catalogo de Identificacion de
+items, sin exigir almacen ni apertura. Registrar/cerrar preparan una revision;
+solo la firma confirma el movimiento. Origen `ENTREGAS_CAMBIOS` y almacen nulo
+distinguen este flujo de las operaciones de inventario existentes. Editar/borrar
+historial permanece protegido. Kardex y PDF incluyen evidencia privada.
+`EppCatalogReturnController` y `EppCatalogReturnService` permiten seleccionar
+saldos por trabajador en `/epps/devoluciones`, con cantidades parciales y una
+firma compartida. `epps/catalog-return.blade.php` reutiliza `epp-operation.js`;
+la confirmacion conserva la evidencia de origen y cierra solo saldos agotados.
+El dashboard conserva `es_requerido_cobertura` y saldos retornables positivos.
+
+`EppKardexExcelService` conserva la plantilla `resources/epp-templates/SGC-FOR-59.xlsx`
+y exporta codigos N/C/I/P/D y firma valida sobre fondo blanco.
+La firma se dibuja solo una vez en el recuadro inferior de la hoja, usando la
+ultima firma valida relacionada dentro del rango; las filas quedan sin firma.
+`EppKardexMovementService`, `EppKardexTemplateColumns` y `EppKardexRowGrouper`
+comparten movimientos, columnas y agrupacion entre pantalla y Excel: una unidad
+por columna/fila, agrupada por fecha, movimiento y lote, sin mezclar firmas.
+`EppPageController::kardexPersonal` valida `page` y `per_page` (20/50/100);
+`EppService::buildKardexMatrix` pagina las filas agrupadas en el servidor.
+El pie de la tabla Kardex en `logistica/index.blade.php` consulta cada pagina
+sin recarga completa, descarta respuestas obsoletas y permite reintentar.
+Se omite el bloque tecnico sin borrar operaciones, evidencia o constancias.
+`EppDeliveryDeclaration` centraliza el texto/version congelados antes de firmar
+nuevas entregas. `app/Shared/Support/SearchTerms.php` unifica busquedas por
+palabras sin orden en EPP y Logistica. `EppService::pageData` filtra la mina por
+paradas RQ solapadas, conservando el alcance autorizado del usuario.

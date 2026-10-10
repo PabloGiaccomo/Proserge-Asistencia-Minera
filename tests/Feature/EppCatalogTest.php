@@ -826,7 +826,8 @@ class EppCatalogTest extends TestCase
 
         $service = app(EppService::class);
 
-        $this->assertSame(2, $service->pageData(['mina_id' => $minaA->id])['entregas']->total());
+        // Habilitation alone does not establish EPP usage in a mine.
+        $this->assertSame(0, $service->pageData(['mina_id' => $minaA->id])['entregas']->total());
         $this->assertSame(1, $service->pageData(['epp_id' => $casco->id])['entregas']->total());
         $this->assertSame(1, $service->pageData(['tipo_movimiento' => 'CAMBIO'])['entregas']->total());
         $this->assertSame(1, $service->pageData(['tipo_movimiento' => 'RENOVACION'])['entregas']->total());

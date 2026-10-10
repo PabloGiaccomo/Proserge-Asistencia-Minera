@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Rol;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -19,20 +20,17 @@ class RQMinaApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->assertSame('proserge_app_test', DB::connection()->getDatabaseName());
 
-        $this->adminRoleId = (string) Str::uuid();
+        $admin = Rol::firstOrCreate(['nombre' => 'ADMIN'], ['id' => (string) Str::uuid()]);
+        $admin->update(['estado' => 'ACTIVO', 'permisos' => ['rq_mina.read', 'rq_mina.write']]);
+        $this->adminRoleId = (string) $admin->id;
         $this->userRoleId = (string) Str::uuid();
 
         DB::table('roles')->insert([
             [
-                'id' => $this->adminRoleId,
-                'nombre' => 'ADMIN',
-                'permisos' => json_encode(['rq_mina.read', 'rq_mina.write']),
-                'estado' => 'ACTIVO',
-            ],
-            [
                 'id' => $this->userRoleId,
-                'nombre' => 'PLANNER',
+                'nombre' => 'PLANNER_RQ_API_'.Str::random(8),
                 'permisos' => json_encode(['rq_mina.read', 'rq_mina.write']),
                 'estado' => 'ACTIVO',
             ],

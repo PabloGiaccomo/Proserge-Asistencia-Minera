@@ -160,11 +160,6 @@
     <header class="lgt-header">
         <h1 class="lgt-title">Logística</h1>
         <p class="lgt-subtitle">Control de EPP, herramientas, servicios y costos</p>
-        @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'gestionar_inventario') || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'ajustar_inventario'))
-            <a class="epp-btn epp-btn-light" href="{{ route('epps.inventory.index') }}">Inventario por almacén</a>
-        @endif
-        @allowed('epps', 'preparar_entrega')<a class="epp-btn epp-btn-primary" href="{{ route('epps.operations.create') }}">Entrega multiple con firma</a>@endallowed
-        @allowed('epps', 'preparar_devolucion')<a class="epp-btn" href="{{ route('epps.operations.returns.create') }}">Devolucion multiple con firma</a>@endallowed
     </header>
 
     <nav class="lgt-tabs" aria-label="Secciones de logística" data-logistics-tabs>
@@ -1312,15 +1307,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         function filterParadas() {
-            var searchVal = searchInput.value.toLowerCase().trim();
+            var searchTerms = searchInput.value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().split(/\s+/).filter(Boolean);
             var minaVal = minaFilter ? minaFilter.value : '';
             var cards = paradaList.querySelectorAll('.lgt-parada-card');
             var visibleCount = 0;
 
             cards.forEach(function(card) {
-                var searchText = card.getAttribute('data-parada-search') || '';
+                var searchText = (card.getAttribute('data-parada-search') || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
                 var cardMina = card.getAttribute('data-parada-mina') || '';
-                var matchesSearch = searchVal === '' || searchText.indexOf(searchVal) !== -1;
+                var matchesSearch = searchTerms.every(function(term) { return searchText.indexOf(term) !== -1; });
                 var matchesMina = minaVal === '' || cardMina.indexOf(minaVal) !== -1;
                 var visible = matchesSearch && matchesMina;
                 card.style.display = visible ? '' : 'none';
@@ -2661,14 +2656,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     {{-- Vista previa del kardex --}}
                     <div class="lgt-kardex-preview" id="kardexPreview" hidden>
-                        <div class="lgt-kardex-preview-header">
+                        <div class="lgt-kardex-preview-header" style="flex-wrap:wrap">
                             <div class="lgt-kardex-worker-info" id="kardexWorkerInfo">
                                 <strong id="kardexWorkerName">—</strong>
                                 <span id="kardexWorkerMeta">—</span>
                             </div>
+                            <div class="lgt-kardex-export-range" style="display:flex;flex:1 1 300px;min-width:0;flex-wrap:wrap;gap:12px;align-items:end;max-width:100%">
+                            <label>Desde<input type="date" id="kardexFechaDesde" value="{{ now('America/Lima')->startOfMonth()->subMonth()->toDateString() }}" required></label>
+                            <label>Hasta<input type="date" id="kardexFechaHasta" value="{{ now('America/Lima')->startOfMonth()->subDay()->toDateString() }}" required></label>
                             <button type="button" class="lgt-btn lgt-btn-primary" id="kardexDownloadBtn" disabled>
                                 ⬇️ Descargar Excel
                             </button>
+                            <small style="flex-basis:100%">Descarga SGC-FOR-59: incluye ambas fechas y agrupa los movimientos por dia.</small>
+                            </div>
                         </div>
 
                         <div class="lgt-kardex-preview-table-wrap">
@@ -2693,6 +2693,21 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </table>
                             </div>
                         </div>
+                        <div class="lgt-kardex-pagination" id="kardexPagination" hidden>
+                            <label for="kardexPerPage">Mostrar
+                                <select id="kardexPerPage" class="lgt-filter-input">
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                                registros
+                            </label>
+                            <span id="kardexPageSummary" role="status" aria-live="polite">Mostrando 0–0 de 0</span>
+                            <nav aria-label="Paginas del Kardex">
+                                <button type="button" class="lgt-btn lgt-btn-secondary" id="kardexPreviousPage" disabled>Anterior</button>
+                                <button type="button" class="lgt-btn lgt-btn-secondary" id="kardexNextPage" disabled>Siguiente</button>
+                            </nav>
+                        </div>
                     </div>
 
                     <div class="lgt-kardex-empty" id="kardexEmpty">
@@ -2715,6 +2730,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 var previewPlaceholder = document.getElementById('kardexPreviewPlaceholder');
                 var previewContent = document.getElementById('kardexPreviewContent');
                 var downloadBtn = document.getElementById('kardexDownloadBtn');
+                var pager = document.getElementById('kardexPagination');
+                var perPage = document.getElementById('kardexPerPage');
+                var pageSummary = document.getElementById('kardexPageSummary');
+                var previousPage = document.getElementById('kardexPreviousPage');
+                var nextPage = document.getElementById('kardexNextPage');
 
                 if (!searchInput || !resultsPanel) return;
 
@@ -2726,6 +2746,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 var activeItems = [];
                 var searchAbortController = null;
                 var searchRequestId = 0;
+                var detailRequestId = 0;
+                var detailAbortController = null;
+                var pagination = { current_page: 1, last_page: 1, total: 0, from: 0, to: 0 };
+                var requestedPage = 1;
 
                 function escapeHtml(value) {
                     return String(value || '').replace(/[&<>"']/g, function(c) {
@@ -2746,10 +2770,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 function resetSelection() {
+                    detailRequestId++;
+                    if (detailAbortController) detailAbortController.abort();
                     selectedWorker = null;
                     preview.hidden = true;
                     empty.hidden = false;
                     downloadBtn.disabled = true;
+                    pager.hidden = true;
                 }
 
                 function positionResults() {
@@ -2848,7 +2875,55 @@ document.addEventListener('DOMContentLoaded', function() {
                         '</tr>';
                     }).join('');
                 }
-                async function applyPerson(person) {
+                function renderPagination() {
+                    pager.hidden = false;
+                    pageSummary.textContent = 'Mostrando ' + pagination.from + '–' + pagination.to + ' de ' + pagination.total;
+                    previousPage.disabled = pagination.current_page <= 1;
+                    nextPage.disabled = pagination.current_page >= pagination.last_page;
+                    perPage.disabled = false;
+                    tableBody.removeAttribute('aria-busy');
+                }
+
+                async function loadPage(page) {
+                    if (!selectedWorker) return;
+                    var workerId = selectedWorker.id;
+                    var requestId = ++detailRequestId;
+                    requestedPage = page;
+                    if (detailAbortController) detailAbortController.abort();
+                    detailAbortController = window.AbortController ? new AbortController() : null;
+                    pager.hidden = false;
+                    previousPage.disabled = true;
+                    nextPage.disabled = true;
+                    perPage.disabled = true;
+                    pageSummary.textContent = 'Cargando registros...';
+                    tableBody.setAttribute('aria-busy', 'true');
+                    tableBody.innerHTML = '<tr><td colspan="100" class="lgt-kardex-loading">Cargando historial de EPP del trabajador...</td></tr>';
+                    try {
+                        var params = new URLSearchParams({ personal_id: workerId, page: String(page), per_page: perPage.value });
+                        var response = await fetch(detailUrl + '?' + params.toString(), {
+                            headers: { 'Accept': 'application/json' },
+                            credentials: 'same-origin',
+                            signal: detailAbortController ? detailAbortController.signal : undefined,
+                        });
+                        if (!response.ok) throw new Error('kardex');
+                        var payload = await response.json();
+                        if (requestId !== detailRequestId || !selectedWorker || selectedWorker.id !== workerId) return;
+                        var kardex = (payload.data && payload.data.kardex) || {};
+                        renderKardexMatrix(kardex);
+                        pagination = kardex.pagination || { current_page: 1, last_page: 1, total: 0, from: 0, to: 0 };
+                        perPage.value = String(pagination.per_page || perPage.value);
+                        renderPagination();
+                        downloadBtn.disabled = false;
+                    } catch (e) {
+                        if (requestId !== detailRequestId || (e && e.name === 'AbortError')) return;
+                        tableBody.removeAttribute('aria-busy');
+                        tableBody.innerHTML = '<tr><td colspan="100" class="lgt-kardex-loading">No se pudo cargar el Kardex. <button type="button" class="lgt-btn lgt-btn-secondary" data-kardex-retry>Reintentar</button></td></tr>';
+                        pageSummary.textContent = 'No se pudieron cargar los registros.';
+                        perPage.disabled = false;
+                    }
+                }
+
+                function applyPerson(person) {
                     selectedWorker = person;
                     searchInput.value = person.nombre || '';
                     closeResults();
@@ -2864,36 +2939,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     previewContent.hidden = false;
                     downloadBtn.disabled = true;
 
-                    tableHead.innerHTML = '<tr><th>Nro</th><th>Fecha</th><th>EPP usado</th><th>Movimiento</th></tr>';
-                    tableBody.innerHTML = '<tr><td colspan="4" class="lgt-kardex-loading">' +
-                        'Cargando historial de EPP del trabajador...' +
-                        '</td></tr>';
-
-                    try {
-                        var params = new URLSearchParams({ personal_id: person.id });
-                        var response = await fetch(detailUrl + '?' + params.toString(), {
-                            headers: { 'Accept': 'application/json' },
-                        });
-
-                        if (!response.ok) {
-                            throw new Error('kardex');
-                        }
-
-                        var payload = await response.json();
-                        renderKardexMatrix((payload.data && payload.data.kardex) || {});
-                        var operations = (payload.data && payload.data.operations) || [];
-                        if (operations.length) {
-                            tableBody.insertAdjacentHTML('beforeend', operations.map(function(operation) {
-                                return '<tr><td colspan="100"><strong>' + escapeHtml(operation.type) + '</strong> ' + escapeHtml(operation.id) + ' — ' + escapeHtml(operation.evidence_state) + ' — ' + escapeHtml(operation.signed_at || 'Sin firma') + ' — ' + escapeHtml(operation.verification_code || '') + (operation.original_operation_id ? ' — Origen: ' + escapeHtml(operation.original_operation_id) : '') + '</td></tr>';
-                            }).join(''));
-                        }
-                        downloadBtn.disabled = false;
-                    } catch (e) {
-                        tableBody.innerHTML = '<tr><td colspan="4" class="lgt-kardex-loading">No se pudo cargar el kardex del trabajador.</td></tr>';
-                    }
-
+                    perPage.value = '20';
+                    loadPage(1);
                     searchInput.dispatchEvent(new Event('change', { bubbles: true }));
                 }
+
+                perPage.addEventListener('change', function() { loadPage(1); });
+                previousPage.addEventListener('click', function() { loadPage(pagination.current_page - 1); });
+                nextPage.addEventListener('click', function() { loadPage(pagination.current_page + 1); });
+                tableBody.addEventListener('click', function(event) {
+                    if (event.target.closest('[data-kardex-retry]')) loadPage(requestedPage);
+                });
 
                 // Search input events
                 searchInput.addEventListener('input', function() {
@@ -2958,7 +3014,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
 
-                    var params = new URLSearchParams({ personal_id: selectedWorker.id });
+                    var from = document.getElementById('kardexFechaDesde');
+                    var to = document.getElementById('kardexFechaHasta');
+                    to.setCustomValidity(to.value && from.value && to.value < from.value ? 'La fecha Hasta no puede ser anterior a Desde.' : '');
+                    if (!from.reportValidity() || !to.reportValidity()) return;
+                    var params = new URLSearchParams({ personal_id: selectedWorker.id, fecha_desde: from.value, fecha_hasta: to.value });
                     window.location.href = downloadUrl + '?' + params.toString();
                 });
 
@@ -2983,6 +3043,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
             @push('styles')
             <style>
+            .lgt-kardex-pagination {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 16px;
+                border-top: 1px solid var(--color-slate-200);
+                font-size: var(--text-sm);
+            }
+            .lgt-kardex-pagination[hidden] { display: none; }
+            .lgt-kardex-pagination label, .lgt-kardex-pagination nav {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .lgt-kardex-pagination select,
+            .lgt-kardex-pagination button {
+                min-height: 40px;
+                padding: 6px 12px;
+                border: 1px solid var(--color-slate-200);
+                border-radius: 8px;
+                background: #fff;
+            }
+            .lgt-kardex-pagination select { width: auto; }
+            .lgt-kardex-pagination button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
             .lgt-kardex-search {
                 margin-bottom: 1.5rem;
             }

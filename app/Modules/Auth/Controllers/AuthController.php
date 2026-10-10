@@ -21,11 +21,11 @@ class AuthController extends Controller
         ]);
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos'])
+            ->with(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos'])
             ->where('email', $payload['email'])
             ->first();
 
-        if (!$usuario || !Hash::check($payload['password'], $usuario->password)) {
+        if (!$usuario || strtoupper((string) ($usuario->estado ?? 'ACTIVO')) !== 'ACTIVO' || !Hash::check($payload['password'], $usuario->password)) {
             return ApiResponse::error(
                 message: 'Credenciales invalidas',
                 code: 'AUTH_INVALID_CREDENTIALS',
@@ -70,7 +70,7 @@ class AuthController extends Controller
 
     private function buildUserPayload(Usuario $usuario): array
     {
-        $usuario->loadMissing(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'scopesMina:usuario_id,mina_id']);
+        $usuario->loadMissing(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos', 'scopesMina:usuario_id,mina_id']);
 
         $roles = collect([$usuario->rol])
             ->merge($usuario->rolesAdicionales)

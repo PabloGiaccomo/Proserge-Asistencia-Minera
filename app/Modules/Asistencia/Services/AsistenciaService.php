@@ -486,7 +486,7 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_NOT_FOUND', 'Asistencia no existe para este grupo');
         }
 
-        $result = $this->cierreService->reabrir($grupo, $encabezado);
+        $result = $this->cierreService->reabrir($usuario, $grupo, $encabezado);
 
         if (($result['ok'] ?? false) === false) {
             return $result;
@@ -941,9 +941,8 @@ class AsistenciaService
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
+            || PermissionMatrix::userCanDirect($usuario, 'asistencias', 'administrar');
     }
 
     public function listGruposForUser(Usuario $usuario, array $filters): array

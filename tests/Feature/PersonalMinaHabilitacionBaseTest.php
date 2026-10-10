@@ -211,10 +211,10 @@ class PersonalMinaHabilitacionBaseTest extends TestCase
         $this->assertSame($target->id, $result->first()->id);
     }
 
-    public function test_rutas_respetan_permiso_actualizar(): void
+    public function test_rutas_respetan_permiso_asignar_explicito(): void
     {
-        $denied = $this->createUser(['personal' => ['ver']]);
-        $allowed = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $denied = $this->createUser(['personal' => ['ver'], 'habilitacion_minera' => ['ver']]);
+        $allowed = $this->createUser(['habilitacion_minera' => ['ver', 'asignar']]);
         $mine = $this->createMine();
         $worker = $this->createPersonal('ACTIVO');
 

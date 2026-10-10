@@ -19,12 +19,16 @@ export function initEppOperations(root = document) {
             const destination = line.querySelector('[data-return-destination]');
             const refresh = () => {
                 line.querySelectorAll('[data-return-field]').forEach(field => { field.disabled = !selected.checked; });
-                const good = condition.value === 'BUENO';
-                line.querySelector('textarea').required = condition.value === 'OTRO';
-                [...destination.options].forEach(option => { option.disabled = good ? option.value !== 'DISPONIBLE' : option.value === 'DISPONIBLE'; });
-                if (destination.selectedOptions[0].disabled) destination.value = good ? 'DISPONIBLE' : 'CUARENTENA';
+                if (condition && destination) {
+                    const good = condition.value === 'BUENO';
+                    line.querySelector('textarea').required = condition.value === 'OTRO';
+                    [...destination.options].forEach(option => { option.disabled = good ? option.value !== 'DISPONIBLE' : option.value === 'DISPONIBLE'; });
+                    if (destination.selectedOptions[0].disabled) destination.value = good ? 'DISPONIBLE' : 'CUARENTENA';
+                }
                 const remaining = Number(line.dataset.balance) - (selected.checked ? Number(quantity.value || 0) : 0);
                 line.querySelector('[data-return-remaining]').textContent = `Saldo restante: ${remaining} unidades.`;
+                const error = page.querySelector('[data-return-error]');
+                if (error && page.querySelector('[data-return-select]:checked')) error.hidden = true;
                 lineChanged();
             };
             line.addEventListener('input', refresh);
@@ -42,7 +46,7 @@ export function initEppOperations(root = document) {
             if (form) {
                 form.inert = true;
                 const error = page.querySelector('[data-return-error]');
-                if (error) { error.textContent = 'Pulsa Ver saldos por devolver para actualizar el trabajador y almacen.'; error.hidden = false; }
+                if (error) { error.textContent = page.hasAttribute('data-catalog-return') ? 'Pulsa Ver saldos por devolver para actualizar el trabajador.' : 'Pulsa Ver saldos por devolver para actualizar el trabajador y almacen.'; error.hidden = false; }
             }
         });
         const catalog = JSON.parse(page.querySelector('[data-operation-catalog]')?.textContent || '[]');
@@ -131,8 +135,9 @@ export function initEppOperations(root = document) {
                     results.replaceChildren();
                     data.items.forEach(worker => {
                         const button = document.createElement('button'); button.type = 'button'; button.className = 'epp-operation-button';
-                        button.textContent = `${worker.nombre_completo} · ${worker.dni}`;
-                        button.addEventListener('click', () => { workerId.value = worker.id; search.value = worker.nombre_completo; page.querySelector('[data-worker-selected]').textContent = button.textContent; results.replaceChildren(); });
+                        const name = worker.nombre_completo ?? worker.nombre ?? worker.label;
+                        button.textContent = `${name} · ${worker.dni ?? worker.documento ?? ''}`;
+                        button.addEventListener('click', () => { workerId.value = worker.id; search.value = name; page.querySelector('[data-worker-selected]').textContent = button.textContent; results.replaceChildren(); });
                         results.append(button);
                     });
                     if (!data.items.length) results.textContent = 'No hay trabajadores disponibles para tu alcance.';

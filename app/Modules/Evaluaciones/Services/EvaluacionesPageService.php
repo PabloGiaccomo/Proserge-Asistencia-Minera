@@ -10,6 +10,7 @@ use App\Models\EvaluacionSupervisor;
 use App\Models\Mina;
 use App\Models\Usuario;
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -22,13 +23,15 @@ class EvaluacionesPageService
     ) {
     }
 
-    public function build(Usuario $usuario, string $requestedType, string $date): array
+    public function build(Usuario $usuario, string $requestedType, string $date, array $historyFilters = []): array
     {
         $access = collect(['desempeno', 'supervisores', 'residentes'])
             ->mapWithKeys(fn (string $type): array => [$type => $this->policy->canViewType($usuario, $type)])
             ->all();
         $availableTypes = collect($access)->filter()->keys()->values();
-        if ($availableTypes->isNotEmpty()) $availableTypes->push('dashboard');
+        if ($availableTypes->isNotEmpty() && PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'dashboards')) {
+            $availableTypes->push('dashboard');
+        }
         $activeType = $availableTypes->contains($requestedType) ? $requestedType : (string) $availableTypes->first();
 
         $mineIds = $this->accessibleMineIds($usuario);
@@ -56,7 +59,7 @@ class EvaluacionesPageService
                 : collect(),
             'dailyPending' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyPending($usuario, $date) : collect(),
             'dailyHistory' => $access['desempeno'] && $activeType !== 'dashboard' ? $this->dailyHistory($usuario, $mineIds) : collect(),
-            'supervisorHistory' => $access['supervisores'] && $activeType !== 'dashboard' ? $this->supervisorHistory($usuario, $mineIds) : collect(),
+            'supervisorHistory' => $access['supervisores'] && $activeType === 'supervisores' ? $this->supervisorHistory($usuario, $historyFilters) : collect(),
             'residentHistory' => $access['residentes'] && $activeType !== 'dashboard' ? $this->residentHistory($usuario) : collect(),
         ];
     }
@@ -144,14 +147,20 @@ class EvaluacionesPageService
             ->get();
     }
 
-    private function supervisorHistory(Usuario $usuario, Collection $mineIds): Collection
+    private function supervisorHistory(Usuario $usuario, array $filters)
     {
         return EvaluacionSupervisor::query()
-            ->with(['evaluador:id,nombre_completo', 'usuarioEvaluador:id,email', 'evaluado:id,nombre_completo,puesto', 'mina:id,nombre'])
+            ->with(['evaluador:id,nombre_completo', 'usuarioEvaluador:id,email', 'evaluado:id,nombre_completo,puesto,dni', 'mina:id,nombre'])
             ->when(!$this->policy->canViewOthers($usuario), fn ($query) => $this->policy->ownedBy($query, $usuario))
+            ->when(($filters['estado_supervisor'] ?? '') === 'pendientes', fn ($query) => $query->where('estado', EvaluacionSupervisor::PENDING_REGULARIZATION))
+            ->when(($filters['estado_supervisor'] ?? '') === 'regularizadas', fn ($query) => $query->where('calculo_version', 'REGULARIZADA'))
+            ->when(!empty($filters['buscar_supervisor']), fn ($query) => $query->whereHas('evaluado', fn ($person) => $person
+                ->where(fn ($search) => $search->where('dni', 'like', '%'.$filters['buscar_supervisor'].'%')
+                    ->orWhere('nombre_completo', 'like', '%'.$filters['buscar_supervisor'].'%'))))
             ->orderByDesc('fecha')
-            ->limit(20)
-            ->get();
+            ->orderBy('id')
+            ->paginate(20, ['*'], 'pagina_supervisor', $filters['pagina_supervisor'] ?? 1)
+            ->withQueryString();
     }
 
     private function residentHistory(Usuario $usuario): Collection

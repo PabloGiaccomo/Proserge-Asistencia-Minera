@@ -98,7 +98,6 @@ class AsistenciaPageController extends WebPageController
             'grupo_trabajo_detalle_ids' => ['required', 'array', 'min:1'],
             'grupo_trabajo_detalle_ids.*' => ['string', 'size:36', 'exists:grupo_trabajo_detalle,id'],
             'estado' => ['required', 'string', 'in:PRESENTE,AUSENTE,TARDANZA,JUSTIFICADO,NO_CORRESPONDE'],
-            'hora_marcado' => ['nullable', 'date_format:H:i'],
             'motivo_estado' => ['nullable', 'string', 'required_if:estado,JUSTIFICADO,NO_CORRESPONDE'],
             'observaciones' => ['nullable', 'string'],
         ]);
@@ -159,7 +158,6 @@ class AsistenciaPageController extends WebPageController
         return [
             'grupo_trabajo_detalle_id' => ['required', 'string', 'size:36', 'exists:grupo_trabajo_detalle,id'],
             'estado' => ['required', 'string', 'in:PRESENTE,AUSENTE,TARDANZA,JUSTIFICADO,NO_CORRESPONDE'],
-            'hora_marcado' => ['nullable', 'date_format:H:i'],
             'motivo_estado' => ['nullable', 'string', 'required_if:estado,JUSTIFICADO,NO_CORRESPONDE'],
             'observaciones' => ['nullable', 'string'],
         ];

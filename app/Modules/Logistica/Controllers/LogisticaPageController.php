@@ -10,6 +10,7 @@ use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
 use App\Support\Rbac\MinaScopeAccess;
+use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -35,21 +36,24 @@ class LogisticaPageController extends WebPageController
         $canViewEpps = PermissionMatrix::allows($permissions, 'epps', 'ver');
         $canViewHerramientas = PermissionMatrix::allows($permissions, 'herramientas', 'ver');
         $canViewServicios = PermissionMatrix::allowsDirect($permissions, 'logistica', 'ver_logistica_servicios');
-        $eppActor = $canViewEpps ? Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id')) : null;
+        $eppTabActions = array_diff_key(PermissionCatalog::logisticsTabActions(), array_flip(['herramientas', 'servicios']));
+        $needsEppContext = $canViewEpps || PermissionMatrix::allowsDirectAny($permissions, 'logistica', array_values($eppTabActions));
+        $canViewEppWorkspace = $canViewEpps || PermissionMatrix::allowsDirect($permissions, 'logistica', 'ver_logistica_entregas');
+        $eppActor = $needsEppContext ? $usuario : null;
 
         if (! $canAccessLogistica && ! $canViewEpps && ! $canViewHerramientas) {
             abort(403, 'No tienes permiso para ver Logistica.');
         }
 
         $query = $request->query();
-        if (! $canViewEpps && $canViewHerramientas) {
+        if (! $needsEppContext && $canViewHerramientas) {
             $query['tab'] = 'herramientas';
         }
 
         // Servicios y alquileres no depende del permiso de EPP: se arma un
         // contexto minimo con paradas y requerimientos de transporte.
         $data = match (true) {
-            $canViewEpps => $this->service->pageData($query, $eppActor),
+            $needsEppContext => $this->service->pageData($query, $eppActor),
             $canViewServicios || $canViewHerramientas => $this->service->serviciosPageData($query),
             default => [
                 'activeTab' => 'herramientas',
@@ -62,7 +66,7 @@ class LogisticaPageController extends WebPageController
         $data['canViewEpps'] = $canViewEpps;
         $data['canViewHerramientas'] = $canViewHerramientas || $canViewEpps;
 
-        if ($canViewEpps) {
+        if ($canViewEppWorkspace) {
             $workerSearch = trim((string) $request->query('trabajador', ''));
             $data['eppModule'] = $this->eppService->pageData([
                 'q' => $workerSearch !== '' ? $workerSearch : $request->query('q'),

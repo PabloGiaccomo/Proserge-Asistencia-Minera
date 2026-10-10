@@ -150,11 +150,13 @@ usuarios con `evaluaciones.administrar`, mientras la carga este habilitada y no
 exista un lote confirmado. Las rutas de carga y reporte validan ese permiso en
 backend. Los permisos para evaluar diariamente no autorizan una importacion.
 
-Se cargan juntos los dos libros principales:
-
-- Control de asistencia: PERSONAL, ASISTENCIA ENCABEZADO, ASISTENCIA DETALLE,
-  EV DESEMPENO, EV SUPERVISORES y EV RESIDENTES.
-- Consolidado de evaluaciones: hoja Consolidado.
+Alcance vigente (2026-10-06): se carga solamente `Proserge Control Asistencia.xlsx`.
+Se leen `EV SUPERVISORES` y `PERSONAL` como diccionario ID -> DNI. No se importan
+asistencias, evaluaciones diarias, residentes ni el Consolidado. Las rutas web
+solo llaman `previewSupervisors` y `confirmSupervisors`; un preview antiguo de
+alcance mixto debe revisarse nuevamente, no puede confirmarse por este flujo.
+Los lectores genericos permanecen para compatibilidad y pruebas del historial
+anterior; no constituyen una opcion de carga expuesta al usuario.
 
 Los snapshots DATA 2025 no se importan ni actualizan Personal. Son evidencia
 auxiliar para corregir documentos desconocidos antes de volver a revisar los
@@ -166,55 +168,90 @@ bloquea la carga. No se adivinan ceros iniciales perdidos ni identidades por
 parecido. Las diferencias de nombre se muestran como advertencias ubicadas por
 DNI, hoja y fila; la identidad resuelta sigue siendo el DNI.
 
+La revision tambien consulta UUID exactos de `personal.id` en lotes de 500 y
+resuelve su DNI registrado, tanto para trabajador como para evaluador. Si la
+hoja PERSONAL y el ID actual indican documentos distintos, se mantiene el
+bloqueo. Se normalizan separadores, apostrofo de Excel, decimales cero y
+notacion cientifica que represente exactamente ocho digitos; no se completan
+ceros ni se extraen numeros de textos libres. La referencia original permanece
+visible en la revision y el reporte. Una coincidencia exacta de nombre solo
+se sugiere (hasta cinco opciones), nunca asigna ni desbloquea la fila.
+Los previews anteriores deben revisarse nuevamente con los archivos originales;
+la confirmacion sigue revalidando la identidad y rechaza manifiestos obsoletos.
+
 La pantalla pagina de 50 en 50 y permite filtrar cambios propuestos, errores,
 advertencias y filas sin cambios, por tipo y por DNI/nombre/hoja/motivo. El
 reporte CSV identifica las filas y evita que sus textos se interpreten como
 formulas al abrirlos en Excel. Archivos y manifiestos permanecen en el disco
 privado `local`; el reporte solo se descarga con permiso administrativo.
 
-Las filas de asistencia antigua representan presencia efectiva. Se guardan en
-`asistencia_historica` usando Fecha Marcado, sin mina/parada y sin crear marcas
-operativas ni faltas. Una referencia incoherente de evaluacion a detalle
-antiguo se reporta para revision; no se vincula a una asistencia actual.
+Los registros historicos anteriores de otros tipos mantienen su estructura;
+esta carga no los crea, elimina ni modifica. No crea Personal ni asignaciones.
 
-Las evaluaciones diarias importadas tienen `origen=HISTORICA`, cinco notas 1..4
-y total calculado sobre 20. No necesitan asistencia cerrada, mina ni usuario
-autor. La fuente conserva mina y evaluador como contexto; no se asignan minas
-por coincidencia de texto. Un evaluador con DNI verificable conserva su FK a
-Personal. Los demas quedan identificados solo por la fuente.
-
-Supervisores y residentes conservan la nota original del Excel con
+Supervisores conservan la nota original del Excel con
 `calculo_version=HISTORICA`, lote, fila, clave unica y respuestas originales.
-No se recalcula ese total con las plantillas nuevas. Supervisor admite total
-0..100 y respuestas presentes 1..5; residente admite total 0..20 y liderazgo
-1..4, con periodo normalizado al primer dia del mes. Un periodo ya evaluado o
-repetido en el libro bloquea la carga. Las horas y puntajes de componentes no
-documentados permanecen desconocidos; no se inventan ceros ni horas actuales.
-
-La conciliacion entre los libros usa DNI/fecha/cinco notas y conserva la
-multiplicidad. Control prevalece cuando ambos concilian; las filas equivalentes
-del consolidado aparecen como sin cambios. Ante diferencias se bloquea el
-grupo para revision. Un ID/fila de origen ya importado se omite solo si su
-contenido coincide; nunca se sobreescribe.
+No se recalcula ese total al importar. Admite total 0..100 y respuestas
+presentes 1..5. Una respuesta fuera de rango es bloqueante. Una celda de criterio
+vacia es una excepcion historica: se conserva el registro con
+`estado=POR_REGULARIZAR`, se muestra una advertencia y no participa en ningun
+indicador, promedio o grafico (ni en Evaluaciones ni en el Dashboard general).
+La nota original sigue disponible como historial. No se inventan calificaciones.
+Un ID/fila de origen ya importado se omite solo si coincide; no se sobreescribe.
 
 Confirmar requiere cero bloqueantes, revisar el reporte y marcar la aceptacion.
 Una revision sin cambios propuestos no puede cerrar la carga. Las evaluaciones
-importadas no se recalculan mediante la edicion habitual: conservan su nota
-original y cualquier correccion requiere revision administrativa auditada.
+historicas completas no se recalculan mediante la edicion habitual.
 Se vuelve a comprobar hash, identidad, contenido y unicidad. El lote, las
-asistencias, las tres evaluaciones y los promedios se guardan en una sola
-transaccion. Se bloquean trabajadores en orden y una clave UNIQUE permite un
+evaluaciones de supervisor se guardan en una sola transaccion. No se escriben
+asistencias, evaluaciones diarias/residentes ni promedios diarios. Se bloquean
+trabajadores en orden y una clave UNIQUE permite un
 solo lote definitivo, incluso entre solicitudes competidoras. Un fallo revierte
 todas las escrituras. Una repeticion no crea otra carga.
 
 Tras confirmar se retira el boton y se rechazan nuevos previews/confirmaciones
 incluso por URL directa; el reporte sigue disponible para administradores. Las
-evaluaciones cuentan desde la confirmacion en los indicadores. El historial
+evaluaciones historicas completas cuentan desde la confirmacion; las pendientes
+quedan excluidas hasta regularizar. El historial
 sin mina se muestra a lectores con `ver_todas_evaluaciones`, no a quienes solo
 leen sus propias evaluaciones. Filtrar una mina concreta excluye esos registros.
 El filtro Origen del dashboard afecta todos sus KPI, graficos y resultados.
 Las notas antiguas se etiquetan; la reconstruccion de aportes ponderados de
 supervisor se limita a la formula vigente y muestra su cobertura de datos.
+
+### Seguimiento y regularizacion
+
+En la misma pestana Supervisores, el historial ahora tiene busqueda por DNI o
+nombre, filtros Todas/Pendientes/Regularizadas y paginacion de 20 registros. No
+se limita a los 20 registros mas recientes, para que los pendientes antiguos
+puedan encontrarse. Se muestran criterios faltantes, motivo, fecha y revisor.
+
+`Regularizar` reutiliza el formulario de los 26 criterios. Requiere
+`evaluaciones.administrar` y `editar`/`actualizar`, ademas del acceso al registro;
+GET, POST y servicio vuelven a validarlo. No obliga a inventar mina o parada.
+`Guardar seguimiento` permite documentar por que sigue pendiente, sin habilitar
+indicadores ni cambiar notas. Es una accion independiente del guardado completo.
+Solo admite registros historicos pendientes; no habilita edicion de historicos
+completos, ni permite reabrir una regularizacion ya completada.
+
+Al regularizar se exigen las 26 notas 1..5 y se calcula el resultado con la
+plantilla actual. Se cambia a `REGISTRADA` / `calculo_version=REGULARIZADA`, y
+cuenta en indicadores, conservando Origen historico. Las celdas originales del
+Excel permanecen en `source_payload`; la clave `_regularizacion` contiene la
+bitacora de seguimiento (actor, fecha, motivo y criterios pendientes). No se
+requiere otra tabla ni migracion. Un bloqueo de fila y transaccion impiden que
+dos intentos regularicen el registro dos veces. Las historicas completas
+conservan siempre su nota original sin recalculo.
+
+El enlace `Descargar reporte` permanece en Evaluaciones despues de confirmar,
+aunque el flag de carga se cierre. El CSV conserva la revision original y agrega
+estado actual, criterios pendientes, bitacora, nota actual y version de calculo.
+El reporte no habilita otra importacion ni permite saltar los bloqueantes.
+
+Todos los criterios de evaluaciones nuevas son obligatorios: diaria 5 notas
+1..4, supervisor 26 notas 1..5, residente todos sus componentes. Las escalas y
+formulas no cambian. Los formularios conservan valores tras un error, muestran
+el criterio faltante y bloquean visualmente el doble envio. Request y servicio
+de supervisor rechazan criterios ausentes, nulos, fuera de rango o desconocidos.
 
 ### Despliegue y ensayo
 
@@ -227,16 +264,16 @@ supervisor se limita a la formula vigente y muestra su cobertura de datos.
 3. Ejecutar las migraciones seleccionadas y `php artisan optimize:clear`.
 4. Habilitar `EVALUACIONES_HISTORICAL_IMPORT_ENABLED=true` en el ambiente de la
    carga y limpiar cache de configuracion. Por defecto el flag es false.
-5. Desde Evaluaciones, revisar ambos Excel; descargar el reporte y resolver
-   todos los bloqueantes. Revisar tambien advertencias y conteos por tipo.
+5. Desde Evaluaciones, revisar el archivo Control; descargar el reporte y resolver
+   todos los bloqueantes. Revisar las advertencias de criterios faltantes.
    Ninguna evaluacion definitiva se escribe durante el preview.
 6. Confirmar manualmente una sola vez. Comparar guardados con cambios propuestos
-   (las filas conciliadas/sin cambios no se insertan), verificar promedios y
+   (las filas sin cambios no se insertan), verificar pendientes y
    dashboard filtrando fechas antiguas y Origen = Carga historica.
 7. Poner el flag en false y limpiar cache. Comprobar que el boton desaparecio,
    que otra carga es rechazada y que el reporte permanece protegido.
 
-Los dos archivos admiten hasta 20 MB cada uno; verificar limites PHP de subida,
+El archivo admite hasta 20 MB; verificar limites PHP de subida,
 memoria y tiempo en cPanel antes del ensayo de volumen.
 El lector carga las hojas seleccionadas en memoria, no en streaming. El limite
 de subida no acota la memoria descomprimida; ensayar los libros reales en una

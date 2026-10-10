@@ -176,8 +176,31 @@ Reglas:
   el intento anterior permanece en el historial.
 - `NO_APLICA` debe ser explicito, no exige observacion obligatoria y cuenta como
   requisito resuelto.
+- `NO_APLICA` cierra el ciclo operativo actual, pero no impide programar el
+  examen mas adelante. Al marcarlo, las programaciones pendientes del requisito
+  se conservan como `ANULADO`; una cita EMO compartida sigue activa para las
+  otras minas. Programar no consume intento: el contador del ciclo permanece en
+  cero hasta `NO_ASISTIO` o `DESAPROBADO`, que pasa a ser el intento operativo 1.
+- La numeracion fisica de intentos es historica y monotona. El contador visible
+  corresponde al ciclo operativo: queda en cero con una aprobacion vigente o
+  `NO_APLICA`, y empieza un ciclo nuevo en cero al vencer la aprobacion.
 - Convalidacion debe conservar origen y no inventar datos.
 - Convalidacion debe sugerirse, no aplicarse automaticamente.
+- La convalidacion acepta el mismo examen o un examen distinto autorizado como
+  equivalente en el requisito de la mina destino. Las equivalencias son
+  direccionales y no se deducen por parecido de nombres ni por transitividad.
+- No todos los examenes tienen nota. Se conserva la nota original cuando existe;
+  si el destino exige nota, el origen debe tenerla y alcanzar el minimo del
+  snapshot destino. Si no la exige, un resultado aprobado sin nota es valido.
+  No se convierte entre escalas: configurar equivalencias de nota solo cuando
+  las escalas son compatibles.
+- Antes de confirmar se muestran trabajador, examen y mina de origen, nota o
+  sin nota, vigencia, examen y mina destino. La escritura web exige confirmacion
+  explicita. Se guarda contexto de origen/destino como snapshot junto al actor,
+  fecha y referencias originales; cambiar equivalencias no altera lo convalidado.
+- Acciones > Configurar examenes por mina > Convalidacion y equivalencias permite
+  modificar reglas de un requisito existente con permiso `configurar`.
+  `Aceptar resultados de otras minas` se guarda como una regla independiente.
 - El Master propone habilitar convalidacion para examenes compartidos por mas de
   una mina y deshabilitarla cuando dejan de estar compartidos. La vista previa
   enumera ambos grupos y los cambios de permiso. Esto no convalida resultados
@@ -246,6 +269,53 @@ Pantalla y acciones:
 - No quemar nombres de minas, examenes ni personas en codigo, rutas, vistas,
   migraciones ni tests.
 
+## Citas EMO, clinicas y control de asistencia
+
+- Una persona tiene una sola cita EMO no anulada por fecha operativa. Otra
+  clinica el mismo dia se rechaza sin escritura parcial.
+- Una cita compartida exige el mismo `examen_id` exacto y enlaces explicitos
+  por mina. Una cita completada no admite enlaces nuevos ni cambios ordinarios
+  de clinica o resultado. La anulacion/reprogramacion conserva historial.
+- La cita guarda el resultado medico exacto. `APTO`, `APTO_CON_RESTRICCION` y
+  `APTO_CON_OBSERVACION` aprueban; `NO_APTO` desaprueba. Restriccion y observacion
+  requieren detalle. Los intentos mantienen el resultado generico y sus
+  snapshots propios de nota/vigencia. Completar revierte todo si falla un enlace.
+- Los textos historicos singular/plural, con o sin tilde o guion bajo, de
+  `APTO CON RESTRICCION(ES)` y `APTO CON OBSERVACION(ES)` son habilitantes. El
+  detalle se muestra en tooltip; si el legado solo trae la etiqueta se informa
+  que el detalle no fue registrado, sin inventarlo ni degradarlo a `OBSERVADO`.
+- Las categorias operativas y clinicas se configuran explicitamente; no se
+  infieren de nombres, del tipo descriptivo ni de lugares historicos. Cambiar
+  categoria requiere motivo y auditoria. Desactivar una clinica conserva citas.
+- Excepcion de reparacion de despliegue 2026-10-10: solo el nombre normalizado
+  exacto `EXAMEN MEDICO` pasa de `OTRO` a `EMO`, tambien en catalogos historicos,
+  con auditoria de sistema. Categorias explicitas distintas y nombres parecidos
+  se conservan. El backfill corrige `OBSERVADO/APROBADO` solo con ultimo intento
+  no anulado aprobado y prefijo medico inequivoco de restriccion/observacion.
+  Conserva detalle registrado y recalcula vigencia en Lima y habilitacion.
+- La migracion repara `NO_APLICA` con pendientes heredados: quedan `ANULADO`,
+  se conservan numeros/archivos/historia y se fija un limite de ciclo fisico
+  en `max+1`. Repetir no mueve el limite ni duplica auditoria. Programar desde
+  `NO_APLICA` tambien sanea pendientes dentro de la transaccion, sin depender
+  del backfill; las otras minas de una cita compartida conservan sus enlaces.
+- Los EMO historicos sin cita siguen sin clinica inventada. Una programacion
+  pendiente se regulariza con permiso `programar`, conservando su trazabilidad.
+- La revision de cita rechaza formularios obsoletos, incluso tras anular y
+  reactivar con los mismos valores. El conflicto no se resuelve sobrescribiendo.
+- Para cambiar fecha o clinica, primero anular la cita y luego reprogramarla
+  con motivo y revision vigente. Una cita completada queda en consulta.
+- El cierre antiguo de intentos rechaza EMO; el resultado se registra desde
+  la cita en Ver programados. El legado pendiente requiere regularizar clinica.
+- Habilitacion minera conserva la separacion de contratos y estado laboral.
+- Consulta y Excel comparten filtros SQL por fecha programada inclusiva,
+  trabajador, categoria, examen, mina, clinica y asistencia. Rango por defecto:
+  hoy menos 30 a hoy mas 60 en `app.display_timezone`; maximo 366 dias.
+- Una cita compartida es una fila fisica. El filtro de mina reduce tambien las
+  minas visibles/exportadas. El legado no se agrupa por coincidencia de texto.
+- La descarga exige `ver_programados` y `exportar` por separado; hasta 10 000
+  filas agrupadas, sin truncado. Auditoria guarda actor, fecha, filtros/hash y
+  cantidad; no guarda los resultados medicos completos.
+
 ## Historial, antiguedad y trazabilidad
 
 - Todo evento historico debe conservar fecha, usuario, origen y observacion
@@ -255,6 +325,23 @@ Pantalla y acciones:
 - No usar campos editables vigentes como unica fuente de verdad historica.
 - Preferir snapshots para cierres de contrato, examenes, habilitaciones y
   procesos de cese.
+
+## Identidad administrada de examenes mineros
+
+- Variantes del mismo curso pueden asociarse a un principal con preview,
+  confirmacion, motivo y auditoria. No se borran IDs ni se mueven resultados.
+- Aliases confirmados reconocen nombres de Excel, globales o por mina.
+  Coincidencias aproximadas solo sugieren revision; no aprueban ni agrupan.
+- Excel usa el requisito activo del grupo en la mina destino. Mas de un
+  requisito activo del grupo implica ambiguedad, nunca elegir el primero.
+- Nota, vigencia, precio, intentos y convalidacion de cada variante/mina se
+  conservan. El Master no reemplaza reglas administradas de convalidacion ni
+  el nombre principal usando un alias.
+- La convalidacion admite variantes confirmadas como origen, pero exige mismo
+  trabajador, aprobacion vigente, reglas de mina y nota minima si el destino la
+  requiere. Siempre la confirma el usuario. Agrupar no convalida en silencio.
+- La estructura y los datos de organizacion son propios de cada ambiente;
+  FTP no copia MySQL. Ver `docs/FTP_ORGANIZAR_EXAMENES.md`.
 
 ## Adopcion operativa
 

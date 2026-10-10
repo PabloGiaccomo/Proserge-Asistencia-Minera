@@ -24,11 +24,11 @@ class LogisticaEppIntegrationTest extends TestCase
 {
     use DatabaseTransactions;
 
-    public function test_individual_entry_is_retired_in_favour_of_signed_batch(): void
+    public function test_existing_entry_stays_in_deliveries_and_requires_valid_data_before_signature(): void
     {
         $session = $this->sessionWithSelections(['logistica' => ['ver', 'ver_logistica_entregas', 'ver_logistica_dashboard'], 'epps' => ['ver', 'registrar', 'preparar_entrega']]);
-        $this->withSession($session)->get(route('logistica.index', ['tab' => 'entregas']))->assertOk()->assertSee('Nueva entrega multiple')->assertDontSee('Registrar y agregar otra');
-        $this->post(route('epps.entregas.store'), [])->assertStatus(409);
+        $this->withSession($session)->get(route('logistica.index', ['tab' => 'entregas']))->assertOk()->assertSee('data-epp-open-modal="eppDeliveryModal"', false)->assertDontSee('Nueva entrega multiple');
+        $this->post(route('epps.entregas.store'), [])->assertRedirect()->assertSessionHasErrors(['personal_id', 'epp_id']);
         $this->get(route('logistica.index', ['tab' => 'dashboard']))->assertOk()
             ->assertSee('Pendientes registrados en lotes')->assertSee('Lotes con firma')
             ->assertSee('Entregas historicas sin firma')->assertSee('Stock por conciliar')
@@ -166,7 +166,7 @@ class LogisticaEppIntegrationTest extends TestCase
     {
         $session = $this->sessionWithEppPermissions();
         $before = EppEntrega::query()->count();
-        $this->withSession($session)->post(route('epps.entregas.store'), ['_epp_add_another' => '1'])->assertStatus(409);
+        $this->withSession($session)->post(route('epps.entregas.store'), ['_epp_add_another' => '1'])->assertRedirect()->assertSessionHasErrors();
         $this->assertSame($before, EppEntrega::query()->count());
     }
 
@@ -187,7 +187,7 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('Tipo de movimiento')
             ->assertSee('Fecha desde')
             ->assertSee('Fecha hasta')
-            ->assertDontSee('Registrar y agregar otra')
+            ->assertSee('Agregar otro EPP')
             ->assertSee('data-epp-filter-toggle', false)
             ->assertSee('aria-controls="eppFilterBody"', false)
             ->assertSee('Catalogo de EPP');

@@ -11,6 +11,7 @@ use App\Models\PersonalMinaExamen;
 use App\Models\PersonalMinaExamenIntento;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use App\Modules\Personal\Support\EmoOutcome;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,11 @@ class PersonalMinaExcelImportService
 {
     public function __construct(private readonly PersonalMinaHabilitacionService $habilitation)
     {
+    }
+
+    private function operationalToday(): Carbon
+    {
+        return Carbon::today(config('app.display_timezone', 'America/Lima'));
     }
 
     public function preview(UploadedFile $file): array
@@ -857,7 +863,7 @@ class PersonalMinaExcelImportService
             foreach ($catalogRow['examenes'] as &$examRow) {
                 $name = (string) ($examRow['nombre'] ?? '');
                 $matchedExam = $this->matchingExam($name, $index, $mine?->id);
-                $identity = app(MiningExamIdentityResolver::class)->resolve($name, $mine?->id, $index['allExams']);
+                $identity = app(MiningExamIdentityResolver::class)->resolve($name, $mine?->id, $index['allExams'], allowInactive: true);
                 $examRow['identity_error'] = $identity['status'] === 'ambiguous'
                     ? 'Examen ambiguo para '.$catalogRow['mina'].': '.$name.'. Revisa los requisitos y asociaciones.'
                     : (!$matchedExam && $this->similarExamSuggestionsFor($name, $index)
@@ -1068,24 +1074,11 @@ class PersonalMinaExcelImportService
         $name = mb_substr(PersonalNormalizer::text($examRow['nombre'] ?? ''), 0, 191);
         $allExams = ExamenMinero::query()->get();
         $identity = app(MiningExamIdentityResolver::class);
-        $resolved = $identity->resolve($name, $mineId, $allExams);
+        $resolved = $identity->resolve($name, $mineId, $allExams, allowInactive: true);
         if ($resolved['status'] === 'ambiguous') {
             throw ValidationException::withMessages(['archivo' => 'El examen '.$name.' es ambiguo para la mina de destino. Revisa Organizar examenes.']);
         }
-        if ($resolved['status'] === 'matched' && in_array($resolved['match_type'], ['alias', 'group'], true)) {
-            return $allExams->firstWhere('id', $resolved['examen_id']);
-        }
-        $exam = $allExams
-            ->sortByDesc(fn (ExamenMinero $candidate) => (int) $candidate->activo)
-            ->first(fn (ExamenMinero $candidate) => $this->indexKey($candidate->nombre) === $this->indexKey($name));
-        $matchType = $exam ? 'exact' : null;
-        if (!$exam) {
-            $canonicalKey = $this->examIndexKey($name);
-            $canonicalMatches = $allExams
-                ->filter(fn (ExamenMinero $candidate) => $this->examIndexKey($candidate->nombre) === $canonicalKey);
-            $exam = $canonicalMatches->count() === 1 ? $canonicalMatches->first() : null;
-            $matchType = $exam ? 'canonical' : null;
-        }
+        $exam = $resolved['status'] === 'matched' ? $allExams->firstWhere('id', $resolved['examen_id']) : null;
         if ($exam) {
             if (!$exam->activo) {
                 $exam->forceFill([
@@ -1095,7 +1088,7 @@ class PersonalMinaExcelImportService
                 $counts['examenes_reactivados']++;
             }
 
-            if ($exam->nombre !== $name && $name !== '') {
+            if (!in_array($resolved['match_type'], ['alias', 'group'], true) && $exam->nombre !== $name && $name !== '') {
                 $exam->forceFill([
                     'nombre' => $name,
                     'updated_by_usuario_id' => $user->id,
@@ -1239,7 +1232,7 @@ class PersonalMinaExcelImportService
             'personal_id' => $personal->id,
             'mina_id' => $mine->id,
             'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
-            'fecha_asignacion' => Carbon::today()->toDateString(),
+            'fecha_asignacion' => $this->operationalToday()->toDateString(),
         ], $user, false);
     }
 
@@ -1255,16 +1248,24 @@ class PersonalMinaExcelImportService
 
     private function applyExamValues(PersonalMinaExamen $workerExam, array $values, Usuario $user): ?string
     {
+        PersonalMina::query()->whereKey($workerExam->personal_mina_id)->lockForUpdate()->firstOrFail();
+        $workerExam = PersonalMinaExamen::query()->lockForUpdate()->findOrFail($workerExam->id);
         $result = $this->normalizeResult($values['resultado'] ?? $values['estado'] ?? '');
+        $legacyMedical = EmoOutcome::fromLegacyText($values['resultado'] ?? $values['estado'] ?? '');
+        $observation = PersonalNormalizer::text($values['observacion'] ?? '') ?: null;
+        if ($legacyMedical && $legacyMedical['outcome']->requiresDetail()) {
+            $observation = $legacyMedical['outcome']->legacyObservation($observation ?: $legacyMedical['detail']);
+        }
         $payload = [
             'fecha_programacion' => $this->normalizeDate($values['fecha_programacion'] ?? null),
             'fecha_realizacion' => $this->normalizeDate($values['fecha_realizacion'] ?? null),
             'fecha_vencimiento' => $this->normalizeDate($values['fecha_vencimiento'] ?? null),
             'resultado' => $result ?: PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
             'nota' => $this->numericOrNull($values['nota'] ?? null),
-            'observacion' => PersonalNormalizer::text($values['observacion'] ?? '') ?: null,
+            'observacion' => $observation,
         ];
         $state = $this->stateFromImportedValues($values, $payload);
+        $pendingAction = $this->pendingActionFromImportedValues($values, $state);
         $hasStateOnlyValue = $this->hasImportedStateOnlyValue($values, $state);
 
         if (!$result && !$payload['fecha_programacion'] && !$payload['fecha_realizacion'] && !$payload['fecha_vencimiento'] && !$payload['observacion'] && $payload['nota'] === null && !$hasStateOnlyValue) {
@@ -1277,35 +1278,47 @@ class PersonalMinaExcelImportService
             return 'updated';
         }
 
-        if ($this->attemptAlreadyImported($workerExam, $payload)) {
-            $this->updateWorkerExamSnapshotFromImport($workerExam, $values, $payload, $user);
+        // The historical Master is not an appointment source. "PROGRAMAR EMO"
+        // only keeps the operational next action visible; dates and
+        // SEDE/LUGAR/CLINICA from this workbook must not become an EMO booking.
+        if ($pendingAction === 'PROGRAMAR_EXAMEN') {
+            // Preview retains the requested next action. A pending renewal
+            // must not replace the evidence of an approval that is still valid.
+            if ($this->habilitation->preservesCurrentApproval($workerExam, $payload['resultado'])) {
+                return 'updated';
+            }
 
+            DB::table('personal_mina_examenes')
+                ->where('id', $workerExam->id)
+                ->update([
+                    'estado' => PersonalMinaExamen::ESTADO_PROGRAMADO,
+                    'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE,
+                    'observacion' => $payload['observacion'] ?: $workerExam->observacion,
+                    'usuario_actualizacion_id' => $user->id,
+                    'fecha_actualizacion' => now(),
+                    'updated_at' => now(),
+                ]);
+
+            return 'updated';
+        }
+
+        if ($this->attemptAlreadyImported($workerExam, $payload)) {
             return 'duplicate';
         }
 
-        try {
-            $created = $this->storeImportedAttempt($workerExam, $payload, $user);
-            $this->updateWorkerExamSnapshotFromImport($workerExam, $values, $payload, $user);
+        $created = $this->storeImportedAttempt($workerExam, $payload, $user);
+        $this->updateWorkerExamSnapshotFromImport($workerExam, $values, $payload, $user);
 
-            return $created ? 'created' : null;
-        } catch (\Throwable) {
-            $this->updateWorkerExamSnapshotFromImport($workerExam, $values, $payload, $user);
-
-            return null;
-        }
+        return $created ? 'created' : null;
     }
 
     private function storeImportedAttempt(PersonalMinaExamen $workerExam, array $payload, Usuario $user): bool
     {
-        $attempts = $workerExam->relationLoaded('intentos')
-            ? $workerExam->intentos
-            : PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $workerExam->id)->get();
-
-        $nextAttempt = ((int) ($attempts->max('numero_intento') ?? 0)) + 1;
+        $nextAttempt = ((int) $workerExam->intentos()->orderByDesc('numero_intento')->lockForUpdate()->value('numero_intento')) + 1;
 
         $priceSnapshot = $this->habilitation->resolveAttemptPriceSnapshot(
             $workerExam,
-            Carbon::today()->toDateString(),
+            $this->operationalToday()->toDateString(),
             $payload['fecha_programacion'],
             $payload['fecha_realizacion'],
         );
@@ -1333,9 +1346,7 @@ class PersonalMinaExcelImportService
 
     private function attemptAlreadyImported(PersonalMinaExamen $workerExam, array $payload): bool
     {
-        $attempts = $workerExam->relationLoaded('intentos')
-            ? $workerExam->intentos
-            : PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $workerExam->id)->get();
+        $attempts = $workerExam->intentos()->lockForUpdate()->get();
 
         return $attempts->contains(function (PersonalMinaExamenIntento $attempt) use ($payload): bool {
             if ($attempt->resultado !== $payload['resultado']) {
@@ -1349,6 +1360,16 @@ class PersonalMinaExcelImportService
                 }
             }
 
+            $sameGrade = $attempt->nota === null && $payload['nota'] === null
+                || $attempt->nota !== null && $payload['nota'] !== null
+                    && (float) $attempt->nota === (float) $payload['nota'];
+            if (!$sameGrade || ($payload['observacion'] !== null
+                && PersonalNormalizer::text($attempt->observacion ?? '') !== $payload['observacion'])) {
+                throw ValidationException::withMessages([
+                    'archivo' => 'El Master contiene una nota u observacion distinta para un resultado ya registrado. Revisa el historial del examen antes de confirmar.',
+                ]);
+            }
+
             return true;
         });
     }
@@ -1359,9 +1380,20 @@ class PersonalMinaExcelImportService
             return;
         }
 
+        if ($this->habilitation->preservesCurrentApproval($workerExam, $payload['resultado'])) {
+            return;
+        }
+
+        if ($workerExam->fecha_realizacion && $payload['fecha_realizacion']
+            && $payload['fecha_realizacion'] < $workerExam->fecha_realizacion->toDateString()) {
+            return;
+        }
+
         $state = $this->stateFromImportedValues($values, $payload);
         $observation = $payload['observacion'] ?: $workerExam->observacion;
         $place = PersonalNormalizer::text($values['lugar'] ?? '') ?: $workerExam->lugar_snapshot;
+
+        $this->habilitation->clearPreviousConvalidation($workerExam, $user);
 
         DB::table('personal_mina_examenes')
             ->where('id', $workerExam->id)
@@ -1393,7 +1425,14 @@ class PersonalMinaExcelImportService
         ]);
         $raw = $this->normalizeHeader($rawText);
         $rawCompact = trim(str_replace(['.', '/'], '', $raw));
+        $medical = EmoOutcome::fromLegacyText($values['resultado'] ?? $values['estado'] ?? $values['observacion'] ?? '');
 
+        // PROGRAMAR EMO is an explicit operational next action. It takes
+        // precedence over contradictory auxiliary cells such as NO APLICA,
+        // without turning Master dates or places into an appointment.
+        if (str_contains($raw, 'programar emo')) {
+            return PersonalMinaExamen::ESTADO_PROGRAMADO;
+        }
         if (
             str_contains($raw, 'no aplica')
             || str_contains($raw, 'no corresponde')
@@ -1401,6 +1440,14 @@ class PersonalMinaExcelImportService
             || in_array($rawCompact, ['na', 'n a'], true)
         ) {
             return PersonalMinaExamen::ESTADO_NO_APLICA;
+        }
+        if ($medical === null && isset($values['observacion'])) {
+            $medical = EmoOutcome::fromLegacyText($values['observacion']);
+        }
+        if ($medical) {
+            return $medical['outcome'] === EmoOutcome::NO_APTO
+                ? PersonalMinaExamen::ESTADO_DESAPROBADO
+                : $this->stateForImportedExpiration($payload['fecha_vencimiento']);
         }
         if (str_contains($raw, 'desaprob') || str_contains($raw, 'no apt') || str_contains($raw, 'rechaz')) {
             return PersonalMinaExamen::ESTADO_DESAPROBADO;
@@ -1433,8 +1480,8 @@ class PersonalMinaExcelImportService
             return PersonalMinaExamen::ESTADO_APROBADO;
         }
 
-        $today = Carbon::today();
-        $end = Carbon::parse($expiration);
+        $today = $this->operationalToday();
+        $end = Carbon::parse($expiration, $today->getTimezone());
         if ($end->lt($today)) {
             return PersonalMinaExamen::ESTADO_VENCIDO;
         }
@@ -1478,7 +1525,7 @@ class PersonalMinaExcelImportService
         $assignment->forceFill([
             'estado' => $excelState,
             'estado_habilitacion' => $excelState,
-            'fecha_habilitacion' => $excelState === PersonalMina::ESTADO_HABILITADO ? Carbon::today()->toDateString() : null,
+            'fecha_habilitacion' => $excelState === PersonalMina::ESTADO_HABILITADO ? $this->operationalToday()->toDateString() : null,
             'usuario_actualizacion_id' => $user->id,
         ])->save();
 
@@ -1728,25 +1775,15 @@ class PersonalMinaExcelImportService
 
     private function examIndexKey(string $value): string
     {
-        return preg_replace('/[^a-z0-9]+/', '', $this->normalizeHeader($value)) ?: '';
+        return app(MiningExamIdentityResolver::class)->normalizedName($value);
     }
 
     private function matchingExam(string $name, array $index, ?string $mineId = null): ?ExamenMinero
     {
-        $resolved = app(MiningExamIdentityResolver::class)->resolve($name, $mineId, $index['allExams'] ?? null);
-        if ($resolved['status'] === 'ambiguous') {
-            return null;
-        }
+        $resolved = app(MiningExamIdentityResolver::class)->resolve($name, $mineId, $index['allExams'] ?? null, allowInactive: true);
         if ($resolved['status'] === 'matched') {
             return collect($index['allExams'])->firstWhere('id', $resolved['examen_id']);
         }
-        $matched = $index['examsByName'][$this->indexKey($name)]
-            ?? $index['examsByCanonicalName'][$this->examIndexKey($name)]
-            ?? null;
-        if ($matched) {
-            return $matched;
-        }
-
         return null;
     }
 
@@ -2117,6 +2154,10 @@ class PersonalMinaExcelImportService
         $value = $this->normalizeHeader($value);
         if ($value === '') {
             return null;
+        }
+        $medical = EmoOutcome::fromLegacyText($value);
+        if ($medical) {
+            return $medical['outcome']->genericResult();
         }
         if (str_contains($value, 'desaprob') || str_contains($value, 'no apt') || str_contains($value, 'rechaz')) {
             return PersonalMinaExamenIntento::RESULTADO_DESAPROBADO;

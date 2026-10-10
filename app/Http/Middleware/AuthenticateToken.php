@@ -30,7 +30,7 @@ class AuthenticateToken
             ->whereNull('revoked_at')
             ->first();
 
-        if (!$token || !$token->usuario) {
+        if (!$token || !$token->usuario || strtoupper((string) ($token->usuario->estado ?? 'ACTIVO')) !== 'ACTIVO') {
             return ApiResponse::error(
                 message: 'Token invalido',
                 code: 'AUTH_TOKEN_INVALID',

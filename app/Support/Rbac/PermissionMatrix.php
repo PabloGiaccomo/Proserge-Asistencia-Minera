@@ -60,9 +60,11 @@ class PermissionMatrix
             }
 
             if (self::hasOperationalPermission($matrix[$module])) {
-                $matrix[$module]['ver'] = true;
+                if (! array_key_exists('ver', $actions)) {
+                    $matrix[$module]['ver'] = true;
+                }
 
-                if (array_key_exists('dashboards', $matrix[$module])) {
+                if (array_key_exists('dashboards', $matrix[$module]) && ! array_key_exists('dashboards', $actions)) {
                     $matrix[$module]['dashboards'] = true;
                 }
             }
@@ -85,14 +87,14 @@ class PermissionMatrix
         $explicitEpp = $rawPermissions['epps'] ?? [];
         $matrix = self::normalizeLegacyEppGrants($matrix, is_array($explicitEpp) ? $explicitEpp : []);
 
-        return self::applyDerivedPermissions($matrix);
+        return self::applyDerivedPermissions($matrix, $rawPermissions);
     }
 
     public static function normalizeForRole(?string $roleName, mixed $rawPermissions): array
     {
         $matrix = self::normalize($rawPermissions);
 
-        if (self::isPrivilegedRole($roleName) && self::isEmptyMatrix($matrix)) {
+        if (self::isPrivilegedRole($roleName)) {
             return PermissionCatalog::fullAccessMatrix();
         }
 
@@ -104,7 +106,7 @@ class PermissionMatrix
         $matrices = [];
         $hasPrivileged = false;
 
-        foreach ($roles as $role) {
+        foreach (self::activeRoles($roles) as $role) {
             $roleName = is_array($role) ? ($role['nombre'] ?? null) : ($role->nombre ?? null);
             $permissions = is_array($role) ? ($role['permisos'] ?? []) : ($role->permisos ?? []);
 
@@ -123,10 +125,49 @@ class PermissionMatrix
         return self::mergeMatrices($matrices);
     }
 
+    public static function activeRoleNames(Usuario $usuario): array
+    {
+        if ($usuario->exists) {
+            $usuario->loadMissing(['rol', 'rolesAdicionales']);
+        }
+        $roles = $usuario->rol ? [$usuario->rol] : [];
+        if ($usuario->relationLoaded('rolesAdicionales')) {
+            $roles = array_merge($roles, $usuario->rolesAdicionales->all());
+        }
+        return array_values(array_unique(array_map(
+            fn ($role) => strtoupper(trim((string) (is_array($role) ? ($role['nombre'] ?? '') : ($role->nombre ?? '')))),
+            self::activeRoles($roles))));
+    }
+
+    private static function activeRoles(array $roles): array
+    {
+        $active = [];
+        foreach ($roles as $role) {
+            if ($role instanceof \App\Models\Rol && $role->exists
+                && (!array_key_exists('estado', $role->getAttributes()) || !array_key_exists('permisos', $role->getAttributes()))) {
+                $role = $role->fresh();
+                if (!$role) {
+                    continue;
+                }
+            }
+            $state = is_array($role) ? ($role['estado'] ?? 'ACTIVO') : ($role->estado ?? 'ACTIVO');
+            if (strtoupper(trim((string) $state)) !== 'ACTIVO') {
+                continue;
+            }
+            $active[] = $role;
+        }
+
+        return $active;
+    }
+
     public static function effectivePermissions(?Usuario $usuario): array
     {
         if (! $usuario) {
             return PermissionCatalog::emptyMatrix();
+        }
+
+        if ($usuario->exists) {
+            $usuario->loadMissing(['rol', 'rolesAdicionales']);
         }
 
         $roles = [];
@@ -151,6 +192,10 @@ class PermissionMatrix
     {
         $matrix = self::normalize($rawPermissions);
 
+        if (self::hasExplicitPermission($rawPermissions, $module, $action)) {
+            return $matrix[$module][$action] ?? false;
+        }
+
         if (self::matrixAllows($matrix, $module, $action)) {
             return true;
         }
@@ -172,7 +217,8 @@ class PermissionMatrix
             return true;
         }
 
-        return $action !== 'administrar'
+        return ! self::hasExplicitPermission($rawPermissions, $module, $action)
+            && $action !== 'administrar'
             && ! self::requiresExplicitGrant($module, $action)
             && (($matrix[$module]['administrar'] ?? false) === true);
     }
@@ -247,9 +293,22 @@ class PermissionMatrix
                 && ($matrix[$module]['administrar'] ?? false) === true);
     }
 
-    private static function applyDerivedPermissions(array $matrix): array
+    private static function hasExplicitPermission(mixed $rawPermissions, string $module, string $action): bool
     {
-        if (($matrix['logistica']['ver_logistica_entregas'] ?? false) === true) {
+        if (! is_array($rawPermissions)) {
+            return false;
+        }
+
+        $permissions = $rawPermissions['matrix'] ?? $rawPermissions;
+
+        return is_array($permissions) && isset($permissions[$module])
+            && is_array($permissions[$module]) && array_key_exists($action, $permissions[$module]);
+    }
+
+    private static function applyDerivedPermissions(array $matrix, array $explicit = []): array
+    {
+        if (($matrix['logistica']['ver_logistica_entregas'] ?? false) === true
+            && ! self::hasExplicitPermission($explicit, 'epps', 'ver')) {
             $matrix['epps']['ver'] = true;
         }
 
@@ -551,6 +610,6 @@ class PermissionMatrix
 
     private static function isPrivilegedRole(?string $roleName): bool
     {
-        return in_array(strtoupper(trim((string) $roleName)), ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return in_array(strtoupper(trim((string) $roleName)), ['ADMIN', 'SUPERADMIN'], true);
     }
 }

@@ -3,11 +3,14 @@
 namespace App\Modules\Epps\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\EppEntrega;
 use App\Models\ParadaHerramientaCatalogo;
 use App\Models\Personal;
 use App\Models\Usuario;
+use App\Modules\Epps\Requests\DownloadEppKardexRequest;
 use App\Modules\Epps\Requests\SaveEppCatalogRequest;
-use App\Modules\Epps\Services\EppKardexService;
+use App\Modules\Epps\Services\EppDeliverySignatureService;
+use App\Modules\Epps\Services\EppKardexExcelService;
 use App\Modules\Epps\Services\EppScopeService;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\ParadaHerramientas\Services\ParadaHerramientaService;
@@ -70,31 +73,32 @@ class EppPageController extends WebPageController
 
     public function kardexPersonal(Request $request): JsonResponse
     {
+        $pagination = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1', 'max:2147483647'],
+            'per_page' => ['sometimes', 'integer', 'in:20,50,100'],
+        ]);
         $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
         $worker = Personal::query()->findOrFail((string) $request->query('personal_id', ''));
         app(EppScopeService::class)->assertPersonalAccess($actor, $worker);
-        $data = $this->service->personalKardex($worker->id, $actor);
-        if (PermissionMatrix::userCanDirect($actor, 'epps', 'ver_evidencia')) {
-            $data['operations'] = app(EppKardexService::class)->forWorker($worker, $actor)['operations'];
-        }
+        $data = $this->service->personalKardex($worker->id, $actor, [
+            'page' => (int) ($pagination['page'] ?? 1), 'per_page' => (int) ($pagination['per_page'] ?? 20),
+        ]);
 
         return response()->json([
             'data' => $data,
         ])->header('Cache-Control', 'private, no-store');
     }
 
-    public function descargarKardex(Request $request): StreamedResponse
+    public function descargarKardex(DownloadEppKardexRequest $request): StreamedResponse
     {
         $this->requireAuthenticatedUser();
 
-        $validated = $request->validate([
-            'personal_id' => ['required', 'string', 'exists:personal,id'],
-        ]);
+        $validated = $request->validated();
 
         $actor = Usuario::query()->with(['rol', 'rolesAdicionales'])->where('estado', 'ACTIVO')->findOrFail(session('user_id') ?: session('user.id'));
         app(EppScopeService::class)->assertPersonalAccess($actor, Personal::query()->findOrFail($validated['personal_id']));
 
-        return $this->service->downloadPersonalKardex((string) $validated['personal_id'], $actor);
+        return app(EppKardexExcelService::class)->download(Personal::query()->findOrFail($validated['personal_id']), $actor, $validated['fecha_desde'], $validated['fecha_hasta']);
     }
 
     public function storeCatalog(SaveEppCatalogRequest $request): RedirectResponse
@@ -129,7 +133,35 @@ class EppPageController extends WebPageController
 
     public function storeEntrega(Request $request): RedirectResponse
     {
-        abort(409, 'El registro individual fue retirado. Usa Nueva entrega multiple con firma.');
+        $data = $request->validate([
+            'personal_id' => ['required', 'uuid', 'exists:personal,id'],
+            'epp_id' => ['required_without:items', 'nullable', 'uuid', 'exists:epp_registro,id'],
+            'cantidad' => ['required_without:items', 'nullable', 'integer', 'min:1', 'max:1000'],
+            'talla' => ['nullable', 'string', 'max:80'], 'color' => ['nullable', 'string', 'max:120'],
+            'atributos' => ['nullable', 'array'], 'atributos.*.nombre' => ['nullable', 'string', 'max:100'], 'atributos.*.valor' => ['nullable', 'string', 'max:200'],
+            'fecha_entrega' => ['required', 'date'], 'observacion' => ['nullable', 'string', 'max:1000'],
+            'submission_uuid' => ['nullable', 'uuid'],
+            '_epp_add_another' => ['nullable', 'boolean'],
+            '_epp_replaces_entrega_id' => ['nullable', 'uuid', 'exists:epp_entregas,id'],
+            '_epp_replacement_fecha' => ['nullable', 'date'], '_epp_replacement_motivo' => ['nullable', 'string', 'max:120'], '_epp_replacement_observacion' => ['nullable', 'string', 'max:1000'],
+            'items' => ['sometimes', 'array', 'min:1', 'max:50'],
+            'items.*' => ['array:epp_id,cantidad,talla,color,atributos,observacion'],
+            'items.*.epp_id' => ['required', 'uuid', 'exists:epp_registro,id'],
+            'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
+            'items.*.talla' => ['nullable', 'string', 'max:80'],
+            'items.*.color' => ['nullable', 'string', 'max:120'],
+            'items.*.observacion' => ['nullable', 'string', 'max:1000'],
+            'items.*.atributos' => ['nullable', 'array'],
+            'items.*.atributos.*.nombre' => ['nullable', 'string', 'max:100'],
+            'items.*.atributos.*.valor' => ['nullable', 'string', 'max:200'],
+        ]);
+        try {
+            $operation = app(EppDeliverySignatureService::class)->prepare($data, $this->eppActor());
+        } catch (InvalidArgumentException $exception) {
+            return back()->withInput($request->input() + ['_epp_open_modal' => 'eppDeliveryModal'])->with('error', $exception->getMessage());
+        }
+
+        return redirect()->route('epps.delivery-signature.review', $operation);
     }
 
     private function eppActor(): Usuario
@@ -139,7 +171,24 @@ class EppPageController extends WebPageController
 
     public function closeEntrega(Request $request, string $id): RedirectResponse
     {
-        abort(409, 'Usa la devolucion multiple o una correccion compensatoria para conservar el historial.');
+        $actor = $this->eppActor();
+        $delivery = EppEntrega::query()->with('personal', 'operacion')->findOrFail($id);
+        app(EppScopeService::class)->assertPersonalAccess($actor, $delivery->personal);
+        abort_if($delivery->operacion_id && ! $delivery->operacion?->isCatalogWorkflow(), 409, 'Esta entrega usa inventario por almacen. Conserva su flujo de devolucion original.');
+        $data = $request->validate(['estado' => ['required', 'in:CAMBIADO,DEVUELTO,USO_INCORRECTO,PERDIDA_OLVIDO'], 'devuelto_at' => ['required', 'date'], 'motivo_cambio' => ['nullable', 'string', 'max:120'], 'observacion' => ['nullable', 'string', 'max:1000'], 'submission_uuid' => ['nullable', 'uuid']]);
+        if ($delivery->estado !== 'ENTREGADO') {
+            return back()->with('error', 'Esta entrega ya fue cerrada.');
+        }
+        if ($data['estado'] === 'CAMBIADO') {
+            return back()->withInput(['_epp_open_modal' => 'eppDeliveryModal', '_epp_replaces_entrega_id' => $delivery->id, '_epp_replacement_fecha' => $data['devuelto_at'], '_epp_replacement_motivo' => $data['motivo_cambio'] ?? '', '_epp_replacement_observacion' => $data['observacion'] ?? '', 'personal_id' => $delivery->personal_id, 'personal_label' => $delivery->personal->nombre_completo.' - '.$delivery->personal->dni, 'epp_id' => $delivery->epp_id, 'cantidad' => $delivery->cantidad, 'fecha_entrega' => $data['devuelto_at'], 'talla' => $delivery->talla, 'color' => $delivery->color, 'atributos' => $delivery->atributos_json ?: []]);
+        }
+        try {
+            $operation = app(EppDeliverySignatureService::class)->prepare($data, $actor, $delivery);
+        } catch (InvalidArgumentException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return redirect()->route('epps.delivery-signature.review', $operation);
     }
 
     public function updateEntrega(Request $request, string $id): RedirectResponse

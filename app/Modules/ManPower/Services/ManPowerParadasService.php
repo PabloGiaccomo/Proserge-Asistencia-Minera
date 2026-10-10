@@ -7,6 +7,7 @@ use App\Models\RQMina;
 use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
 use App\Modules\ManPower\Policies\ManPowerPolicy;
+use App\Support\Rbac\PermissionMatrix;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -287,9 +288,8 @@ class ManPowerParadasService
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
+            || PermissionMatrix::userCanDirect($usuario, 'man_power', 'administrar');
     }
 
     private function normalizeDate(string $date): string

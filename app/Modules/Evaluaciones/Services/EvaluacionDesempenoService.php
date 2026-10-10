@@ -354,6 +354,10 @@ class EvaluacionDesempenoService
             return $this->forbidden();
         }
 
+        if (!\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::hasCompleteResponses($payload['respuestas'] ?? null)) {
+            return $this->businessError('EVAL_CRITERIA_REQUIRED', 'Completa todos los criterios de la evaluacion con notas entre 1 y 5.');
+        }
+
         $item = EvaluacionSupervisor::query()->create([
             'id' => (string) Str::uuid(),
             ...$payload,

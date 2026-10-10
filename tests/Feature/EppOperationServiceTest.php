@@ -382,7 +382,8 @@ class EppOperationServiceTest extends TestCase
         $this->assertSame(5, $payload['details'][0]['processed_quantity']);
         $this->assertSame(10, $payload['details'][0]['requested_quantity']);
         $this->assertSame(5, $payload['details'][0]['pending_quantity']);
-        $this->assertSame('DELIVERY_V1', $payload['declaration_version']);
+        $this->assertSame('DELIVERY_SGC_FOR59_V1', $payload['declaration_version']);
+        $this->assertStringContainsString('e. Asimismo declara haberlos recibido', $payload['declaration_text']);
     }
 
     public function test_canonical_payload_sorts_nested_keys_and_preserves_list_order(): void

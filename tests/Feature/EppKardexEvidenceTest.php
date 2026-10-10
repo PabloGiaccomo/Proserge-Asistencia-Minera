@@ -13,6 +13,7 @@ use App\Models\PersonalMina;
 use App\Models\Rol;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Modules\Epps\Services\EppKardexExcelService;
 use App\Modules\Epps\Services\EppKardexService;
 use App\Modules\Epps\Services\EppQrCodeService;
 use App\Modules\Epps\Services\EppReceiptPdfService;
@@ -180,6 +181,48 @@ class EppKardexEvidenceTest extends TestCase
         } finally {
             @unlink($path);
         }
+    }
+
+    public function test_formatted_kardex_uses_lima_date_without_appending_technical_observations(): void
+    {
+        EppEntrega::query()->where('personal_id', $this->worker->id)->whereNull('operacion_id')->update(['fecha_entrega' => '2026-10-08']);
+        $this->operation->update(['firmado_at' => '2026-10-10 02:00:00']);
+        $this->acceptance->update(['firmado_at_utc' => '2026-10-10 02:00:00']);
+        $payload = $this->acceptance->contenido_json;
+        $payload['notes'] = 'OBSERVACION GENERAL ALMACEN';
+        $payload['input']['observacion'] = 'OBSERVACION GENERAL LOTE';
+        $payload['details'][0]['reason'] = 'OBSERVACION ARTICULO';
+        $payload['details'][0]['return_condition'] = 'DANADO';
+        $payload['details'][0]['inventory_destination'] = 'CUARENTENA';
+        $this->replacePayload($payload);
+        $book = app(EppKardexExcelService::class)->workbook($this->worker, $this->viewer, '2026-10-09', '2026-10-09');
+        $sheet = $book->getSheet(0);
+        $text = implode('|', array_map(fn ($row) => implode('|', $row), $sheet->toArray()));
+        foreach (['OBSERVACION GENERAL ALMACEN', 'OBSERVACION GENERAL LOTE', 'OBSERVACION ARTICULO', 'DANADO', 'CUARENTENA'] as $fact) {
+            $this->assertStringNotContainsString($fact, $text);
+        }
+        $this->assertSame(EppCanonicalPayload::json($payload), EppCanonicalPayload::json($this->acceptance->fresh()->contenido_json));
+        $this->assertSame('09/10/2026', $sheet->getCell('B14')->getFormattedValue());
+        $this->assertSame('09/10/2026', $sheet->getCell('B15')->getFormattedValue());
+        $this->assertNull($sheet->getCell('B16')->getValue());
+    }
+
+    public function test_formatted_kardex_does_not_invent_delivery_codes_for_administrative_corrections(): void
+    {
+        $correction = EppOperacion::query()->create(['personal_id' => $this->worker->id, 'almacen_id' => $this->operation->almacen_id, 'tipo' => 'CORRECCION', 'estado' => 'FIRMADO', 'submission_uuid' => (string) Str::uuid(), 'operacion_origen_id' => $this->operation->id, 'version' => 1, 'created_at' => '2026-10-12 16:00:00', 'registrado_por_usuario_id' => $this->viewer->id, 'motivo' => 'AJUSTE ADMINISTRATIVO DOCUMENTADO']);
+        $correction->forceFill(['created_at' => '2026-10-12 16:00:00'])->save();
+        $detail = $this->operation->detalles->first()->replicate();
+        $detail->operacion_id = $correction->id;
+        $detail->motivo = 'AJUSTE ADMINISTRATIVO DOCUMENTADO';
+        $detail->save();
+        $book = app(EppKardexExcelService::class)->workbook($this->worker, $this->viewer, '2026-10-12', '2026-10-12');
+        $sheet = $book->getSheet(0);
+        $text = implode('|', array_map(fn ($row) => implode('|', $row), $sheet->toArray()));
+        $this->assertStringNotContainsString('AJUSTE ADMINISTRATIVO DOCUMENTADO', $text);
+        $this->assertNull($sheet->getCell('C14')->getValue());
+        $this->assertNull($sheet->getCell('B14')->getValue());
+        $this->assertSame('AJUSTE ADMINISTRATIVO DOCUMENTADO', $correction->fresh()->motivo);
+        $this->assertCount(0, collect($sheet->getDrawingCollection())->where('description', 'Firma del trabajador'));
     }
 
     private function replacePayload(array $payload): void

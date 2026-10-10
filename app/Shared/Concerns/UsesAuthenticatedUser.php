@@ -12,6 +12,10 @@ trait UsesAuthenticatedUser
 {
     protected function getUser(): ?Usuario
     {
+        $authenticatedUser = request()->user();
+        if ($authenticatedUser instanceof Usuario) {
+            return $authenticatedUser;
+        }
         $sessionUser = session('user');
         
         if (!$sessionUser) {

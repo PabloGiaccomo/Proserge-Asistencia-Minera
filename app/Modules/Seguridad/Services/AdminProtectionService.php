@@ -97,23 +97,7 @@ class AdminProtectionService
             return false;
         }
 
-        if (strtoupper(trim((string) optional($usuario->rol)->nombre)) === 'SUPERADMIN') {
-            return true;
-        }
-
-        if ($usuario->relationLoaded('rolesAdicionales')) {
-            return $usuario->rolesAdicionales->contains(
-                fn (Rol $r) => strtoupper(trim((string) $r->nombre)) === 'SUPERADMIN'
-            );
-        }
-
-        if (Schema::hasTable('usuario_roles')) {
-            return $usuario->rolesAdicionales()
-                ->where('nombre', 'SUPERADMIN')
-                ->exists();
-        }
-
-        return false;
+        return in_array('SUPERADMIN', PermissionMatrix::activeRoleNames($usuario), true);
     }
 
     public function getTransactionalDependencies(Usuario $usuario): array

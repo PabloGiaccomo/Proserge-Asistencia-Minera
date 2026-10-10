@@ -43,6 +43,14 @@ permiso de Logistica ni la visibilidad de una pestana a un grant de escritura.
 
 ## Alcance y gates
 
+Desde 2026-10-09, el formulario habitual de Entregas y cambios usa operaciones
+sin almacen exclusivamente cuando el resumen tiene origen `ENTREGAS_CAMBIOS`.
+Preparar requiere `registrar`; los gates de lectura, confirmacion y evidencia
+revalidan permiso directo y alcance del trabajador, sin exigir un almacen
+inexistente. No habilita correccion/anulacion de inventario ni excepcion de testigo.
+Un almacen nulo sin ese origen no concede acceso. Las reglas siguientes de
+almacen permanecen para operaciones por inventario.
+
 `EppScopeService` exige usuario `ACTIVO`. ADMIN, GERENTE y SUPERADMIN usan el
 criterio comun de `MinaScopeAccess` y ven todos los almacenes/trabajadores.
 Los demas usuarios requieren la mina del almacen en `usuario_mina_scope` y,

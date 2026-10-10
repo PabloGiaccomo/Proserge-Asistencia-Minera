@@ -724,7 +724,7 @@ class EvaluacionesWebTest extends TestCase
             'mina_id' => $mineId,
             'evaluado_id' => $candidateId,
             'fecha' => '2026-08-21',
-            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
         ])->assertRedirect(route('evaluaciones.index', ['tipo' => 'supervisores']));
 
         $this->withSession($session)->post(route('evaluaciones.residentes.store'), [
@@ -773,7 +773,7 @@ class EvaluacionesWebTest extends TestCase
         $session = [...$this->sessionFor($userId), '_token' => 'eval-csrf'];
         $this->withSession($session)->post(route('evaluaciones.supervisores.store'), [
             '_token' => 'eval-csrf', 'mina_id' => $mine, 'evaluado_id' => $candidate,
-            'evaluador_id' => $candidate, 'fecha' => '2026-09-16', 'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'evaluador_id' => $candidate, 'fecha' => '2026-09-16', 'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
         ])->assertSessionHasNoErrors()->assertRedirect(route('evaluaciones.index', ['tipo' => 'supervisores']));
         $this->withSession($session)->post(route('evaluaciones.residentes.store'), [
             '_token' => 'eval-csrf', 'residente_id' => $resident, 'periodo_mes' => '2026-09',
@@ -847,7 +847,7 @@ class EvaluacionesWebTest extends TestCase
             'destino_id' => $mineId,
             'mina_id' => $mineId,
             'fecha' => '2026-09-25',
-            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
         ];
 
         $allowed = $service->create($actor, [...$payload, 'evaluado_id' => $supervisor]);
@@ -877,7 +877,7 @@ class EvaluacionesWebTest extends TestCase
             \App\Models\Usuario::findOrFail($userId), [
                 'evaluado_id' => $supervisorId, 'fecha' => '2026-09-26',
                 'mina_id' => $mineId, 'destino_tipo' => 'MINA', 'destino_id' => $mineId,
-                'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+                'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
             ],
         );
 
@@ -904,7 +904,7 @@ class EvaluacionesWebTest extends TestCase
 
     public function test_dashboard_filtra_y_respeta_propiedad_y_tipo_sin_recargar_layout(): void
     {
-        [$id, $person] = $this->createUser(['evaluaciones' => ['ver_supervisores', 'administrar']]);
+        [$id, $person] = $this->createUser(['evaluaciones' => ['ver_supervisores', 'administrar', 'dashboards']]);
         $mine = (string) Str::uuid();
         DB::table('minas')->insert(['id' => $mine, 'nombre' => 'MINA DASHBOARD', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
         $worker = $this->createPersonal('PERSONA DASHBOARD', true);

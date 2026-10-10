@@ -12,6 +12,7 @@ use App\Models\PersonalContrato;
 use App\Models\PersonalMina;
 use App\Models\RQMinaActividadTransporte;
 use App\Models\Usuario;
+use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -23,6 +24,55 @@ use Tests\TestCase;
 class LogisticaDashboardServiceTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_logistics_search_matches_reordered_partial_names_and_document(): void
+    {
+        $this->assertSame('proserge_app_test', DB::connection()->getDatabaseName());
+        $worker = $this->createPersonal('ACTIVO', 'PAREDES ZEGARRA PÁBLO');
+        $epp = $this->createEpp('CASCO BUSQUEDA '.Str::uuid());
+        $this->createDelivery($worker, $epp, today()->toDateString(), today()->addDays(10)->toDateString());
+        foreach (['pablo paredes', 'PAREDES PABLO', '  pab   pared ', $worker->dni] as $term) {
+            $rows = app(EppService::class)->pageData(['q' => $term])['entregas'];
+            $this->assertSame(1, $rows->total(), $term);
+            $data = app(LogisticaDashboardService::class)->pageData(['q' => $term]);
+            $this->assertSame(1, $data['metrics']['workers'], $term);
+            $this->assertCount(1, $data['filteredExpiringDeliveries'], $term);
+            $this->assertContains($worker->id, array_column(app(EppService::class)->searchPersonal($term), 'id'));
+        }
+        $this->assertSame(0, app(EppService::class)->pageData(['q' => 'PABLO INEXISTENTE'])['entregas']->total());
+        $worker->update(['estado' => 'CESADO']);
+        foreach (['pablo paredes', 'PAREDES PABLO', $worker->dni] as $term) {
+            $ceased = app(LogisticaDashboardService::class)->pageData(['tab' => 'cesados', 'q' => $term])['ceasedRows'];
+            $this->assertSame($worker->id, $ceased->first()['personal_id']);
+        }
+    }
+
+    public function test_delivery_mine_filter_uses_overlapping_usage_not_active_habilitation(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-09 12:00:00'));
+        try {
+            $worker = $this->createPersonal('ACTIVO', 'FILTRO USO MINA '.Str::uuid());
+            $mine = $this->createMine('MINA USO '.Str::uuid());
+            $other = $this->createMine('MINA OTRA '.Str::uuid());
+            $epp = $this->createEpp('CASCO FILTRO '.Str::uuid());
+            $this->createRqAssignment($worker, $mine, '2026-09-02', '2026-09-04');
+            $this->createRqAssignment($worker, $other, '2026-09-06', '2026-09-08');
+            $this->createDelivery($worker, $epp, '2026-09-01', '2027-09-01');
+            $this->createDelivery($worker, $epp, '2026-09-05', '2027-09-05');
+            $this->createDelivery($worker, $epp, '2026-08-01', '2026-08-05', EppEntrega::ESTADO_DEVUELTO);
+            $this->createDelivery($worker, $epp, '2026-10-10', '2027-10-10');
+            $page = app(EppService::class)->pageData(['q' => $worker->nombre_completo, 'mina_id' => $mine]);
+            $this->assertSame(1, $page['entregas']->total());
+            $row = $page['entregas']->first();
+            $this->assertCount(1, $row['periodos_uso']);
+            $this->assertSame('2026-09-02', $row['periodos_uso'][0]['desde']);
+            $this->assertSame(3, $row['dias_uso_efectivo']);
+            $all = app(EppService::class)->pageData(['q' => $worker->nombre_completo]);
+            $this->assertSame(4, $all['entregas']->total());
+        } finally {
+            $this->travelBack();
+        }
+    }
 
     public function test_coverage_uses_catalog_requirement_flag_and_unconciliated_stock_is_unknown(): void
     {
@@ -213,6 +263,10 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('Van 15, minibus 35', $row['solicitado']);
         $this->assertSame('ABC-123; chofer Juan', $row['placas_asignadas']);
+        foreach (['Juan ABC-123', '  abc-123   JUAN '] as $term) {
+            $found = app(LogisticaDashboardService::class)->pageData(['tab' => 'servicios', 'servicio_q' => $term])['serviceRows'];
+            $this->assertSame($transportId, $found->first()['id']);
+        }
 
         // La trazabilidad ya se registraba, pero tenia que poder verse en pantalla.
         $this->assertNotEmpty($row['eventos']);
@@ -555,7 +609,7 @@ class LogisticaDashboardServiceTest extends TestCase
 
         DB::table('roles')->insert([
             'id' => $roleId,
-            'nombre' => 'LOGISTICA_DASHBOARD_TEST',
+            'nombre' => 'LOGISTICA_DASHBOARD_TEST_'.Str::random(8),
             'permisos' => json_encode([]),
             'estado' => 'ACTIVO',
             'created_at' => now(),

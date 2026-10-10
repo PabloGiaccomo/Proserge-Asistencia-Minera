@@ -189,9 +189,8 @@ class FaltasService
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true);
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
+            || PermissionMatrix::userCanDirect($usuario, 'faltas', 'administrar');
     }
 
     public function listForUser(Usuario $usuario, array $filters): array

@@ -88,6 +88,9 @@ Estados validos:
   repetida no altera `PRESENTE`, `TARDANZA` ni `JUSTIFICADO` existentes.
   El responsable puede cambiar una ausencia a tardanza o justificarla con motivo.
 - El servidor determina la hora de las nuevas marcas. No cambia las existentes.
+- Los formularios de marcacion individual y masiva no muestran una hora
+  editable: siempre registran la hora del servidor. Solo la regularizacion
+  historica de una falta permite declarar la hora que corresponde.
 - Para funcionar sin pantallas abiertas, el servidor debe ejecutar
   `php artisan schedule:run` cada minuto, como indica `OPERACION_DESPLIEGUE.md`.
   No se ejecuto este barrido sobre datos reales durante la implementacion.
@@ -118,6 +121,8 @@ verificacion del scheduler en el servidor de despliegue. Sin subida al FTP.
 
 El cierre:
 
+- bloquea el encabezado y revalida su estado dentro de la transaccion, por lo
+  que una solicitud simultanea u obsoleta no puede volver a cerrarlo;
 - completa el padron faltante desde distribuciones activas;
 - marca ausentes automaticos cuando corresponda;
 - genera faltas solo por `AUSENTE`;
@@ -127,10 +132,17 @@ El cierre:
 
 La reapertura:
 
+- bloquea el mismo encabezado y revalida que siga cerrado;
 - cambia el encabezado a `REGISTRADO`;
-- anula faltas activas generadas por esa asistencia;
+- anula solo faltas activas generadas por esa asistencia y registra el usuario
+  que realizo la anulacion;
 - sincroniza el padron;
 - recalcula la ejecucion.
+
+No existe una unicidad permanente sobre `faltas.asistencia_detalle_id`: despues
+de una reapertura, un nuevo cierre puede generar otro evento historico para el
+mismo detalle. La serializacion del encabezado evita duplicados dentro de cada
+ciclo sin borrar ese historial.
 
 ## Actividad principal
 
@@ -236,6 +248,12 @@ Faltas incorpora filtros, indicadores, tendencia, reincidencias, contexto del
 trabajador y destino, y diferencia el origen automatico desde Asistencia del
 registro manual. Corregir exige motivo y actualiza la asistencia origen; anular
 exige motivo y conserva el registro historico.
+
+La correccion bloquea la falta y su detalle de asistencia en una sola
+transaccion. Solo una falta `ACTIVA` puede corregirse: una falta `CORREGIDA` no
+admite una segunda correccion ni permite sobrescribir motivo, actor, fecha u
+hora previos. El detalle queda como `PRESENTE`, con actor y fecha de marcacion,
+y con `CORRECCION_FALTA` como origen auditable.
 
 Validacion de esta vista:
 

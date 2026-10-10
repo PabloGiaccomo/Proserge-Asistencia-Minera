@@ -20,6 +20,7 @@ use App\Models\RQProsergeDetalle;
 use App\Models\Usuario;
 use App\Modules\Epps\Services\EppScopeService;
 use App\Modules\Epps\Services\EppService;
+use App\Shared\Support\SearchTerms;
 use App\Support\Rbac\MinaScopeAccess;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -136,7 +137,8 @@ class LogisticaDashboardService
         $ceasedRows = $this->ceasedEppRows($filters, $actor);
         $operationQuery = EppOperacion::query()->whereIn('personal_id', $workers->pluck('id'))->whereIn('estado', ['FIRMADO', 'FIRMADO_PARCIAL']);
         if ($actor) {
-            $operationQuery->whereIn('almacen_id', app(EppScopeService::class)->visibleWarehouseIds($actor));
+            $operationQuery->where(fn ($query) => $query->whereIn('almacen_id', app(EppScopeService::class)->visibleWarehouseIds($actor))
+                ->orWhere(fn ($catalog) => $catalog->whereNull('almacen_id')->where('resumen_json->origin', 'ENTREGAS_CAMBIOS')));
         }
         if ($filters['minas'] !== []) {
             $operationQuery->whereIn('mina_id', $filters['minas']);
@@ -476,10 +478,7 @@ class LogisticaDashboardService
         if ($filters['q'] !== '') {
             $q = $filters['q'];
             $query->where(function ($where) use ($q): void {
-                $where->where('nombre_completo', 'like', "%{$q}%")
-                    ->orWhere('dni', 'like', "%{$q}%")
-                    ->orWhere('numero_documento', 'like', "%{$q}%")
-                    ->orWhere('puesto', 'like', "%{$q}%");
+                SearchTerms::apply($where, $q, ['nombre_completo', 'dni', 'numero_documento', 'puesto']);
             });
         }
 
@@ -1419,10 +1418,7 @@ class LogisticaDashboardService
         $search = trim((string) ($filters['q'] ?? ''));
         if ($search !== '') {
             $query->where(function ($where) use ($search): void {
-                $where->where('nombre_completo', 'like', "%{$search}%")
-                    ->orWhere('dni', 'like', "%{$search}%")
-                    ->orWhere('numero_documento', 'like', "%{$search}%")
-                    ->orWhere('puesto', 'like', "%{$search}%");
+                SearchTerms::apply($where, $search, ['nombre_completo', 'dni', 'numero_documento', 'puesto']);
             });
         }
 
@@ -1592,7 +1588,7 @@ class LogisticaDashboardService
                     $row['epp'] ?? '',
                 ]));
 
-                return str_contains($haystack, $search);
+                return SearchTerms::matches($haystack, $search);
             })
             ->filter(fn (array $row): bool => $mineId === '' || in_array($mineId, (array) ($row['mina_ids'] ?? []), true))
             ->filter(fn (array $row): bool => $eppId === '' || (string) ($row['epp_id'] ?? '') === $eppId)
@@ -1754,21 +1750,22 @@ class LogisticaDashboardService
         }
 
         $search = trim((string) ($filters['servicio_q'] ?? ''));
-        if ($search !== '') {
-            $query->where(function ($where) use ($search): void {
-                $where->where('alcance', 'like', "%{$search}%")
-                    ->orWhere('unidad_carga', 'like', "%{$search}%")
-                    ->orWhere('unidades_transporte', 'like', "%{$search}%")
-                    ->orWhere('placas_asignadas', 'like', "%{$search}%")
-                    ->orWhereHas('grupo', function ($group) use ($search): void {
-                        $group->where('nombre', 'like', "%{$search}%")
-                            ->orWhere('area_operativa', 'like', "%{$search}%")
-                            ->orWhere('modulo', 'like', "%{$search}%");
+        foreach (SearchTerms::terms($search) as $term) {
+            $like = '%'.addcslashes($term, '\\%_').'%';
+            $query->where(function ($where) use ($like): void {
+                $where->where('alcance', 'like', $like)
+                    ->orWhere('unidad_carga', 'like', $like)
+                    ->orWhere('unidades_transporte', 'like', $like)
+                    ->orWhere('placas_asignadas', 'like', $like)
+                    ->orWhereHas('grupo', function ($group) use ($like): void {
+                        $group->where('nombre', 'like', $like)
+                            ->orWhere('area_operativa', 'like', $like)
+                            ->orWhere('modulo', 'like', $like);
                     })
-                    ->orWhereHas('grupo.rqMina', function ($rq) use ($search): void {
-                        $rq->where('area', 'like', "%{$search}%")
-                            ->orWhere('destino_nombre', 'like', "%{$search}%")
-                            ->orWhereHas('mina', fn ($mine) => $mine->where('nombre', 'like', "%{$search}%"));
+                    ->orWhereHas('grupo.rqMina', function ($rq) use ($like): void {
+                        $rq->where('area', 'like', $like)
+                            ->orWhere('destino_nombre', 'like', $like)
+                            ->orWhereHas('mina', fn ($mine) => $mine->where('nombre', 'like', $like));
                     });
             });
         }

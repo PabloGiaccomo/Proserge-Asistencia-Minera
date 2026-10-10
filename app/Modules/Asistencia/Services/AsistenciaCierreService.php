@@ -16,14 +16,6 @@ class AsistenciaCierreService
 {
     public function cerrar(Usuario $usuario, GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado, array $payload): array
     {
-        if ($encabezado->estado === 'CERRADO') {
-            return [
-                'ok' => false,
-                'code' => 'ASISTENCIA_ALREADY_CLOSED',
-                'message' => 'Asistencia ya cerrada',
-            ];
-        }
-
         $registradorId = $usuario->personal_id ?: $encabezado->supervisor_id ?: $grupo->supervisor_id;
         if (blank($registradorId)) {
             return [
@@ -33,31 +25,51 @@ class AsistenciaCierreService
             ];
         }
 
-        DB::transaction(function () use ($grupo, $encabezado, $payload, $registradorId): void {
-            $this->ensureDetalleCompleto($grupo, $encabezado);
+        return DB::transaction(function () use ($grupo, $encabezado, $payload, $registradorId): array {
+            $encabezadoBloqueado = AsistenciaEncabezado::query()
+                ->lockForUpdate()
+                ->find($encabezado->getKey());
 
-            $encabezado->fill([
+            if (! $encabezadoBloqueado) {
+                return [
+                    'ok' => false,
+                    'code' => 'ASISTENCIA_NOT_FOUND',
+                    'message' => 'Asistencia no existe para este grupo',
+                ];
+            }
+
+            if ($encabezadoBloqueado->estado === 'CERRADO') {
+                return [
+                    'ok' => false,
+                    'code' => 'ASISTENCIA_ALREADY_CLOSED',
+                    'message' => 'Asistencia ya cerrada',
+                ];
+            }
+
+            $this->ensureDetalleCompleto($grupo, $encabezadoBloqueado);
+
+            $encabezadoBloqueado->fill([
                 'estado' => 'CERRADO',
-                'actividad_realizada' => $payload['actividad_realizada'] ?? $encabezado->actividad_realizada,
-                'reporte_suceso' => $payload['reporte_suceso'] ?? $encabezado->reporte_suceso,
+                'actividad_realizada' => $payload['actividad_realizada'] ?? $encabezadoBloqueado->actividad_realizada,
+                'reporte_suceso' => $payload['reporte_suceso'] ?? $encabezadoBloqueado->reporte_suceso,
             ]);
-            $encabezado->save();
+            $encabezadoBloqueado->save();
 
             $ausentes = AsistenciaDetalle::query()
-                ->where('asistencia_id', $encabezado->id)
+                ->where('asistencia_id', $encabezadoBloqueado->id)
                 ->where('estado', 'AUSENTE')
                 ->get(['id', 'trabajador_id']);
 
             foreach ($ausentes as $item) {
                 $trabajadorId = (string) $item->trabajador_id;
                 $exists = Falta::query()
-                    ->where(function ($q) use ($item, $trabajadorId, $encabezado): void {
+                    ->where(function ($q) use ($item, $trabajadorId, $encabezadoBloqueado): void {
                         $q->where(function ($detailQuery) use ($item): void {
                             $detailQuery->where('asistencia_detalle_id', $item->id)
                                 ->where('motivo', 'INASISTENCIA_ASISTENCIA');
-                        })->orWhere(function ($legacyQuery) use ($trabajadorId, $encabezado): void {
+                        })->orWhere(function ($legacyQuery) use ($trabajadorId, $encabezadoBloqueado): void {
                             $legacyQuery->where('trabajador_id', $trabajadorId)
-                                ->where('fecha', $encabezado->fecha->toDateString())
+                                ->where('fecha', $encabezadoBloqueado->fecha->toDateString())
                                 ->where('motivo', 'INASISTENCIA_ASISTENCIA');
                         });
                     })
@@ -71,52 +83,65 @@ class AsistenciaCierreService
                 Falta::query()->create([
                     'id' => (string) Str::uuid(),
                     'trabajador_id' => $trabajadorId,
-                    'fecha' => $encabezado->fecha->toDateString(),
+                    'fecha' => $encabezadoBloqueado->fecha->toDateString(),
                     'motivo' => 'INASISTENCIA_ASISTENCIA',
                     'descripcion' => 'Generada automaticamente al cierre de asistencia',
                     'observaciones' => 'grupo_trabajo_id='.$grupo->id,
                     'estado' => 'ACTIVA',
                     'registrada_por_id' => $registradorId,
-                    'asistencia_encabezado_id' => $encabezado->id,
+                    'asistencia_encabezado_id' => $encabezadoBloqueado->id,
                     'asistencia_detalle_id' => $item->id,
-                    'destino_tipo' => $encabezado->destino_tipo,
-                    'destino_id' => $encabezado->destino_id,
+                    'destino_tipo' => $encabezadoBloqueado->destino_tipo,
+                    'destino_id' => $encabezadoBloqueado->destino_id,
                 ]);
             }
-        });
 
-        return ['ok' => true];
+            return ['ok' => true];
+        });
     }
 
-    public function reabrir(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): array
+    public function reabrir(Usuario $usuario, GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): array
     {
-        if ($encabezado->estado !== 'CERRADO') {
-            return [
-                'ok' => false,
-                'code' => 'ASISTENCIA_NOT_CLOSED',
-                'message' => 'Asistencia no esta cerrada',
-            ];
-        }
+        return DB::transaction(function () use ($usuario, $grupo, $encabezado): array {
+            $encabezadoBloqueado = AsistenciaEncabezado::query()
+                ->lockForUpdate()
+                ->find($encabezado->getKey());
 
-        DB::transaction(function () use ($grupo, $encabezado): void {
-            $encabezado->fill(['estado' => 'REGISTRADO']);
-            $encabezado->save();
+            if (! $encabezadoBloqueado) {
+                return [
+                    'ok' => false,
+                    'code' => 'ASISTENCIA_NOT_FOUND',
+                    'message' => 'Asistencia no existe para este grupo',
+                ];
+            }
+
+            if ($encabezadoBloqueado->estado !== 'CERRADO') {
+                return [
+                    'ok' => false,
+                    'code' => 'ASISTENCIA_NOT_CLOSED',
+                    'message' => 'Asistencia no esta cerrada',
+                ];
+            }
+
+            $encabezadoBloqueado->fill(['estado' => 'REGISTRADO']);
+            $encabezadoBloqueado->save();
 
             Falta::query()
-                ->where('asistencia_encabezado_id', $encabezado->id)
+                ->where('asistencia_encabezado_id', $encabezadoBloqueado->id)
                 ->where('motivo', 'INASISTENCIA_ASISTENCIA')
                 ->where('estado', 'ACTIVA')
                 ->update([
                     'estado' => 'ANULADA',
                     'motivo_anulacion' => 'Reapertura de asistencia',
+                    'anulado_por_usuario_id' => $usuario->id,
                     'anulado_at' => now(),
                     'updated_at' => now(),
                 ]);
 
-            $this->ensureDetalleCompleto($grupo, $encabezado);
-        });
+            $this->ensureDetalleCompleto($grupo, $encabezadoBloqueado);
 
-        return ['ok' => true];
+            return ['ok' => true];
+        });
     }
 
     private function ensureDetalleCompleto(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): void

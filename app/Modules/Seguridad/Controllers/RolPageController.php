@@ -7,6 +7,7 @@ use App\Models\Rol;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
+use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -192,6 +193,14 @@ class RolPageController extends Controller
             $validated['permisos'] = $rol && !$request->boolean('permisos_present')
                 ? ($rol->permisos ?? [])
                 : [];
+        }
+
+        // A submitted checkbox form replaces permissions; missing checks mean false.
+        if ($request->boolean('permisos_present')) {
+            $validated['permisos'] = array_replace_recursive(
+                PermissionCatalog::emptyMatrix(),
+                $validated['permisos'] ?? []
+            );
         }
 
         return $validated;

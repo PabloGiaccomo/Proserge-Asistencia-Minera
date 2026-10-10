@@ -31,7 +31,8 @@ class EppKardexService
         $operations = EppOperacion::query()
             ->with(['aceptacion', 'detalles.epp', 'operacionOrigen.aceptacion'])
             ->where('personal_id', $worker->id)
-            ->whereIn('almacen_id', $this->scope->visibleWarehouseIds($viewer))
+            ->where(fn ($query) => $query->whereIn('almacen_id', $this->scope->visibleWarehouseIds($viewer))
+                ->orWhere(fn ($catalog) => $catalog->whereNull('almacen_id')->where('resumen_json->origin', 'ENTREGAS_CAMBIOS')))
             ->whereIn('estado', [EppOperacion::ESTADO_FIRMADO, EppOperacion::ESTADO_FIRMADO_PARCIAL])
             ->orderByDesc('firmado_at')->orderByDesc('created_at')->get()
             ->map(function (EppOperacion $operation) use ($viewer): array {
@@ -46,6 +47,8 @@ class EppKardexService
                     'state' => (string) $operation->estado,
                     'evidence_state' => $verification['valid'] ? 'FIRMADO_VALIDO' : 'EVIDENCIA_INVALIDA',
                     'verification_code' => $acceptance?->codigo_verificacion,
+                    'evidence_url' => $acceptance ? route('epps.evidence.verify', $acceptance->codigo_verificacion, false) : null,
+                    'receipt_url' => $acceptance && Gate::forUser($viewer)->allows('downloadReceipt', $operation) ? route('epps.evidence.receipt', $operation, false) : null,
                     'signed_at' => $acceptance?->firmado_at?->toIso8601String() ?: $operation->firmado_at?->toIso8601String(),
                     'original_operation_id' => $operation->operacion_origen_id,
                     'content_hash' => $acceptance ? Str::limit($acceptance->contenido_sha256, 16, '') : null,

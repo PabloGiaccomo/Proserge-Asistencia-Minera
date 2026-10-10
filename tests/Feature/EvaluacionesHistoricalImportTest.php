@@ -526,7 +526,8 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $actor = $this->administrator();
         $files = $this->historicalBooks('91919191');
         try {
-            $preview = app(EvaluacionesHistoricalImportService::class)->preview($actor, $files);
+            $this->addSupervisorRow($files['control']);
+            $preview = app(EvaluacionesHistoricalImportService::class)->previewSupervisors($actor, $files['control']);
             $this->withSession($this->webSession($actor))
                 ->get(route('evaluaciones.historico.importar', ['lote' => $preview['lote_id'], 'estado' => 'blocked']))
                 ->assertOk()->assertSee('DNI inexistente')->assertSee('Aplicar carga')->assertSee('disabled', false);
@@ -551,12 +552,14 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $files = $this->historicalBooks('92929292');
         try {
             $this->withSession($this->webSession($actor))->get(route('evaluaciones.index'))->assertSee('Cargar datos históricos');
-            $preview = app(EvaluacionesHistoricalImportService::class)->preview($actor, $files);
+            $this->addSupervisorRow($files['control']);
+            $preview = app(EvaluacionesHistoricalImportService::class)->previewSupervisors($actor, $files['control']);
             $this->withSession($this->webSession($actor))->post(route('evaluaciones.historico.confirmar'), [
                 'lote_id' => $preview['lote_id'], 'hash' => $preview['hash'], 'confirmacion' => '1',
-            ])->assertRedirect(route('evaluaciones.index'))->assertSessionHas('success');
-            $this->withSession($this->webSession($actor))->get(route('evaluaciones.index'))->assertDontSee('Cargar datos históricos');
-            $this->assertDatabaseHas('promedio_desempeno', ['trabajador_id' => $worker, 'cantidad_evaluaciones' => 1, 'promedio_total' => 15]);
+            ])->assertRedirect(route('evaluaciones.index', ['tipo' => 'supervisores']))->assertSessionHas('success');
+            $this->withSession($this->webSession($actor))->get(route('evaluaciones.index'))->assertDontSee('Cargar datos históricos')->assertSee('Descargar reporte');
+            $this->assertDatabaseHas('evaluacion_supervisor', ['evaluado_id' => $worker, 'resultado_final' => 61]);
+            $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $worker]);
             $denied = $this->administrator(['evaluaciones' => ['evaluar_desempeno']]);
             $this->withSession($this->webSession($denied))->get(route('evaluaciones.historico.reporte', ['lote' => $preview['lote_id']]))->assertForbidden();
         } finally {
@@ -746,6 +749,60 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $this->assertEquals(61, $supervisor->resultado_final);
     }
 
+    public function test_review_resolves_personal_uuid_and_formatted_dni_automatically(): void
+    {
+        $worker = $this->personal('85671234');
+        $evaluator = $this->personal('85671235');
+        $rows = [];
+        foreach ([$worker, '85 671 234', '85.671.234', "'85671234", '85671234.00', '8.5671234E+7'] as $index => $reference) {
+            $rows[] = [
+                'type' => 'daily', 'source_file' => 'consolidado', 'source_sheet' => 'Consolidado',
+                'source_row' => $index + 2, 'dni_ref' => $reference, 'evaluator_ref' => $evaluator,
+                'date' => '2025-04-30', 'scores' => [3, 3, 3, 3, 3],
+            ];
+        }
+        $result = app(EvaluacionesHistoricalReconciler::class)->reconcile(['rows' => $rows]);
+        $this->assertCount(6, $result['proposed']);
+        $this->assertEmpty($result['blocked']);
+        foreach ($result['proposed'] as $row) {
+            $this->assertSame($worker, $row['trabajador_id']);
+            $this->assertSame('85671234', $row['dni']);
+            $this->assertSame($evaluator, $row['evaluador_id']);
+        }
+        $this->assertSame($worker, $result['proposed'][0]['dni_ref']);
+    }
+
+    public function test_review_blocks_conflicting_uuid_mapping_and_unknown_ids(): void
+    {
+        $worker = $this->personal('85671236');
+        $this->personal('85671237');
+        $base = ['type' => 'daily', 'source_file' => 'consolidado', 'source_sheet' => 'Consolidado',
+            'date' => '2025-04-30', 'scores' => [3, 3, 3, 3, 3]];
+        $result = app(EvaluacionesHistoricalReconciler::class)->reconcile([
+            'personal_map' => [$worker => '85671237'],
+            'rows' => [[...$base, 'source_row' => 2, 'dni_ref' => $worker],
+                [...$base, 'source_row' => 3, 'dni_ref' => (string) Str::uuid()],
+                [...$base, 'source_row' => 4, 'dni_ref' => '5671236'],
+                [...$base, 'source_row' => 5, 'dni_ref' => '8.56712360000000001E+7']],
+        ]);
+        $this->assertEmpty($result['proposed']);
+        $this->assertCount(4, $result['blocked']);
+    }
+
+    public function test_review_only_suggests_exact_name_match_without_assigning_identity(): void
+    {
+        $worker = $this->personal('85671238');
+        $result = app(EvaluacionesHistoricalReconciler::class)->reconcile(['rows' => [[
+            'type' => 'daily', 'source_file' => 'consolidado', 'source_sheet' => 'Consolidado',
+            'source_row' => 2, 'dni_ref' => 'REFERENCIA-DESCONOCIDA', 'name' => 'PERSONA HISTORICA',
+            'date' => '2025-04-30', 'scores' => [3, 3, 3, 3, 3],
+        ]]]);
+        $this->assertEmpty($result['proposed']);
+        $this->assertNull($result['blocked'][0]['trabajador_id']);
+        $this->assertSame($worker, $result['blocked'][0]['identity_suggestions'][0]['id']);
+        $this->assertSame('85671238', $result['blocked'][0]['identity_suggestions'][0]['dni']);
+    }
+
     private function webSession(Usuario $user): array
     {
         return ['auth_token' => 'test-token', 'user_id' => $user->id, 'user' => [
@@ -771,6 +828,18 @@ class EvaluacionesHistoricalImportTest extends TestCase
         ]);
 
         return Usuario::findOrFail($user);
+    }
+
+    private function addSupervisorRow(string $path): void
+    {
+        $book = IOFactory::load($path);
+        $values = array_fill(0, 36, null);
+        $values[0] = 'SUP-WEB'; $values[2] = 'OLD-PERSON'; $values[3] = '2025-12-15';
+        foreach (range(5, 30) as $column) { $values[$column] = 4; }
+        $values[31] = 61;
+        $book->getSheetByName('EV SUPERVISORES')->fromArray([$values], null, 'A2');
+        (new Xlsx($book))->save($path);
+        $book->disconnectWorksheets();
     }
 
     private function historicalBooks(string $dni): array

@@ -1,12 +1,16 @@
 import './bootstrap';
 import { initSignaturePads } from './modules/signature-pad';
 import { initEppOperations } from './modules/epp-operation';
+import { initEppDeliveryBatches } from './modules/epp-delivery-batch';
 
 window.initProsergeSignaturePads = initSignaturePads;
 document.addEventListener('DOMContentLoaded', () => {
     initSignaturePads();
     initEppOperations();
+    initEppDeliveryBatches();
 });
+import './modules/mining-convalidation';
+import './modules/mining-catalog-organization';
 
 window.loadProsergeBarcodeScanner = async function () {
     if (window.ProsergeBarcodeScanner) {
@@ -937,3 +941,4 @@ window.ProsergeUI.initClientPagination = function(options) {
         },
     };
 };
+import './modules/mining-scheduled-control.js';

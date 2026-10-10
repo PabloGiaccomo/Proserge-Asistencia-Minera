@@ -92,10 +92,13 @@ class EppOperationPolicy
 
     private function canAccessOperation(Usuario $usuario, EppOperacion $operacion, string $action): bool
     {
+        if ($operacion->isCatalogWorkflow() && ! in_array($action, ['ver_operaciones', 'confirmar_entrega', 'confirmar_devolucion', 'ver_evidencia', 'descargar_constancia'], true)) {
+            return false;
+        }
+
         return $this->can($usuario, $action)
-            && $operacion->almacen !== null
             && $operacion->personal !== null
-            && $this->scope->canAccessWarehouse($usuario, $operacion->almacen)
+            && ($operacion->isCatalogWorkflow() || ($operacion->almacen !== null && $this->scope->canAccessWarehouse($usuario, $operacion->almacen)))
             && $this->scope->canAccessPersonal($usuario, $operacion->personal);
     }
 }

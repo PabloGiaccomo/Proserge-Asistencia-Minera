@@ -129,7 +129,7 @@ class EvaluacionesApiTest extends TestCase
             'mina_id' => $minaId,
             'destino_tipo' => 'MINA',
             'destino_id' => $minaId,
-            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
         ]);
         $sup->assertStatus(201);
 
@@ -143,7 +143,7 @@ class EvaluacionesApiTest extends TestCase
             'mina_id' => $minaId,
             'destino_tipo' => 'MINA',
             'destino_id' => $minaId,
-            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'respuestas' => array_fill_keys(array_keys(\App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate::WEIGHTS), 4),
         ]);
         $supOk->assertStatus(422)->assertJsonPath('code', 'EVAL_SUP_DUPLICATED');
 

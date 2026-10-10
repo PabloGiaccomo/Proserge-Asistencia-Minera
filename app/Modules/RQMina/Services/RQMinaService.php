@@ -739,9 +739,7 @@ class RQMinaService
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
             || PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'administrar');
     }
 
@@ -1373,7 +1371,7 @@ class RQMinaService
                     'doc_proserge_path' => $transporte['doc_proserge_path'] ?? null,
                     'doc_mantenimiento_path' => $transporte['doc_mantenimiento_path'] ?? null,
                     'doc_checklist_path' => $transporte['doc_checklist_path'] ?? null,
-                    'documentos' => $this->encodeTransportDocuments($transporte['documentos'] ?? []),
+                    'documentos' => $this->normalizeTransportDocuments($transporte['documentos'] ?? []),
                 ]);
 
                 $transportesDelGrupo[] = (string) $nuevo->id;
@@ -1880,7 +1878,7 @@ class RQMinaService
                         'doc_proserge_path' => $transport->doc_proserge_path,
                         'doc_mantenimiento_path' => $transport->doc_mantenimiento_path,
                         'doc_checklist_path' => $transport->doc_checklist_path,
-                        'documentos' => is_array($transport->documentos) ? $transport->documentos : [],
+                        'documentos' => $this->normalizeTransportDocuments($transport->documentos) ?? [],
                     ],
                 ];
             }
@@ -2055,7 +2053,7 @@ class RQMinaService
         return $value === null || trim((string) $value) === '';
     }
 
-    private function encodeTransportDocuments(mixed $documents): ?string
+    private function normalizeTransportDocuments(mixed $documents): ?array
     {
         if (is_string($documents)) {
             $documents = json_decode($documents, true);
@@ -2066,7 +2064,7 @@ class RQMinaService
             ->values()
             ->all();
 
-        return $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
+        return $clean === [] ? null : $clean;
     }
 
     private function normalizedTransportSnapshots(array $groups): array

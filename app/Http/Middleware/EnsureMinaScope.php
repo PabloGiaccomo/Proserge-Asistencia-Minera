@@ -22,9 +22,7 @@ class EnsureMinaScope
             );
         }
 
-        $rolNombre = strtoupper((string) optional($usuario->rol)->nombre);
-
-        if (in_array($rolNombre, ['ADMIN', 'SUPERADMIN'], true)) {
+        if (array_intersect(\App\Support\Rbac\PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'SUPERADMIN'])) {
             return $next($request);
         }
 

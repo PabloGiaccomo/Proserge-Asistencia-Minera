@@ -40,7 +40,7 @@ class MiningExamIdentityResolver
             : [$examId];
     }
 
-    public function resolve(string $name, ?string $mineId = null, ?Collection $catalog = null): array
+    public function resolve(string $name, ?string $mineId = null, ?Collection $catalog = null, bool $allowInactive = false): array
     {
         $key = $this->normalizedName($name);
         $catalog ??= ExamenMinero::query()->get(['id', 'nombre', 'activo']);
@@ -57,18 +57,32 @@ class MiningExamIdentityResolver
         if (! $principals) {
             return $result;
         }
+        $groups = [];
+        $activePrincipals = [];
+        foreach ($principals as $principal) {
+            $groups[$principal] = $this->groupIds($principal);
+            if ($catalog->contains(fn ($exam) => $exam->activo && in_array($exam->id, $groups[$principal], true))) {
+                $activePrincipals[] = $principal;
+            }
+        }
+        if ($activePrincipals !== []) {
+            $principals = $activePrincipals;
+        } elseif (! $allowInactive) {
+            return $result;
+        }
         if (count($principals) !== 1) {
             return array_replace($result, ['status' => 'ambiguous']);
         }
         $principal = $principals[0];
-        $group = $this->groupIds($principal);
+        $group = $groups[$principal];
         $configured = $mineId ? MinaRequisito::query()->where('mina_id', $mineId)->where('activo', true)
             ->whereIn('examen_id', $group)->pluck('examen_id')->unique()->values()->all() : [];
         if (count($configured) > 1) {
             return array_replace($result, ['status' => 'ambiguous', 'candidates' => $configured, 'principal_id' => $principal]);
         }
-        $examId = $configured[0] ?? (count($group) > 1 ? $principal : ($ids[0] ?? $principal));
-        if (! $catalog->contains(fn ($exam) => $exam->id === $examId && $exam->activo)) {
+        $matchingIds = array_values(array_intersect($ids, $group));
+        $examId = $configured[0] ?? (count($group) > 1 ? $principal : ($matchingIds[0] ?? $principal));
+        if (! $catalog->contains(fn ($exam) => $exam->id === $examId && ($exam->activo || $allowInactive))) {
             return $result;
         }
 

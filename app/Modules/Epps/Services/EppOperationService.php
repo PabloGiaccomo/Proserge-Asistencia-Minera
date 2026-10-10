@@ -12,6 +12,7 @@ use App\Models\EppRegistro;
 use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Epps\Support\EppCanonicalPayload;
+use App\Modules\Epps\Support\EppDeliveryDeclaration;
 use App\Modules\Epps\Support\EppReservationBalanceException;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -363,7 +364,8 @@ class EppOperationService
             'schema_version' => 1, 'operation_id' => $operation->id, 'submission_uuid' => $operation->submission_uuid, 'revision' => $operation->version,
             'type' => $operation->tipo, 'state' => $operation->estado, 'registered_by' => $operation->registrado_por_usuario_id,
             'reason' => $operation->motivo, 'notes' => $operation->observacion,
-            'declaration_version' => $operation->tipo === 'DEVOLUCION' ? 'RETURN_V1' : 'DELIVERY_V1',
+            'declaration_version' => $operation->tipo === 'DEVOLUCION' ? 'RETURN_V1' : EppDeliveryDeclaration::VERSION,
+            ...($operation->tipo === 'ENTREGA' ? ['declaration_text' => EppDeliveryDeclaration::TEXT] : []),
             'worker' => $operation->resumen_json['worker'] ?? ['id' => $operation->personal_id, 'name' => $operation->personal->nombre_completo, 'document' => $operation->personal->dni],
             'warehouse' => $operation->resumen_json['warehouse'] ?? ['id' => $operation->almacen_id, 'name' => $operation->almacen->nombre, 'mine_id' => $operation->mina_id],
             'details' => $details->filter(fn ($detail) => $detail['processed_quantity'] > 0 && $detail['state'] !== 'RECHAZADO')->values()->all(),

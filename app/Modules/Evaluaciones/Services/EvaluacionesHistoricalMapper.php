@@ -2,6 +2,7 @@
 
 namespace App\Modules\Evaluaciones\Services;
 
+use App\Models\EvaluacionSupervisor;
 use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
 use Illuminate\Support\Facades\DB;
 
@@ -11,6 +12,7 @@ class EvaluacionesHistoricalMapper
     {
         $mapped = [];
         $blocked = $manifest['blocked'] ?? [];
+        $warnings = $manifest['warnings'] ?? [];
         $residentPeriods = [];
 
         foreach ($manifest['proposed'] ?? [] as $entry) {
@@ -47,6 +49,7 @@ class EvaluacionesHistoricalMapper
                 ];
             } elseif ($type === 'supervisor') {
                 $responses = [];
+                $missing = [];
                 foreach (array_keys(SupervisorEvaluationTemplate::WEIGHTS) as $index => $key) {
                     $raw = $values[$index + 5] ?? null;
                     if ($raw !== null && trim((string) $raw) !== '' && ! preg_match('/^[1-5]$/', trim((string) $raw))) {
@@ -54,6 +57,9 @@ class EvaluacionesHistoricalMapper
                         break;
                     }
                     $responses[$key] = $raw === null || trim((string) $raw) === '' ? 0 : (int) $raw;
+                    if ($raw === null || trim((string) $raw) === '') {
+                        $missing[] = $key;
+                    }
                 }
                 $score = $this->score($values[31] ?? null, 100);
                 if ($score === null) {
@@ -66,6 +72,7 @@ class EvaluacionesHistoricalMapper
                     'respuestas' => $responses,
                     'resultado_final' => $score,
                     'calculo_version' => 'HISTORICA',
+                    'estado' => $missing ? EvaluacionSupervisor::PENDING_REGULARIZATION : 'REGISTRADA',
                     'source_payload' => $values,
                     'source_mina' => $values[4] ?? null,
                     'source_evaluador' => $entry['evaluator_ref'] ?? null,
@@ -73,6 +80,9 @@ class EvaluacionesHistoricalMapper
                     'aspectos_positivos' => $values[33] ?? null,
                     'capacitaciones_recomendadas' => $values[34] ?? null,
                 ];
+                if ($missing) {
+                    $warnings[] = [...$entry, 'reason' => 'Pendiente de regularizacion: criterios sin dato '.implode(', ', $missing).'. Se conserva la nota original, fuera de indicadores hasta completar la revision.'];
+                }
             } elseif ($type === 'resident') {
                 $score = $this->score($values[10] ?? null, 20);
                 $leadership = $values[6] ?? null;
@@ -138,13 +148,14 @@ class EvaluacionesHistoricalMapper
                 $key = $entry['trabajador_id'].'|'.$entry['payload']['periodo_mes'];
                 if (count($residentPeriods[$key]) > 1 || isset($existingPeriods[$key])) {
                     $blocked[] = [...$entry, 'reason' => 'El residente ya tiene una evaluacion en ese periodo.'];
+
                     continue;
                 }
             }
             $proposed[] = $entry;
         }
 
-        return [...$manifest, 'proposed' => $proposed, 'blocked' => $blocked];
+        return [...$manifest, 'proposed' => $proposed, 'blocked' => $blocked, 'warnings' => $warnings];
     }
 
     private function score(mixed $value, int $maximum): ?float

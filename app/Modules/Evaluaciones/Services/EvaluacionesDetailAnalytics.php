@@ -13,7 +13,7 @@ class EvaluacionesDetailAnalytics
         $max = $type === 'supervisores' ? 100 : 20;
         $scores = $rows->pluck('score')->filter(fn ($v) => $this->valid($v, 0, $max))->values();
         $records = $rows->pluck('detail');
-        $historicalCount = $records->filter(fn ($r) => ($r['calculo_version'] ?? '') === 'HISTORICA' || ($r['origen'] ?? '') === 'HISTORICA')->count();
+        $historicalCount = $records->filter(fn ($r) => in_array($r['calculo_version'] ?? '', ['HISTORICA', 'REGULARIZADA'], true) || ($r['origen'] ?? '') === 'HISTORICA')->count();
         $charts = [];
         $extra = [];
         if ($type === 'desempeno') {

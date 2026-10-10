@@ -2,6 +2,7 @@
 
 namespace App\Modules\Evaluaciones\Requests;
 
+use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreEvaluacionSupervisorRequest extends FormRequest
@@ -22,12 +23,16 @@ class StoreEvaluacionSupervisorRequest extends FormRequest
             'asistencia_encabezado_id' => ['nullable', 'string', 'size:36', 'exists:asistencia_encabezado,id'],
             'destino_tipo' => ['required', 'string', 'in:MINA,TALLER,OFICINA'],
             'destino_id' => ['required', 'string', 'size:36'],
-            'respuestas' => ['required', 'array'],
-            'respuestas.*' => ['nullable', 'integer', 'min:1', 'max:5'],
+            ...SupervisorEvaluationTemplate::responseRules(),
             'comentarios_finales' => ['nullable', 'string'],
             'aspectos_positivos' => ['nullable', 'string'],
             'capacitaciones_recomendadas' => ['nullable', 'string'],
             'firma' => ['nullable', 'string'],
         ];
+    }
+
+    public function messages(): array
+    {
+        return SupervisorEvaluationTemplate::responseMessages();
     }
 }

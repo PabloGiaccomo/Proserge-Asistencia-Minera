@@ -106,6 +106,11 @@ class EppOperacion extends Model
         return $this->belongsTo(Personal::class, 'personal_id');
     }
 
+    public function isCatalogWorkflow(): bool
+    {
+        return $this->almacen_id === null && ($this->resumen_json['origin'] ?? null) === 'ENTREGAS_CAMBIOS';
+    }
+
     public function almacen(): BelongsTo
     {
         return $this->belongsTo(EppAlmacen::class, 'almacen_id');

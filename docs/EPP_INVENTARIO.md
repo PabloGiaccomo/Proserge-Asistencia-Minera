@@ -8,7 +8,10 @@ serie y cobertura. La categoria del articulo no determina su politica.
 
 ## Acceso operativo
 
-Logistica ofrece **Inventario por almacen** en `/epps/inventario`. Listar requiere
+La capacidad separada **Inventario por almacen** permanece en `/epps/inventario`;
+desde 2026-10-09 no se inserta como boton global ni bloquea Registrar entrega.
+El flujo habitual conserva Identificacion de items y anade firma sin exigir
+almacen. Ver `EPP_FIRMA_OPERATIVA.md`. Listar inventario requiere
 `epps.gestionar_inventario` o `epps.ajustar_inventario`; crear almacen, guardar
 catalogo y abrir stock requieren `gestionar_inventario`; ajustar requiere
 `ajustar_inventario`. Las rutas usan `web.auth` y permisos directos, y los

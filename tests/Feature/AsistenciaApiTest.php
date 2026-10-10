@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\AsistenciaEncabezado;
+use App\Models\GrupoTrabajo;
+use App\Models\Usuario;
+use App\Modules\Asistencia\Services\AsistenciaCierreService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -105,6 +109,29 @@ class AsistenciaApiTest extends TestCase
             'grupo_trabajo_id' => $grupoId,
             'destino_tipo' => 'MINA',
             'destino_id' => $minaId,
+        ]);
+    }
+
+    public function test_marcado_individual_usa_hora_del_servidor_aunque_cliente_envie_otra(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'PRESENTE',
+            'hora_marcado' => '05:15',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('asistencia_detalle', [
+            'trabajador_id' => $trabajadorId,
+            'hora_marcado' => '06:29:00',
+        ]);
+        $this->assertDatabaseMissing('asistencia_detalle', [
+            'trabajador_id' => $trabajadorId,
+            'hora_marcado' => '05:15:00',
         ]);
     }
 
@@ -344,6 +371,46 @@ class AsistenciaApiTest extends TestCase
         $second->assertStatus(422)->assertJsonPath('code', 'ASISTENCIA_ALREADY_CLOSED');
     }
 
+    public function test_cierre_revalida_el_estado_bloqueado_y_no_duplica_faltas(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/marcar', [
+            'personal_id' => $trabajadorId,
+            'estado' => 'AUSENTE',
+        ])->assertOk();
+
+        $encabezadoId = DB::table('asistencia_encabezado')->where('grupo_trabajo_id', $grupoId)->value('id');
+        $detalleId = DB::table('asistencia_detalle')
+            ->where('asistencia_id', $encabezadoId)
+            ->where('trabajador_id', $trabajadorId)
+            ->value('id');
+        $primeraInstancia = AsistenciaEncabezado::query()->findOrFail($encabezadoId);
+        $instanciaObsoleta = AsistenciaEncabezado::query()->findOrFail($encabezadoId);
+        $grupo = GrupoTrabajo::query()->findOrFail($grupoId);
+        $usuario = Usuario::query()->findOrFail($usuarioId);
+        $service = app(AsistenciaCierreService::class);
+
+        $primero = $service->cerrar($usuario, $grupo, $primeraInstancia, []);
+        $segundo = $service->cerrar($usuario, $grupo, $instanciaObsoleta, []);
+
+        $this->assertTrue($primero['ok']);
+        $this->assertFalse($segundo['ok']);
+        $this->assertSame('ASISTENCIA_ALREADY_CLOSED', $segundo['code']);
+        $this->assertSame(1, DB::table('faltas')
+            ->where('asistencia_detalle_id', $detalleId)
+            ->where('motivo', 'INASISTENCIA_ASISTENCIA')
+            ->where('estado', 'ACTIVA')
+            ->count());
+        $this->assertDatabaseHas('asistencia_encabezado', [
+            'id' => $encabezadoId,
+            'estado' => 'CERRADO',
+        ]);
+    }
+
     public function test_usuario_sin_scope_no_accede(): void
     {
         [, $grupoId] = $this->crearEscenarioGrupo();
@@ -376,6 +443,79 @@ class AsistenciaApiTest extends TestCase
 
         $reopen = $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/reabrir', []);
         $reopen->assertOk()->assertJsonPath('code', 'ASISTENCIA_REABRIR_OK');
+    }
+
+    public function test_reapertura_anula_solo_faltas_activas_generadas_y_registra_actor(): void
+    {
+        [$minaId, $grupoId] = $this->crearEscenarioGrupo();
+        $usuarioId = $this->crearUsuario();
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/cerrar', [])->assertOk();
+
+        $automatica = DB::table('faltas')
+            ->where('motivo', 'INASISTENCIA_ASISTENCIA')
+            ->where('estado', 'ACTIVA')
+            ->first();
+        $manualId = (string) Str::uuid();
+        $corregidaId = (string) Str::uuid();
+
+        DB::table('faltas')->insert([
+            'id' => $manualId,
+            'trabajador_id' => $automatica->trabajador_id,
+            'fecha' => $automatica->fecha,
+            'motivo' => 'REGISTRO_MANUAL',
+            'descripcion' => 'Falta manual que debe conservarse',
+            'estado' => 'ACTIVA',
+            'registrada_por_id' => $automatica->registrada_por_id,
+            'asistencia_encabezado_id' => $automatica->asistencia_encabezado_id,
+            'destino_tipo' => $automatica->destino_tipo,
+            'destino_id' => $automatica->destino_id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('faltas')->insert([
+            'id' => $corregidaId,
+            'trabajador_id' => $automatica->trabajador_id,
+            'fecha' => $automatica->fecha,
+            'motivo' => 'INASISTENCIA_ASISTENCIA',
+            'descripcion' => 'Falta automatica ya corregida',
+            'estado' => 'CORREGIDA',
+            'registrada_por_id' => $automatica->registrada_por_id,
+            'asistencia_encabezado_id' => $automatica->asistencia_encabezado_id,
+            'asistencia_detalle_id' => $automatica->asistencia_detalle_id,
+            'destino_tipo' => $automatica->destino_tipo,
+            'destino_id' => $automatica->destino_id,
+            'motivo_correccion' => 'Regularizacion previa',
+            'corregido_por_usuario_id' => $usuarioId,
+            'corregido_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withToken($token)
+            ->postJson('/api/v1/asistencia/grupos/'.$grupoId.'/reabrir', [])
+            ->assertOk()
+            ->assertJsonPath('code', 'ASISTENCIA_REABRIR_OK');
+
+        $this->assertDatabaseHas('faltas', [
+            'id' => $automatica->id,
+            'estado' => 'ANULADA',
+            'motivo_anulacion' => 'Reapertura de asistencia',
+            'anulado_por_usuario_id' => $usuarioId,
+        ]);
+        $this->assertNotNull(DB::table('faltas')->where('id', $automatica->id)->value('anulado_at'));
+        $this->assertDatabaseHas('faltas', ['id' => $manualId, 'estado' => 'ACTIVA']);
+        $this->assertDatabaseHas('faltas', [
+            'id' => $corregidaId,
+            'estado' => 'CORREGIDA',
+            'motivo_correccion' => 'Regularizacion previa',
+        ]);
+        $this->assertDatabaseHas('asistencia_encabezado', [
+            'id' => $automatica->asistencia_encabezado_id,
+            'estado' => 'REGISTRADO',
+        ]);
     }
 
     private function crearEscenarioGrupo(bool $withWorker = false): array

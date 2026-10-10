@@ -2,7 +2,7 @@
     $permissions = session('user.permissions', []);
     $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'configurar');
     $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'editar');
-    $canRegisterEpps = false;
+    $canRegisterEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'registrar');
     $canUpdateEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'actualizar');
     $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
     $canManageEpps = $canConfigureEpps || $canEditEpps || $canRegisterEpps;
@@ -233,16 +233,11 @@
             </div>
             <div class="epp-panel-header-actions">
                 <span class="epp-count">{{ $entregasTotal }} registros</span>
-                @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'preparar_entrega'))
-                    <a class="epp-btn epp-btn-primary epp-list-action" href="{{ route('epps.operations.create') }}">Nueva entrega multiple</a>
-                @endif
-                @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'preparar_devolucion'))
-                    <a class="epp-btn epp-list-action" href="{{ route('epps.operations.returns.create') }}">Devolucion multiple con firma</a>
-                @endif
                 @if($canRegisterEpps)
                     <button type="button" class="epp-btn epp-btn-primary epp-list-action" data-epp-open-modal="eppDeliveryModal">
                         + Registrar entrega
                     </button>
+                    <a class="epp-btn epp-list-action" href="{{ route('epps.catalog-returns.create') }}">Registrar devolucion</a>
                 @endif
             </div>
         </div>
@@ -269,6 +264,7 @@
                             $epp = $item['epp'];
                             $isActive = $entrega->estado === \App\Models\EppEntrega::ESTADO_ENTREGADO;
                             $isProtectedHistory = true;
+                            $canCloseDelivery = !$entrega->operacion_id || $entrega->operacion?->isCatalogWorkflow();
                             $editableEpps = collect($eppsActivos ?? []);
                             if ($epp && ! $editableEpps->contains('id', $epp->id)) {
                                 $editableEpps = $editableEpps->push($epp);
@@ -306,6 +302,7 @@
                             <td>
                                 <strong>{{ optional($entrega->fecha_entrega)->format('d/m/Y') }}</strong>
                                 <span>Cantidad: {{ $entrega->cantidad }}</span>
+                                @if($entrega->estado === 'ENTREGADO' && $entrega->politica_devolucion_snapshot === 'RETORNABLE')<span>Pendiente de devolucion: {{ $entrega->cantidad_pendiente_devolucion }}</span>@endif
                             </td>
                             <td>
                                 <strong>{{ optional($entrega->fecha_vencimiento_calendario)->format('d/m/Y') ?: '-' }}</strong>
@@ -349,7 +346,7 @@
                             </td>
                             <td class="epp-actions-cell">
                                 <div class="epp-row-actions">
-                                    @if($canRegisterEpps && $isActive && !$isProtectedHistory)
+                                    @if($canRegisterEpps && $isActive && $canCloseDelivery)
                                         <button type="button" class="epp-btn epp-btn-sm epp-btn-outline" data-epp-open-modal="eppCloseModal{{ $entrega->id }}" title="Registrar devolucion o cambio">
                                             Cerrar
                                         </button>
@@ -543,13 +540,16 @@
                                     @endif
 
                                     @if($isProtectedHistory)
-                                        @if($entrega->operacion_id)
+                                        @if($entrega->operacion?->isCatalogWorkflow())
+                                            @if($entrega->operacion->aceptacion)
+                                                @allowed('epps', 'ver_evidencia')<a class="epp-btn epp-btn-sm" href="{{ route('epps.evidence.verify', $entrega->operacion->aceptacion->codigo_verificacion) }}">Ver firma</a>@endallowed
+                                            @else<span class="epp-no-action">Evidencia no disponible</span>@endif
+                                            @allowed('epps', 'descargar_constancia')<a class="epp-btn epp-btn-sm" href="{{ route('epps.evidence.receipt', $entrega->operacion_id) }}">Constancia</a>@endallowed
+                                        @elseif($entrega->operacion_id)
                                             @if($entrega->cantidad_pendiente_devolucion > 0)@allowed('epps', 'corregir')<a class="epp-btn epp-btn-sm" href="{{ route('epps.deliveries.loss.form', $entrega) }}">Registrar perdida</a>@endallowed @endif
                                             @allowed('epps', 'ver_operaciones')<a class="epp-btn epp-btn-sm" href="{{ route('epps.operations.show', $entrega->operacion_id) }}">Ver lote y acciones</a>@endallowed
-                                        @elseif($entrega->cantidad_pendiente_devolucion > 0)
-                                            @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'corregir') || \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'anular'))<a class="epp-btn epp-btn-sm" href="{{ route('epps.legacy.form', $entrega) }}">Corregir / anular saldo legacy</a>@endif
                                         @endif
-                                        <span class="epp-no-action">{{ $entrega->es_legacy ? 'Legado sin firma: historial protegido' : 'Firmado: usa correccion o anulacion' }}</span>
+                                        @unless($entrega->operacion_id)<span class="epp-no-action">Registro anterior sin firma</span>@endunless
                                     @elseif(!$canRegisterEpps && !$canUpdateEpps && !$canDeleteEpps)
                                         <span class="epp-no-action">Sin accion</span>
                                     @endif
@@ -867,13 +867,14 @@
                 <div class="epp-modal-header">
                     <div>
                         <h2 id="eppDeliveryTitle">Registrar entrega</h2>
-                        <p>Anota quien recoge, que recoge y la fecha de entrega.</p>
+                        <p>Agrega los EPP del mismo trabajador y confirma todos con una sola firma.</p>
                     </div>
                     <button type="button" class="epp-modal-close" data-epp-close-modal aria-label="Cerrar">X</button>
                 </div>
                 <div class="epp-modal-body">
-                    <form method="POST" action="{{ route('epps.entregas.store') }}" class="epp-delivery-form epp-delivery-modal-form {{ old('_epp_replaces_entrega_id') ? 'is-change-replacement' : '' }}">
+                    <form method="POST" action="{{ route('epps.entregas.store') }}" class="epp-delivery-form epp-delivery-modal-form {{ old('_epp_replaces_entrega_id') ? 'is-change-replacement' : '' }}" @unless(old('_epp_replaces_entrega_id')) data-epp-batch-form @endunless>
                         @csrf
+                        <input type="hidden" name="submission_uuid" value="{{ old('submission_uuid', (string) \Illuminate\Support\Str::uuid()) }}">
                         @if(old('_epp_replaces_entrega_id'))
                             <input type="hidden" name="_epp_replaces_entrega_id" value="{{ old('_epp_replaces_entrega_id') }}">
                             <input type="hidden" name="_epp_replacement_fecha" value="{{ old('_epp_replacement_fecha') }}">
@@ -886,9 +887,10 @@
                         <input type="hidden" name="personal_id" id="eppPersonalId" value="{{ old('personal_id') }}">
                         <label class="epp-delivery-field epp-delivery-field-wide epp-autocomplete">
                             <span>Trabajador</span>
-                            <input type="search" id="eppPersonalSearch" autocomplete="off" placeholder="Buscar por nombre, DNI o puesto" value="{{ old('personal_label') }}">
+                            <input type="search" name="personal_label" id="eppPersonalSearch" autocomplete="off" placeholder="Buscar por nombre, DNI o puesto" value="{{ old('personal_label') }}">
                             <div class="epp-autocomplete-results" id="eppPersonalResults" hidden></div>
                         </label>
+                        <div class="epp-delivery-editor">
                         <label class="epp-delivery-field">
                             <span>EPP</span>
                             <select name="epp_id" id="eppSelect" required>
@@ -907,6 +909,7 @@
                             <span>Fecha de entrega</span>
                             <input type="date" name="fecha_entrega" value="{{ old('fecha_entrega', now()->toDateString()) }}" required>
                         </label>
+                        </div>
                         <aside class="epp-mini-kardex" id="eppLastDeliveryCard" aria-live="polite">
                             <div class="epp-mini-kardex-header">
                                 <span>Ultima entrega</span>
@@ -951,10 +954,20 @@
                             <span>Observacion</span>
                             <textarea name="observacion" rows="3" placeholder="Detalle opcional de entrega, talla, condicion o cambio">{{ old('observacion') }}</textarea>
                         </label>
+                        @unless(old('_epp_replaces_entrega_id'))
+                            <section class="epp-delivery-field-wide epp-batch-summary" data-epp-batch-summary hidden aria-label="Articulos pendientes de firma">
+                                <h3>EPP que recibira el trabajador (<span data-epp-batch-count>0</span>)</h3>
+                                <p>Estos articulos se revisaran juntos antes de firmar. Todavia no se han registrado.</p>
+                                <div data-epp-batch-list aria-live="polite"></div>
+                                <div data-epp-batch-inputs></div>
+                            </section>
+                            <p class="epp-delivery-field-wide epp-alert epp-alert-error" data-epp-batch-error role="alert" hidden></p>
+                            <script type="application/json" data-epp-batch-initial>@json(old('items', []))</script>
+                        @endunless
                         <div class="epp-delivery-submit-actions epp-delivery-field-wide">
-                            <button type="submit" class="epp-btn epp-btn-primary">Registrar entrega</button>
+                            <button type="submit" class="epp-btn epp-btn-primary">Continuar a la firma</button>
                             @unless(old('_epp_replaces_entrega_id'))
-                                <button type="submit" name="_epp_add_another" value="1" class="epp-btn epp-btn-secondary">Registrar y agregar otra</button>
+                                <button type="button" data-epp-add-to-batch class="epp-btn epp-btn-secondary">Agregar otro EPP</button>
                             @endunless
                         </div>
                     </form>

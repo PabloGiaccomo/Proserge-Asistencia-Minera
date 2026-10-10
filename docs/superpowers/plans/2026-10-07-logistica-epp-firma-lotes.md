@@ -1,5 +1,9 @@
 # Logistica EPP: Firma Movil, Lotes e Inventario Implementation Plan
 
+> Precision aprobada 2026-10-09: Agregar otro EPP acumula articulos del mismo trabajador ANTES de firmar. El resumen debe mostrar todos los articulos y caracteristicas; una sola firma confirma todo el grupo. No se firma cada articulo por separado. Ver [correccion de firma unica](../reports/2026-10-09-epp-firma-unica-varios-articulos.md).
+
+> Correccion de alcance 2026-10-09, confirmada por el usuario: conservar Entregas y cambios e Identificacion de items y agregar firma al formulario habitual, sin requisito de almacen ni botones globales. El inventario por lotes queda separado y no es requisito operativo. Ver `docs/EPP_FIRMA_OPERATIVA.md` y `docs/superpowers/reports/2026-10-09-epp-correccion-flujo-existente.md`. Las notas anteriores de exigir almacen/conteo para toda entrega quedan sustituidas por esta decision; Task 11 no queda aprobado para produccion.
+
 > Actualizacion 2026-10-09: el usuario autorizo integrar el flujo en la aplicacion local. Codigo integrado, dependencias instaladas y cinco migraciones EPP ejecutadas con respaldo; 3 entregas conservadas como legado sin firma. Falta configurar almacen/conteo real. Ver [integracion local](../reports/2026-10-09-epp-integracion-local.md). Esto no sustituye el ensayo aislado ni la aprobacion de produccion de Task 11.
 
 > Estado al 2026-10-08: Tasks 1-10 implementadas en `codex/epp-signed-operations-finish`; revision final corregida. Task 11 parcial: controles focalizados, navegador y build ejecutados; suite global/estilo global no estan en verde y falta ensayo sobre copia realista aislada. No aprobado para produccion. Ver [registro de verificacion](2026-10-07-logistica-epp-firma-lotes-verification.md). Los checks de Tasks 1-10 registran pasos ejecutados; las excepciones de verificacion transversal se detallan en ese registro.

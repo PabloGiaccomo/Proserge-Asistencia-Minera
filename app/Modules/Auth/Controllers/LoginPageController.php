@@ -40,7 +40,7 @@ class LoginPageController extends Controller
         }
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'personal:id,nombre_completo'])
+            ->with(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos', 'personal:id,nombre_completo'])
             ->where('email', $payload['email'])
             ->first();
 

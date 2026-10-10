@@ -71,7 +71,7 @@ class AppServiceProvider extends ServiceProvider
 
     private function notificationsAllowedForUser(string $userId): bool
     {
-        if ($userId === '') {
+        if ($userId === '' || ! PermissionMatrix::allowsDirect(session('user.permissions', []), 'notificaciones', 'ver')) {
             return false;
         }
 

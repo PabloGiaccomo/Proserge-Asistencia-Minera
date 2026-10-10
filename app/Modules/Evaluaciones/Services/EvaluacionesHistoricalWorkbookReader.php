@@ -8,11 +8,11 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 class EvaluacionesHistoricalWorkbookReader
 {
-    public function read(array $privatePaths): array
+    public function read(array $privatePaths, bool $supervisorsOnly = false): array
     {
         $result = ['rows' => [], 'personal_map' => [], 'attendance_headers' => [], 'issues' => []];
 
-        foreach (['control', 'consolidado'] as $required) {
+        foreach ($supervisorsOnly ? ['control'] : ['control', 'consolidado'] as $required) {
             if (! array_key_exists($required, $privatePaths)) {
                 $result['issues'][] = ['source' => $required, 'message' => 'Falta uno de los dos libros principales.'];
             }
@@ -27,14 +27,14 @@ class EvaluacionesHistoricalWorkbookReader
 
             $reader = IOFactory::createReaderForFile($path);
             $reader->setReadDataOnly(true);
-            $reader->setLoadSheetsOnly($source === 'control'
+            $reader->setLoadSheetsOnly($supervisorsOnly ? ['PERSONAL', 'EV SUPERVISORES'] : ($source === 'control'
                 ? ['PERSONAL', 'ASISTENCIA ENCABEZADO', 'ASISTENCIA DETALLE', 'EV DESEMPENO', 'EV SUPERVISORES', 'EV RESIDENTES']
-                : ['Consolidado']);
+                : ['Consolidado']));
             $workbook = $reader->load($path);
 
             try {
                 if ($source === 'control') {
-                    $this->readControl($workbook, $result);
+                    $this->readControl($workbook, $result, $supervisorsOnly);
                 } else {
                     $this->readConsolidado($workbook, $result);
                 }
@@ -46,7 +46,7 @@ class EvaluacionesHistoricalWorkbookReader
         return $result;
     }
 
-    private function readControl($workbook, array &$result): void
+    private function readControl($workbook, array &$result, bool $supervisorsOnly = false): void
     {
         $personal = $this->sheet($workbook, 'PERSONAL', [0 => 'Id', 1 => 'DNI'], $result);
         if ($personal) {
@@ -64,43 +64,45 @@ class EvaluacionesHistoricalWorkbookReader
             }
         }
 
-        $headers = $this->sheet($workbook, 'ASISTENCIA ENCABEZADO', [0 => 'Id Asistencia', 1 => 'Fecha'], $result);
-        if ($headers) {
-            foreach ($this->dataRows($headers) as [$line, $cells]) {
-                $id = trim((string) ($cells[0] ?? ''));
-                if ($id !== '') {
-                    $result['attendance_headers'][$id] = ['date' => $cells[1] ?? null, 'mine' => $cells[3] ?? null];
+        if (! $supervisorsOnly) {
+            $headers = $this->sheet($workbook, 'ASISTENCIA ENCABEZADO', [0 => 'Id Asistencia', 1 => 'Fecha'], $result);
+            if ($headers) {
+                foreach ($this->dataRows($headers) as [$line, $cells]) {
+                    $id = trim((string) ($cells[0] ?? ''));
+                    if ($id !== '') {
+                        $result['attendance_headers'][$id] = ['date' => $cells[1] ?? null, 'mine' => $cells[3] ?? null];
+                    }
                 }
             }
-        }
 
-        $detail = $this->sheet($workbook, 'ASISTENCIA DETALLE', [0 => 'Id Detalle', 2 => 'Id Asistencia', 3 => 'DNI Empleado'], $result);
-        if ($detail) {
-            foreach ($this->dataRows($detail) as [$line, $cells]) {
-                $result['rows'][] = [
-                    'type' => 'attendance', 'source_file' => 'control', 'source_sheet' => 'ASISTENCIA DETALLE',
-                    'source_row' => $line, 'source_id' => $cells[0] ?? null, 'date' => $cells[1] ?? null,
-                    'header_id' => $cells[2] ?? null, 'dni_ref' => $cells[3] ?? null,
-                ];
+            $detail = $this->sheet($workbook, 'ASISTENCIA DETALLE', [0 => 'Id Detalle', 2 => 'Id Asistencia', 3 => 'DNI Empleado'], $result);
+            if ($detail) {
+                foreach ($this->dataRows($detail) as [$line, $cells]) {
+                    $result['rows'][] = [
+                        'type' => 'attendance', 'source_file' => 'control', 'source_sheet' => 'ASISTENCIA DETALLE',
+                        'source_row' => $line, 'source_id' => $cells[0] ?? null, 'date' => $cells[1] ?? null,
+                        'header_id' => $cells[2] ?? null, 'dni_ref' => $cells[3] ?? null,
+                    ];
+                }
             }
-        }
 
-        $daily = $this->sheet($workbook, 'EV DESEMPENO', [1 => 'Fecha', 13 => 'DNI Empleado'], $result);
-        if ($daily) {
-            foreach ($this->dataRows($daily) as [$line, $cells]) {
-                $result['rows'][] = [
-                    'type' => 'daily', 'source_file' => 'control', 'source_sheet' => 'EV DESEMPENO',
-                    'source_row' => $line, 'source_id' => $cells[0] ?? null, 'date' => $cells[1] ?? null,
-                    'hora' => $cells[2] ?? null, 'mine' => $cells[3] ?? null, 'scores' => array_slice($cells, 5, 5),
-                    'source_total' => $cells[10] ?? null, 'observaciones' => $cells[11] ?? null,
-                    'evaluator_ref' => $cells[12] ?? null, 'dni_ref' => $cells[13] ?? null,
-                    'tuvo_incidencia' => $cells[14] ?? null, 'descripcion_incidencia' => $cells[15] ?? null,
-                    'detail_ref' => $cells[16] ?? null,
-                ];
+            $daily = $this->sheet($workbook, 'EV DESEMPENO', [1 => 'Fecha', 13 => 'DNI Empleado'], $result);
+            if ($daily) {
+                foreach ($this->dataRows($daily) as [$line, $cells]) {
+                    $result['rows'][] = [
+                        'type' => 'daily', 'source_file' => 'control', 'source_sheet' => 'EV DESEMPENO',
+                        'source_row' => $line, 'source_id' => $cells[0] ?? null, 'date' => $cells[1] ?? null,
+                        'hora' => $cells[2] ?? null, 'mine' => $cells[3] ?? null, 'scores' => array_slice($cells, 5, 5),
+                        'source_total' => $cells[10] ?? null, 'observaciones' => $cells[11] ?? null,
+                        'evaluator_ref' => $cells[12] ?? null, 'dni_ref' => $cells[13] ?? null,
+                        'tuvo_incidencia' => $cells[14] ?? null, 'descripcion_incidencia' => $cells[15] ?? null,
+                        'detail_ref' => $cells[16] ?? null,
+                    ];
+                }
             }
-        }
 
-        foreach (['EV SUPERVISORES' => 'supervisor', 'EV RESIDENTES' => 'resident'] as $sheetName => $type) {
+        }
+        foreach ($supervisorsOnly ? ['EV SUPERVISORES' => 'supervisor'] : ['EV SUPERVISORES' => 'supervisor', 'EV RESIDENTES' => 'resident'] as $sheetName => $type) {
             $sheet = $this->sheet($workbook, $sheetName,
                 $type === 'supervisor' ? [0 => 'Id EvSup', 3 => 'Fecha'] : [0 => 'Id EvRes', 1 => 'Fecha'], $result);
             if (! $sheet) {

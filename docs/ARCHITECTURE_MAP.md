@@ -45,6 +45,14 @@ Servicios:
 - `PersonalMinaHabilitacionService`: asignacion mina, requisitos, examenes,
   intentos, estados y convalidaciones.
 - `PersonalMinaExcelImportService`: lectura de master Excel de habilitacion.
+- `EmoAppointmentService`: agregado de cita EMO, enlaces por mina, resultado
+  atomico, bloqueo por trabajador, revision y regularizacion del legado.
+- `EmoClinicService` y `ExamOperationalCategoryService`: catalogos explicitos
+  con permisos; categoria con motivo/historial, sin clasificacion por nombre.
+- `PersonalMinaScheduledControlService`: union SQL de citas, cursos y legado;
+  filtros compartidos y agrupacion de filas fisicas antes de paginar/exportar.
+- `PersonalMinaScheduledControlExcelService`: XLSX autenticado de la misma
+  consulta, textos seguros y auditoria minima en `PersonalEmoExportAudit`.
 - `PersonalFichaMacroExtractor`, `PersonalFichaExportService`,
   `PersonalFichaPdfService`: extraccion, exportacion y ficha PDF.
 
@@ -59,6 +67,8 @@ Controladores:
 - `PersonalContratoDatoController`: datos de contrato y firmado.
 - `PersonalContratoFormatoController`: formatos Excel de contrato.
 - `PersonalMinaHabilitacionController`: habilitacion minera y master Excel.
+- `PersonalMinaScheduledControlExportController`: descarga con comprobacion
+  separada de `ver_programados` y `exportar`, delegando validacion/consulta.
 
 Vistas principales:
 
@@ -244,6 +254,32 @@ confirma firma/inventario/saldos; `EppCorrectionService` compensa sin borrar.
 `EppKardexService`, `EppReceiptPdfService`, `EppQrCodeService` y
 `EppEvidenceController` producen evidencia autenticada y verificable.
 Comando: `epp:backfill-legacy-traceability [--dry-run]`.
-El dashboard usa `es_requerido_cobertura`, existencias conciliadas y saldos
-retornables positivos. Las rutas individuales de escritura devuelven 409;
-no usarlas como flujo productivo. Firmas en disco privado `local`.
+Correccion operativa 2026-10-09: `EppDeliverySignatureService` agrega firma al
+formulario habitual de Entregas y cambios, con catalogo de Identificacion de
+items, sin exigir almacen ni apertura. Registrar/cerrar preparan una revision;
+solo la firma confirma el movimiento. Origen `ENTREGAS_CAMBIOS` y almacen nulo
+distinguen este flujo de las operaciones de inventario existentes. Editar/borrar
+historial permanece protegido. Kardex y PDF incluyen evidencia privada.
+Devolucion del catalogo: `EppCatalogReturnController` ->
+`EppCatalogReturnService` (seleccion y snapshots de saldos) ->
+`EppDeliverySignatureService` (aceptacion y descuento atomicos). Cada detalle
+referencia su entrega origen sin reemplazar su firma. Solo saldo cero cierra
+la entrega; no afecta inventario ni exige almacen.
+El dashboard conserva `es_requerido_cobertura` y saldos retornables positivos.
+
+La descarga operativa usa `EppKardexExcelService` y la plantilla SGC-FOR-59,
+con filas compactadas por fecha, movimiento y lote firmado, sin perder unidades.
+`EppKardexMovementService` comparte la lectura de movimientos con la pantalla;
+`EppKardexTemplateColumns` unifica columnas y `EppKardexRowGrouper` distribuye
+una unidad por columna y fila sin mezclar lotes. Las firmas se normalizan solo
+en la copia exportada. Solo se dibuja la ultima firma valida del trabajador
+relacionada con la hoja y el rango en el recuadro inferior, nunca en las filas.
+La pantalla pagina en servidor despues de agrupar (20/50/100). El agrupador
+indexa rangos de cantidad y materializa solo la ventana pedida; la lectura
+de metadatos sigue siendo completa para contar, con origen `lazy(100)`.
+La respuesta paginada omite entregas crudas y el listado tecnico de operaciones;
+el exportador conserva su rango completo y sus controles de evidencia.
+`EppDeliveryDeclaration` versiona el texto incluido en nuevos resumenes firmados.
+`SearchTerms` en Shared centraliza las busquedas por palabras sin orden; no
+reemplaza controles de permiso o alcance. El filtro operativo de mina en EPP
+consulta paradas RQ solapadas con el intervalo de uso, no habilitacion minera.

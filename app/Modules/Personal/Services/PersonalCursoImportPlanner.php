@@ -2,7 +2,10 @@
 
 namespace App\Modules\Personal\Services;
 
+use App\Models\ExamenMinero;
+use App\Models\PersonalEmoCita;
 use App\Models\PersonalMinaExamenIntento;
+use App\Modules\Personal\Support\EmoOutcome;
 use Illuminate\Support\Collection;
 
 /** Read-only reconciliation of course events within their explicit target mine. */
@@ -61,13 +64,17 @@ class PersonalCursoImportPlanner
             $row['linked_rows'] = [];
             $row['existing_attempt_ids'] = [];
             $row['matched_schedule'] = null;
-            if (!$row['issues'] && $row['personal_id'] && $row['examen_id'] && $row['type'] === 'Programacion') {
+            if (($row['operational_category'] ?? null) !== ExamenMinero::CATEGORIA_EMO
+                && !$row['issues'] && $row['personal_id'] && $row['examen_id'] && $row['type'] === 'Programacion') {
                 $schedules[$this->key($row['personal_id'], $row['examen_id'], $row['mina_id'])][$row['date']][] = $i;
             }
         }
         unset($row);
         foreach ($rows as $i => &$row) {
             if ($row['issues'] || !$row['personal_id'] || !$row['examen_id']) {
+                continue;
+            }
+            if (($row['operational_category'] ?? null) === ExamenMinero::CATEGORIA_EMO) {
                 continue;
             }
             $key = $this->key($row['personal_id'], $row['examen_id'], $row['mina_id']);
@@ -84,7 +91,10 @@ class PersonalCursoImportPlanner
                 continue;
             }
             $sameResultDate = $events->where('done', $row['date'])->where('result', '!=', 'PENDIENTE');
-            $result = in_array($row['result'], ['APTO', 'APROBADO', 'APTO CON RESTRICCION'], true) ? 'APROBADO' : 'DESAPROBADO';
+            $medical = EmoOutcome::fromLegacyText($row['result'] ?? '');
+            $result = $medical
+                ? $medical['outcome']->genericResult()
+                : (strtoupper((string) ($row['result'] ?? '')) === 'APROBADO' ? 'APROBADO' : 'DESAPROBADO');
             if ($sameResultDate->isNotEmpty()) {
                 $observation = \App\Modules\Personal\Support\CursoResultado::payload([
                     'resultado' => $row['result'], 'observacion' => $row['observation'] ?? '',
@@ -130,7 +140,8 @@ class PersonalCursoImportPlanner
         unset($row);
         $claimed = [];
         foreach ($rows as $i => $row) {
-            if ($row['type'] === 'Resultado' && !$row['issues'] && $row['matched_schedule']) {
+            if (($row['operational_category'] ?? null) !== ExamenMinero::CATEGORIA_EMO
+                && $row['type'] === 'Resultado' && !$row['issues'] && $row['matched_schedule']) {
                 $claimed[$this->key($row['personal_id'], $row['examen_id'], $row['mina_id']).'|'.$row['matched_schedule']][] = $i;
             }
         }
@@ -145,6 +156,188 @@ class PersonalCursoImportPlanner
             foreach ($rows[$resultIndex]['linked_rows'] as $scheduleIndex) {
                 $rows[$scheduleIndex]['action'] = 'Programacion vinculada a nota; no crear otro intento';
                 $rows[$scheduleIndex]['linked_rows'] = [$resultIndex];
+            }
+        }
+
+        return $this->reconcileEmo($rows);
+    }
+
+    private function reconcileEmo(array $rows): array
+    {
+        $workerIds = collect($rows)->where('operational_category', ExamenMinero::CATEGORIA_EMO)
+            ->pluck('personal_id')->filter()->unique()->values();
+        $dates = collect($rows)->where('operational_category', ExamenMinero::CATEGORIA_EMO)
+            ->map(fn (array $row) => $row['scheduled_date'] ?? ($row['type'] === 'Programacion' ? ($row['date'] ?? null) : null))
+            ->filter()->unique()->values();
+        $appointments = collect();
+        $legacySchedules = collect();
+        if ($workerIds->isNotEmpty() && $dates->isNotEmpty()) {
+            $appointments = PersonalEmoCita::query()
+                ->with(['intentos.examenTrabajador.asignacion'])
+                ->whereIn('personal_id', $workerIds)
+                ->whereIn('fecha_programacion', $dates)
+                ->get()
+                ->keyBy(fn (PersonalEmoCita $appointment): string => $appointment->personal_id.'|'.$appointment->fecha_programacion->toDateString());
+            // Match the central booking guard across all of the worker's mines
+            // and exact exam IDs, including historical inactive assignments.
+            $legacySchedules = PersonalMinaExamenIntento::query()
+                ->with('examenTrabajador.asignacion')
+                ->whereNull('emo_cita_id')
+                ->where('resultado', 'PENDIENTE')
+                ->whereIn('fecha_programacion', $dates)
+                ->whereHas('examenTrabajador', fn ($query) => $query
+                    ->whereHas('examen', fn ($catalog) => $catalog->where('categoria_operativa', ExamenMinero::CATEGORIA_EMO))
+                    ->whereHas('asignacion', fn ($assignment) => $assignment->whereIn('personal_id', $workerIds)))
+                ->get()
+                ->groupBy(fn ($attempt): string => $attempt->examenTrabajador->asignacion->personal_id.'|'.$attempt->fecha_programacion->toDateString());
+        }
+
+        $fileGroups = [];
+        foreach ($rows as $index => $row) {
+            if (($row['operational_category'] ?? null) !== ExamenMinero::CATEGORIA_EMO
+                || blank($row['personal_id'] ?? null) || blank($row['scheduled_date'] ?? null)) {
+                continue;
+            }
+            $fileGroups[$row['personal_id'].'|'.$row['scheduled_date']][] = $index;
+        }
+        foreach ($fileGroups as $indices) {
+            $clinicIds = collect($indices)->map(fn (int $index) => $rows[$index]['clinic_id'] ?? null)->filter()->unique();
+            if ($clinicIds->count() > 1) {
+                foreach ($indices as $index) {
+                    $this->conflict($rows[$index], 'El archivo intenta programar al trabajador el mismo dia en dos clinicas diferentes.');
+                }
+            }
+            $examIds = collect($indices)->map(fn (int $index) => $rows[$index]['examen_id'] ?? null)->filter()->unique();
+            if ($examIds->count() > 1) {
+                foreach ($indices as $index) {
+                    $this->conflict($rows[$index], 'La cita del mismo trabajador y dia solo admite exactamente el mismo examen EMO.');
+                }
+            }
+        }
+
+        foreach ($rows as &$row) {
+            if (($row['operational_category'] ?? null) !== ExamenMinero::CATEGORIA_EMO
+                || $row['issues'] || blank($row['personal_id'] ?? null) || blank($row['examen_id'] ?? null)) {
+                continue;
+            }
+            $scheduled = $row['scheduled_date'] ?? ($row['type'] === 'Programacion' ? ($row['date'] ?? null) : null);
+            if (!$scheduled || blank($row['clinic_id'] ?? null)) {
+                continue;
+            }
+            $key = $row['personal_id'].'|'.$scheduled;
+            /** @var PersonalEmoCita|null $appointment */
+            $appointment = $appointments->get($key);
+            if ($appointment) {
+                $row['appointment_id'] = $appointment->id;
+                $row['appointment_revision'] = $appointment->revision;
+            }
+            $fileScheduleIndexes = collect($fileGroups[$key] ?? [])->filter(fn (int $index) => $rows[$index]['type'] === 'Programacion'
+                && ($rows[$index]['examen_id'] ?? null) === $row['examen_id']
+                && ($rows[$index]['mina_id'] ?? null) === $row['mina_id']
+                && ($rows[$index]['clinic_id'] ?? null) === $row['clinic_id']);
+
+            if ($row['type'] === 'Programacion' && $legacySchedules->has($key)) {
+                $this->conflict($row, 'Existe un EMO historico sin clinica para ese dia. Regularice primero la programacion.');
+                continue;
+            }
+
+            if ($appointment && $appointment->clinica_id !== $row['clinic_id']) {
+                $this->conflict($row, 'Ya existe una cita EMO para el trabajador en otra clinica ese dia.');
+                continue;
+            }
+            if ($appointment) {
+                $linkedExamIds = $appointment->intentos->map(fn ($attempt) => $attempt->examenTrabajador?->examen_id)->filter()->unique();
+                if ($linkedExamIds->isNotEmpty() && ($linkedExamIds->count() !== 1 || $linkedExamIds->first() !== $row['examen_id'])) {
+                    $this->conflict($row, 'La cita existente corresponde a otro examen EMO y no puede compartirse.');
+                    continue;
+                }
+            }
+
+            if ($row['type'] === 'Programacion') {
+                $linked = $appointment?->intentos->first(fn ($attempt) => $attempt->examenTrabajador?->asignacion?->mina_id === $row['mina_id']
+                    && $attempt->examenTrabajador?->examen_id === $row['examen_id']);
+                if ($linked) {
+                    $row['existing_attempt_ids'] = [$linked->id];
+                    $row['appointment_action'] = 'Sin cambios';
+                    $row['action'] = 'Cita EMO ya registrada: no duplicar';
+                } elseif ($appointment && $appointment->estado !== PersonalEmoCita::ESTADO_PROGRAMADA) {
+                    $this->conflict($row, 'La cita EMO existente ya fue cerrada y no admite nuevas minas.');
+                } else {
+                    $row['appointment_action'] = $appointment ? 'Vincular mina a cita EMO' : 'Crear cita EMO';
+                    $row['action'] = $appointment ? 'Vincular mina a cita EMO' : 'Crear cita EMO';
+                }
+                continue;
+            }
+
+            if (!$appointment && $fileScheduleIndexes->isEmpty()) {
+                $this->conflict($row, 'No existe una cita EMO programada con esa fecha y clinica.');
+                continue;
+            }
+            if ($appointment) {
+                $linkedToMine = $appointment->intentos->contains(fn ($attempt) => $attempt->examenTrabajador?->asignacion?->mina_id === $row['mina_id']
+                    && $attempt->examenTrabajador?->examen_id === $row['examen_id']);
+                if (!$linkedToMine && $fileScheduleIndexes->isEmpty()) {
+                    $this->conflict($row, 'La mina indicada no esta vinculada a esta cita EMO.');
+                    continue;
+                }
+            }
+            if ($appointment && $appointment->estado === PersonalEmoCita::ESTADO_COMPLETADA) {
+                $expectedOutcome = str_replace(' ', '_', $row['result']);
+                $equivalent = $appointment->resultado_emo === $expectedOutcome
+                    && $appointment->fecha_realizacion?->toDateString() === ($row['performed_date'] ?? $row['date'])
+                    && trim((string) $appointment->detalle_resultado_emo) === trim((string) ($row['observation'] ?? ''))
+                    && $appointment->intentos->every(function ($attempt) use ($row): bool {
+                        // complete() persists scores according to each linked
+                        // worker-exam snapshot, rather than the current catalog.
+                        $score = $attempt->examenTrabajador?->requiere_nota_snapshot ? ($row['score'] ?? null) : null;
+                        $sameScore = ($attempt->nota === null && blank($score))
+                            || ($attempt->nota !== null && is_numeric($score) && (float) $attempt->nota === (float) $score);
+
+                        return $sameScore && (blank($row['expiry'] ?? null)
+                            || $attempt->examenTrabajador?->fecha_vencimiento?->toDateString() === $row['expiry']);
+                    });
+                if ($equivalent) {
+                    $row['appointment_action'] = 'Sin cambios';
+                    $row['action'] = 'Resultado EMO existente: omitir duplicado';
+                } else {
+                    $this->conflict($row, 'La cita EMO ya tiene un resultado diferente. No se sobrescribira.');
+                }
+                continue;
+            }
+            if ($appointment && $appointment->estado !== PersonalEmoCita::ESTADO_PROGRAMADA) {
+                $this->conflict($row, 'La cita EMO no esta disponible para registrar resultado.');
+                continue;
+            }
+            $row['appointment_action'] = 'Completar cita EMO';
+            $row['matched_schedule'] = $scheduled;
+            $row['action'] = 'Completar cita EMO';
+        }
+        unset($row);
+
+        $resultGroups = collect($rows)->keys()->filter(fn (int $index) => ($rows[$index]['operational_category'] ?? null) === ExamenMinero::CATEGORIA_EMO
+            && $rows[$index]['type'] === 'Resultado'
+            && $rows[$index]['issues'] === [])
+            ->groupBy(fn (int $index): string => implode('|', [
+                $rows[$index]['personal_id'], $rows[$index]['scheduled_date'],
+                $rows[$index]['clinic_id'], $rows[$index]['examen_id'],
+            ]));
+        foreach ($resultGroups as $indices) {
+            if ($indices->count() < 2) {
+                continue;
+            }
+            $payloads = $indices->map(fn (int $index): array => [
+                $rows[$index]['performed_date'], str_replace(' ', '_', $rows[$index]['result']),
+                $rows[$index]['score'], $rows[$index]['expiry'], trim((string) $rows[$index]['observation']),
+            ])->uniqueStrict();
+            if ($payloads->count() !== 1) {
+                foreach ($indices as $index) {
+                    $this->conflict($rows[$index], 'Varias filas intentan completar la misma cita EMO con resultados diferentes.');
+                }
+                continue;
+            }
+            foreach ($indices->skip(1) as $index) {
+                $rows[$index]['appointment_action'] = 'Sin cambios';
+                $rows[$index]['action'] = 'Resultado de cita EMO compartida: omitir duplicado';
             }
         }
 

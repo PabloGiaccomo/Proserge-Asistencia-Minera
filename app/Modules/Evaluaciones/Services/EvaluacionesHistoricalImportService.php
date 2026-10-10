@@ -31,7 +31,17 @@ class EvaluacionesHistoricalImportService
             && ! EvaluacionesImportLote::query()->where('confirmation_key', 'HISTORICAL')->exists();
     }
 
-    public function preview(Usuario $actor, array $paths): array
+    public function previewSupervisors(Usuario $actor, string $path): array
+    {
+        return $this->preview($actor, ['control' => $path], true);
+    }
+
+    public function confirmSupervisors(Usuario $actor, string $loteId, string $expectedHash): array
+    {
+        return $this->confirm($actor, $loteId, $expectedHash, true);
+    }
+
+    public function preview(Usuario $actor, array $paths, bool $supervisorsOnly = false): array
     {
         if (! $this->authorized($actor)) {
             return $this->error('EVAL_HIST_FORBIDDEN', 'No autorizado.');
@@ -39,7 +49,7 @@ class EvaluacionesHistoricalImportService
         if (! $this->isOpen()) {
             return $this->error('EVAL_HIST_CLOSED', 'La carga historica esta cerrada.');
         }
-        if (count($paths) !== 2 || ! isset($paths['control'], $paths['consolidado'])) {
+        if ($supervisorsOnly ? (count($paths) !== 1 || ! isset($paths['control'])) : (count($paths) !== 2 || ! isset($paths['control'], $paths['consolidado']))) {
             return $this->error('EVAL_HIST_FILES', 'Se requieren ambos libros historicos.');
         }
         foreach ($paths as $path) {
@@ -58,9 +68,9 @@ class EvaluacionesHistoricalImportService
         }
 
         try {
-            $storedPaths = $this->paths($base);
+            $storedPaths = $this->paths($base, $supervisorsOnly);
             $hash = $this->fileHash($storedPaths);
-            $manifest = $this->buildManifest($storedPaths);
+            $manifest = $this->buildManifest($storedPaths, $supervisorsOnly);
             $manifestPath = "{$base}/manifest.json";
             $encoded = json_encode($manifest, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
             if (! $disk->put($manifestPath, $encoded)) {
@@ -84,7 +94,7 @@ class EvaluacionesHistoricalImportService
         }
     }
 
-    public function confirm(Usuario $actor, string $loteId, string $expectedHash): array
+    public function confirm(Usuario $actor, string $loteId, string $expectedHash, bool $supervisorsOnly = false): array
     {
         if (! $this->authorized($actor)) {
             return $this->error('EVAL_HIST_FORBIDDEN', 'No autorizado.');
@@ -94,7 +104,7 @@ class EvaluacionesHistoricalImportService
         }
 
         try {
-            return DB::transaction(function () use ($actor, $loteId, $expectedHash): array {
+            return DB::transaction(function () use ($actor, $loteId, $expectedHash, $supervisorsOnly): array {
                 $batch = EvaluacionesImportLote::query()->whereKey($loteId)->lockForUpdate()->first();
                 if (! $batch || $batch->estado !== 'PREVIEW' || ! hash_equals((string) $batch->hash, $expectedHash)) {
                     return $this->error('EVAL_HIST_STALE', 'La revision ya no corresponde al lote actual.');
@@ -104,21 +114,25 @@ class EvaluacionesHistoricalImportService
                 }
 
                 $base = "evaluaciones-historicas/{$batch->id}";
-                $paths = $this->paths($base);
-                if (! hash_equals($expectedHash, $this->fileHash($paths))) {
-                    return $this->error('EVAL_HIST_CHANGED', 'Los archivos cambiaron desde la revision.');
-                }
-
                 $stored = Storage::disk('local')->get((string) $batch->manifest_path);
                 if (! is_string($stored)) {
                     return $this->error('EVAL_HIST_STALE', 'No se encontro el reporte revisado.');
                 }
                 $previous = json_decode($stored, true, 512, JSON_THROW_ON_ERROR);
+                if ($supervisorsOnly && (($previous['scope'] ?? null) !== 'SUPERVISORS'
+                    || collect($previous['proposed'] ?? [])->contains(fn ($row) => ($row['type'] ?? null) !== 'supervisor'))) {
+                    return $this->error('EVAL_HIST_SCOPE', 'Esta revision anterior incluye otros tipos. Revisa nuevamente solo el archivo de supervisores.');
+                }
+                $scopeIsSupervisors = ($previous['scope'] ?? null) === 'SUPERVISORS';
+                $paths = $this->paths($base, $scopeIsSupervisors);
+                if (! hash_equals($expectedHash, $this->fileHash($paths))) {
+                    return $this->error('EVAL_HIST_CHANGED', 'Los archivos cambiaron desde la revision.');
+                }
                 $workerIds = collect($previous['proposed'] ?? [])->pluck('trabajador_id')->filter()->unique()->sort()->values();
                 foreach ($workerIds as $workerId) {
                     Personal::query()->whereKey($workerId)->lockForUpdate()->firstOrFail();
                 }
-                $manifest = $this->buildManifest($paths);
+                $manifest = $this->buildManifest($paths, $scopeIsSupervisors);
                 if ($this->manifestHash($previous) !== $this->manifestHash($manifest)) {
                     return $this->error('EVAL_HIST_STALE', 'Los datos cambiaron. Revisa los libros nuevamente.');
                 }
@@ -175,9 +189,13 @@ class EvaluacionesHistoricalImportService
         return PermissionMatrix::userCanDirect($actor, 'evaluaciones', 'administrar');
     }
 
-    private function paths(string $base): array
+    private function paths(string $base, bool $supervisorsOnly = false): array
     {
         $disk = Storage::disk('local');
+
+        if ($supervisorsOnly) {
+            return ['control' => $disk->path("{$base}/control.xlsx")];
+        }
 
         return [
             'control' => $disk->path("{$base}/control.xlsx"),
@@ -196,9 +214,11 @@ class EvaluacionesHistoricalImportService
         return hash('sha256', implode('|', array_map('hash_file', array_fill(0, count($paths), 'sha256'), array_values($paths))));
     }
 
-    private function buildManifest(array $paths): array
+    private function buildManifest(array $paths, bool $supervisorsOnly = false): array
     {
-        return $this->mapper->map($this->reconciler->reconcile($this->reader->read($paths)));
+        $manifest = $this->mapper->map($this->reconciler->reconcile($this->reader->read($paths, $supervisorsOnly)));
+
+        return $supervisorsOnly ? [...$manifest, 'scope' => 'SUPERVISORS'] : $manifest;
     }
 
     private function manifestHash(array $manifest): string

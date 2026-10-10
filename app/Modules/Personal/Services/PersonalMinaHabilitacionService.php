@@ -9,6 +9,7 @@ use App\Models\MinaRequisito;
 use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalCursoRegistro;
+use App\Models\PersonalEmoCita;
 use App\Models\PersonalMinaExamen;
 use App\Models\PersonalMinaExamenIntento;
 use App\Models\PersonalMina;
@@ -16,6 +17,11 @@ use App\Models\PersonalMinaHistorial;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use App\Modules\Personal\Support\CompleteEmoData;
+use App\Modules\Personal\Support\EmoOrigin;
+use App\Modules\Personal\Support\EmoOutcome;
+use App\Modules\Personal\Support\ScheduleEmoData;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -33,6 +39,11 @@ class PersonalMinaHabilitacionService
     {
     }
 
+    private function operationalToday(): Carbon
+    {
+        return Carbon::today(config('app.display_timezone', 'America/Lima'));
+    }
+
     public function listAssignments(array $filters)
     {
         $perPage = $this->perPageFromFilters($filters);
@@ -46,7 +57,7 @@ class PersonalMinaHabilitacionService
                 'mina',
                 'actualizadoPor.personal',
                 'historial.usuario.personal',
-                'examenes.intentos',
+                'examenes.intentos.emoCita',
                 'examenes.requisitoMina',
                 'examenes.examen',
             ])
@@ -159,7 +170,7 @@ class PersonalMinaHabilitacionService
                     'mina',
                     'actualizadoPor.personal',
                     'historial.usuario.personal',
-                    'examenes.intentos',
+                    'examenes.intentos.emoCita',
                     'examenes.requisitoMina',
                     'examenes.examen',
                 ])
@@ -253,7 +264,7 @@ class PersonalMinaHabilitacionService
             return collect();
         }
 
-        $today = Carbon::today();
+        $today = $this->operationalToday();
         $until = $today->copy()->addDays(max(1, $days));
         $activeStates = [
             PersonalMinaExamen::ESTADO_APROBADO,
@@ -293,7 +304,8 @@ class PersonalMinaHabilitacionService
             ->map(function ($group) use ($today): array {
                 /** @var PersonalMinaExamen $first */
                 $first = $group->first();
-                $expiresAt = $first->fecha_vencimiento ? Carbon::parse($first->fecha_vencimiento) : null;
+                $expiresAt = $first->fecha_vencimiento
+                    ? Carbon::parse($first->fecha_vencimiento->toDateString(), $today->getTimezone()) : null;
 
                 return [
                     'worker' => $first->asignacion->personal,
@@ -331,7 +343,7 @@ class PersonalMinaHabilitacionService
             return collect();
         }
 
-        $today = Carbon::today();
+        $today = $this->operationalToday();
         $from = $today->copy()->subDays(30);
         $until = $today->copy()->addDays(max(1, $days));
 
@@ -373,7 +385,8 @@ class PersonalMinaHabilitacionService
                 /** @var PersonalMinaExamenIntento $firstAttempt */
                 $firstAttempt = $group->first();
                 $firstExam = $firstAttempt->examenTrabajador;
-                $scheduledAt = $firstAttempt->fecha_programacion ? Carbon::parse($firstAttempt->fecha_programacion) : null;
+                $scheduledAt = $firstAttempt->fecha_programacion
+                    ? Carbon::parse($firstAttempt->fecha_programacion->toDateString(), $today->getTimezone()) : null;
 
                 return [
                     'worker' => $firstExam->asignacion->personal,
@@ -505,6 +518,10 @@ class PersonalMinaHabilitacionService
         return DB::transaction(function () use ($payload, $user): MinaRequisito {
             Mina::query()->whereKey($payload['mina_id'] ?? null)->lockForUpdate()->first();
             $requirement = $this->storeRequirement($payload);
+            $requirement->forceFill([
+                'convalidacion_configurada_por_id' => $user->id,
+                'convalidacion_configurada_at' => now(),
+            ])->save();
             app(MineRequirementSyncService::class)->request($requirement->mina_id, $user);
 
             return $requirement;
@@ -551,6 +568,9 @@ class PersonalMinaHabilitacionService
             'orden' => $this->positiveIntegerOrNull($payload['orden'] ?? null) ?? 0,
             'permite_no_aplica' => filter_var($payload['permite_no_aplica'] ?? true, FILTER_VALIDATE_BOOLEAN),
             'permite_convalidacion_mina' => filter_var($payload['permite_convalidacion_mina'] ?? $exam->permite_convalidacion ?? false, FILTER_VALIDATE_BOOLEAN),
+            'examenes_equivalentes_json' => $this->normalizeEquivalentExams($payload['examenes_equivalentes'] ?? [], $exam->id),
+            'convalidacion_configurada_por_id' => $user?->id,
+            'convalidacion_configurada_at' => $user ? now() : null,
             'fecha_inicio_convalidacion' => PersonalNormalizer::isoDate($payload['fecha_inicio_convalidacion'] ?? null),
             'fecha_fin_convalidacion' => PersonalNormalizer::isoDate($payload['fecha_fin_convalidacion'] ?? null),
             'convalidar_desde_otras_minas' => filter_var($payload['convalidar_desde_otras_minas'] ?? false, FILTER_VALIDATE_BOOLEAN),
@@ -564,6 +584,34 @@ class PersonalMinaHabilitacionService
         }
 
         return $requirement;
+    }
+
+    private function normalizeEquivalentExams(array $ids, string $targetExamId): array
+    {
+        $ids = array_values(array_unique(array_filter($ids)));
+        if (in_array($targetExamId, $ids, true)
+            || ExamenMinero::query()->where('activo', true)->whereIn('id', $ids)->count() !== count($ids)) {
+            throw ValidationException::withMessages(['examenes_equivalentes' => 'Selecciona examenes activos diferentes del examen destino.']);
+        }
+
+        return $ids;
+    }
+
+    public function configureConvalidation(MinaRequisito $requirement, array $payload, Usuario $user): void
+    {
+        DB::transaction(function () use ($requirement, $payload, $user): void {
+            $requirement = MinaRequisito::query()->lockForUpdate()->findOrFail($requirement->id);
+            if (!$requirement->activo) {
+                throw ValidationException::withMessages(['requisito' => 'El requisito ya no esta activo.']);
+            }
+            $requirement->forceFill([
+                'permite_convalidacion_mina' => (bool) ($payload['permite_convalidacion_mina'] ?? false),
+                'convalidar_desde_otras_minas' => (bool) ($payload['convalidar_desde_otras_minas'] ?? false),
+                'examenes_equivalentes_json' => $this->normalizeEquivalentExams($payload['examenes_equivalentes'] ?? [], $requirement->examen_id),
+                'convalidacion_configurada_por_id' => $user->id,
+                'convalidacion_configurada_at' => now(),
+            ])->save();
+        });
     }
 
     public function storeMiningExam(array $payload, Usuario $user): ExamenMinero
@@ -585,7 +633,7 @@ class PersonalMinaHabilitacionService
                 $this->storeExamPrice($exam, [
                     'precio' => $payload['precio'],
                     'moneda' => $payload['moneda'] ?? 'PEN',
-                    'fecha_inicio' => $payload['precio_desde'] ?? Carbon::today()->toDateString(),
+                    'fecha_inicio' => $payload['precio_desde'] ?? $this->operationalToday()->toDateString(),
                     'observacion' => $payload['observacion_precio'] ?? 'Precio inicial del examen.',
                 ], $user);
             }
@@ -616,6 +664,7 @@ class PersonalMinaHabilitacionService
         }
 
         return DB::transaction(function () use ($exam, $payload, $user, $price, $start, $end): ExamenMineroPrecio {
+            $exam = ExamenMinero::query()->whereKey($exam->id)->lockForUpdate()->firstOrFail();
             ExamenMineroPrecio::query()
                 ->where('examen_id', $exam->id)
                 ->whereNull('fecha_fin')
@@ -698,7 +747,7 @@ class PersonalMinaHabilitacionService
                 $this->storeExamPrice($exam, [
                     'precio' => $normalized['precio'],
                     'moneda' => $normalized['moneda'],
-                    'fecha_inicio' => $normalized['precio_desde'] ?: Carbon::today()->toDateString(),
+                    'fecha_inicio' => $normalized['precio_desde'] ?: $this->operationalToday()->toDateString(),
                     'observacion' => $payload['observacion_precio'] ?? 'Actualizacion de precio del examen.',
                 ], $user);
             }
@@ -727,9 +776,11 @@ class PersonalMinaHabilitacionService
         $this->assertCeasedWorkerConfirmation($personal, $state, $payload);
 
         return DB::transaction(function () use ($personal, $mina, $state, $payload, $user, $notify): PersonalMina {
+            Personal::query()->whereKey($personal->id)->lockForUpdate()->firstOrFail();
             $existing = PersonalMina::query()
                 ->where('personal_id', $personal->id)
                 ->where('mina_id', $mina->id)
+                ->lockForUpdate()
                 ->first();
 
             if ($existing && (bool) ($existing->activo ?? true)) {
@@ -738,7 +789,7 @@ class PersonalMinaHabilitacionService
                 ]);
             }
 
-            $date = PersonalNormalizer::isoDate($payload['fecha_asignacion'] ?? null) ?: Carbon::today()->toDateString();
+            $date = PersonalNormalizer::isoDate($payload['fecha_asignacion'] ?? null) ?: $this->operationalToday()->toDateString();
             $observation = mb_substr(PersonalNormalizer::text($payload['observacion'] ?? ''), 0, 5000) ?: null;
 
             $relation = $existing ?: new PersonalMina([
@@ -754,7 +805,7 @@ class PersonalMinaHabilitacionService
                 'fecha_asignacion' => $date,
                 'fecha_inicio_proceso' => PersonalNormalizer::isoDate($payload['fecha_inicio_proceso'] ?? null) ?: $date,
                 'fecha_habilitacion' => $state === PersonalMina::ESTADO_HABILITADO
-                    ? (PersonalNormalizer::isoDate($payload['fecha_habilitacion'] ?? null) ?: Carbon::today()->toDateString())
+                    ? (PersonalNormalizer::isoDate($payload['fecha_habilitacion'] ?? null) ?: $this->operationalToday()->toDateString())
                     : null,
                 'observacion' => $observation,
                 'activo' => true,
@@ -779,64 +830,70 @@ class PersonalMinaHabilitacionService
 
     public function updateAssignment(PersonalMina $relation, array $payload, Usuario $user): PersonalMina
     {
-        $relation = PersonalMina::query()
-            ->with('personal')
-            ->findOrFail($relation->id);
+        return DB::transaction(function () use ($relation, $payload, $user): PersonalMina {
+            $relation = PersonalMina::query()
+                ->with('personal')
+                ->lockForUpdate()
+                ->findOrFail($relation->id);
 
-        if (!(bool) ($relation->activo ?? true)) {
-            throw ValidationException::withMessages(['asignacion' => 'La asignacion esta inactiva. Reactivala antes de cambiar su estado.']);
-        }
-
-        $state = $this->normalizeHabilitationState($payload['estado_habilitacion'] ?? $relation->estadoHabilitacionActual());
-        $this->assertCeasedWorkerConfirmation($relation->personal, $state, $payload);
-        $previousState = $relation->estadoHabilitacionActual();
-        $observation = mb_substr(PersonalNormalizer::text($payload['observacion'] ?? $relation->observacion ?? ''), 0, 5000) ?: null;
-
-        if ($state === PersonalMina::ESTADO_HABILITADO) {
-            $calculated = $this->calculatedAssignmentStatus($relation);
-
-            if ($calculated !== PersonalMina::ESTADO_HABILITADO) {
-                throw ValidationException::withMessages([
-                    'estado_habilitacion' => 'No se puede marcar como habilitado hasta que tenga examenes generados y todos los requisitos esten resueltos.',
-                ]);
+            if (!(bool) ($relation->activo ?? true)) {
+                throw ValidationException::withMessages(['asignacion' => 'La asignacion esta inactiva. Reactivala antes de cambiar su estado.']);
             }
-        }
 
-        $relation->forceFill([
-            'estado' => $state,
-            'estado_habilitacion' => $state,
-            'fecha_inicio_proceso' => PersonalNormalizer::isoDate($payload['fecha_inicio_proceso'] ?? null) ?: $relation->fecha_inicio_proceso,
-            'fecha_habilitacion' => $state === PersonalMina::ESTADO_HABILITADO
-                ? (PersonalNormalizer::isoDate($payload['fecha_habilitacion'] ?? null) ?: optional($relation->fecha_habilitacion)->toDateString() ?: Carbon::today()->toDateString())
-                : null,
-            'observacion' => $observation,
-            'usuario_actualizacion_id' => $user->id,
-        ])->save();
+            $state = $this->normalizeHabilitationState($payload['estado_habilitacion'] ?? $relation->estadoHabilitacionActual());
+            $this->assertCeasedWorkerConfirmation($relation->personal, $state, $payload);
+            $previousState = $relation->estadoHabilitacionActual();
+            $observation = mb_substr(PersonalNormalizer::text($payload['observacion'] ?? $relation->observacion ?? ''), 0, 5000) ?: null;
 
-        $this->recordHistory($relation, $previousState, $state, $observation, $user);
-        $this->operationalNotifications->habilitacionAsignacion(
-            $relation->fresh(['personal', 'mina']) ?: $relation,
-            $user,
-            $previousState
-        );
+            if ($state === PersonalMina::ESTADO_HABILITADO) {
+                $relation->setRelation('examenes', $relation->examenes()->lockForUpdate()->get());
+                $calculated = $this->calculateAssignmentStatus($relation);
 
-        return $relation->fresh(['personal.contratoLaboralActual', 'mina', 'actualizadoPor.personal', 'historial.usuario.personal']);
+                if ($calculated !== PersonalMina::ESTADO_HABILITADO) {
+                    throw ValidationException::withMessages([
+                        'estado_habilitacion' => 'No se puede marcar como habilitado hasta que tenga examenes generados y todos los requisitos esten resueltos.',
+                    ]);
+                }
+            }
+
+            $relation->forceFill([
+                'estado' => $state,
+                'estado_habilitacion' => $state,
+                'fecha_inicio_proceso' => PersonalNormalizer::isoDate($payload['fecha_inicio_proceso'] ?? null) ?: $relation->fecha_inicio_proceso,
+                'fecha_habilitacion' => $state === PersonalMina::ESTADO_HABILITADO
+                    ? (PersonalNormalizer::isoDate($payload['fecha_habilitacion'] ?? null) ?: optional($relation->fecha_habilitacion)->toDateString() ?: $this->operationalToday()->toDateString())
+                    : null,
+                'observacion' => $observation,
+                'usuario_actualizacion_id' => $user->id,
+            ])->save();
+
+            $this->recordHistory($relation, $previousState, $state, $observation, $user);
+            $this->operationalNotifications->habilitacionAsignacion(
+                $relation->fresh(['personal', 'mina']) ?: $relation,
+                $user,
+                $previousState
+            );
+
+            return $relation->load(['personal.contratoLaboralActual', 'mina', 'actualizadoPor.personal', 'historial.usuario.personal']);
+        }, 3);
     }
 
     public function deactivateAssignment(PersonalMina $relation, Usuario $user, ?string $observation = null): PersonalMina
     {
-        $relation = PersonalMina::query()->findOrFail($relation->id);
-        $previousState = $relation->estadoHabilitacionActual();
+        return DB::transaction(function () use ($relation, $user, $observation): PersonalMina {
+            $relation = PersonalMina::query()->lockForUpdate()->findOrFail($relation->id);
+            $previousState = $relation->estadoHabilitacionActual();
 
-        $relation->forceFill([
-            'activo' => false,
-            'observacion' => mb_substr(PersonalNormalizer::text($observation ?? $relation->observacion ?? ''), 0, 5000) ?: $relation->observacion,
-            'usuario_actualizacion_id' => $user->id,
-        ])->save();
+            $relation->forceFill([
+                'activo' => false,
+                'observacion' => mb_substr(PersonalNormalizer::text($observation ?? $relation->observacion ?? ''), 0, 5000) ?: $relation->observacion,
+                'usuario_actualizacion_id' => $user->id,
+            ])->save();
 
-        $this->recordHistory($relation, $previousState, $previousState, 'Asignacion desactivada. ' . trim((string) $observation), $user);
+            $this->recordHistory($relation, $previousState, $previousState, 'Asignacion desactivada. ' . trim((string) $observation), $user);
 
-        return $relation->fresh(['personal', 'mina']);
+            return $relation->fresh(['personal', 'mina']);
+        }, 3);
     }
 
     public function generateRequiredExams(
@@ -850,7 +907,15 @@ class PersonalMinaHabilitacionService
             return 0;
         }
 
-        $relation = PersonalMina::query()->with('mina')->findOrFail($relation->id);
+        return DB::transaction(
+            fn (): int => $this->generateRequiredExamsLocked($relation, $user, $notify, $recalculate),
+            3,
+        );
+    }
+
+    private function generateRequiredExamsLocked(PersonalMina $relation, Usuario $user, bool $notify, bool $recalculate): int
+    {
+        $relation = PersonalMina::query()->with('mina')->lockForUpdate()->findOrFail($relation->id);
         $requirements = MinaRequisito::query()
             ->with('examen')
             ->where('mina_id', $relation->mina_id)
@@ -866,11 +931,30 @@ class PersonalMinaHabilitacionService
                 continue;
             }
 
-            $exists = PersonalMinaExamen::query()
+            $existing = PersonalMinaExamen::query()
                 ->where('personal_mina_id', $relation->id)
                 ->where('examen_id', $exam->id)
-                ->exists();
-            if ($exists) {
+                ->lockForUpdate()
+                ->first();
+            if ($existing) {
+                if (!$existing->requisitoMina?->activo) {
+                    DB::transaction(function () use ($existing, $requirement, $relation, $user): void {
+                        $locked = PersonalMinaExamen::query()->lockForUpdate()->findOrFail($existing->id);
+                        if ($locked->requisitoMina?->activo) {
+                            return;
+                        }
+                        $previousRequirement = $locked->mina_requisito_id;
+                        $locked->forceFill([
+                            'mina_requisito_id' => $requirement->id,
+                            'usuario_actualizacion_id' => $user->id,
+                            'fecha_actualizacion' => now(),
+                        ])->save();
+                        $state = $relation->estadoHabilitacionActual();
+                        $this->recordHistory($relation, $state, $state,
+                            'Requisito reincorporado: '.$locked->nombre_snapshot.'. Referencia anterior: '
+                                .$previousRequirement.'. Referencia actual: '.$requirement->id, $user);
+                    });
+                }
                 continue;
             }
 
@@ -889,6 +973,16 @@ class PersonalMinaHabilitacionService
 
     public function syncCourseRecordToMines(PersonalCursoRegistro $record, Usuario $user): array
     {
+        return DB::transaction(fn (): array => $this->syncCourseRecordToMinesLocked($record, $user), 3);
+    }
+
+    private function syncCourseRecordToMinesLocked(PersonalCursoRegistro $record, Usuario $user): array
+    {
+        if (blank($record->mina_id)) {
+            throw ValidationException::withMessages([
+                'archivo' => 'El curso historico no tiene mina de origen. Revise su trazabilidad antes de aplicarlo.',
+            ]);
+        }
         if (!Schema::hasColumn('personal_mina_examen_intentos', 'personal_curso_registro_id')) {
             throw ValidationException::withMessages([
                 'archivo' => 'Falta instalar la migracion que vincula cursos con habilitacion minera.',
@@ -898,7 +992,7 @@ class PersonalMinaHabilitacionService
         $mineIds = MinaRequisito::query()
             ->where('examen_id', $record->examen_id)
             ->where('activo', true)
-            ->when($record->mina_id, fn ($query) => $query->where('mina_id', $record->mina_id))
+            ->where('mina_id', $record->mina_id)
             ->pluck('mina_id')
             ->unique()
             ->values();
@@ -913,7 +1007,7 @@ class PersonalMinaHabilitacionService
         }
 
         $assignments = PersonalMina::query()
-            ->with(['examenes.intentos', 'mina'])
+            ->with('mina')
             ->where('personal_id', $record->personal_id)
             ->where('activo', true)
             ->whereIn('mina_id', $mineIds)
@@ -924,7 +1018,10 @@ class PersonalMinaHabilitacionService
         $updated = 0;
         $generated = 0;
         foreach ($assignments as $assignment) {
-            $workerExam = $assignment->examenes->firstWhere('examen_id', $record->examen_id);
+            $workerExam = PersonalMinaExamen::query()
+                ->where('personal_mina_id', $assignment->id)
+                ->where('examen_id', $record->examen_id)
+                ->lockForUpdate()->first();
             if (!$workerExam) {
                 $requirement = MinaRequisito::query()
                     ->where('mina_id', $assignment->mina_id)
@@ -941,6 +1038,7 @@ class PersonalMinaHabilitacionService
                 $workerExam->load('intentos');
                 $generated++;
             }
+            $workerExam->setRelation('asignacion', $assignment);
 
             if ($this->syncCourseRecordToWorkerExam($record, $workerExam, $user)) {
                 $updated++;
@@ -954,12 +1052,14 @@ class PersonalMinaHabilitacionService
     private function syncCourseRecordsForAssignment(PersonalMina $assignment, Usuario $user): void
     {
         if (!Schema::hasTable('personal_curso_registros')
+            || !Schema::hasColumn('personal_curso_registros', 'mina_id')
             || !Schema::hasColumn('personal_mina_examen_intentos', 'personal_curso_registro_id')) {
             return;
         }
 
         $examIds = PersonalMinaExamen::query()
             ->where('personal_mina_id', $assignment->id)
+            ->lockForUpdate()
             ->pluck('examen_id')
             ->filter()
             ->unique();
@@ -970,11 +1070,7 @@ class PersonalMinaHabilitacionService
         $records = PersonalCursoRegistro::query()
             ->where('personal_id', $assignment->personal_id)
             ->whereIn('examen_id', $examIds)
-            ->when(Schema::hasColumn('personal_curso_registros', 'mina_id'),
-                fn ($query) => $query->where(function ($mineQuery) use ($assignment): void {
-                    $mineQuery->where('mina_id', $assignment->mina_id)
-                        ->orWhereNull('mina_id');
-                }))
+            ->where('mina_id', $assignment->mina_id)
             ->orderByRaw('COALESCE(fecha_realizacion, fecha_programacion) ASC')
             ->orderBy('created_at')
             ->get();
@@ -1020,7 +1116,7 @@ class PersonalMinaHabilitacionService
 
         $price = $this->resolveAttemptPriceSnapshot(
             $workerExam,
-            Carbon::today()->toDateString(),
+            $this->operationalToday()->toDateString(),
             $dateScheduled,
             $dateDone,
         );
@@ -1079,7 +1175,7 @@ class PersonalMinaHabilitacionService
         );
     }
 
-    public function refreshAssignmentFromExams(PersonalMina $relation, Usuario $user, bool $notify = true): bool
+    public function refreshAssignmentFromExams(PersonalMina $relation, ?Usuario $user, bool $notify = true): bool
     {
         return $this->refreshAssignmentStatus($relation, $user, $notify);
     }
@@ -1159,13 +1255,13 @@ class PersonalMinaHabilitacionService
                 ->where('examen_id', $exam->id)
                 ->where('precio', $exam->precio)
                 ->where('moneda', $exam->moneda ?: 'PEN')
-                ->where('fecha_inicio', optional($exam->precio_desde)->toDateString() ?: Carbon::today()->toDateString())
+                ->where('fecha_inicio', optional($exam->precio_desde)->toDateString() ?: $this->operationalToday()->toDateString())
                 ->exists();
             if (!$exists) {
                 $this->storeExamPrice($exam, [
                     'precio' => $exam->precio,
                     'moneda' => $exam->moneda ?: 'PEN',
-                    'fecha_inicio' => optional($exam->precio_desde)->toDateString() ?: Carbon::today()->toDateString(),
+                    'fecha_inicio' => optional($exam->precio_desde)->toDateString() ?: $this->operationalToday()->toDateString(),
                     'observacion' => 'Sincronizacion de informacion actual.',
                 ], $user);
                 $prices++;
@@ -1258,7 +1354,7 @@ class PersonalMinaHabilitacionService
                                 'estado' => $newState,
                                 'estado_habilitacion' => $newState,
                                 'fecha_habilitacion' => $newState === PersonalMina::ESTADO_HABILITADO
-                                    ? ($fresh->fecha_habilitacion ?: Carbon::today()->toDateString())
+                                    ? ($fresh->fecha_habilitacion ?: $this->operationalToday()->toDateString())
                                     : null,
                             ])->save();
                             $this->recordHistory(
@@ -1325,7 +1421,7 @@ class PersonalMinaHabilitacionService
         }
 
         $relations = PersonalMina::query()
-            ->with(['personal.contratoLaboralActual', 'mina', 'examenes.intentos', 'examenes.requisitoMina', 'examenes.examen'])
+            ->with(['personal.contratoLaboralActual', 'mina', 'examenes.intentos.emoCita', 'examenes.requisitoMina', 'examenes.examen'])
             ->where('personal_id', $worker->id)
             ->where('activo', true)
             ->get()
@@ -1429,15 +1525,20 @@ class PersonalMinaHabilitacionService
 
     public function registerAttempt(PersonalMinaExamen $workerExam, array $payload, ?UploadedFile $file, Usuario $user): PersonalMinaExamen
     {
+        $currentExam = PersonalMinaExamen::with('examen')->findOrFail($workerExam->id);
+        if ($currentExam->examen?->categoria_operativa === ExamenMinero::CATEGORIA_EMO) {
+            return $this->registerEmoAttempt($currentExam, $payload, $file, $user);
+        }
         $payload = \App\Modules\Personal\Support\CursoResultado::payload($payload);
         $workerExam = PersonalMinaExamen::query()
             ->with(['asignacion', 'intentos'])
             ->findOrFail($workerExam->id);
 
+        $this->assertExamOperational($workerExam);
+
         $isExpired = $this->expiredAttemptCycleCutoff($workerExam) !== null;
 
         if (!$isExpired && in_array(strtoupper((string) $workerExam->estado), [
-            PersonalMinaExamen::ESTADO_NO_APLICA,
             PersonalMinaExamen::ESTADO_CONVALIDADO,
             PersonalMinaExamen::ESTADO_VIGENTE,
             PersonalMinaExamen::ESTADO_APROBADO,
@@ -1451,7 +1552,7 @@ class PersonalMinaHabilitacionService
         $dateScheduled = PersonalNormalizer::isoDate($payload['fecha_programacion'] ?? null);
         $score = $payload['nota'] ?? null;
 
-        if ($result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled) {
+        if ($workerExam->estado !== PersonalMinaExamen::ESTADO_NO_APLICA && $result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled) {
             $hasPendingSchedule = $this->currentCycleAttempts($workerExam)
                 ->where('resultado', PersonalMinaExamenIntento::RESULTADO_PENDIENTE)
                 ->filter(fn (PersonalMinaExamenIntento $attempt): bool => filled($attempt->fecha_programacion))
@@ -1482,16 +1583,26 @@ class PersonalMinaHabilitacionService
 
         $storedFile = null;
         try {
-            DB::transaction(function () use ($workerExam, $dateScheduled, $dateDone, $result, $score, $payload, $file, &$storedFile, $manualExpiration, $user): void {
+            $createdAttempt = DB::transaction(function () use ($workerExam, $dateScheduled, $dateDone, $result, $score, $payload, $file, &$storedFile, $manualExpiration, $user): PersonalMinaExamenIntento {
+                $lockedAssignment = PersonalMina::query()->whereKey($workerExam->personal_mina_id)->lockForUpdate()->firstOrFail();
                 $lockedExam = PersonalMinaExamen::query()->whereKey($workerExam->id)->lockForUpdate()->firstOrFail();
-                $lockedExam->load(['asignacion', 'intentos']);
+                $lockedExam->setRelation('asignacion', $lockedAssignment);
+                $lockedExam->setRelation('intentos', $lockedExam->intentos()->lockForUpdate()->get());
+                $this->assertExamOperational($lockedExam);
                 if ($this->expiredAttemptCycleCutoff($lockedExam) === null && in_array($lockedExam->estado, [
-                    PersonalMinaExamen::ESTADO_NO_APLICA,
                     PersonalMinaExamen::ESTADO_CONVALIDADO,
                     PersonalMinaExamen::ESTADO_VIGENTE,
                     PersonalMinaExamen::ESTADO_APROBADO,
                 ], true)) {
                     throw ValidationException::withMessages(['examen' => 'Este examen ya fue resuelto.']);
+                }
+                if ($lockedExam->estado === PersonalMinaExamen::ESTADO_NO_APLICA) {
+                    app(LegacyMiningDeployRepairService::class)->closeNotApplicablePendingLocked($lockedExam, $lockedExam->intentos, $user);
+                    $lockedExam->forceFill([
+                        'intentos_ciclo_desde' => now(),
+                        'intentos_ciclo_numero_desde' => $this->nextStoredAttemptNumber($lockedExam),
+                    ])->save();
+                    $lockedExam->setRelation('intentos', collect());
                 }
                 if ($result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled
                     && $this->currentCycleAttempts($lockedExam)
@@ -1502,9 +1613,9 @@ class PersonalMinaHabilitacionService
 
                 $storedFile = $file ? $this->storeAttemptFile($lockedExam, $file) : null;
                 $storedAttemptNumber = $this->nextStoredAttemptNumber($lockedExam);
-                $priceSnapshot = $this->resolveAttemptPriceSnapshot($lockedExam, Carbon::today()->toDateString(), $dateScheduled, $dateDone);
+                $priceSnapshot = $this->resolveAttemptPriceSnapshot($lockedExam, $this->operationalToday()->toDateString(), $dateScheduled, $dateDone);
 
-                PersonalMinaExamenIntento::query()->create([
+                $createdAttempt = PersonalMinaExamenIntento::query()->create([
                     'id' => (string) Str::uuid(),
                     'personal_mina_examen_id' => $lockedExam->id,
                     'numero_intento' => $storedAttemptNumber,
@@ -1526,6 +1637,8 @@ class PersonalMinaHabilitacionService
 
                 $this->applyAttemptToExam($lockedExam, $result, $dateScheduled, $dateDone, $score, $manualExpiration, $payload, $user);
                 $this->refreshAssignmentStatus($lockedExam->asignacion, $user);
+
+                return $createdAttempt;
             });
         } catch (\Throwable $exception) {
             $this->deleteFailedAttemptFile($storedFile);
@@ -1535,7 +1648,7 @@ class PersonalMinaHabilitacionService
 
         $updated = $workerExam->fresh(['asignacion.personal', 'asignacion.mina', 'intentos']);
         if ($updated && $result === PersonalMinaExamenIntento::RESULTADO_PENDIENTE && $dateScheduled) {
-            $this->operationalNotifications->examenProgramado($updated, $user);
+            $this->operationalNotifications->examenProgramado($updated, $user, $createdAttempt);
         }
 
         return $updated;
@@ -1543,6 +1656,16 @@ class PersonalMinaHabilitacionService
 
     public function completeScheduledAttempt(PersonalMinaExamenIntento $attempt, array $payload, ?UploadedFile $file, Usuario $user): PersonalMinaExamen
     {
+        $currentAttempt = PersonalMinaExamenIntento::with('examenTrabajador.examen')->findOrFail($attempt->id);
+        if ($currentAttempt->emo_cita_id || $currentAttempt->examenTrabajador->examen?->categoria_operativa === ExamenMinero::CATEGORIA_EMO) {
+            if (!$currentAttempt->emo_cita_id) {
+                throw ValidationException::withMessages(['clinica_id' => 'Regularice la clinica del EMO historico antes de registrar su resultado.']);
+            }
+            app(EmoAppointmentService::class)->complete(
+                PersonalEmoCita::findOrFail($currentAttempt->emo_cita_id), $this->completeEmoData($payload, $file), $user,
+            );
+            return $currentAttempt->examenTrabajador->fresh(['asignacion', 'intentos']);
+        }
         $payload = \App\Modules\Personal\Support\CursoResultado::payload($payload);
         $attempt = PersonalMinaExamenIntento::query()
             ->with('examenTrabajador.asignacion')
@@ -1550,6 +1673,8 @@ class PersonalMinaHabilitacionService
         $workerExam = PersonalMinaExamen::query()
             ->with(['asignacion', 'intentos'])
             ->findOrFail($attempt->personal_mina_examen_id);
+
+        $this->assertExamOperational($workerExam);
 
         if ($attempt->resultado !== PersonalMinaExamenIntento::RESULTADO_PENDIENTE) {
             throw ValidationException::withMessages(['intento' => 'Este examen programado ya tiene resultado registrado.']);
@@ -1559,7 +1684,7 @@ class PersonalMinaHabilitacionService
             throw ValidationException::withMessages(['fecha_programacion' => 'Este intento no tiene fecha de programacion.']);
         }
 
-        if ($attempt->fecha_programacion->gt(Carbon::today())) {
+        if ($attempt->fecha_programacion->toDateString() > $this->operationalToday()->toDateString()) {
             throw ValidationException::withMessages(['fecha_programacion' => 'Todavia no se puede registrar resultado porque la fecha programada no ha pasado.']);
         }
 
@@ -1606,13 +1731,15 @@ class PersonalMinaHabilitacionService
         $storedFile = null;
         try {
             DB::transaction(function () use ($attempt, $workerExam, $dateDone, $result, $score, $payload, $file, &$storedFile, $manualExpiration, $user): void {
+                $lockedAssignment = PersonalMina::query()->whereKey($workerExam->personal_mina_id)->lockForUpdate()->firstOrFail();
                 $lockedExam = PersonalMinaExamen::query()->whereKey($workerExam->id)->lockForUpdate()->firstOrFail();
-                $lockedExam->load('asignacion');
+                $lockedExam->setRelation('asignacion', $lockedAssignment);
+                $this->assertExamOperational($lockedExam);
                 $lockedAttempt = PersonalMinaExamenIntento::query()->whereKey($attempt->id)->lockForUpdate()->firstOrFail();
                 if ($lockedAttempt->resultado !== PersonalMinaExamenIntento::RESULTADO_PENDIENTE) {
                     throw ValidationException::withMessages(['intento' => 'Este examen programado ya tiene resultado registrado.']);
                 }
-                if (!$lockedAttempt->fecha_programacion || $lockedAttempt->fecha_programacion->gt(Carbon::today())) {
+                if (!$lockedAttempt->fecha_programacion || $lockedAttempt->fecha_programacion->toDateString() > $this->operationalToday()->toDateString()) {
                     throw ValidationException::withMessages(['fecha_programacion' => 'Esta programacion ya no permite registrar un resultado.']);
                 }
                 if (in_array($lockedExam->estado, [
@@ -1626,7 +1753,7 @@ class PersonalMinaHabilitacionService
 
                 $dateScheduled = $lockedAttempt->fecha_programacion->toDateString();
                 $storedFile = $file ? $this->storeAttemptFile($lockedExam, $file) : null;
-                $priceSnapshot = $this->resolveAttemptPriceSnapshot($lockedExam, Carbon::today()->toDateString(), $dateScheduled, $dateDone);
+                $priceSnapshot = $this->resolveAttemptPriceSnapshot($lockedExam, $this->operationalToday()->toDateString(), $dateScheduled, $dateDone);
                 $attemptPayload = [
                     'fecha_realizacion' => $dateDone,
                     'resultado' => $result,
@@ -1662,35 +1789,145 @@ class PersonalMinaHabilitacionService
         return $workerExam->fresh(['asignacion', 'intentos']);
     }
 
+    private function registerEmoAttempt(PersonalMinaExamen $exam, array $payload, ?UploadedFile $file, Usuario $actor): PersonalMinaExamen
+    {
+        $pending = strtoupper(trim((string) ($payload['resultado'] ?? 'PENDIENTE'))) === 'PENDIENTE';
+        $scheduled = PersonalNormalizer::isoDate($payload['fecha_programacion'] ?? ($pending ? null : ($payload['fecha_realizacion'] ?? null)));
+        if (!$scheduled) {
+            throw ValidationException::withMessages(['fecha_programacion' => 'Indique la fecha de programacion de la cita EMO.']);
+        }
+        $completion = $pending ? null : $this->completeEmoData($payload, $file);
+        return DB::transaction(function () use ($exam, $payload, $file, $actor, $scheduled, $completion): PersonalMinaExamen {
+            $appointment = app(EmoAppointmentService::class)->schedule($exam, new ScheduleEmoData(
+                CarbonImmutable::parse($scheduled, config('app.display_timezone', 'America/Lima')),
+                (string) ($payload['clinica_id'] ?? ''), $payload['observacion'] ?? null,
+                EmoOrigin::fromInput($payload['origen'] ?? 'MANUAL'), $payload['personal_curso_registro_id'] ?? null,
+            ), $actor);
+            if ($completion) {
+                app(EmoAppointmentService::class)->complete($appointment, $completion, $actor);
+            } elseif ($file) {
+                $attempt = $appointment->intentos()->where('personal_mina_examen_id', $exam->id)->lockForUpdate()->firstOrFail();
+                if ($attempt->archivo_path) {
+                    throw ValidationException::withMessages(['archivo' => 'La programacion ya conserva evidencia. Revise el archivo existente.']);
+                }
+                $storedFile = $this->storeAttemptFile($exam, $file);
+                $path = $storedFile['path'];
+                $connection = DB::connection()->getName();
+                // Compensate actual rollback only: a failing afterCommit callback cannot undo MySQL's commit.
+                foreach (app('db.transactions')->getPendingTransactions() as $transaction) {
+                    if ($transaction->connection === $connection) {
+                        $transaction->addCallbackForRollback(fn () => Storage::disk('local')->delete($path));
+                    }
+                }
+                $attempt->forceFill([
+                    'archivo_path' => $path, 'archivo_nombre_original' => $storedFile['original_name'],
+                    'archivo_mime' => $storedFile['mime'], 'archivo_size' => $storedFile['size'],
+                ])->save();
+            }
+            return $exam->fresh(['asignacion', 'intentos']);
+        });
+    }
+
+    private function completeEmoData(array $payload, ?UploadedFile $file): CompleteEmoData
+    {
+        $performed = PersonalNormalizer::isoDate($payload['fecha_realizacion'] ?? null);
+        if (!$performed) {
+            throw ValidationException::withMessages(['fecha_realizacion' => 'La fecha de realizacion es obligatoria.']);
+        }
+        $expiration = PersonalNormalizer::isoDate($payload['fecha_vencimiento'] ?? null);
+        return new CompleteEmoData(
+            CarbonImmutable::parse($performed, config('app.display_timezone', 'America/Lima')),
+            EmoOutcome::fromInput($payload['resultado'] ?? null),
+            $payload['detalle_resultado_emo'] ?? $payload['observacion'] ?? null,
+            isset($payload['nota']) && $payload['nota'] !== '' ? (string) $payload['nota'] : null,
+            $expiration ? CarbonImmutable::parse($expiration, config('app.display_timezone', 'America/Lima')) : null,
+            $payload['observacion'] ?? null, $file, EmoOrigin::fromInput($payload['origen'] ?? 'MANUAL'),
+            $payload['personal_curso_registro_id'] ?? null,
+        );
+    }
+
+    /** Internal domain bridge: EmoAppointmentService must already hold worker,
+     * appointment, assignment, exam and attempt locks in that order. This only
+     * projects the linked attempt using the existing validity/renewal rules.
+     */
+    public function applyEmoAppointmentAttempt(PersonalMinaExamen $exam, PersonalMinaExamenIntento $attempt, ?CarbonImmutable $manualExpiration, Usuario $actor): void
+    {
+        if (DB::transactionLevel() === 0 || !$attempt->emo_cita_id || $attempt->personal_mina_examen_id !== $exam->id) {
+            throw new \LogicException('Una proyeccion EMO exige intento vinculado y transaccion del agregado.');
+        }
+        $this->assertExamOperational($exam);
+        $cancelled = $attempt->resultado === PersonalMinaExamenIntento::RESULTADO_ANULADO;
+        $this->applyAttemptToExam($exam, $cancelled ? 'PENDIENTE' : $attempt->resultado,
+            $cancelled ? null : $attempt->fecha_programacion?->toDateString(),
+            $attempt->fecha_realizacion?->toDateString(), $attempt->nota !== null ? (float) $attempt->nota : null,
+            $manualExpiration?->toDateString(), ['observacion' => $attempt->observacion], $actor);
+    }
+
     public function markExamNotApplicable(PersonalMinaExamen $workerExam, array $payload, Usuario $user): PersonalMinaExamen
     {
-        $workerExam = PersonalMinaExamen::query()
-            ->with(['asignacion', 'requisitoMina'])
-            ->findOrFail($workerExam->id);
-
-        if (!$workerExam->requisitoMina?->permite_no_aplica) {
-            throw ValidationException::withMessages(['no_aplica' => 'Este examen no permite marcar no aplica.']);
+        $current = PersonalMinaExamen::query()->with('examen')->findOrFail($workerExam->id);
+        if ($current->examen?->categoria_operativa === ExamenMinero::CATEGORIA_EMO) {
+            return app(EmoAppointmentService::class)->markExamNotApplicable($current, $payload, $user);
         }
 
-        $observation = mb_substr(PersonalNormalizer::text($payload['observacion'] ?? ''), 0, 5000) ?: null;
+        return DB::transaction(function () use ($workerExam, $payload, $user): PersonalMinaExamen {
+            $lockedAssignment = PersonalMina::query()->whereKey($workerExam->personal_mina_id)->lockForUpdate()->firstOrFail();
+            $workerExam = PersonalMinaExamen::query()
+                ->lockForUpdate()
+                ->findOrFail($workerExam->id);
+            $workerExam->setRelation('asignacion', $lockedAssignment);
+            $this->assertExamOperational($workerExam);
+            $attempts = $workerExam->intentos()->lockForUpdate()->get();
 
-        $workerExam->forceFill([
-            'estado' => PersonalMinaExamen::ESTADO_NO_APLICA,
-            'resultado' => 'NO_APLICA',
-            'observacion' => $observation,
-            'usuario_actualizacion_id' => $user->id,
-            'fecha_actualizacion' => now(),
-        ])->save();
+            if (!$workerExam->requisitoMina?->permite_no_aplica) {
+                throw ValidationException::withMessages(['no_aplica' => 'Este examen no permite marcar no aplica.']);
+            }
 
-        $this->refreshAssignmentStatus($workerExam->asignacion, $user);
+            $observation = mb_substr(PersonalNormalizer::text($payload['observacion'] ?? ''), 0, 5000) ?: null;
 
-        return $workerExam->fresh(['asignacion', 'intentos']);
+            foreach ($attempts->where('resultado', PersonalMinaExamenIntento::RESULTADO_PENDIENTE) as $attempt) {
+                $attempt->forceFill(['resultado' => PersonalMinaExamenIntento::RESULTADO_ANULADO])->save();
+            }
+
+            $workerExam->forceFill([
+                'estado' => PersonalMinaExamen::ESTADO_NO_APLICA,
+                'resultado' => 'NO_APLICA',
+                'observacion' => $observation,
+                'usuario_actualizacion_id' => $user->id,
+                'fecha_actualizacion' => now(),
+                'intentos_ciclo_desde' => now(),
+                'intentos_ciclo_numero_desde' => 1 + (int) $attempts->max('numero_intento'),
+            ])->save();
+
+            $this->refreshAssignmentStatus($workerExam->asignacion, $user);
+
+            return $workerExam->fresh(['asignacion', 'intentos']);
+        });
+    }
+
+    private function assertExamOperational(PersonalMinaExamen $workerExam): void
+    {
+        $workerExam->loadMissing(['asignacion', 'requisitoMina', 'examen']);
+        if (!$workerExam->asignacion?->activo) {
+            throw ValidationException::withMessages(['examen' => 'La asignacion esta inactiva. Asigna nuevamente al trabajador antes de continuar.']);
+        }
+        if (!Mina::query()->activeOperational()->whereKey($workerExam->asignacion->mina_id)->exists()) {
+            throw ValidationException::withMessages(['examen' => 'La mina ya no esta disponible para habilitaciones.']);
+        }
+        if (!$workerExam->requisitoMina?->activo
+            || $workerExam->requisitoMina->mina_id !== $workerExam->asignacion->mina_id
+            || $workerExam->requisitoMina->examen_id !== $workerExam->examen_id) {
+            throw ValidationException::withMessages(['examen' => 'Este requisito fue retirado o cambio en la mina. Actualiza los examenes antes de continuar.']);
+        }
+        if (!$workerExam->examen?->activo) {
+            throw ValidationException::withMessages(['examen' => 'Este examen esta inactivo en el catalogo.']);
+        }
     }
 
     public function convalidationOptions(PersonalMinaExamen $workerExam): array
     {
         $workerExam = PersonalMinaExamen::query()
-            ->with(['asignacion', 'requisitoMina', 'examen'])
+            ->with(['asignacion.mina', 'asignacion.personal', 'requisitoMina', 'examen'])
             ->findOrFail($workerExam->id);
 
         try {
@@ -1704,14 +1941,13 @@ class PersonalMinaHabilitacionService
         }
 
         $allowedOrigins = $workerExam->requisitoMina->minas_origen_convalidacion_json ?: [];
-        $today = Carbon::today()->toDateString();
+        $today = $this->operationalToday()->toDateString();
         $origins = PersonalMinaExamen::query()
             ->with('asignacion.mina')
-            ->where('examen_id', $workerExam->examen_id)
+            ->whereIn('examen_id', array_merge(app(MiningExamIdentityResolver::class)->groupIds($workerExam->examen_id), $workerExam->requisitoMina->examenes_equivalentes_json ?: []))
             ->where('id', '!=', $workerExam->id)
             ->whereHas('asignacion', fn ($query) => $query
                 ->where('personal_id', $workerExam->asignacion->personal_id)
-                ->where('id', '!=', $workerExam->personal_mina_id)
                 ->when(!$workerExam->requisitoMina->convalidar_desde_otras_minas,
                     fn ($query) => $query->where('mina_id', $workerExam->asignacion->mina_id))
                 ->when($allowedOrigins !== [], fn ($query) => $query->whereIn('mina_id', $allowedOrigins)))
@@ -1724,12 +1960,18 @@ class PersonalMinaHabilitacionService
             ->where(function ($query) use ($today) {
                 $query->whereNull('fecha_vencimiento')->orWhereDate('fecha_vencimiento', '>=', $today);
             })
+            ->when($workerExam->requiere_nota_snapshot, fn ($query) => $query
+                ->whereNotNull('nota_obtenida')
+                ->where('nota_obtenida', '>=', $workerExam->nota_minima_snapshot ?? 0))
             ->orderByDesc('fecha_realizacion')
             ->limit(50)
             ->get()
             ->map(fn ($origin) => [
                 'id' => $origin->id,
                 'mina' => $origin->asignacion?->mina?->nombre,
+                'examen' => $origin->nombre_snapshot,
+                'nota' => $origin->nota_obtenida,
+                'equivalente' => $origin->examen_id !== $workerExam->examen_id,
                 'fecha_realizacion' => optional($origin->fecha_realizacion)->format('d/m/Y'),
                 'fecha_vencimiento' => optional($origin->fecha_vencimiento)->format('d/m/Y'),
                 'estado' => $origin->estado,
@@ -1737,8 +1979,15 @@ class PersonalMinaHabilitacionService
 
         return [
             'available' => $origins !== [],
-            'message' => $origins === [] ? 'No hay un resultado aprobado y vigente del mismo examen para este trabajador.' : null,
+            'message' => $origins === [] ? 'No hay resultados aprobados y vigentes del mismo examen o de sus equivalentes autorizados que cumplan la nota requerida.' : null,
             'options' => $origins,
+            'destino' => [
+                'trabajador' => $workerExam->asignacion?->personal?->nombre_completo,
+                'mina' => $workerExam->asignacion?->mina?->nombre,
+                'examen' => $workerExam->nombre_snapshot,
+                'requiere_nota' => $workerExam->requiere_nota_snapshot,
+                'nota_minima' => $workerExam->nota_minima_snapshot,
+            ],
         ];
     }
 
@@ -1772,10 +2021,10 @@ class PersonalMinaHabilitacionService
             throw ValidationException::withMessages(['convalidacion' => 'El curso o EMO no permite convalidacion en el catalogo.']);
         }
 
-        $today = Carbon::today();
+        $today = $this->operationalToday()->toDateString();
         $start = $workerExam->requisitoMina->fecha_inicio_convalidacion;
         $end = $workerExam->requisitoMina->fecha_fin_convalidacion;
-        if (($start && $today->lt($start)) || ($end && $today->gt($end))) {
+        if (($start && $today < $start->toDateString()) || ($end && $today > $end->toDateString())) {
             throw ValidationException::withMessages(['convalidacion' => 'La convalidacion esta fuera del rango permitido.']);
         }
     }
@@ -1790,17 +2039,33 @@ class PersonalMinaHabilitacionService
 
     private function convalidateExamLocked(PersonalMinaExamen $workerExam, string $originExamId, array $payload, Usuario $user): PersonalMinaExamen
     {
+        // Medical evidence is read before assignment/exam locks, matching the
+        // appointment aggregate order and avoiding an inverted appointment lock.
+        $workerId = PersonalMina::findOrFail($workerExam->personal_mina_id)->personal_id;
+        Personal::whereKey($workerId)->lockForUpdate()->firstOrFail();
+        $medicalAppointments = PersonalEmoCita::where('personal_id', $workerId)->orderBy('id')->sharedLock()->get()->keyBy('id');
+        $assignmentIds = PersonalMinaExamen::query()->whereIn('id', [$workerExam->id, $originExamId])
+            ->pluck('personal_mina_id')->unique();
+        $assignments = PersonalMina::query()->whereIn('id', $assignmentIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+
         $workerExam = PersonalMinaExamen::query()
             ->with(['asignacion.mina', 'requisitoMina', 'examen'])
             ->lockForUpdate()
             ->findOrFail($workerExam->id);
+        $workerExam->setRelation('asignacion', $assignments->get($workerExam->personal_mina_id));
+
+        $workerExam->setRelation('requisitoMina', MinaRequisito::query()
+            ->lockForUpdate()->find($workerExam->mina_requisito_id));
 
         $this->assertConvalidationTarget($workerExam);
         $origin = PersonalMinaExamen::query()
             ->with('asignacion.mina')
             ->lockForUpdate()
             ->find($originExamId);
-        if (!$origin || $origin->examen_id !== $workerExam->examen_id) {
+        if ($origin) {
+            $origin->setRelation('asignacion', $assignments->get($origin->personal_mina_id));
+        }
+        if (!$origin || !in_array($origin->examen_id, array_merge(app(MiningExamIdentityResolver::class)->groupIds($workerExam->examen_id), $workerExam->requisitoMina->examenes_equivalentes_json ?: []), true)) {
             throw ValidationException::withMessages(['examen_origen' => 'Selecciona un examen origen valido.']);
         }
         if ($origin->id === $workerExam->id
@@ -1809,6 +2074,10 @@ class PersonalMinaHabilitacionService
         }
         if (!$this->isExamApprovedAndCurrent($origin)) {
             throw ValidationException::withMessages(['examen_origen' => 'El examen origen no esta aprobado o vigente.']);
+        }
+        if ($workerExam->requiere_nota_snapshot && ($origin->nota_obtenida === null
+            || (float) $origin->nota_obtenida < (float) ($workerExam->nota_minima_snapshot ?? 0))) {
+            throw ValidationException::withMessages(['nota' => 'El examen destino exige una nota registrada que alcance su nota minima.']);
         }
 
         $allowedOrigins = $workerExam->requisitoMina->minas_origen_convalidacion_json ?: [];
@@ -1819,9 +2088,52 @@ class PersonalMinaHabilitacionService
             throw ValidationException::withMessages(['convalidacion' => 'La mina origen no esta permitida para convalidacion.']);
         }
 
+        $observation = collect([
+            PersonalNormalizer::text($origin->observacion),
+            PersonalNormalizer::text($payload['observacion'] ?? ''),
+        ])->filter()->unique()->implode("\n");
+        if (mb_strlen($observation) > 5000) {
+            throw ValidationException::withMessages([
+                'observacion' => 'La observacion completa supera el limite. Reduce el comentario adicional sin quitar las restricciones del examen origen.',
+            ]);
+        }
+
+        $medicalContext = $origin->contexto_convalidacion_json ?? [];
+        $medicalAttempt = $origin->intentos()->whereNotNull('emo_cita_id')->where('resultado', 'APROBADO')
+            ->whereDate('fecha_realizacion', $origin->fecha_realizacion?->toDateString())
+            ->orderByDesc('numero_intento')->lockForUpdate()->first();
+        if ($medicalAttempt) {
+            $medicalAppointment = $medicalAppointments->get($medicalAttempt->emo_cita_id);
+            if ($medicalAppointment?->estado === PersonalEmoCita::ESTADO_COMPLETADA) {
+                $medicalContext = [
+                    'resultado_emo' => $medicalAppointment->resultado_emo,
+                    'detalle_resultado_emo' => $medicalAppointment->detalle_resultado_emo,
+                    'emo_cita_id' => $medicalAppointment->id, 'clinica_id' => $medicalAppointment->clinica_id,
+                    'clinica_nombre_snapshot' => $medicalAppointment->clinica_nombre_snapshot,
+                ];
+            }
+        }
+
         $workerExam->forceFill([
             'estado' => PersonalMinaExamen::ESTADO_CONVALIDADO,
             'resultado' => 'APROBADO',
+            'nota_obtenida' => $origin->nota_obtenida,
+            'contexto_convalidacion_json' => [
+                'examen_origen_id' => $origin->examen_id,
+                'examen_origen' => $origin->nombre_snapshot,
+                'mina_origen_id' => $origin->asignacion?->mina_id,
+                'mina_origen' => $origin->asignacion?->mina?->nombre,
+                'examen_destino_id' => $workerExam->examen_id,
+                'examen_destino' => $workerExam->nombre_snapshot,
+                'mina_destino_id' => $workerExam->asignacion?->mina_id,
+                'mina_destino' => $workerExam->asignacion?->mina?->nombre,
+                'nota' => $origin->nota_obtenida,
+                'observacion_origen' => $origin->observacion,
+                'equivalente' => $origin->examen_id !== $workerExam->examen_id,
+                ...\Illuminate\Support\Arr::only($medicalContext, [
+                    'resultado_emo', 'detalle_resultado_emo', 'emo_cita_id', 'clinica_id', 'clinica_nombre_snapshot',
+                ]),
+            ],
             'fecha_realizacion' => $origin->fecha_realizacion,
             'fecha_vencimiento' => $origin->fecha_vencimiento,
             'es_convalidado' => true,
@@ -1830,7 +2142,7 @@ class PersonalMinaHabilitacionService
             'fecha_aprobacion_origen' => optional($origin->fecha_realizacion)->toDateString(),
             'fecha_convalidacion' => now(),
             'usuario_convalidacion_id' => $user->id,
-            'observacion' => mb_substr(PersonalNormalizer::text($payload['observacion'] ?? ''), 0, 5000) ?: null,
+            'observacion' => $observation ?: null,
             'usuario_actualizacion_id' => $user->id,
             'fecha_actualizacion' => now(),
         ])->save();
@@ -1861,7 +2173,7 @@ class PersonalMinaHabilitacionService
         if ($current && strtoupper((string) $current->estado) === PersonalContrato::ESTADO_PREPARACION) {
             $warnings[] = 'Contrato en preparacion';
         }
-        if ($current && $current->fecha_fin && $current->fecha_fin->lt(Carbon::today())) {
+        if ($current && $current->fecha_fin && $current->fecha_fin->toDateString() < $this->operationalToday()->toDateString()) {
             $warnings[] = 'Contrato vencido';
         }
 
@@ -2109,6 +2421,49 @@ class PersonalMinaHabilitacionService
         ];
     }
 
+    public function preservesCurrentApproval(PersonalMinaExamen $workerExam, string $incomingResult): bool
+    {
+        return $incomingResult !== PersonalMinaExamenIntento::RESULTADO_APROBADO
+            && $workerExam->resultado === PersonalMinaExamenIntento::RESULTADO_APROBADO
+            && in_array($workerExam->estado, [
+                PersonalMinaExamen::ESTADO_APROBADO,
+                PersonalMinaExamen::ESTADO_VIGENTE,
+                PersonalMinaExamen::ESTADO_POR_VENCER,
+                PersonalMinaExamen::ESTADO_CONVALIDADO,
+            ], true)
+            && (!$workerExam->fecha_vencimiento
+                || $workerExam->fecha_vencimiento->toDateString() >= $this->operationalToday()->toDateString());
+    }
+
+    public function clearPreviousConvalidation(PersonalMinaExamen $workerExam, Usuario $user): void
+    {
+        if (!$workerExam->es_convalidado && !$workerExam->contexto_convalidacion_json) {
+            return;
+        }
+
+        $snapshot = \Illuminate\Support\Arr::only($workerExam->attributesToArray(), [
+            'id', 'examen_id', 'nombre_snapshot', 'resultado', 'nota_obtenida',
+            'fecha_realizacion', 'fecha_vencimiento', 'observacion', 'es_convalidado',
+            'examen_origen_convalidado_id', 'mina_origen_convalidacion_id',
+            'fecha_aprobacion_origen', 'fecha_convalidacion', 'usuario_convalidacion_id',
+            'contexto_convalidacion_json',
+        ]);
+        $assignment = $workerExam->asignacion;
+        $this->recordHistory($assignment, $assignment->estadoHabilitacionActual(), $assignment->estadoHabilitacionActual(),
+            'Nueva realizacion: '.$workerExam->nombre_snapshot.'. Convalidacion anterior: '
+                .json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $user);
+
+        $workerExam->forceFill([
+            'es_convalidado' => false,
+            'examen_origen_convalidado_id' => null,
+            'mina_origen_convalidacion_id' => null,
+            'fecha_aprobacion_origen' => null,
+            'fecha_convalidacion' => null,
+            'usuario_convalidacion_id' => null,
+            'contexto_convalidacion_json' => null,
+        ])->save();
+    }
+
     private function applyAttemptToExam(
         PersonalMinaExamen $workerExam,
         string $result,
@@ -2119,6 +2474,10 @@ class PersonalMinaHabilitacionService
         array $payload,
         Usuario $user
     ): void {
+        if ($this->preservesCurrentApproval($workerExam, $result)) {
+            return;
+        }
+
         $state = match ($result) {
             PersonalMinaExamenIntento::RESULTADO_APROBADO => PersonalMinaExamen::ESTADO_APROBADO,
             PersonalMinaExamenIntento::RESULTADO_DESAPROBADO => PersonalMinaExamen::ESTADO_DESAPROBADO,
@@ -2143,6 +2502,8 @@ class PersonalMinaHabilitacionService
             $expirationForExam = optional($workerExam->fecha_vencimiento)->toDateString();
         }
 
+        $this->clearPreviousConvalidation($workerExam, $user);
+
         $workerExam->forceFill([
             'estado' => $state,
             'resultado' => $result,
@@ -2156,12 +2517,18 @@ class PersonalMinaHabilitacionService
         ])->save();
     }
 
-    private function refreshAssignmentStatus(PersonalMina $relation, Usuario $user, bool $notify = true): bool
+    private function refreshAssignmentStatus(PersonalMina $relation, ?Usuario $user, bool $notify = true): bool
     {
-        $relation = PersonalMina::query()->with('examenes')->find($relation->id);
+        return DB::transaction(fn (): bool => $this->refreshAssignmentStatusLocked($relation, $user, $notify), 3);
+    }
+
+    private function refreshAssignmentStatusLocked(PersonalMina $relation, ?Usuario $user, bool $notify): bool
+    {
+        $relation = PersonalMina::query()->lockForUpdate()->find($relation->id);
         if (!$relation) {
             return false;
         }
+        $relation->setRelation('examenes', $relation->examenes()->lockForUpdate()->get());
 
         $newState = $this->calculateAssignmentStatus($relation);
         $previous = $relation->estadoHabilitacionActual();
@@ -2170,8 +2537,8 @@ class PersonalMinaHabilitacionService
             $relation->forceFill([
                 'estado' => $newState,
                 'estado_habilitacion' => $newState,
-                'fecha_habilitacion' => $newState === PersonalMina::ESTADO_HABILITADO ? Carbon::today()->toDateString() : null,
-                'usuario_actualizacion_id' => $user->id,
+                'fecha_habilitacion' => $newState === PersonalMina::ESTADO_HABILITADO ? $this->operationalToday()->toDateString() : null,
+                'usuario_actualizacion_id' => $user?->id,
             ])->save();
 
             $this->recordHistory($relation, $previous, $newState, 'Calculo automatico por examenes mineros.', $user);
@@ -2283,8 +2650,8 @@ class PersonalMinaHabilitacionService
             return $convalidated ? PersonalMinaExamen::ESTADO_CONVALIDADO : PersonalMinaExamen::ESTADO_APROBADO;
         }
 
-        $today = Carbon::today();
-        $end = Carbon::parse($expiration);
+        $today = $this->operationalToday();
+        $end = Carbon::parse($expiration, $today->getTimezone());
         if ($end->lt($today)) {
             return PersonalMinaExamen::ESTADO_VENCIDO;
         }
@@ -2297,7 +2664,53 @@ class PersonalMinaHabilitacionService
 
     private function hasAttemptsAvailable(PersonalMinaExamen $exam): bool
     {
-        return $this->currentCycleAttempts($exam)->count() < $this->effectiveMaxAttempts($exam);
+        return $this->consumedCurrentCycleAttempts($exam)->count() < $this->effectiveMaxAttempts($exam);
+    }
+
+    public function operationalAttemptCount(PersonalMinaExamen $exam): int
+    {
+        if (in_array($exam->estado, [
+            PersonalMinaExamen::ESTADO_APROBADO,
+            PersonalMinaExamen::ESTADO_VIGENTE,
+            PersonalMinaExamen::ESTADO_POR_VENCER,
+            PersonalMinaExamen::ESTADO_CONVALIDADO,
+            PersonalMinaExamen::ESTADO_NO_APLICA,
+        ], true)) {
+            return 0;
+        }
+
+        return $this->consumedCurrentCycleAttempts($exam)->count();
+    }
+
+    public function operationalAttemptNumber(PersonalMinaExamenIntento $attempt): ?int
+    {
+        if (!in_array($attempt->resultado, [
+            PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+            PersonalMinaExamenIntento::RESULTADO_NO_ASISTIO,
+        ], true)) {
+            return null;
+        }
+
+        $exam = $attempt->relationLoaded('examenTrabajador')
+            ? $attempt->examenTrabajador
+            : $attempt->examenTrabajador()->with('intentos')->first();
+        if (!$exam) {
+            return null;
+        }
+
+        $ids = $this->consumedCurrentCycleAttempts($exam)->pluck('id')->values();
+        $index = $ids->search($attempt->id);
+
+        return $index === false ? null : $index + 1;
+    }
+
+    private function consumedCurrentCycleAttempts(PersonalMinaExamen $exam): Collection
+    {
+        return $this->currentCycleAttempts($exam)
+            ->whereIn('resultado', [
+                PersonalMinaExamenIntento::RESULTADO_DESAPROBADO,
+                PersonalMinaExamenIntento::RESULTADO_NO_ASISTIO,
+            ])->values();
     }
 
     private function currentCycleAttempts(PersonalMinaExamen $exam)
@@ -2313,7 +2726,13 @@ class PersonalMinaHabilitacionService
             ->where('resultado', '!=', PersonalMinaExamenIntento::RESULTADO_ANULADO)
             ->values();
 
-        $cutoff = $this->expiredAttemptCycleCutoff($exam);
+        if ($exam->intentos_ciclo_numero_desde !== null) {
+            $attempts = $attempts
+                ->where('numero_intento', '>=', (int) $exam->intentos_ciclo_numero_desde)
+                ->values();
+        }
+
+        $cutoff = $this->attemptCycleCutoff($exam);
         if (!$cutoff) {
             return $attempts;
         }
@@ -2358,24 +2777,47 @@ class PersonalMinaHabilitacionService
             return null;
         }
 
-        $expiration = Carbon::parse($exam->fecha_vencimiento)->endOfDay();
-        $isExpiredByDate = $expiration->lt(Carbon::today()->startOfDay());
+        $today = $this->operationalToday();
+        $expiration = Carbon::parse($exam->fecha_vencimiento->toDateString(), $today->getTimezone())->endOfDay();
+        $isExpiredByDate = $expiration->lt($today);
         $isExpiredByState = strtoupper((string) $exam->estado) === PersonalMinaExamen::ESTADO_VENCIDO;
 
         return $isExpiredByDate || $isExpiredByState ? $expiration : null;
     }
 
+    private function attemptCycleCutoff(PersonalMinaExamen $exam): ?Carbon
+    {
+        $expiration = $this->expiredAttemptCycleCutoff($exam);
+        if ($exam->intentos_ciclo_numero_desde !== null) {
+            return $expiration;
+        }
+        $explicit = $exam->intentos_ciclo_desde
+            ? Carbon::parse($exam->intentos_ciclo_desde, config('app.display_timezone', 'America/Lima'))
+            : null;
+
+        if (!$expiration) {
+            return $explicit;
+        }
+        if (!$explicit) {
+            return $expiration;
+        }
+
+        return $explicit->gt($expiration) ? $explicit : $expiration;
+    }
+
     private function attemptOperationalDate(PersonalMinaExamenIntento $attempt): ?Carbon
     {
-        $date = $attempt->fecha_realizacion ?: $attempt->fecha_programacion ?: $attempt->created_at;
+        $date = $attempt->fecha_realizacion ?: $attempt->fecha_programacion;
+        if ($date) {
+            return Carbon::parse($date->toDateString(), config('app.display_timezone', 'America/Lima'));
+        }
 
-        return $date ? Carbon::parse($date) : null;
+        return $attempt->created_at?->copy()->setTimezone(config('app.display_timezone', 'America/Lima'));
     }
 
     private function isExamApprovedAndCurrent(PersonalMinaExamen $exam): bool
     {
         $this->refreshExamExpirationState($exam);
-        $exam = $exam->fresh() ?: $exam;
         if (!in_array($exam->estado, [
             PersonalMinaExamen::ESTADO_APROBADO,
             PersonalMinaExamen::ESTADO_VIGENTE,
@@ -2422,7 +2864,7 @@ class PersonalMinaHabilitacionService
             throw ValidationException::withMessages(['fecha_realizacion' => 'Indica la fecha en que se realizo el examen aprobado.']);
         }
 
-        if ($dateDone && $dateDone > Carbon::today(config('app.display_timezone', 'America/Lima'))->toDateString()) {
+        if ($dateDone && $dateDone > $this->operationalToday()->toDateString()) {
             throw ValidationException::withMessages(['fecha_realizacion' => 'La fecha de realizacion no puede ser futura.']);
         }
     }
@@ -2446,9 +2888,9 @@ class PersonalMinaHabilitacionService
         ];
     }
 
-    public function resolveAttemptPriceSnapshot(PersonalMinaExamen $workerExam, ?string $registrationDate = null, ?string $dateScheduled = null, ?string $dateDone = null): array
+    public function resolveAttemptPriceSnapshot(PersonalMinaExamen $workerExam, ?string $registrationDate = null, ?string $dateScheduled = null, ?string $dateDone = null, bool $currentRead = false): array
     {
-        $date = $registrationDate ?: $dateScheduled ?: $dateDone ?: Carbon::today()->toDateString();
+        $date = $registrationDate ?: $dateScheduled ?: $dateDone ?: $this->operationalToday()->toDateString();
         $catalogExam = $workerExam->relationLoaded('examen')
             ? $workerExam->examen
             : ExamenMinero::query()->find($workerExam->examen_id);
@@ -2471,6 +2913,7 @@ class PersonalMinaHabilitacionService
                         ->orWhere('fecha_fin', '>=', $date);
                 })
                 ->orderByDesc('fecha_inicio')
+                ->when($currentRead, fn ($query) => $query->sharedLock())
                 ->first();
         }
 
@@ -2589,7 +3032,7 @@ class PersonalMinaHabilitacionService
             ->whereNotNull('signed_contract_path')
             ->where(function ($query): void {
                 $query->whereNull('fecha_fin')
-                    ->orWhereDate('fecha_fin', '>=', Carbon::today()->toDateString());
+                    ->orWhereDate('fecha_fin', '>=', $this->operationalToday()->toDateString());
             })
             ->exists();
     }

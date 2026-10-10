@@ -19,9 +19,7 @@ class MinaScopeAccess
 
     public static function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, self::ROLES_SIN_RESTRICCION, true);
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), self::ROLES_SIN_RESTRICCION)) > 0;
     }
 
     public static function allows(Usuario $usuario, ?string $minaId): bool

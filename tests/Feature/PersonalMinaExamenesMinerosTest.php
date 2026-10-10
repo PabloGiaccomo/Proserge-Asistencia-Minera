@@ -232,7 +232,7 @@ class PersonalMinaExamenesMinerosTest extends TestCase
 
         $service->registerAttempt($exam->fresh(), [
             'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
-            'fecha_realizacion' => Carbon::today()->toDateString(),
+            'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(),
         ], null, $actor);
         $this->assertSame(4, PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $exam->id)->max('numero_intento'));
         $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignment->fresh()->estado_habilitacion);
@@ -326,7 +326,7 @@ class PersonalMinaExamenesMinerosTest extends TestCase
 
         $service->registerAttempt($exam, [
             'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
-            'fecha_realizacion' => Carbon::today()->toDateString(),
+            'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(),
             'nota' => 12,
         ], null, $actor);
         $this->assertSame(PersonalMinaExamen::ESTADO_DESAPROBADO, $exam->fresh()->estado);
@@ -338,6 +338,66 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $this->assertSame(PersonalMinaExamen::ESTADO_NO_APLICA, $examNoApply->fresh()->estado);
         $this->assertNull($examNoApply->fresh()->observacion);
         $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignmentNoApply->fresh()->estado_habilitacion);
+    }
+
+    public function test_no_aplica_anula_programacion_y_el_nuevo_ciclo_empieza_en_cero_hasta_no_asistir(): void
+    {
+        Carbon::setTestNow('2026-10-10 09:00:00');
+        [$service, $actor, $assignment] = $this->assignmentWithExam(['max_intentos' => 2, 'permite_reintento' => true]);
+        $exam = $assignment->examenes->sole();
+        $exam->requisitoMina->forceFill(['permite_no_aplica' => true])->save();
+        $service->registerAttempt($exam, [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO, 'fecha_realizacion' => '2026-10-09',
+        ], null, $actor);
+        $service->registerAttempt($exam->fresh(), [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE, 'fecha_programacion' => '2026-10-10',
+        ], null, $actor);
+
+        $service->markExamNotApplicable($exam->fresh(), ['observacion' => 'No requerido temporalmente'], $actor);
+
+        $this->assertSame(['DESAPROBADO', 'ANULADO'], $exam->intentos()->orderBy('numero_intento')->pluck('resultado')->all());
+        $this->assertSame(0, $service->operationalAttemptCount($exam->fresh('intentos')));
+        $this->assertSame(PersonalMina::ESTADO_HABILITADO, $assignment->fresh()->estado_habilitacion);
+
+        $service->registerAttempt($exam->fresh(), [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE, 'fecha_programacion' => '2026-10-10',
+        ], null, $actor);
+        $scheduled = $exam->intentos()->reorder('numero_intento', 'desc')->firstOrFail();
+        $this->assertSame(3, $scheduled->numero_intento, 'La numeracion fisica historica no se reescribe.');
+        $this->assertSame(0, $service->operationalAttemptCount($exam->fresh('intentos')), 'Programar no consume intento.');
+        $this->assertSame(PersonalMina::ESTADO_EN_PROCESO, $assignment->fresh()->estado_habilitacion);
+
+        $service->completeScheduledAttempt($scheduled, [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_NO_ASISTIO, 'fecha_realizacion' => '2026-10-10',
+        ], null, $actor);
+        $this->assertSame(1, $service->operationalAttemptCount($exam->fresh('intentos')));
+        $this->assertSame(1, $service->operationalAttemptNumber($scheduled->fresh()));
+        $this->assertSame(3, $scheduled->fresh()->numero_intento);
+    }
+
+    public function test_aprobacion_vencida_reinicia_contador_operativo_sin_borrar_historial(): void
+    {
+        Carbon::setTestNow('2026-10-10 09:00:00');
+        [$service, $actor, $assignment] = $this->assignmentWithExam([
+            'tiene_vigencia' => true, 'vigencia_dias' => 30, 'max_intentos' => 2,
+        ]);
+        $exam = $assignment->examenes->sole();
+        $service->registerAttempt($exam, [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_DESAPROBADO, 'fecha_realizacion' => '2026-08-31',
+        ], null, $actor);
+        $service->registerAttempt($exam->fresh(), [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO, 'fecha_realizacion' => '2026-09-01',
+            'fecha_vencimiento' => '2026-10-01',
+        ], null, $actor);
+
+        $this->assertSame(PersonalMinaExamen::ESTADO_VENCIDO, $exam->fresh()->estado);
+        $this->assertSame(0, $service->operationalAttemptCount($exam->fresh('intentos')));
+        $this->assertSame(2, $exam->intentos()->count());
+        $service->registerAttempt($exam->fresh(), [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_PENDIENTE, 'fecha_programacion' => '2026-10-10',
+        ], null, $actor);
+        $this->assertSame(0, $service->operationalAttemptCount($exam->fresh('intentos')));
+        $this->assertSame(3, $exam->intentos()->max('numero_intento'));
     }
 
     public function test_convalidacion_permitida_y_bloqueos(): void
@@ -492,6 +552,125 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         }
     }
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('convalidationScores')]
+    public function test_convalida_equivalencias_con_nota_opcional(?float $score, bool $requiresScore, bool $allowed): void
+    {
+        [$service, $actor, $assignment] = $this->assignmentWithExam([
+            'permite_convalidacion' => true,
+            'requiere_nota' => $score !== null,
+            'nota_minima' => $score !== null ? 10 : null,
+        ]);
+        $origin = $assignment->examenes->firstOrFail();
+        $service->registerAttempt($origin, [
+            'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
+            'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(),
+            'nota' => $score,
+        ], null, $actor);
+        $origin = $origin->fresh();
+        $mine = $this->createMine('Destino equivalente');
+        $catalog = $this->createExam([
+            'nombre' => 'Otro nombre de examen',
+            'permite_convalidacion' => true,
+            'requiere_nota' => $requiresScore,
+            'nota_minima' => $requiresScore ? 14 : null,
+        ]);
+        $requirement = $service->storeRequirement([
+            'mina_id' => $mine->id,
+            'examen_id' => $catalog->id,
+            'permite_convalidacion_mina' => true,
+            'convalidar_desde_otras_minas' => true,
+            'examenes_equivalentes' => [$origin->examen_id],
+        ]);
+        $targetAssignment = $service->assignMine([
+            'personal_id' => $assignment->personal_id,
+            'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+        $target = $targetAssignment->examenes->firstOrFail();
+        $options = $service->convalidationOptions($target);
+        $this->assertSame($allowed, $options['available']);
+        if (!$allowed) {
+            try {
+                $service->convalidateExam($target, $origin->id, [], $actor);
+                $this->fail('Debe rechazar una nota ausente o insuficiente para el destino.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('nota', $exception->errors());
+                $this->assertSame('PENDIENTE', $target->fresh()->estado);
+            }
+            return;
+        }
+        $this->assertSame($origin->nombre_snapshot, $options['options'][0]['examen']);
+        $this->assertSame($origin->nota_obtenida, $options['options'][0]['nota']);
+        $result = $service->convalidateExam($target, $origin->id, [], $actor);
+        $this->assertSame('CONVALIDADO', $result->estado);
+        $this->assertSame($origin->nota_obtenida, $result->nota_obtenida);
+        $this->assertSame($origin->id, $result->examen_origen_convalidado_id);
+        $this->assertSame($mine->id, $result->contexto_convalidacion_json['mina_destino_id']);
+        $this->assertSame($origin->nombre_snapshot, $result->contexto_convalidacion_json['examen_origen']);
+        $requirement->forceFill(['examenes_equivalentes_json' => []])->save();
+        $this->assertSame($origin->nombre_snapshot, $result->fresh()->contexto_convalidacion_json['examen_origen']);
+    }
+
+    public static function convalidationScores(): array
+    {
+        return [
+            'ambos sin nota' => [null, false, true],
+            'nota suficiente' => [16.0, true, true],
+            'nota insuficiente' => [12.0, true, false],
+            'origen sin nota y destino exige' => [null, true, false],
+            'conserva nota aunque destino no exige' => [16.0, false, true],
+        ];
+    }
+
+    public function test_convalidacion_mismo_examen_conserva_nota_y_rechaza_equivalencia_no_configurada(): void
+    {
+        [$service, $actor, $assignment] = $this->assignmentWithExam([
+            'permite_convalidacion' => true, 'requiere_nota' => true, 'nota_minima' => 14,
+        ]);
+        $origin = $assignment->examenes->firstOrFail();
+        $service->registerAttempt($origin, [
+            'resultado' => 'APROBADO', 'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(), 'nota' => 17,
+        ], null, $actor);
+        $mine = $this->createMine('Destino mismo examen');
+        $other = $this->createExam(['permite_convalidacion' => true]);
+        foreach ([$origin->examen_id, $other->id] as $id) {
+            $service->storeRequirement([
+                'mina_id' => $mine->id, 'examen_id' => $id,
+                'permite_convalidacion_mina' => true, 'convalidar_desde_otras_minas' => true,
+            ]);
+        }
+        $destination = $service->assignMine([
+            'personal_id' => $assignment->personal_id, 'mina_id' => $mine->id,
+            'estado_habilitacion' => PersonalMina::ESTADO_EN_PROCESO,
+        ], $actor);
+        $same = $destination->examenes->firstWhere('examen_id', $origin->examen_id);
+        $result = $service->convalidateExam($same, $origin->id, [], $actor);
+        $this->assertSame('17.00', $result->nota_obtenida);
+        $different = $destination->examenes->firstWhere('examen_id', $other->id);
+        $this->assertFalse($service->convalidationOptions($different)['available']);
+        $this->expectException(ValidationException::class);
+        $service->convalidateExam($different, $origin->id, [], $actor);
+    }
+
+    public function test_configuracion_de_convalidacion_existente_exige_permiso_y_guarda_origenes(): void
+    {
+        [$service, $actor, $assignment] = $this->assignmentWithExam(['permite_convalidacion' => true]);
+        $requirement = $assignment->examenes->firstOrFail()->requisitoMina;
+        $equivalent = $this->createExam();
+        $url = route('personal.habilitacion-minera.requisitos.convalidation', $requirement->id);
+        $payload = [
+            'permite_convalidacion_mina' => 1,
+            'convalidar_desde_otras_minas' => 1,
+            'examenes_equivalentes' => [$equivalent->id],
+        ];
+        $viewer = $this->createUser(['habilitacion_minera' => ['ver']]);
+        $this->withSession($this->sessionFor($viewer))->post($url, $payload)->assertForbidden();
+        $configurator = $this->createUser(['habilitacion_minera' => ['ver', 'configurar']]);
+        $this->withSession($this->sessionFor($configurator))->post($url, $payload)->assertSessionHas('success');
+        $this->assertTrue($requirement->fresh()->convalidar_desde_otras_minas);
+        $this->assertSame([$equivalent->id], $requirement->fresh()->examenes_equivalentes_json);
+    }
+
     public function test_convalidacion_requiere_permiso_pero_no_scope_de_mina(): void
     {
         [$service, $setupActor, $originAssignment] = $this->assignmentWithExam([
@@ -501,7 +680,7 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $origin = $originAssignment->examenes->firstOrFail();
         $service->registerAttempt($origin, [
             'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
-            'fecha_realizacion' => Carbon::today()->toDateString(),
+            'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(),
         ], null, $setupActor);
 
         $targetMine = $this->createMine('Mina sin scope');
@@ -530,6 +709,12 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $this->withSession($this->sessionFor($permittedUser))
             ->post(route('personal.habilitacion-minera.exam.convalidate', $targetExam->id), [
                 'examen_origen_id' => $origin->id,
+            ])->assertSessionHasErrors('confirmar');
+        $this->assertSame(PersonalMinaExamen::ESTADO_PENDIENTE, $targetExam->fresh()->estado);
+        $this->withSession($this->sessionFor($permittedUser))
+            ->post(route('personal.habilitacion-minera.exam.convalidate', $targetExam->id), [
+                'examen_origen_id' => $origin->id,
+                'confirmar' => 1,
             ])->assertRedirect()->assertSessionHas('success');
 
         $this->assertSame(PersonalMinaExamen::ESTADO_CONVALIDADO, $targetExam->fresh()->estado);
@@ -588,6 +773,7 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $this->withSession($this->sessionFor($permitted))
             ->post(route('personal.habilitacion-minera.exam.convalidate', $target->id), [
                 'examen_origen_id' => $origin->id,
+                'confirmar' => 1,
             ])->assertSessionHas('success');
 
         $this->withSession($this->sessionFor($permitted))
@@ -664,7 +850,7 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $origin = $originAssignment->examenes->firstOrFail();
         $service->registerAttempt($origin, [
             'resultado' => PersonalMinaExamenIntento::RESULTADO_APROBADO,
-            'fecha_realizacion' => Carbon::today()->toDateString(),
+            'fecha_realizacion' => Carbon::today('America/Lima')->toDateString(),
         ], null, $actor);
         $targetMine = $this->createMine('Mina destino retirado');
         $requirement = $service->storeRequirement([
@@ -709,16 +895,16 @@ class PersonalMinaExamenesMinerosTest extends TestCase
         $attempt = PersonalMinaExamenIntento::query()->where('personal_mina_examen_id', $exam->id)->firstOrFail();
         Storage::disk('local')->assertExists($attempt->archivo_path);
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['habilitacion_minera' => ['ver']]);
         $this->withSession($this->sessionFor($userId))
             ->get(route('personal.habilitacion-minera.attempt.download', $attempt->id))
             ->assertOk();
     }
 
-    public function test_rutas_respetan_permiso_actualizar_y_no_cambian_estado_laboral_ni_contrato(): void
+    public function test_rutas_respetan_permiso_registrar_explicito_y_no_cambian_estado_laboral_ni_contrato(): void
     {
         $denied = $this->createUser(['personal' => ['ver']]);
-        $allowed = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $allowed = $this->createUser(['habilitacion_minera' => ['ver', 'registrar']]);
         [$service, $actor, $assignment] = $this->assignmentWithExam();
         $exam = $assignment->examenes->first();
         $contractId = $this->insertContract($assignment->personal, '2026-01-01', '2026-12-31', true)->id;

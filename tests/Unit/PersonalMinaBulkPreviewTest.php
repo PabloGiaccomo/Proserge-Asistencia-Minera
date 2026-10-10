@@ -123,6 +123,64 @@ class PersonalMinaBulkPreviewTest extends TestCase
         }
     }
 
+    public function test_reads_exact_v2_layout_with_clinic_and_separate_scheduled_and_performed_dates(): void
+    {
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([
+            ['DNI', 'APELLIDOS Y NOMBRES', 'CURSO/EMO', 'PROGRAMACION', 'CLINICA', 'MINA'],
+            ['01234567', 'PERSONAL PRUEBA', 'EMO', '06/10/2026', 'Clinica Pulso', 'MARCOBRE'],
+        ]);
+        $book->createSheet()->fromArray([
+            ['DNI', 'APELLIDOS Y NOMBRES', 'CURSO/EMO', 'PROGRAMACION', 'REALIZACION', 'RESULTADO', 'CLINICA', 'NOTA', 'VENCIMIENTO ANUAL', 'OBSERVACION', 'MINA'],
+            ['01234567', 'PERSONAL PRUEBA', 'EMO', '06/10/2026', '07/10/2026', 'APTO CON OBSERVACION', 'Clinica Pulso', null, '07/10/2027', 'Control anual', 'MARCOBRE'],
+        ]);
+        $path = tempnam(sys_get_temp_dir(), 'bulk-v2-test');
+
+        try {
+            (new Xlsx($book))->save($path);
+            $rows = (new PersonalMinaBulkPreviewService)->read($path);
+
+            $this->assertSame('Clinica Pulso', $rows[0]['clinic']);
+            $this->assertSame('2026-10-06', $rows[0]['scheduled_date']);
+            $this->assertNull($rows[0]['performed_date']);
+            $this->assertSame('2026-10-06', $rows[1]['scheduled_date']);
+            $this->assertSame('2026-10-07', $rows[1]['performed_date']);
+            $this->assertSame('2026-10-07', $rows[1]['date']);
+            $this->assertSame('APTO CON OBSERVACION', $rows[1]['result']);
+            $this->assertSame([], $rows[1]['issues']);
+        } finally {
+            unlink($path);
+            $book->disconnectWorksheets();
+        }
+    }
+
+    public function test_old_layout_remains_readable_for_course_rows(): void
+    {
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([
+            ['DNI', 'APELLIDOS Y NOMBRES', 'CURSO/EMO', 'PROGRAMACION', 'MINA'],
+            ['01234567', 'PERSONAL PRUEBA', 'INDUCCION', '06/10/2026', 'MARCOBRE'],
+        ]);
+        $book->createSheet()->fromArray([
+            ['DNI', 'APELLIDOS Y NOMBRES', 'CURSO/EMO', 'REALIZACION', 'RESULTADO', 'NOTA', 'VENCIMIENTO ANUAL', 'OBSERVACION', 'MINA'],
+            ['01234567', 'PERSONAL PRUEBA', 'INDUCCION', '07/10/2026', 'APROBADO', null, null, '', 'MARCOBRE'],
+        ]);
+        $path = tempnam(sys_get_temp_dir(), 'bulk-v1-course-test');
+
+        try {
+            (new Xlsx($book))->save($path);
+            $rows = (new PersonalMinaBulkPreviewService)->read($path);
+
+            $this->assertSame(1, $rows[0]['layout_version']);
+            $this->assertSame('', $rows[0]['clinic']);
+            $this->assertNull($rows[1]['scheduled_date']);
+            $this->assertSame('2026-10-07', $rows[1]['performed_date']);
+        } finally {
+            unlink($path);
+            $book->disconnectWorksheets();
+        }
+    }
+
     public function test_rejects_missing_second_sheet(): void
     {
         $path = tempnam(sys_get_temp_dir(), 'bulk-test');

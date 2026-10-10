@@ -110,7 +110,7 @@ class UsuarioNotificationTest extends TestCase
         ]);
     }
 
-    public function test_permiso_general_permitido_muestra_y_habilita_notificaciones_sin_permiso_de_rol(): void
+    public function test_preferencia_permitida_no_concede_notificaciones_sin_permiso_de_rol(): void
     {
         $roleId = $this->createRole('SIN_MODULO_NOTIF_' . Str::upper(Str::random(6)), [
             'inicio' => ['ver'],
@@ -126,20 +126,21 @@ class UsuarioNotificationTest extends TestCase
             'updated_at' => now(),
         ]);
 
+        session()->put('user.permissions', PermissionCatalog::matrixFromSelections(['inicio' => ['ver']]));
         $html = view('partials.header', [
             'notificationsEnabled' => true,
             'headerUnreadCount' => 0,
             'headerNotifications' => collect(),
         ])->render();
 
-        $this->assertStringContainsString('headerNotifToggle', $html);
+        $this->assertStringNotContainsString('headerNotifToggle', $html);
 
         $this->withSession($this->sessionFor($userId, PermissionCatalog::matrixFromSelections([
             'inicio' => ['ver'],
         ])))
             ->getJson('/notificaciones/poll')
-            ->assertOk()
-            ->assertJsonPath('ok', true);
+            ->assertForbidden()
+            ->assertJsonPath('error', 'PERMISSION_DENIED');
     }
 
     public function test_permiso_general_denegado_bloquea_notificaciones_aunque_el_rol_tenga_permiso(): void

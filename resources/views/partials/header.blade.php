@@ -1,8 +1,9 @@
 @php
     $permissions = session('user.permissions', []);
-    $canNotificacionesVer = (bool) ($notificationsEnabled ?? false)
-        || \App\Support\Rbac\PermissionMatrix::allows($permissions, 'notificaciones', 'ver');
-    $canNotificacionesActualizar = $canNotificacionesVer;
+    $canNotificacionesVer = (bool) ($notificationsEnabled ?? true)
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'notificaciones', 'ver');
+    $canNotificacionesActualizar = $canNotificacionesVer
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'notificaciones', 'actualizar');
 @endphp
 
 <header class="app-header">
@@ -130,6 +131,7 @@
     const markAllReadUrl = '{{ route("notificaciones.mark-all-read") }}';
     const csrfToken = '{{ csrf_token() }}';
     const debugEnabled = @json((bool) config('app.debug'));
+    const canUpdateNotifications = @json($canNotificacionesActualizar);
     let lastCount = Number({{ $headerUnreadCount ?? 0 }});
 
     if (!pollUrl || pollUrl === '') return;
@@ -214,6 +216,10 @@
     }
 
     function updateMarkAllReadAction(unreadCount) {
+        if (!canUpdateNotifications) {
+            return;
+        }
+
         var actionsContainer = document.querySelector('.header-notif-panel-actions');
         if (!actionsContainer) {
             return;
@@ -272,11 +278,11 @@
             var dateLabel = formatDateLabel(item.created_at || item.occurred_at);
             var actions = '';
 
-            if (item.status === 'UNREAD') {
+            if (canUpdateNotifications && item.status === 'UNREAD') {
                 actions += renderPostAction(item.mark_read_url, 'Leida');
             }
 
-            if (item.status !== 'ARCHIVED') {
+            if (canUpdateNotifications && item.status !== 'ARCHIVED') {
                 actions += renderPostAction(item.archive_url, 'Archivar');
             }
 

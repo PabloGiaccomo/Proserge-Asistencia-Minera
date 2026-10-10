@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EvaluacionSupervisor extends Model
 {
+    public const PENDING_REGULARIZATION = 'POR_REGULARIZAR';
+
     protected $table = 'evaluacion_supervisor';
 
     public $incrementing = false;
@@ -49,6 +52,22 @@ class EvaluacionSupervisor extends Model
         'fecha' => 'date',
         'source_payload' => 'array',
     ];
+
+    public function isHistorical(): bool
+    {
+        return $this->import_lote_id && in_array($this->calculo_version, ['HISTORICA', 'REGULARIZADA'], true);
+    }
+
+    public function missingCriteria(): array
+    {
+        return array_values(array_filter(array_keys(SupervisorEvaluationTemplate::WEIGHTS),
+            fn ($key) => ! in_array($this->respuestas[$key] ?? null, [1, 2, 3, 4, 5], true)));
+    }
+
+    public function regularizationEvents(): array
+    {
+        return $this->source_payload['_regularizacion'] ?? [];
+    }
 
     public function evaluador(): BelongsTo
     {

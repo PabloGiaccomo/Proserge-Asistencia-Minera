@@ -24,6 +24,8 @@ const assert = require('node:assert/strict');
             await page.addScriptTag({ content: script[1] });
             assert.equal(await page.getByRole('button', { name: /Aplicar carga/ }).isDisabled(), status === 'blocked');
             assert.equal(await page.locator('input[name="confirmacion"]').isDisabled(), status === 'blocked');
+            assert.equal(await page.getByText('Referencia original:', { exact: false }).count(), 1);
+            assert.equal(await page.getByText('Coincidencia por nombre, sin asignar:', { exact: false }).count(), status === 'blocked' ? 1 : 0);
             await page.locator('#hist-q').fill('12345678');
             await page.locator('#hist-status').selectOption(status === 'blocked' ? 'blocked' : 'proposed');
             for (const width of [1440, 390]) {

@@ -27,7 +27,8 @@ class EppScopeService
     public function scopeDeliveries(Builder $query, Usuario $actor): Builder
     {
         return $query->whereHas('personal', fn ($worker) => $this->scopeWorkers($worker, $actor))
-            ->where(fn ($row) => $row->whereNull('operacion_id')->orWhereHas('operacion', fn ($operation) => $operation->whereIn('almacen_id', $this->visibleWarehouseIds($actor))));
+            ->where(fn ($row) => $row->whereNull('operacion_id')->orWhereHas('operacion', fn ($operation) => $operation->whereIn('almacen_id', $this->visibleWarehouseIds($actor))
+                ->orWhere(fn ($catalog) => $catalog->whereNull('almacen_id')->where('resumen_json->origin', 'ENTREGAS_CAMBIOS'))));
     }
 
     public function assertWarehouseAccess(Usuario $usuario, EppAlmacen $almacen): void

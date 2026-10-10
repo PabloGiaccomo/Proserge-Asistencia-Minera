@@ -8,6 +8,7 @@ use App\Models\EppOperacion;
 use App\Models\EppRegistro;
 use App\Models\Personal;
 use App\Models\Usuario;
+use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Contracts\Console\Kernel;
@@ -34,7 +35,50 @@ $operation->setRelation('personal', $worker)->setRelation('almacen', $warehouse)
 $line = ['epp_id' => $substitute->id, 'requested_epp_id' => $product->id, 'processed_quantity' => 5, 'pending_quantity' => 5, 'requested_quantity' => 10, 'return_policy' => 'RETORNABLE', 'attributes' => ['TALLA' => 'M'], 'reason' => 'Articulo equivalente revisado', 'snapshot' => ['real' => ['nombre' => $substitute->nombre], 'solicitado' => ['nombre' => $product->nombre], 'disponibilidad' => 'CONCILIADO']];
 $payload = ['worker' => ['id' => $worker->id, 'name' => $worker->nombre_completo, 'document' => $worker->dni], 'warehouse' => ['name' => $warehouse->nombre], 'details' => [$line], 'pending' => [$line], 'rejected' => []];
 $mode = $argv[1] ?? 'review';
-if ($mode === 'loss') {
+if ($mode === 'catalog-form' || $mode === 'catalog-recovery') {
+    $app['request']->setLaravelSession($app['session.store']);
+    session()->put('user.permissions', ['epps' => ['ver' => true, 'registrar' => true]]);
+    $oldInput = ['personal_id' => $worker->id, 'personal_label' => $worker->nombre_completo];
+    if ($mode === 'catalog-recovery') {
+        $oldInput['items'] = [['epp_id' => $product->id, 'cantidad' => 2, 'talla' => 'M']];
+    }
+    session()->flash('_old_input', $oldInput);
+    $data = app(EppService::class)->pageData(['q' => 'BROWSER-ISOLATED-NONEXISTENT']);
+    $data['eppsActivos'] = collect([$product, $substitute]);
+    echo view('epps.index', $data)->render();
+} elseif ($mode === 'catalog-return') {
+    $app['request']->setLaravelSession($app['session.store']);
+    $balances = collect();
+    foreach ([[$product, 5, 'M'], [$substitute, 2, 'L']] as $index => [$item, $quantity, $size]) {
+        $delivery = new EppEntrega(['id' => $id(11 + $index), 'personal_id' => $worker->id, 'epp_id' => $item->id, 'cantidad_pendiente_devolucion' => $quantity, 'fecha_entrega' => now()->subDays(3), 'talla' => $size, 'color' => 'BLANCO', 'atributos_json' => [['nombre' => 'TIPO', 'valor' => 'I']]]);
+        $delivery->setRelation('epp', $item)->setRelation('operacionDetalle', null);
+        $balances->push($delivery);
+    }
+    echo view('epps.catalog-return', ['worker' => $worker, 'balances' => $balances, 'submissionUuid' => $id(6)])->render();
+} elseif ($mode === 'catalog-review' || $mode === 'catalog-return-review') {
+    $operation->almacen_id = null;
+    $payload['origin'] = 'ENTREGAS_CAMBIOS';
+    $payload['date'] = '2026-10-09';
+    $payload['input'] = [];
+    $payload['details'][0]['size'] = 'M';
+    $payload['details'][0]['color'] = 'BLANCO';
+    $second = $payload['details'][0];
+    $second['snapshot']['real']['nombre'] = 'CASCO DE SEGURIDAD';
+    $second['processed_quantity'] = 2;
+    $second['size'] = null;
+    $second['attributes'] = ['TIPO' => 'I'];
+    $payload['details'][] = $second;
+    if ($mode === 'catalog-return-review') {
+        $operation->tipo = 'DEVOLUCION';
+        $payload['return_selection'] = true;
+        foreach ($payload['details'] as &$detail) {
+            $detail['snapshot']['saldo_anterior'] = $detail['processed_quantity'] + 1;
+            $detail['snapshot']['saldo_restante'] = 1;
+        }
+        unset($detail);
+    }
+    echo view('epps.delivery-signature', compact('operation', 'payload'))->render();
+} elseif ($mode === 'loss') {
     $delivery = new EppEntrega(['id' => $id(11), 'cantidad_pendiente_devolucion' => 5]);
     $delivery->setRelation('personal', $worker)->setRelation('epp', $product);
     echo view('epps.operations.loss', compact('delivery'))->render();
@@ -42,6 +86,12 @@ if ($mode === 'loss') {
     $acceptance = new EppAceptacion(['codigo_verificacion' => 'TEST-CODE', 'contenido_json' => $payload, 'firmante_nombre' => 'TRABAJADOR DE PRUEBA', 'tipo_firmante' => 'TRABAJADOR', 'firmado_at' => now(), 'zona_horaria' => 'America/Lima']);
     $operation->setRelation('operacionesCompensatorias', collect());
     echo view('epps.operations.verify', ['operation' => $operation, 'acceptance' => $acceptance, 'verification' => ['valid' => true]])->render();
+} elseif ($mode === 'kardex-export') {
+    $app['request']->setLaravelSession($app['session.store']);
+    session()->put('user.permissions', ['epps' => ['ver' => true, 'ver_evidencia' => true, 'descargar_constancia' => true], 'logistica' => ['ver_logistica_kardex' => true]]);
+    $data = app(LogisticaDashboardService::class)->pageData(['q' => 'BROWSER-ISOLATED-NONEXISTENT']);
+    $data['activeTab'] = 'kardex';
+    echo view('logistica.index', $data)->render();
 } elseif ($mode === 'dashboard') {
     $data = app(LogisticaDashboardService::class)->pageData(['q' => 'BROWSER-ISOLATED-NONEXISTENT']);
     $data['coverageByItem'] = collect(range(1, 9))->map(fn ($n) => ['nombre' => 'PROTECCION '.$n, 'requerido' => 1, 'entregado' => 0, 'pendiente' => 1, 'coverage_pct' => 0]);

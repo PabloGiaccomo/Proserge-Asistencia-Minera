@@ -72,4 +72,42 @@ class MiningExamIdentityResolverTest extends TestCase
         $this->assertFalse($resolver->schemaReady());
         $this->assertSame($first->id, $resolver->resolve('CURSO LEGADO')['examen_id']);
     }
+
+    public function test_inactive_alias_requires_explicit_master_resolution_without_reactivation(): void
+    {
+        $resolver = app(MiningExamIdentityResolver::class);
+        $exam = $this->exam('CURSO ARCHIVADO '.Str::random(6), ['activo' => false]);
+        $name = 'ALIAS ARCHIVADO '.Str::random(6);
+        DB::table('examen_minero_aliases')->insert([
+            'id' => (string) Str::uuid(), 'examen_id' => $exam->id,
+            'nombre' => $name, 'clave' => hash('sha256', $resolver->normalizedName($name)),
+            'scope_key' => 'global', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->assertSame('missing', $resolver->resolve($name)['status']);
+        $this->assertSame($exam->id, $resolver->resolve($name, allowInactive: true)['examen_id']);
+        $this->assertFalse($exam->fresh()->activo);
+    }
+
+    public function test_master_prefers_unique_active_identity_over_unrelated_inactive_name(): void
+    {
+        $name = 'ACTIVO UNICO '.Str::random(6);
+        $active = $this->exam($name);
+        $this->exam($name, ['activo' => false]);
+        $resolver = app(MiningExamIdentityResolver::class);
+
+        $this->assertSame($active->id, $resolver->resolve($name)['examen_id']);
+        $this->assertSame($active->id, $resolver->resolve($name, allowInactive: true)['examen_id']);
+    }
+
+    public function test_normalized_name_collision_between_active_groups_stays_ambiguous(): void
+    {
+        $suffix = Str::random(6);
+        $this->exam('CURSO-IDENTIDAD '.$suffix);
+        $this->exam('CURSO IDENTIDAD '.$suffix);
+        $resolver = app(MiningExamIdentityResolver::class);
+
+        $this->assertSame('ambiguous', $resolver->resolve('CURSO IDENTIDAD '.$suffix)['status']);
+        $this->assertSame('ambiguous', $resolver->resolve('CURSO IDENTIDAD '.$suffix, allowInactive: true)['status']);
+    }
 }

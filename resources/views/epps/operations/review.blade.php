@@ -19,6 +19,7 @@
             <label>Testigo identificado<select name="testigo_usuario_id" required data-signer-field><option value="">Seleccionar testigo</option>@foreach($witnesses as $user)<option value="{{ $user->id }}">{{ $user->personal->nombre_completo }} · {{ $user->personal->dni }}</option>@endforeach</select></label>
             <label>Motivo de la excepcion (no admite negativa)<textarea name="motivo_excepcion" required maxlength="1000" data-signer-field></textarea></label>
         @endif
+        @include('epps.operations.delivery-declaration')
         <label class="epp-operation-check"><input type="checkbox" name="confirmacion" value="1" required><span>{{ $operation->tipo === 'DEVOLUCION' ? ($witness ? 'Confirmo la devolucion presenciada de unicamente los articulos mostrados' : 'Confirmo haber devuelto unicamente los articulos mostrados') : ($witness ? 'Confirmo la recepcion presenciada de unicamente los articulos mostrados' : 'Confirmo haber recibido unicamente los articulos mostrados') }}</span></label>
         <div class="signature-pad-wrap">
             <h2>{{ $witness ? 'Firma del testigo' : 'Tu firma' }}</h2><p>Dibuja tu firma completa con el dedo o el mouse. Si te equivocas, puedes limpiar y volver a firmar.</p>

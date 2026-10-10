@@ -44,8 +44,13 @@ class AsistenciaFaltasWebTest extends TestCase
             ->assertOk()
             ->assertSee('name="grupo_trabajo_detalle_id"', false)
             ->assertSee('name="estado"', false)
-            ->assertSee('name="hora_marcado"', false)
+            ->assertDontSee('name="hora_marcado"', false)
             ->assertSee('name="motivo_estado"', false);
+
+        $this->withSession($session)
+            ->get(route('asistencia.masivo', $context['group']))
+            ->assertOk()
+            ->assertDontSee('name="hora_marcado"', false);
 
         $this->withSession($session)
             ->get(route('faltas.corregir', $context['absence']))

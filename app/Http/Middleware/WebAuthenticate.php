@@ -16,7 +16,7 @@ class WebAuthenticate
             return $this->invalidSessionResponse($request, 'SESSION_REQUIRED');
         }
 
-        if (!$this->refreshSessionPermissions()) {
+        if (!$this->refreshSessionPermissions($request)) {
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
@@ -26,7 +26,7 @@ class WebAuthenticate
         return $next($request);
     }
 
-    private function refreshSessionPermissions(): bool
+    private function refreshSessionPermissions(Request $request): bool
     {
         $userId = session('user_id') ?: session('user.id');
         if (!$userId) {
@@ -34,12 +34,14 @@ class WebAuthenticate
         }
 
         $usuario = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos', 'personal:id,nombre_completo'])
+            ->with(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos', 'personal:id,nombre_completo'])
             ->find($userId);
 
-        if (!$usuario) {
+        if (!$usuario || strtoupper((string) ($usuario->estado ?? 'ACTIVO')) !== 'ACTIVO') {
             return false;
         }
+
+        $request->setUserResolver(fn () => $usuario);
 
         $roles = collect([$usuario->rol])
             ->merge($usuario->rolesAdicionales)

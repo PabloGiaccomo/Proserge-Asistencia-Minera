@@ -50,7 +50,7 @@ class AsistenciaPolicy
 
     public function canViewAllAttendances(Usuario $usuario): bool
     {
-        return $this->isPrivileged($usuario)
+        return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'administrar')
             || PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver_todas_asistencias');
     }
 
@@ -92,9 +92,7 @@ class AsistenciaPolicy
 
     private function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
             || PermissionMatrix::userCanDirect($usuario, 'asistencias', 'administrar');
     }
 }

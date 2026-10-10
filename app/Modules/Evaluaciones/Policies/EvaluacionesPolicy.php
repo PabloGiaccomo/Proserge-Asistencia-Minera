@@ -127,9 +127,7 @@ class EvaluacionesPolicy
 
     public function isPrivileged(Usuario $usuario): bool
     {
-        $rol = strtoupper((string) optional($usuario->rol)->nombre);
-
-        return in_array($rol, ['ADMIN', 'GERENTE', 'SUPERADMIN'], true)
+        return $this->roleNames($usuario)->intersect(['ADMIN', 'GERENTE', 'SUPERADMIN'])->isNotEmpty()
             || PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'administrar');
     }
 
@@ -178,13 +176,6 @@ class EvaluacionesPolicy
 
     private function roleNames(Usuario $usuario): \Illuminate\Support\Collection
     {
-        $usuario->loadMissing(['rol:id,nombre', 'rolesAdicionales:id,nombre']);
-
-        return collect([$usuario->rol?->nombre])
-            ->merge($usuario->rolesAdicionales->pluck('nombre'))
-            ->filter()
-            ->map(fn ($role): string => strtoupper(trim((string) $role)))
-            ->unique()
-            ->values();
+        return collect(PermissionMatrix::activeRoleNames($usuario));
     }
 }
