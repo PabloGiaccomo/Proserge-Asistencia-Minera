@@ -86,7 +86,7 @@ class PersonalAntiguoRegularizationTest extends TestCase
 
     public function test_cesado_existente_regularizado_como_vigente_no_queda_cesado_y_aparece_en_vencimientos(): void
     {
-        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['ver', 'actualizar']]));
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar'], 'vencimientos' => ['ver']]));
         $personal = $this->createExistingPersonal('CESADO', [
             'numero_documento' => '73111121',
             'nombre_completo' => 'Regularizado Vigente',

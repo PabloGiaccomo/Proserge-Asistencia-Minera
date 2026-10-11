@@ -379,7 +379,7 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->get(route('ficha-colaborador.show', ['token' => $token]))
             ->assertOk()
             ->assertSee('Guia para completar tu ficha')
-            ->assertSee('Abrir reporte de experiencia')
+            ->assertSee('Abrir formulario de experiencia')
             ->assertSee('quedara pendiente de regularizacion documentaria');
 
         $response = $this->post(route('ficha-colaborador.submit', ['token' => $token]), [

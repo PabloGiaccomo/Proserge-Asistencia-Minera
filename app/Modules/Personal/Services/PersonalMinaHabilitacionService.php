@@ -2748,9 +2748,12 @@ class PersonalMinaHabilitacionService
 
     private function nextStoredAttemptNumber(PersonalMinaExamen $exam): int
     {
+        // Callers lock the assignment/exam; a locking read also sees commits newer than the transaction snapshot.
         return ((int) PersonalMinaExamenIntento::query()
             ->where('personal_mina_examen_id', $exam->id)
-            ->max('numero_intento')) + 1;
+            ->orderByDesc('numero_intento')
+            ->lockForUpdate()
+            ->value('numero_intento')) + 1;
     }
 
     private function deleteFailedAttemptFile(?array $storedFile): void

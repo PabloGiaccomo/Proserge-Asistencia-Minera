@@ -297,7 +297,7 @@ class LogisticaEppIntegrationTest extends TestCase
     public function test_logistica_herramientas_muestra_listado_y_oculta_sidebar_independiente(): void
     {
         $session = $this->sessionWithSelections([
-            'logistica' => ['ver', 'actualizar'],
+            'logistica' => ['ver', 'ver_logistica_herramientas'],
             'herramientas' => ['ver', 'actualizar', 'importar'],
         ]);
 
@@ -342,12 +342,27 @@ class LogisticaEppIntegrationTest extends TestCase
             ->assertSee('data-logistics-tab-panel="herramientas" aria-hidden="false"', false)
             ->assertSee('Herramientas y consumibles por parada')
             ->assertSee('Listas semanales de equipos, herramientas, utillaje y consumibles por grupo')
-            ->assertSee('Subir catalogo')
+            ->assertSee('id="toolsCatalogImportDialog"', false)
+            ->assertSee('action="'.route('herramientas-parada.catalogo.importar').'"', false)
             ->assertSee('Estado lista')
             ->assertSee('Parada herramientas logistica')
             ->assertSee('<span class="nav-label">Logistica</span>', false)
             ->assertDontSee('<span class="nav-label">Herramientas</span>', false)
-            ->assertSee('data-logistics-tab-link="herramientas"', false);
+            ->assertSee('data-logistics-tab-link="herramientas"', false)
+            ->assertDontSee('data-logistics-tab-link="dashboard"', false);
+
+        Usuario::query()->findOrFail($session['user_id'])->rol->update([
+            'permisos' => PermissionCatalog::matrixFromSelections([
+                'logistica' => ['ver', 'ver_logistica_herramientas'],
+                'herramientas' => ['ver', 'actualizar'],
+            ]),
+        ]);
+
+        $this->get(route('logistica.index', ['tab' => 'herramientas', 'q' => 'herramientas logistica']))
+            ->assertOk()
+            ->assertSee('Parada herramientas logistica')
+            ->assertDontSee('id="toolsCatalogImportDialog"', false);
+        $this->post(route('herramientas-parada.catalogo.importar'))->assertForbidden();
     }
 
     public function test_proximos_vencimientos_puede_abrir_entregas_filtradas_por_trabajador(): void

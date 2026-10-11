@@ -187,12 +187,12 @@ class PersonalContratoNotRenewedClosureTest extends TestCase
         }
     }
 
-    public function test_ruta_respeta_permiso_actualizar(): void
+    public function test_ruta_respeta_permiso_explicito_cerrar_vencimientos(): void
     {
         Carbon::setTestNow('2026-07-05 09:00:00');
 
         $denied = $this->createUser(['personal' => ['ver']]);
-        $allowed = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $allowed = $this->createUser(['vencimientos' => ['cerrar']]);
         $actor = Usuario::query()->findOrFail($allowed);
         $personal = $this->createPersonal('ACTIVO');
         $contract = $this->insertContract($personal, '2026-01-01', '2026-06-30', true);

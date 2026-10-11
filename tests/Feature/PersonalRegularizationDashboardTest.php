@@ -70,7 +70,10 @@ class PersonalRegularizationDashboardTest extends TestCase
         ]);
         $before = PersonalContrato::query()->where('personal_id', $personal->id)->count();
 
-        $response = $this->get(route('personal.regularizacion.index', ['section' => 'ceased']));
+        $response = $this->get(route('personal.regularizacion.index', [
+            'section' => 'ceased',
+            'q' => $personal->dni,
+        ]));
 
         $response->assertOk()
             ->assertSee('TRABAJADOR CESADO')

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Evaluaciones\Support\SupervisorEvaluationTemplate;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -48,10 +49,7 @@ class EvaluacionSupervisorApiTest extends TestCase
         $usuarioId = $this->crearUsuario();
         $token = $this->crearToken($usuarioId);
 
-        $responses = [];
-        foreach (['A1','A2','A3','A4','A5','A6','A7','A8','A9','B1','B2','B3','B4','B5','B6','B7','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10'] as $k) {
-            $responses[$k] = 5;
-        }
+        $responses = array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 5);
 
         $response = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor/calcular', ['respuestas' => $responses]);
 
@@ -64,6 +62,7 @@ class EvaluacionSupervisorApiTest extends TestCase
         $token = $this->crearToken($usuarioId);
 
         $response = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor/calcular', ['respuestas' => ['A1' => 5]]);
+        $response->assertOk();
         $score = (float) $response->json('data.resultado_final');
 
         $this->assertEquals(4.0, $score);
@@ -92,13 +91,14 @@ class EvaluacionSupervisorApiTest extends TestCase
         $token = $this->crearToken($usuarioId);
 
         $create = $this->withToken($token)->postJson('/api/v1/evaluaciones/supervisor', $this->payload($evaluadorId, $evaluadoId, $minaId, $grupoId));
+        $create->assertStatus(201);
         $id = (string) $create->json('data.id');
 
         $show = $this->withToken($token)->getJson('/api/v1/evaluaciones/supervisor/'.$id);
         $show->assertOk()->assertJsonPath('data.id', $id);
 
         $update = $this->withToken($token)->putJson('/api/v1/evaluaciones/supervisor/'.$id, [
-            'respuestas' => ['A1' => 5, 'B1' => 5, 'C1' => 5],
+            'respuestas' => array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 5),
             'comentarios_finales' => 'Comentario actualizado',
             'aspectos_positivos' => 'Muy buen liderazgo',
             'capacitaciones_recomendadas' => 'Capacitacion tecnica',
@@ -128,7 +128,7 @@ class EvaluacionSupervisorApiTest extends TestCase
             'fecha' => '2026-10-01',
             'destino_tipo' => 'TALLER',
             'destino_id' => $tallerId,
-            'respuestas' => ['A1' => 3],
+            'respuestas' => array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 3),
         ]);
         $taller->assertStatus(201)->assertJsonPath('data.destino_tipo', 'TALLER');
 
@@ -138,7 +138,7 @@ class EvaluacionSupervisorApiTest extends TestCase
             'fecha' => '2026-10-02',
             'destino_tipo' => 'OFICINA',
             'destino_id' => $oficinaId,
-            'respuestas' => ['A1' => 3],
+            'respuestas' => array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 3),
         ]);
         $oficina->assertStatus(201)->assertJsonPath('data.destino_tipo', 'OFICINA');
     }
@@ -153,7 +153,7 @@ class EvaluacionSupervisorApiTest extends TestCase
             'grupo_trabajo_id' => $grupoId,
             'destino_tipo' => 'MINA',
             'destino_id' => $minaId,
-            'respuestas' => ['A1' => 4, 'B1' => 4, 'C1' => 4],
+            'respuestas' => array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 4),
             'comentarios_finales' => 'Comentarios',
             'aspectos_positivos' => 'Positivos',
             'capacitaciones_recomendadas' => 'Capacitaciones',

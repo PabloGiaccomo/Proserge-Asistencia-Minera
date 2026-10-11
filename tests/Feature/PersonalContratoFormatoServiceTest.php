@@ -91,7 +91,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
 
     public function test_contract_format_routes_return_templates_preview_and_download(): void
     {
-        $session = $this->exportSession();
+        $session = $this->sessionWithPersonalPermissions(['descargar_formato_contrato']);
         $personalId = $this->createWorker();
 
         $this->withSession($session)
@@ -124,7 +124,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
     {
         Storage::fake('local');
 
-        $session = $this->updateSession();
+        $session = $this->sessionWithPersonalPermissions(['subir_contrato_firmado']);
         $personalId = $this->createWorker('FALTA_CONTRATO');
         $fechaInicio = now()->toDateString();
         $fechaFin = now()->addMonths(6)->toDateString();
@@ -167,7 +167,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
 
     public function test_contract_data_update_redirects_to_personal_list(): void
     {
-        $session = $this->updateSession();
+        $session = $this->sessionWithPersonalPermissions(['editar_datos_contrato']);
         $personalId = $this->createWorker('FALTA_CONTRATO');
 
         DB::table('personal_puestos')->insertOrIgnore([
@@ -208,7 +208,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
     {
         Storage::fake('local');
 
-        $session = $this->updateSession();
+        $session = $this->sessionWithPersonalPermissions(['descargar_documentos']);
         $personalId = $this->createWorker('ACTIVO');
         $path = 'personal_contratos/' . $personalId . '/contrato_firmado_test.pdf';
         Storage::disk('local')->put($path, 'PDF firmado de prueba');
@@ -279,16 +279,6 @@ class PersonalContratoFormatoServiceTest extends TestCase
         ]);
 
         return $personalId;
-    }
-
-    private function exportSession(): array
-    {
-        return $this->sessionWithPersonalPermissions(['ver', 'exportar']);
-    }
-
-    private function updateSession(): array
-    {
-        return $this->sessionWithPersonalPermissions(['ver', 'actualizar']);
     }
 
     private function sessionWithPersonalPermissions(array $actions): array

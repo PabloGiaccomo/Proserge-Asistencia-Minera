@@ -23,11 +23,12 @@ class ParadaHerramientaServiceTest extends TestCase
         $rolId = (string) Str::uuid();
         DB::table('roles')->insert([
             'id' => $rolId,
-            'nombre' => 'OPERACIONES',
+            'nombre' => 'OPERACIONES HERRAMIENTAS ' . Str::uuid(),
             'permisos' => json_encode([
-                'man_power' => [
+                'herramientas' => [
                     'ver' => true,
                     'actualizar' => true,
+                    'enviar' => true,
                     'administrar' => false,
                 ],
             ]),
@@ -123,11 +124,12 @@ class ParadaHerramientaServiceTest extends TestCase
         $rolId = (string) Str::uuid();
         DB::table('roles')->insert([
             'id' => $rolId,
-            'nombre' => 'PLANEAMIENTO',
+            'nombre' => 'PLANEAMIENTO HERRAMIENTAS ' . Str::uuid(),
             'permisos' => json_encode([
-                'man_power' => [
+                'herramientas' => [
                     'ver' => true,
                     'actualizar' => true,
+                    'importar' => true,
                     'administrar' => false,
                 ],
             ]),
@@ -419,6 +421,7 @@ class ParadaHerramientaServiceTest extends TestCase
             'herramientas' => [
                 'ver' => true,
                 'actualizar' => true,
+                'registrar' => true,
                 'administrar' => false,
             ],
         ]);
@@ -491,6 +494,7 @@ class ParadaHerramientaServiceTest extends TestCase
             'herramientas' => [
                 'ver' => true,
                 'actualizar' => true,
+                'registrar' => true,
                 'administrar' => false,
             ],
         ]);
@@ -574,6 +578,7 @@ class ParadaHerramientaServiceTest extends TestCase
             'herramientas' => [
                 'ver' => true,
                 'actualizar' => true,
+                'registrar' => true,
                 'administrar' => false,
             ],
         ]);
@@ -646,6 +651,7 @@ class ParadaHerramientaServiceTest extends TestCase
             'herramientas' => [
                 'ver' => true,
                 'actualizar' => true,
+                'registrar' => true,
                 'administrar' => false,
             ],
         ]);
@@ -874,7 +880,7 @@ class ParadaHerramientaServiceTest extends TestCase
         $rolId = (string) Str::uuid();
         DB::table('roles')->insert([
             'id' => $rolId,
-            'nombre' => $roleName,
+            'nombre' => $roleName . ' ' . Str::uuid(),
             'permisos' => json_encode($permissions),
             'estado' => 'ACTIVO',
         ]);

@@ -216,7 +216,7 @@ class PersonalPageController extends WebPageController
 
         return array_values(array_filter($rows, function (array $row) use ($visibleStates, $puestos, $contratos, $situaciones): bool {
             $state = PersonalNormalizer::normalizeKey($row['estado_operativo'] ?? $row['estado'] ?? '');
-            if ($visibleStates->isNotEmpty() && !$visibleStates->contains($state)) {
+            if (empty($row['en_lista_negra']) && $visibleStates->isNotEmpty() && !$visibleStates->contains($state)) {
                 return false;
             }
 

@@ -179,7 +179,7 @@ class PersonalContratoRenewalTest extends TestCase
 
     public function test_historial_solo_muestra_boton_de_subir_pdf_para_contrato_en_preparacion(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver_contratos', 'actualizar', 'subir_contrato_firmado']]);
         $personal = $this->createPersonal('ACTIVO');
         $cerrado = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
         $activo = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
@@ -199,7 +199,7 @@ class PersonalContratoRenewalTest extends TestCase
     {
         Storage::fake('local');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['personal' => ['ver_contratos', 'descargar_documentos']]);
         $personal = $this->createPersonal('ACTIVO');
         $unsigned = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
         $signed = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
@@ -222,7 +222,7 @@ class PersonalContratoRenewalTest extends TestCase
     {
         Storage::fake('local');
 
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['personal' => ['descargar_documentos']]);
         $personal = $this->createPersonal('ACTIVO');
         $unsigned = $this->insertContract($personal, PersonalContrato::ESTADO_CERRADO, '2026-01-01', '2026-03-31', false);
         $signed = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-04-01', '2026-06-30', true);
@@ -590,7 +590,7 @@ class PersonalContratoRenewalTest extends TestCase
             $this->markTestSkipped('El catalogo de puestos no esta disponible.');
         }
 
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver_contratos', 'editar_datos_contrato']]);
         if (DB::table('personal_puestos')->where('nombre', 'SUPERVISOR CAMPO')->exists()) {
             DB::table('personal_puestos')->where('nombre', 'SUPERVISOR CAMPO')->update([
                 'activo' => true,
@@ -629,7 +629,7 @@ class PersonalContratoRenewalTest extends TestCase
             $this->markTestSkipped('El catalogo de puestos no esta disponible.');
         }
 
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['editar_datos_contrato']]);
         $personal = $this->createPersonal('ACTIVO');
         $contract = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', true);
 
@@ -648,7 +648,7 @@ class PersonalContratoRenewalTest extends TestCase
 
     public function test_editar_contrato_rechaza_tipo_de_contrato_fuera_del_catalogo(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['editar_datos_contrato']]);
         $personal = $this->createPersonal('ACTIVO');
         $contract = $this->insertContract($personal, PersonalContrato::ESTADO_ACTIVO, '2026-01-01', '2026-06-30', true);
 

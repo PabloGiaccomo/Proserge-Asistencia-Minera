@@ -24,7 +24,7 @@ class PersonalDocumentoDownloadTest extends TestCase
     public function test_individual_document_download_still_works(): void
     {
         Storage::fake('local');
-        $userId = $this->createUser(['personal' => ['ver']]);
+        $userId = $this->createUser(['personal' => ['descargar_documentos']]);
         $ficha = $this->createFicha();
         $archivoId = $this->attachDocument($ficha, 'cv_documentado', 'cv.pdf');
 
@@ -171,7 +171,7 @@ class PersonalDocumentoDownloadTest extends TestCase
         $ficha = $this->createFicha();
         $this->attachDocument($ficha, 'cv_documentado', 'cv.pdf');
         $deniedUser = $this->createUser(['personal' => []]);
-        $allowedUser = $this->createUser(['personal' => ['ver']]);
+        $allowedUser = $this->createUser(['personal' => ['descargar_documentos']]);
 
         $this->withSession($this->sessionFor($deniedUser))
             ->post(route('personal.documentos.download-bulk'), [

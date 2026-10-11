@@ -1015,7 +1015,7 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
 
     public function test_tarea_diaria_actualiza_vencimientos_y_deja_historial_de_sistema(): void
     {
-        Carbon::setTestNow('2026-09-21 00:10:00');
+        Carbon::setTestNow(Carbon::parse('2026-09-21 00:10:00', 'America/Lima'));
         $actor = Usuario::query()->findOrFail($this->createUser(['habilitacion_minera' => ['ver', 'actualizar']]));
         $service = app(PersonalMinaHabilitacionService::class);
         $assignment = $this->assignmentWithExam($service, $actor, $this->createExam('Vigencia automatica '.Str::random(6)));
@@ -2555,6 +2555,9 @@ $userId = $this->createMiningOperator();
         $service = app(PersonalMinaHabilitacionService::class);
         $assignedWorker = $this->createPersonal();
         $unassignedWorker = $this->createPersonal();
+        $fixture = 'ACCIONES MINERAS '.Str::uuid();
+        $assignedWorker->update(['nombre_completo' => $fixture.' ASIGNADO']);
+        $unassignedWorker->update(['nombre_completo' => $fixture.' DISPONIBLE']);
         $mine = $this->createMine('Mina acciones');
         $exam = $this->createExam('Examen acciones');
         $service->storeRequirement([
@@ -2569,7 +2572,7 @@ $userId = $this->createMiningOperator();
         ], $actor);
 
         $response = $this->withSession($this->sessionFor($actor->id))
-            ->get(route('personal.habilitacion-minera.index', ['worker_limit' => 80]))
+            ->get(route('personal.habilitacion-minera.index', ['worker_limit' => 80, 'trabajador' => $fixture]))
             ->assertOk()
             ->assertSee('data-testid="worker-assign-' . $assignedWorker->id . '"', false)
             ->assertSee('data-testid="worker-manage-' . $assignedWorker->id . '"', false)
@@ -2800,9 +2803,10 @@ $userId = $this->createMiningOperator();
             ->assertSee('Estado habilitacion')
             ->assertSee('Accion siguiente')
             ->assertSee($exam->nombre)
-            ->assertSee('Intento 1/2')
+            ->assertSee('Intento 0/2')
             ->assertSee('mine-exam-cell ok', false)
             ->assertSee('data-visual-state="' . PersonalMina::ESTADO_HABILITADO . '"', false);
+        $this->assertSame(1, $assignment->examenes->first()->intentos()->where('resultado', 'APROBADO')->count());
     }
 
     public function test_filtro_de_estado_examen_limita_trabajadores_y_columnas_de_la_matriz(): void

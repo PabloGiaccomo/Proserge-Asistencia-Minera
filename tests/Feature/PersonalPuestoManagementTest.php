@@ -16,7 +16,7 @@ class PersonalPuestoManagementTest extends TestCase
 
     public function test_boton_puestos_aparece_en_acciones_de_personal(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver'], 'personal_puestos' => ['ver']]);
 
         $this->withSession($this->sessionFor($userId))
             ->get(route('personal.index'))
@@ -27,7 +27,7 @@ class PersonalPuestoManagementTest extends TestCase
 
     public function test_crea_puesto_con_funciones(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal_puestos' => ['crear']]);
 
         $this->withSession($this->sessionFor($userId))
             ->post(route('personal.puestos.store'), [
@@ -45,7 +45,7 @@ class PersonalPuestoManagementTest extends TestCase
 
     public function test_editar_puesto_mantiene_id_y_actualiza_trabajadores_enlazados(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal_puestos' => ['actualizar']]);
         $puesto = PersonalPuesto::query()->create([
             'id' => (string) Str::uuid(),
             'nombre' => 'AUXILIAR BASE',
@@ -86,7 +86,7 @@ class PersonalPuestoManagementTest extends TestCase
 
     public function test_elimina_puesto_sin_trabajadores_asociados(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal_puestos' => ['eliminar']]);
         $puesto = PersonalPuesto::query()->create([
             'id' => (string) Str::uuid(),
             'nombre' => 'PUESTO SIN USO',
@@ -106,7 +106,7 @@ class PersonalPuestoManagementTest extends TestCase
 
     public function test_no_elimina_puesto_con_trabajadores_asociados(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal_puestos' => ['eliminar']]);
         $puesto = PersonalPuesto::query()->create([
             'id' => (string) Str::uuid(),
             'nombre' => 'PUESTO EN USO',

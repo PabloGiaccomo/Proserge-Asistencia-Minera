@@ -39,7 +39,7 @@ class PersonalContractStatusHighlightTest extends TestCase
 
     public function test_listado_resalta_columna_contrato_segun_estado_documental(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver', 'subir_contrato_firmado']]);
 
         app(PersonalService::class)->create([
             'dni' => '75990101',
@@ -97,7 +97,7 @@ class PersonalContractStatusHighlightTest extends TestCase
         ]);
 
         $response = $this->withSession($this->sessionFor($userId))
-            ->get(route('personal.index'));
+            ->get(route('personal.index', ['q' => '7599010']));
 
         $response
             ->assertOk()
@@ -126,7 +126,7 @@ class PersonalContractStatusHighlightTest extends TestCase
     {
         Storage::fake('local');
 
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['subir_contrato_firmado']]);
         $personal = app(PersonalService::class)->create([
             'dni' => '75990104',
             'tipo_documento' => 'DNI',
@@ -183,7 +183,7 @@ class PersonalContractStatusHighlightTest extends TestCase
 
     public function test_contrato_cerrado_prioriza_estado_cesado_sobre_inactivo(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver', 'ver_contratos']]);
 
         $personal = app(PersonalService::class)->create([
             'dni' => '75990201',

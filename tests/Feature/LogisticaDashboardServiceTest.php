@@ -140,9 +140,10 @@ class LogisticaDashboardServiceTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-07-08 08:00:00'));
 
-        $activeWorker = $this->createPersonal('ACTIVO', 'TRABAJADOR ACTIVO');
-        $enabledWorker = $this->createPersonal('INACTIVO', 'TRABAJADOR HABILITADO');
-        $outsideWorker = $this->createPersonal('INACTIVO', 'TRABAJADOR FUERA');
+        $fixture = 'ALCANCE '.Str::uuid();
+        $activeWorker = $this->createPersonal('ACTIVO', 'TRABAJADOR ACTIVO '.$fixture);
+        $enabledWorker = $this->createPersonal('INACTIVO', 'TRABAJADOR HABILITADO '.$fixture);
+        $outsideWorker = $this->createPersonal('INACTIVO', 'TRABAJADOR FUERA '.$fixture);
         $mineId = $this->createMine('BOROO');
         $eppId = $this->createEpp('CASCO DE SEGURIDAD');
 
@@ -152,11 +153,15 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->createDelivery($enabledWorker, $eppId, '2026-07-01', '2026-07-20');
         $this->createDelivery($outsideWorker, $eppId, '2026-06-01', '2026-07-02');
 
-        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'dashboard']);
+        $data = app(LogisticaDashboardService::class)->pageData(['tab' => 'dashboard', 'q' => $fixture, 'epps' => [$eppId]]);
 
         $this->assertSame(2, $data['metrics']['workers']);
         $this->assertSame(1, $data['metrics']['expired_epp']);
         $this->assertSame(1, $data['metrics']['expiring_epp']);
+        $this->assertEqualsCanonicalizing(
+            [$activeWorker->nombre_completo, $enabledWorker->nombre_completo],
+            $data['expiringDeliveries']->pluck('trabajador')->all()
+        );
         $this->assertArrayNotHasKey('costo_pendiente_estimado', $data['metrics']);
     }
 

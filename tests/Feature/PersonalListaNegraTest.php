@@ -15,7 +15,7 @@ class PersonalListaNegraTest extends TestCase
 
     public function test_usuario_con_permiso_agrega_trabajador_a_lista_negra_sin_cambiar_estado(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['gestionar_lista_negra']]);
         $personal = app(PersonalService::class)->create([
             'dni' => '75990001',
             'tipo_documento' => 'DNI',
@@ -73,7 +73,7 @@ class PersonalListaNegraTest extends TestCase
 
     public function test_usuario_con_permiso_quita_trabajador_de_lista_negra_sin_cambiar_estado(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['gestionar_lista_negra']]);
         $personal = app(PersonalService::class)->create([
             'dni' => '75990003',
             'tipo_documento' => 'DNI',
@@ -137,7 +137,7 @@ class PersonalListaNegraTest extends TestCase
 
     public function test_listado_mantiene_visible_lista_negra_aunque_filtre_estado(): void
     {
-        $userId = $this->createUser(['personal' => ['ver', 'actualizar']]);
+        $userId = $this->createUser(['personal' => ['ver']]);
 
         app(PersonalService::class)->create([
             'dni' => '75990005',
@@ -177,11 +177,61 @@ class PersonalListaNegraTest extends TestCase
         ]);
 
         $this->withSession($this->sessionFor($userId))
-            ->get(route('personal.index', ['estado' => 'ACTIVO']))
+            ->get(route('personal.index', ['estado' => 'ACTIVO', 'q' => '7599000']))
             ->assertOk()
             ->assertSee('TRABAJADOR CESADO LISTA NEGRA VISIBLE')
             ->assertSee('data-lista-negra="1"', false)
             ->assertDontSee('TRABAJADOR CESADO SIN LISTA NEGRA');
+    }
+
+    public function test_alertas_lista_negra_se_cuentan_antes_de_paginar_y_respetan_los_otros_filtros(): void
+    {
+        $userId = $this->createUser(['personal' => ['ver']]);
+        $group = 'ALERTA' . Str::upper(Str::random(12));
+        $blacklistedIds = [];
+
+        foreach (range(1, 13) as $index) {
+            $document = (string) (75991000 + $index);
+            $personal = app(PersonalService::class)->create([
+                'dni' => $document,
+                'tipo_documento' => 'DNI',
+                'numero_documento' => $document,
+                'nombre_completo' => $group . ' CESADO ' . $index,
+                'puesto' => 'OPERARIO REGRESION',
+                'contrato' => 'FIJO',
+                'estado' => 'CESADO',
+            ]);
+
+            if ($index <= 12) {
+                DB::table('personal')->where('id', $personal->id)->update(['en_lista_negra' => true]);
+                $blacklistedIds[] = $personal->id;
+            }
+        }
+
+        $filters = ['q' => $group, 'visible_estados' => ['activo'], 'per_page' => 10];
+        $firstPage = $this->withSession($this->sessionFor($userId))
+            ->getJson(route('personal.api.list', $filters))
+            ->assertOk()
+            ->assertJsonPath('total', 12)
+            ->assertJsonCount(10, 'data');
+        $secondPage = $this->getJson(route('personal.api.list', [...$filters, 'page' => 2]))
+            ->assertOk()
+            ->assertJsonPath('total', 12)
+            ->assertJsonCount(2, 'data');
+
+        $this->assertEqualsCanonicalizing(
+            $blacklistedIds,
+            array_merge(array_column($firstPage->json('data'), 'id'), array_column($secondPage->json('data'), 'id')),
+        );
+
+        foreach ([['q' => $group . ' AUSENTE'], ['puestos' => ['PUESTO AJENO']], ['contratos' => ['Intermitente']]] as $extraFilters) {
+            $this->getJson(route('personal.api.list', [...$filters, ...$extraFilters]))
+                ->assertOk()
+                ->assertJsonPath('total', 0)
+                ->assertJsonCount(0, 'data');
+        }
+
+        $this->assertDatabaseHas('personal', ['id' => $blacklistedIds[0], 'estado' => 'CESADO', 'en_lista_negra' => true]);
     }
 
     private function createUser(array $permissions): string

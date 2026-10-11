@@ -197,7 +197,7 @@ class ImportPersonalLifecycleStateTest extends TestCase
         ]);
     }
 
-    public function test_imported_preparation_contract_dates_appear_in_contract_expirations(): void
+    public function test_imported_preparation_contract_preserves_dates_in_worker_history_but_is_excluded_from_expirations(): void
     {
         $user = $this->createUser();
 
@@ -252,16 +252,28 @@ class ImportPersonalLifecycleStateTest extends TestCase
             ],
         ]), $user);
 
-        $contracts = app(PersonalContratoService::class)->listExpiringContracts([
+        $personal = Personal::query()->where('numero_documento', '71000112')->firstOrFail();
+        $service = app(PersonalContratoService::class);
+        $history = $service->listExpiringContracts([
+            'trabajador' => $personal->nombre_completo,
+        ]);
+
+        $this->assertCount(1, $history);
+        $contract = $history->first();
+        $this->assertSame($personal->id, $contract->personal_id);
+        $this->assertSame('PREPARACION', $contract->estado);
+        $this->assertNull($contract->origen_contrato_id);
+        $this->assertSame('2026-07-01', $contract->fecha_inicio->toDateString());
+        $this->assertSame('2026-12-31', $contract->fecha_fin->toDateString());
+        $this->assertFalse((bool) $contract->getAttribute('can_register_decision'));
+
+        $contracts = $service->listExpiringContracts([
             'mes' => 12,
             'anio' => 2026,
             'cargo' => 'MECANICO IMPORTADO',
         ]);
 
-        $this->assertCount(1, $contracts);
-        $this->assertSame('PREPARACION', strtoupper((string) $contracts->first()->estado));
-        $this->assertSame('VENCIMIENTO IMPORTADO JORGE', $contracts->first()->personal->nombre_completo);
-        $this->assertFalse((bool) $contracts->first()->getAttribute('can_register_decision'));
+        $this->assertNotContains($contract->id, $contracts->pluck('id')->all());
     }
 
     public function test_personnel_data_import_updates_existing_worker_and_clears_dash_contract_end(): void
