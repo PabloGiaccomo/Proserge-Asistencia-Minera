@@ -14,6 +14,7 @@ use App\Models\PersonalMina;
 use App\Models\PersonalPuesto;
 use App\Models\Usuario;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use App\Modules\Personal\Support\PersonalSearchQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -967,6 +968,16 @@ class PersonalService
 
     private function applySearch(Builder $query, string $search): void
     {
+        $dniList = PersonalSearchQuery::dniList($search);
+        if ($dniList !== []) {
+            $query->where(function (Builder $documents) use ($dniList): void {
+                $documents->whereIn('personal.dni', $dniList)
+                    ->orWhereIn('personal.numero_documento', $dniList);
+            });
+
+            return;
+        }
+
         $searchableColumns = collect([
             'nombre_completo',
             'dni',

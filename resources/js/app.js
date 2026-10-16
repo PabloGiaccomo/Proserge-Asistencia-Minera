@@ -1,4 +1,9 @@
 import './bootstrap';
+import { createPersonalLiveResults } from './modules/personal-live-results';
+import { findExportDniMatches } from './modules/personal-export-selection';
+
+window.createPersonalLiveResults = createPersonalLiveResults;
+window.findExportDniMatches = findExportDniMatches;
 import { initSignaturePads } from './modules/signature-pad';
 import { initEppOperations } from './modules/epp-operation';
 import { initEppDeliveryBatches } from './modules/epp-delivery-batch';

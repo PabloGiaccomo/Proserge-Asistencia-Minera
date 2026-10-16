@@ -127,11 +127,20 @@ class PersonalPageController extends WebPageController
 
         $catalogs = $this->getLocationCatalogs();
 
-        return view('personal.index', array_merge($catalogs, compact('trabajadores'), [
+        $view = view('personal.index', array_merge($catalogs, compact('trabajadores'), [
             'puestoOptions' => $this->puestoOptions(),
             'contractTypeOptions' => $this->contratoService->contractTypeOptions(),
             'paginationMeta' => $paginationMeta,
         ]));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'html' => $view->fragment('personal-rows'),
+                'pagination' => $paginationMeta,
+            ])->header('Cache-Control', 'no-store');
+        }
+
+        return $view;
     }
 
     public function apiList(Request $request): JsonResponse

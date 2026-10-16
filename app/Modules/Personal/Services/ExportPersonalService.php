@@ -5,6 +5,7 @@ namespace App\Modules\Personal\Services;
 use App\Models\Personal;
 use App\Modules\Personal\Support\PersonalExportConfig;
 use App\Modules\Personal\Support\PersonalNormalizer;
+use App\Modules\Personal\Support\PersonalSearchQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -214,14 +215,15 @@ class ExportPersonalService
             return [];
         }
 
+        $dniList = PersonalSearchQuery::dniList($query);
+
         return $this->personalService
             ->buildFilteredQuery([
                 'search' => $query,
                 'with_minas' => true,
-                'limit' => max(1, min(20, $limit)),
             ])
             ->with(['minas'])
-            ->limit(max(1, min(20, $limit)))
+            ->when($dniList === [], fn (Builder $workers): Builder => $workers->limit(max(1, min(20, $limit))))
             ->get()
             ->map(fn (Personal $personal): array => $this->workerSummary($personal))
             ->values()

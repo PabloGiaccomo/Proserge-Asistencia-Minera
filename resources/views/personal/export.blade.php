@@ -57,7 +57,7 @@
             <div class="export-card-header">
                 <div>
                     <h2 class="export-card-title">Seleccionar personal</h2>
-                    <p class="export-card-subtitle">Busca por nombre, DNI o puesto y agrega trabajadores al resumen previo.</p>
+                    <p class="export-card-subtitle">Busca por nombre, DNI o puesto. Pega varios DNI separados por espacios y pulsa Enter para agregarlos al resumen previo.</p>
                 </div>
             </div>
             <div class="export-card-body">
@@ -125,6 +125,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const loadingMeta = document.getElementById('exportLoadingMeta');
     const selectedWorkers = new Map();
     let searchTimer = null;
+    let workerSearchRevision = 0;
+    let workerSearchAbortController = null;
     let previewTimer = null;
     let loadingTimer = null;
     let loadingStep = 0;
@@ -329,25 +331,44 @@ document.addEventListener('DOMContentLoaded', function () {
         }).join('');
     }
 
-    async function searchWorkers() {
+    async function searchWorkers(selectDniMatches = false) {
         const value = workerSearch.value.trim();
+        workerSearchAbortController?.abort();
+        const revision = ++workerSearchRevision;
         if (value.length < 2) {
             renderSearchResults([], 'Escribe al menos 2 caracteres para buscar.');
             return;
         }
 
         renderSearchResults([], 'Buscando...');
-        const response = await fetch(endpoints.workers + '?q=' + encodeURIComponent(value), {
-            headers: {'Accept': 'application/json'}
-        });
+        workerSearchAbortController = new AbortController();
+        try {
+            const response = await fetch(endpoints.workers + '?q=' + encodeURIComponent(value), {
+                headers: {'Accept': 'application/json'},
+                signal: workerSearchAbortController.signal,
+            });
+            if (!response.ok || response.redirected) throw new Error('No se pudo buscar personal en este momento.');
 
-        if (!response.ok) {
-            renderSearchResults([], 'No se pudo buscar personal en este momento.');
-            return;
+            const payload = await response.json();
+            if (revision !== workerSearchRevision || workerSearch.value.trim() !== value) return;
+            const workers = Array.isArray(payload.workers) ? payload.workers : [];
+            if (selectDniMatches) {
+                const matches = window.findExportDniMatches(value, workers);
+                if (matches.length) {
+                    matches.forEach(worker => selectedWorkers.set(worker.id, worker));
+                    renderSelectedWorkers();
+                    schedulePreview();
+                    renderSearchResults(workers);
+                    workerResults.classList.remove('is-open');
+                    return;
+                }
+            }
+            renderSearchResults(workers);
+        } catch (error) {
+            if (revision === workerSearchRevision && error.name !== 'AbortError') {
+                renderSearchResults([], 'No se pudo buscar personal en este momento. Reintenta la busqueda.');
+            }
         }
-
-        const payload = await response.json();
-        renderSearchResults(Array.isArray(payload.workers) ? payload.workers : []);
     }
 
     function renderPreview(payload) {
@@ -463,8 +484,17 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     workerSearch.addEventListener('input', function () {
+        workerSearchRevision += 1;
+        workerSearchAbortController?.abort();
         window.clearTimeout(searchTimer);
         searchTimer = window.setTimeout(searchWorkers, 250);
+    });
+
+    workerSearch.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        window.clearTimeout(searchTimer);
+        searchWorkers(true);
     });
 
     workerSearch.addEventListener('focus', function () {

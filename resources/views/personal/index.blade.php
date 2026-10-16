@@ -2503,8 +2503,7 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
             <span class="card-title">Listado de Personal</span>
         </div>
         <div class="card-body">
-            @if($paginationTotal === 0)
-                <div class="empty-state">
+                <div class="empty-state" id="personalEmptyResults" style="{{ $paginationTotal === 0 ? '' : 'display:none' }}" role="status">
                     <div class="empty-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -2513,10 +2512,10 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                         </svg>
                     </div>
-                    <h3 class="empty-title">Aún no hay personal registrado</h3>
-                    <p class="empty-description">Una vez que se integren trabajadores al sistema, aparecerán aquí.</p>
+                    <h3 class="empty-title">No se encontraron trabajadores</h3>
+                    <p class="empty-description">Prueba otra busqueda o revisa los filtros seleccionados.</p>
                 </div>
-            @else
+                <p id="personalSearchStatus" role="status" aria-live="polite" hidden></p>
                 <div class="personal-grid-shell" id="personalGridShell">
                     <div class="personal-pagination-controls is-top" aria-label="Resumen superior de paginacion">
                         <div class="personal-page-size">
@@ -2748,7 +2747,8 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                                 </th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="personalResultsBody">
+                            @fragment('personal-rows')
                             @foreach($trabajadores as $trabajador)
                                 @php
                                     $estadoRaw = strtoupper((string) ($trabajador['estado'] ?? 'ACTIVO'));
@@ -3202,6 +3202,7 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                                     </td>
                                 </tr>
                             @endforeach
+                            @endfragment
                         </tbody>
                         </table>
                     </div>
@@ -3218,7 +3219,6 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                 </div>
 
                 <div class="personal-pagination" id="personalPagination"></div>
-            @endif
         </div>
     </div>
 
@@ -4718,7 +4718,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const bootOverlay = document.getElementById('personalBootOverlay');
     const bootProgressBar = document.getElementById('personalBootProgressBar');
     const bootStatus = document.getElementById('personalBootStatus');
-    const rows = Array.from(document.querySelectorAll('.js-person-row'));
+    let rows = Array.from(document.querySelectorAll('.js-person-row'));
     const gridShell = document.getElementById('personalGridShell');
     const topScrollbar = document.getElementById('personalTopScrollbar');
     const topScrollbarInner = document.getElementById('personalTopScrollbarInner');
@@ -4767,7 +4767,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const contractDownloadForm = document.getElementById('contractFormatDownloadForm');
     const documentDownloadForm = document.getElementById('documentDownloadForm');
     const documentDownloadSelectAll = document.getElementById('personalSelectAllDocuments');
-    const documentDownloadChecks = Array.from(document.querySelectorAll('.js-personal-document-check'));
     const columnCheckboxes = Array.from(document.querySelectorAll('.js-col-toggle'));
     const viewStateKey = 'proserge.personal.index.viewState.v1';
     const defaultVisibleColumns = ['documento', 'celular', 'correo', 'puesto', 'contrato', 'estado', 'situacion', 'ocupacion', 'acciones'];
@@ -4879,8 +4878,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    documentDownloadChecks.forEach(function (input) {
-        input.addEventListener('change', updateDocumentDownloadSelectionState);
+    dataGrid?.addEventListener('change', function (event) {
+        if (event.target.matches('.js-personal-document-check')) updateDocumentDownloadSelectionState();
     });
 
     if (documentDownloadForm) {
@@ -5153,12 +5152,51 @@ document.addEventListener('DOMContentLoaded', function () {
         gridShell.style.removeProperty('--personal-grid-expanded-width');
     };
 
+    const liveResults = window.createPersonalLiveResults({
+        onResults: function (result, url) {
+            document.getElementById('personalResultsBody').innerHTML = result.html;
+            rows = Array.from(dataGrid.querySelectorAll('.js-person-row'));
+            Object.assign(serverPagination, result.pagination);
+            window.history.replaceState(null, '', url.toString());
+            const exportLink = document.getElementById('personalExportExcelAction');
+            if (exportLink) {
+                const exportUrl = new URL(exportLink.dataset.baseUrl, window.location.origin);
+                exportUrl.search = url.search;
+                exportLink.href = exportUrl.toString();
+            }
+            document.querySelectorAll('input[type="hidden"][name="q"]').forEach(function (input) {
+                input.value = url.searchParams.get('q') || '';
+            });
+            document.getElementById('personalEmptyResults').style.display = Number(result.pagination.total) === 0 ? '' : 'none';
+            if (documentDownloadSelectAll) documentDownloadSelectAll.checked = false;
+            applyVisibleColumns(collectVisibleColumns());
+            applyOccupationVisibility();
+            renderGrid(false);
+        },
+        onBusy: function (busy) {
+            dataGrid?.setAttribute('aria-busy', String(busy));
+            const status = document.getElementById('personalSearchStatus');
+            status.hidden = !busy;
+            status.textContent = busy ? 'Buscando trabajadores...' : '';
+        },
+        onError: function (message) {
+            const status = document.getElementById('personalSearchStatus');
+            status.hidden = false;
+            status.textContent = message;
+        },
+    });
+
     const navigateServerPage = function (page, nextPageSize) {
         const url = new URL(window.location.href);
-        url.searchParams.set('page', String(Math.max(1, Number(page || 1))));
+        const query = String(searchInput?.value || '').trim();
+        const queryChanged = query !== (url.searchParams.get('q') || url.searchParams.get('search') || '');
+        url.searchParams.delete('search');
+        if (query) url.searchParams.set('q', query);
+        else url.searchParams.delete('q');
+        url.searchParams.set('page', queryChanged ? '1' : String(Math.max(1, Number(page || 1))));
         url.searchParams.set('per_page', String(Number(nextPageSize || pageSize || serverPagination?.perPage || 25)));
-        markInternalPersonalNavigation();
-        window.location.href = url.toString();
+        window.clearTimeout(simpleSearchTimer);
+        liveResults.load(url);
     };
 
     const navigateServerSearch = function (query) {
@@ -5176,14 +5214,7 @@ document.addEventListener('DOMContentLoaded', function () {
         url.searchParams.set('per_page', String(Number(pageSize || serverPagination?.perPage || 25)));
 
         if (url.toString() !== window.location.href) {
-            clearViewState();
-            markInternalPersonalNavigation();
-            try {
-                window.sessionStorage.setItem('proserge.personal.focusSearchOnce', '1');
-            } catch (error) {
-                // La busqueda sigue disponible sin almacenamiento de sesion.
-            }
-            window.location.href = url.toString();
+            liveResults.load(url);
         }
     };
 
@@ -5999,6 +6030,7 @@ document.addEventListener('DOMContentLoaded', function () {
         simpleSearchInput.addEventListener('input', function (event) {
             syncSearchClear();
             if (hasServerPagination) {
+                liveResults.cancel();
                 window.clearTimeout(simpleSearchTimer);
                 if (!event.isComposing) {
                     simpleSearchTimer = window.setTimeout(function () {
@@ -6022,6 +6054,7 @@ document.addEventListener('DOMContentLoaded', function () {
             simpleSearchInput.value = '';
             syncSearchClear();
             if (hasServerPagination) {
+                liveResults.cancel();
                 window.clearTimeout(simpleSearchTimer);
                 navigateServerSearch('');
                 return;
@@ -6270,38 +6303,31 @@ document.addEventListener('DOMContentLoaded', function () {
         return true;
     };
 
-    document.querySelectorAll('.dg-ocup-chip-btn').forEach(function (button) {
-        button.addEventListener('click', function (event) {
-            event.preventDefault();
-            event.stopPropagation();
-            const filterType = button.dataset.ocupFilterType;
-            const value = button.dataset.ocupFilterValue || '';
-            let updated = false;
-            if (filterType === 'ocupMina') {
-                updated = updateOcupCheckboxSelectionFromChip(ocupMineCheckboxes, value);
-            } else if (filterType === 'ocupOffice') {
-                updated = updateOcupCheckboxSelectionFromChip(ocupOfficeCheckboxes, value);
-            } else if (filterType === 'ocupWorkshop') {
-                updated = updateOcupCheckboxSelectionFromChip(ocupWorkshopCheckboxes, value);
-            } else {
-                return;
-            }
+    dataGrid?.addEventListener('click', function (event) {
+        const button = event.target.closest('.dg-ocup-chip-btn');
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const filterType = button.dataset.ocupFilterType;
+        const value = button.dataset.ocupFilterValue || '';
+        let updated = false;
+        if (filterType === 'ocupMina') {
+            updated = updateOcupCheckboxSelectionFromChip(ocupMineCheckboxes, value);
+        } else if (filterType === 'ocupOffice') {
+            updated = updateOcupCheckboxSelectionFromChip(ocupOfficeCheckboxes, value);
+        } else if (filterType === 'ocupWorkshop') {
+            updated = updateOcupCheckboxSelectionFromChip(ocupWorkshopCheckboxes, value);
+        } else {
+            return;
+        }
 
-            if (!updated) {
-                return;
-            }
+        if (!updated) return;
+        if (ocupFilterRowsToggle) ocupFilterRowsToggle.checked = true;
 
-            if (ocupFilterRowsToggle) {
-                ocupFilterRowsToggle.checked = true;
-            }
-
-            applyOccupationVisibility();
-            if (scheduleServerOccupationFilter()) {
-                return;
-            }
-            renderGrid(true);
-        });
-    });
+        applyOccupationVisibility();
+        if (scheduleServerOccupationFilter()) return;
+        renderGrid(true);
+    }, true);
     
     // Dropdown Acciones - mostrar/ocultar sin mover contenido
     const accionesBtn = document.getElementById('accionesBtn');
