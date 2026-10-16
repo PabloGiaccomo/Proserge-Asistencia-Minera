@@ -33,6 +33,9 @@ Se actualizan filas, contador y paginacion sin recargar la pagina ni reemplazar
 el campo de busqueda. Las peticiones anteriores se cancelan al volver a escribir
 y sus respuestas tardias se ignoran. Los filtros siguen presentes en la consulta.
 La pagina y el tamano de pagina tambien se actualizan sin recarga.
+Sin coincidencias se muestra solo el mensaje de busqueda vacia: se ocultan tabla,
+barras de desplazamiento y controles de paginacion. El listado reaparece al
+obtener resultados, sin reemplazar el campo de busqueda.
 
 Las filas se renderizan en el servidor con los mismos permisos de la vista
 completa. Ante un error se conserva el ultimo listado y se muestra un mensaje

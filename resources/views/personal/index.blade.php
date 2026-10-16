@@ -2516,6 +2516,7 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                     <p class="empty-description">Prueba otra busqueda o revisa los filtros seleccionados.</p>
                 </div>
                 <p id="personalSearchStatus" role="status" aria-live="polite" hidden></p>
+                <div id="personalResultsLayout" style="{{ $paginationTotal === 0 ? 'display:none' : '' }}">
                 <div class="personal-grid-shell" id="personalGridShell">
                     <div class="personal-pagination-controls is-top" aria-label="Resumen superior de paginacion">
                         <div class="personal-page-size">
@@ -3219,6 +3220,7 @@ html.personal-skip-boot .personal-page .personal-boot-overlay {
                 </div>
 
                 <div class="personal-pagination" id="personalPagination"></div>
+                </div>
         </div>
     </div>
 
@@ -5168,6 +5170,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 input.value = url.searchParams.get('q') || '';
             });
             document.getElementById('personalEmptyResults').style.display = Number(result.pagination.total) === 0 ? '' : 'none';
+            document.getElementById('personalResultsLayout').style.display = Number(result.pagination.total) === 0 ? 'none' : '';
             if (documentDownloadSelectAll) documentDownloadSelectAll.checked = false;
             applyVisibleColumns(collectVisibleColumns());
             applyOccupationVisibility();

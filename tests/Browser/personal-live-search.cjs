@@ -22,7 +22,7 @@ const path = require('node:path');
                     const file = path.join('public', url.pathname);
                     return route.fulfill({ contentType: file.endsWith('.css') ? 'text/css' : 'application/javascript', body: fs.readFileSync(file) });
                 }
-                if (request.resourceType() === 'document') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixtures.initial.html });
+                if (request.resourceType() === 'document') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: url.searchParams.has('initial_empty') ? fixtures.initialEmpty.html : fixtures.initial.html });
                 if (url.pathname === '/personal') {
                     assert.equal(url.searchParams.get('puestos[]'), 'OPERARIO');
                     const q = url.searchParams.get('q') || '';
@@ -43,9 +43,12 @@ const path = require('node:path');
             await search.fill('NO EXISTE');
             await page.waitForFunction(() => document.querySelector('#personalCount').textContent === '0 trabajadores');
             assert.equal(await page.locator('#personalEmptyResults').isVisible(), true);
+            assert.equal(await page.locator('#personalGridShell').isVisible(), false, 'Empty results must hide the table');
+            assert.equal(await page.locator('#personalPageSize').isVisible(), false, 'Empty results must hide pagination controls');
             await search.fill('');
             await page.waitForFunction(() => document.querySelector('#personalCount').textContent === '26 trabajadores');
             assert.equal(await page.locator('.js-person-row:visible').count(), 25);
+            assert.equal(await page.locator('#personalResultsLayout').isVisible(), true);
             await page.locator('#personalPagination button[data-page="2"]').first().click();
             await page.waitForFunction(() => document.querySelector('#personalPaginationInfo').textContent.includes('26-26'));
             assert.equal(await page.locator('.js-person-row:visible').count(), 1);
@@ -53,6 +56,15 @@ const path = require('node:path');
             assert.deepEqual(errors, []);
             fs.mkdirSync('.codex-tmp', { recursive: true });
             await page.screenshot({ path: `.codex-tmp/personal-live-search-${width}.png`, fullPage: true });
+            await page.goto('http://synthetic.local/personal?puestos%5B%5D=OPERARIO&initial_empty=1');
+            await page.waitForFunction(() => getComputedStyle(document.querySelector('#personalBootOverlay')).opacity === '0');
+            assert.equal(await page.locator('#personalEmptyResults').isVisible(), true);
+            assert.equal(await page.locator('#personalGridShell').isVisible(), false);
+            assert.equal(await page.locator('#personalPageSize').isVisible(), false);
+            await page.screenshot({ path: `.codex-tmp/personal-empty-results-${width}.png`, fullPage: true });
+            await search.fill('77012755');
+            await page.waitForFunction(() => document.querySelector('#personalCount').textContent === '1 trabajadores');
+            assert.equal(await page.locator('#personalGridShell').isVisible(), true);
             console.log(`PASS ${width}px: search, DNI lists, empty results, clear, focus, filters and pagination without reload.`);
             await page.close();
         }

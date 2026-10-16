@@ -53,6 +53,7 @@ $render = function (array $rows, int $total, int $page = 1, bool $full = false):
 
 echo json_encode([
     'initial' => $render(array_slice($workers, 0, 25), 26, 1, true),
+    'initialEmpty' => $render([], 0, 1, true),
     'all' => $render(array_slice($workers, 0, 25), 26),
     'hit' => $render([$workers[0]], 1),
     'pair' => $render(array_slice($workers, 0, 2), 2),
