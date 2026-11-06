@@ -37,7 +37,9 @@ class FaltasPageController extends WebPageController
             ]);
         }
 
-        $items = $this->service->list($user, $filters) ?? collect();
+        $items = $request->routeIs('inicio.dashboard.faltas')
+            ? $this->service->listForDashboard($user, $filters)
+            : ($this->service->list($user, $filters) ?? collect());
         $dashboard = $this->service->dashboard($items);
         $perPage = (int) ($filters['per_page'] ?? 10);
         $lastPage = max(1, (int) ceil($items->count() / $perPage));
@@ -84,7 +86,7 @@ class FaltasPageController extends WebPageController
             return redirect()->route('faltas.show', $id)->with('success', $result['message']);
         }
         
-        return back()->with('error', $result['message']);
+        return back()->withInput($payload)->with('error', $result['message']);
     }
 
     public function anular(Request $request, string $id): RedirectResponse

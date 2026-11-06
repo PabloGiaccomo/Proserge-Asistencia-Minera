@@ -11,6 +11,24 @@
     $supervisorPets = $item['supervisor_pets'] ?? null;
     $planOperativo = $item['plan_operativo'] ?? [];
     $personalParada = $item['personal_parada'] ?? [];
+    $plans = collect($item['plans'] ?? [])->keyBy('id');
+    $plansNoArchivados = $plans->reject(static fn (array $plan): bool => ($plan['estado'] ?? '') === 'ARCHIVADO');
+    $planInicial = $plansNoArchivados->get($item['plan_inicial_id'] ?? '') ?? $plansNoArchivados->first();
+    $solicitudesTransporte = collect($planOperativo)
+        ->reject(static fn (array $grupo): bool => ($plans->get($grupo['rq_mina_plan_id'] ?? '')['estado'] ?? '') === 'ARCHIVADO')
+        ->flatMap(static fn (array $grupo): array => $grupo['transportes'] ?? []);
+    $cantidadSolicitudesTransporte = $solicitudesTransporte->count();
+    $unidadesSolicitadas = $solicitudesTransporte->sum(static fn (array $fila): int => max(0, (int) ($fila['cantidad_unidades_requeridas'] ?? 0)));
+    $lista = array_filter(\Illuminate\Support\Arr::only((array) request()->query('lista', []), [
+        'q', 'mina_id', 'estado', 'created_by_usuario_id', 'fecha_inicio_desde', 'fecha_inicio_hasta',
+        'fecha_fin_desde', 'fecha_fin_hasta', 'page', 'per_page',
+    ]), static fn ($value): bool => is_scalar($value) && $value !== '');
+    $estadoKey = strtolower(str_replace(' ', '_', (string) ($item['estado'] ?? 'borrador')));
+    $estadoLabel = match ($estadoKey) {
+        'enviado' => 'Pedido registrado en RR.HH.',
+        'en_atencion' => 'En atención',
+        default => ucfirst(str_replace('_', ' ', $estadoKey)),
+    };
     $detalleConTotales = array_map(static function (array $linea): array {
         $cantidad = max(0, (int) ($linea['cantidad'] ?? 0));
         $backup = array_key_exists('cantidad_backup', $linea)
@@ -69,40 +87,79 @@
         'NO_LLEGO' => 'No llego',
         'CON_OBSERVACION' => 'Con observacion',
     ];
-    $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirectAny(session('user.permissions', []), 'rq_mina', ['editar', 'actualizar']);
+    $rqPermissions = session('user.permissions', []);
+    $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'editar');
+    $canSavePlan = $canEditRq
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'actualizar')
+        && ($item['puede_actualizar'] ?? false);
+    $cargosParaRevision = array_values(array_filter($detalleConTotales, static fn (array $fila): bool =>
+        trim((string) ($fila['puesto'] ?? '')) !== '' && $fila['cantidad'] > 0
+    ));
+    $canRegisterSavedPersonnel = ($item['puede_registrar_rrhh'] ?? false)
+        && $estadoKey === 'borrador'
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'ver')
+        && \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'enviar')
+        && !$canSavePlan
+        && $cargosParaRevision !== [];
 @endphp
 
 <div class="page-header">
     <div class="page-header-content">
         <div>
-            <h1 class="page-title">Detalle de Solicitud</h1>
-            <p class="page-subtitle">RQ Mina #{{ $item['id'] ?? '' }}</p>
+            <h1 class="page-title">{{ $item['area'] ?? 'Detalle de parada' }}</h1>
+            <p class="page-subtitle">RQ Mina · {{ $item['lugar'] ?? $item['mina'] ?? 'Lugar sin indicar' }}</p>
         </div>
         <div class="page-actions">
-            <span class="rqm-chip {{ strtolower((string) ($item['estado'] ?? 'borrador')) }}">{{ ucfirst($item['estado'] ?? 'borrador') }}</span>
-            <a href="{{ route('rq-mina.index') }}" class="btn btn-outline">
+            <span class="rqm-chip {{ $estadoKey }}">{{ $estadoLabel }}</span>
+            <a href="{{ route('rq-mina.index', $lista) }}" class="btn btn-outline">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="19" y1="12" x2="5" y2="12"></line>
                     <polyline points="12 19 5 12 12 5"></polyline>
                 </svg>
-                Volver
+                Volver a paradas
             </a>
             @if($canEditRq)
-                <a href="{{ route('rq-mina.plan', $item['id']) }}" class="btn btn-outline">
-                    Plan operativo
+                <a href="{{ route('rq-mina.plan', ['id' => $item['id'], 'plan_id' => $planInicial['id'] ?? null, 'lista' => $lista]) }}" class="btn btn-primary">
+                    {{ $planInicial ? 'Abrir plan operativo' : 'Preparar plan operativo' }}
                 </a>
             @endif
-            <a href="{{ route('rq-mina.dashboard', $item['id']) }}" class="btn btn-outline">
-                Dashboard KPI
+            <a href="{{ route('rq-mina.dashboard', ['rqMina' => $item['id'], 'lista' => $lista]) }}" class="btn btn-outline">
+                Ver indicadores
             </a>
             @if($canEditRq)
-                <a href="{{ route('rq-mina.edit', $item['id']) }}" class="btn btn-primary">
-                    Editar
+                <a href="{{ route('rq-mina.edit', ['id' => $item['id'], 'lista' => $lista]) }}" class="btn btn-outline">
+                    Editar datos de parada
                 </a>
             @endif
         </div>
     </div>
 </div>
+
+@if(session('success'))
+    <div class="alert alert-success" role="status">{{ session('success') }}</div>
+@endif
+
+@if(session('error'))
+    <div class="alert alert-error" role="alert">{{ session('error') }}</div>
+@endif
+
+@if($canRegisterSavedPersonnel)
+    <details class="card" id="rqRegisterSavedPersonnel">
+        <summary class="card-header" style="cursor:pointer;"><span class="btn btn-outline">Registrar pedido en RR.HH. <span aria-hidden="true">&#9662;</span></span></summary>
+        <div class="card-body">
+            <p>Revisa los cargos ya guardados para <strong>{{ $item['area'] }}</strong>. Al confirmar, RR.HH. podrá atender este pedido en RQ Proserge.</p>
+            <ul>
+                @foreach($cargosParaRevision as $cargo)
+                    <li><strong>{{ $cargo['puesto'] }}</strong> · {{ $cargo['cantidad'] }} base + {{ $cargo['cantidad_backup'] }} back up = {{ $cargo['cantidad_total'] }}</li>
+                @endforeach
+            </ul>
+            <form method="POST" action="{{ route('rq-mina.enviar', ['id' => $item['id'], 'lista' => $lista]) }}">
+                @csrf
+                <button type="submit" class="btn btn-primary">Confirmar registro en RR.HH.</button>
+            </form>
+        </div>
+    </details>
+@endif
 
 @if($item)
 @if(!empty($cambiosPedido))
@@ -153,9 +210,9 @@
         <div class="rqm-progress" style="margin-top:8px;"><span style="width: {{ min(100, max(0, $cobertura)) }}%"></span></div>
     </div>
     <div class="rqm-kpi">
-        <div class="rqm-kpi-label">Transporte requerido</div>
-        <div class="rqm-kpi-value">{{ $totalTransporte > 0 ? $totalTransporte : '-' }}</div>
-        <div class="rqm-kpi-sub">{{ $transportesCount }} tipo(s) registrados</div>
+        <div class="rqm-kpi-label">Solicitudes de transporte en planes</div>
+        <div class="rqm-kpi-value">{{ $cantidadSolicitudesTransporte }}</div>
+        <div class="rqm-kpi-sub">{{ $unidadesSolicitadas > 0 ? $unidadesSolicitadas.' unidad(es) solicitada(s)' : ($cantidadSolicitudesTransporte ? 'Cantidad de unidades sin indicar' : 'Sin solicitudes registradas') }}</div>
     </div>
     <div class="rqm-kpi">
         <div class="rqm-kpi-label">Duración</div>
@@ -223,16 +280,16 @@
                 </div>
                 <div class="rqm-meta-item">
                     <span class="rqm-meta-label">Estado actual</span>
-                    <span class="rqm-meta-value">{{ ucfirst($item['estado'] ?? 'borrador') }}</span>
+                    <span class="rqm-meta-value">{{ $estadoLabel }}</span>
                 </div>
                 <div class="rqm-meta-item">
                     <span class="rqm-meta-label">Personal en parada</span>
                     <span class="rqm-meta-value">{{ count($personalParada) }} persona(s)</span>
                 </div>
                 <div class="rqm-meta-item">
-                    <span class="rqm-meta-label">Transporte solicitado</span>
+                    <span class="rqm-meta-label">Transporte registrado antes</span>
                     <span class="rqm-meta-value">
-                        {{ $totalTransporte > 0 ? $totalTransporte.' unidad(es)' : 'Sin transporte' }}
+                        {{ $totalTransporte > 0 ? $totalTransporte.' unidad(es)' : 'Sin registros anteriores' }}
                     </span>
                 </div>
             </div>
@@ -242,11 +299,17 @@
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Plan Operativo Semanal</h3>
+        <h3 class="card-title">Actividades por plan operativo</h3>
     </div>
     <div class="card-body">
+        @if($cantidadSolicitudesTransporte)
+            <p class="text-muted">Aquí se muestran las solicitudes de cada plan. Los servicios y pasajeros se gestionan en Transporte operativo.</p>
+        @endif
         @if(!empty($planOperativo))
             @foreach($planOperativo as $grupo)
+                @php
+                    $planDelGrupo = $plans->get($grupo['rq_mina_plan_id'] ?? '');
+                @endphp
                 <div class="rqm-plan-group">
                     <div class="rqm-plan-group-head">
                         <div>
@@ -255,6 +318,10 @@
                                 {{ $grupo['area_operativa'] ?? '-' }}
                                 @if(!empty($grupo['modulo'])) / {{ $grupo['modulo'] }} @endif
                             </span>
+                            <small class="rqm-plan-note">
+                                {{ $planDelGrupo ? $planDelGrupo['codigo'].' · '.$planDelGrupo['nombre'] : 'Plan inicial · Registro anterior' }}
+                                @if(($planDelGrupo['estado'] ?? '') === 'ARCHIVADO') · Archivado @endif
+                            </small>
                         </div>
                         <span>{{ count($grupo['actividades'] ?? []) }} actividad(es)</span>
                     </div>
@@ -311,7 +378,7 @@
                     @endif
                     @if(!empty($grupo['transportes']))
                         <div class="rqm-plan-transport">
-                            <h4>Unidades de carga y transporte</h4>
+                            <h4>Solicitudes de carga y transporte del plan</h4>
                             <div class="table-responsive">
                                 <table class="data-table">
                                     <thead>
@@ -384,14 +451,14 @@
                 </div>
             @endforeach
         @else
-            <p class="text-muted">No hay plan operativo semanal registrado para este RQ Mina.</p>
+            <p class="text-muted">Esta parada todavía no tiene actividades programadas.</p>
         @endif
     </div>
 </div>
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Detalle de Transporte</h3>
+        <h3 class="card-title">Registros anteriores de transporte</h3>
     </div>
     <div class="card-body">
         @if(!empty($transporte))
@@ -432,14 +499,14 @@
                 </table>
             </div>
         @else
-            <p class="text-muted">No hay transporte registrado para este RQ Mina.</p>
+            <p class="text-muted">No hay registros anteriores. Las solicitudes actuales se muestran en cada plan. Los servicios se gestionan en Transporte operativo.</p>
         @endif
     </div>
 </div>
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Detalle del RQ Mina (Puestos Solicitados)</h3>
+        <h3 class="card-title">Pedido de personal para RR.HH.</h3>
     </div>
     <div class="card-body">
         @if(!empty($detalleConTotales))
@@ -487,9 +554,7 @@
         <h3 class="card-title">Personal Seleccionado para la Parada</h3>
     </div>
     <div class="card-body">
-        @if(strtoupper((string) ($item['estado'] ?? '')) !== 'ENVIADO')
-            <p class="text-muted">El RQ Mina aun no fue enviado. Cuando se envie y exista seleccion desde RQ Proserge, el personal aparecera aqui.</p>
-        @elseif(!empty($personalParada))
+        @if(!empty($personalParada))
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
@@ -510,8 +575,10 @@
                     </tbody>
                 </table>
             </div>
+        @elseif($estadoKey === 'borrador')
+            <p class="text-muted">El pedido de personal está pendiente de registrar en RR.HH.</p>
         @else
-            <p class="text-muted">El RQ Mina fue enviado, pero aun no hay personal seleccionado en RQ Proserge para esta parada.</p>
+            <p class="text-muted">Todavía no hay personal seleccionado en RQ Proserge para esta parada.</p>
         @endif
     </div>
 </div>
@@ -526,15 +593,4 @@
 </div>
 @endif
 
-@if(session('clear_rq_mina_plan_draft'))
-<script>
-(function () {
-    try {
-        window.localStorage.removeItem('rq_mina_plan_draft:' + @json(session('clear_rq_mina_plan_draft')));
-    } catch (error) {
-        // No bloquea la vista si el navegador no permite almacenamiento local.
-    }
-})();
-</script>
-@endif
 @endsection

@@ -3,10 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\TransporteServicio;
+use App\Models\TransporteServicioEvento;
 use App\Models\TransporteServicioPasajero;
+use App\Models\Usuario;
+use App\Modules\Transporte\Services\TransportePlanningService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -182,7 +186,10 @@ class TransporteApiTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $token = $this->tokenForRole(['man_power' => ['ver', 'asignar']], $fixture['mina_id']);
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$serviceId}/pasajeros/{$passengerId}/retirar", [
+            'motivo' => 'Sin permiso de Transporte',
+        ])->assertForbidden();
         $this->withToken($token)->postJson("/api/v1/man-power/grupos/{$fixture['grupo_trabajo_id']}/integrantes/{$fixture['detalle_id']}/retirar", [
             'motivo' => 'Retiro de prueba',
         ])->assertOk();
@@ -191,6 +198,11 @@ class TransporteApiTest extends TestCase
             'id' => $passengerId,
             'estado' => TransporteServicioPasajero::ESTADO_RETIRADO,
             'motivo_retiro' => 'INTEGRANTE_RETIRADO_DE_MAN_POWER',
+        ]);
+        $this->assertDatabaseHas('transporte_servicio_eventos', [
+            'transporte_servicio_id' => $serviceId,
+            'usuario_id' => $this->actorForToken($token)->id,
+            'tipo' => 'PASAJERO_RETIRADO',
         ]);
     }
 
@@ -328,6 +340,33 @@ class TransporteApiTest extends TestCase
         ])->assertOk();
     }
 
+    public function test_shared_man_power_worker_can_only_ride_once_per_leg(): void
+    {
+        $fixture = $this->fixture();
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $origin = $this->crearServicio($fixture);
+        $otherGroup = (string) Str::uuid();
+        $otherDetail = (string) Str::uuid();
+        $group = (array) DB::table('grupo_trabajo')->where('id', $fixture['grupo_trabajo_id'])->first();
+        DB::table('grupo_trabajo')->insert([...$group, 'id' => $otherGroup, 'servicio' => 'Grupo compartido']);
+        DB::table('grupo_trabajo_detalle')->insert([
+            'id' => $otherDetail, 'grupo_trabajo_id' => $otherGroup, 'personal_id' => $fixture['personal_id'],
+            'estado_distribucion' => 'ASIGNADO', 'estado_asistencia' => 'AUSENTE',
+        ]);
+        $destination = $this->crearServicio([...$fixture, 'grupo_trabajo_id' => $otherGroup]);
+        $return = $this->crearServicio([...$fixture, 'grupo_trabajo_id' => $otherGroup], ['tramo' => 'RETORNO']);
+
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$origin}/pasajeros", [
+            'grupo_trabajo_detalle_id' => $fixture['detalle_id'],
+        ])->assertOk();
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$destination}/pasajeros", [
+            'grupo_trabajo_detalle_id' => $otherDetail,
+        ])->assertUnprocessable()->assertJsonPath('code', 'TRANSPORTE_PASSENGER_CONTEXT_INVALID');
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$return}/pasajeros", [
+            'grupo_trabajo_detalle_id' => $otherDetail,
+        ])->assertOk();
+    }
+
     public function test_retiro_de_pasajero_exige_motivo_y_no_retira_integrante(): void
     {
         $fixture = $this->fixture();
@@ -384,12 +423,397 @@ class TransporteApiTest extends TestCase
         $fixture = $this->fixture();
 
         $this->withToken($this->tokenForUserWithoutScope())->postJson('/api/v1/transporte/servicios', $this->servicePayload($fixture))
-            ->assertStatus(422)
+            ->assertForbidden()
             ->assertJsonPath('code', 'TRANSPORTE_RQ_FORBIDDEN');
 
         $this->withToken($this->tokenForRole([]))->postJson('/api/v1/transporte/servicios', $this->servicePayload($fixture))
             ->assertStatus(403)
             ->assertJsonPath('code', 'TRANSPORTE_CREATE_FORBIDDEN');
+    }
+
+    public function test_every_transport_write_requires_action_permission_and_both_mine_scopes(): void
+    {
+        $fixture = $this->fixture();
+        $other = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $destinationId = $this->crearServicio($other);
+        $passengerId = $this->assignPassenger($fixture, $serviceId);
+        $path = "/transporte/servicios/{$serviceId}";
+        $writes = [
+            ['POST', '/transporte/servicios', $this->servicePayload($fixture), true],
+            ['PATCH', $path, ['placa' => 'AUTH-01'], true],
+            ['POST', "{$path}/alcances", ['alcances' => [['sait_snapshot' => 'AUTH']]], false],
+            ['POST', "{$path}/pasajeros", ['grupo_trabajo_detalle_id' => $this->extraDetalle($fixture)], true],
+            ['POST', "{$path}/pasajeros/{$passengerId}/retirar", ['motivo' => 'Prueba'], true],
+            ['POST', "{$path}/pasajeros/{$passengerId}/reubicar", ['motivo' => 'Prueba', 'destino_servicio_id' => $destinationId], false],
+            ['POST', "{$path}/copiar", ['fecha' => '2026-08-02', 'turno' => 'A'], true],
+            ['POST', "{$path}/estado", ['estado' => 'ASIGNADO'], true],
+        ];
+
+        $before = $this->transportSnapshot([$serviceId, $destinationId]);
+        $all = ['transportes' => ['ver', 'crear', 'editar', 'actualizar', 'entregar', 'recepcionar']];
+        $tokens = [
+            $this->tokenForRole(['transportes' => ['ver']], $fixture['mina_id']),
+            $this->tokenForRole($all, $other['mina_id']),
+            $this->tokenForRole($all, null),
+            $this->tokenForRole($all, $fixture['mina_id'], 'INACTIVO'),
+        ];
+
+        foreach ($tokens as $token) {
+            foreach ($writes as [$method, $uri, $payload, $web]) {
+                $this->withToken($token)->json($method, '/api/v1'.$uri, $payload)
+                    ->assertForbidden()
+                    ->assertJsonMissingPath('data.id');
+
+                if ($web) {
+                    $this->withSession(['auth_token' => $token, 'user_id' => $this->actorForToken($token)->id])
+                        ->json($method, $uri, $payload)
+                        ->assertForbidden();
+                }
+            }
+        }
+
+        $token = $this->tokenForRole($all, $fixture['mina_id']);
+        $this->withToken($token)->postJson('/api/v1'.$path."/pasajeros/{$passengerId}/reubicar", [
+            'motivo' => 'Destino fuera del alcance',
+            'destino_servicio_id' => $destinationId,
+        ])->assertForbidden()->assertJsonMissingPath('data.id');
+        $this->withToken($token)->patchJson('/api/v1'.$path, [
+            'rq_mina_id' => $other['rq_mina_id'],
+            'rq_mina_plan_id' => $other['plan_id'],
+        ])->assertForbidden()->assertJsonMissingPath('data.id');
+        $this->assertSame($before, $this->transportSnapshot([$serviceId, $destinationId]));
+    }
+
+    public function test_invalid_scope_batch_preserves_all_previous_scopes_and_events(): void
+    {
+        $fixture = $this->fixture();
+        $other = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $alcances = [
+            ['sait_snapshot' => 'NUEVO'],
+            ['grupo_trabajo_id' => $other['grupo_trabajo_id']],
+        ];
+        $before = $this->transportSnapshot([$serviceId]);
+
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$serviceId}/alcances", compact('alcances'))
+            ->assertUnprocessable();
+        $this->assertSame($before, $this->transportSnapshot([$serviceId]));
+
+        $result = app(TransportePlanningService::class)->syncAlcances(
+            $this->actorForToken($token),
+            TransporteServicio::query()->findOrFail($serviceId),
+            $alcances,
+        );
+        $this->assertFalse($result['ok']);
+        $this->assertSame($before, $this->transportSnapshot([$serviceId]));
+
+        $malformed = app(TransportePlanningService::class)->syncAlcances(
+            $this->actorForToken($token),
+            TransporteServicio::query()->findOrFail($serviceId),
+            [42],
+        );
+        $this->assertFalse($malformed['ok']);
+        $this->assertSame($before, $this->transportSnapshot([$serviceId]));
+    }
+
+    public function test_permission_and_service_scope_are_checked_before_passenger_validation(): void
+    {
+        $fixture = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $other = $this->fixture();
+        $token = $this->tokenForRole(['transportes' => ['entregar']], $other['mina_id']);
+
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$serviceId}/pasajeros", [
+            'grupo_trabajo_detalle_id' => (string) Str::uuid(),
+        ])->assertForbidden()->assertJsonPath('code', 'TRANSPORTE_PASSENGER_FORBIDDEN');
+    }
+
+    public function test_transport_administration_requires_mine_scope_on_web_and_api(): void
+    {
+        $fixture = $this->fixture();
+        $other = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $role = ['transportes' => ['administrar']];
+        $allowed = $this->tokenForRole($role, $fixture['mina_id']);
+        $denied = $this->tokenForRole($role, $other['mina_id']);
+
+        $this->withSession(['auth_token' => $allowed, 'user_id' => $this->actorForToken($allowed)->id])
+            ->patch(route('transporte.servicios.update', $serviceId), ['placa' => 'ADMIN-MINA'])->assertRedirect();
+        $this->withToken($denied)->patchJson("/api/v1/transporte/servicios/{$serviceId}", ['placa' => 'MINA-AJENA'])
+            ->assertForbidden();
+        $this->assertDatabaseHas('transporte_servicios', ['id' => $serviceId, 'placa' => 'ADMIN-MINA']);
+    }
+
+    public function test_a_driver_outside_the_actor_scope_cannot_be_associated_by_uuid(): void
+    {
+        $fixture = $this->fixture();
+        $other = $this->fixture();
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $url = '/api/v1/transporte/servicios';
+        $this->withToken($token)->postJson($url, $this->servicePayload($fixture, [
+            'conductor_personal_id' => $other['conductor_id'],
+        ]))->assertForbidden()->assertJsonPath('code', 'TRANSPORTE_DRIVER_FORBIDDEN')->assertJsonPath('data', null);
+        $this->assertDatabaseMissing('transporte_servicios', ['rq_mina_id' => $fixture['rq_mina_id']]);
+    }
+
+    public function test_finished_cancelled_and_archived_transport_rejects_ordinary_mutations(): void
+    {
+        $fixture = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $passengerId = $this->assignPassenger($fixture, $serviceId);
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $path = "/api/v1/transporte/servicios/{$serviceId}";
+        $writes = [
+            ['PATCH', $path, ['observaciones' => 'Cambio']],
+            ['POST', "{$path}/alcances", ['alcances' => [['sait_snapshot' => 'NUEVO']]]],
+            ['POST', "{$path}/pasajeros", ['grupo_trabajo_detalle_id' => $this->extraDetalle($fixture)]],
+            ['POST', "{$path}/pasajeros/{$passengerId}/retirar", ['motivo' => 'Cambio']],
+            ['POST', "{$path}/copiar", ['fecha' => '2026-08-02', 'turno' => 'A']],
+            ['POST', "{$path}/estado", ['estado' => 'BORRADOR']],
+        ];
+
+        foreach (['FINALIZADO', 'CANCELADO', 'BORRADOR'] as $estado) {
+            DB::table('transporte_servicios')->where('id', $serviceId)->update(compact('estado'));
+            if ($estado === 'BORRADOR') {
+                DB::table('rq_mina_planes')->where('id', $fixture['plan_id'])->update(['estado' => 'ARCHIVADO']);
+            }
+            $before = $this->transportSnapshot([$serviceId]);
+
+            foreach ($writes as [$method, $uri, $payload]) {
+                $this->withToken($token)->json($method, $uri, $payload)->assertUnprocessable();
+            }
+            $this->assertSame($before, $this->transportSnapshot([$serviceId]));
+        }
+    }
+
+    public function test_state_cannot_be_changed_through_create_or_patch(): void
+    {
+        $fixture = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+
+        $this->withToken($token)->postJson('/api/v1/transporte/servicios', $this->servicePayload($fixture, ['estado' => 'FINALIZADO']))
+            ->assertUnprocessable();
+        $this->withToken($token)->patchJson("/api/v1/transporte/servicios/{$serviceId}", ['estado' => 'EN_SERVICIO'])
+            ->assertUnprocessable();
+        $this->assertDatabaseHas('transporte_servicios', ['id' => $serviceId, 'estado' => 'BORRADOR']);
+    }
+
+    public function test_operator_can_create_edit_and_confirm_personal_service_from_web(): void
+    {
+        $fixture = $this->fixture();
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $this->withoutVite();
+        $this->withSession(['auth_token' => $token, 'user_id' => $this->actorForToken($token)->id]);
+        $context = [
+            'rq_mina_id' => $fixture['rq_mina_id'], 'rq_mina_plan_id' => $fixture['plan_id'],
+            'fecha' => '2026-08-01', 'turno' => 'A', 'lista' => ['q' => 'C2', 'page' => '2'],
+        ];
+        $url = route('transporte.planificacion', $context);
+        $driver = DB::table('personal')->where('id', $fixture['conductor_id'])->first();
+        $this->get($url)->assertOk()->assertSee('name="conductor_personal_id"', false)->assertSee($driver->nombre_completo);
+
+        $this->post(route('transporte.servicios.store'), [
+            ...$this->servicePayload($fixture, ['placa' => 'WEB-01']),
+            'form_key' => 'nuevo', 'contexto' => $context,
+        ])->assertRedirect($url);
+        $service = TransporteServicio::query()->where('rq_mina_id', $fixture['rq_mina_id'])->firstOrFail();
+        $this->assertSame($driver->nombre_completo, $service->conductor_nombre_snapshot);
+        $editUrl = route('transporte.planificacion', [...$context, 'editar' => $service->id]);
+        $this->get($editUrl)->assertOk()->assertSee('Guardar cambios')->assertSee('value="WEB-01"', false);
+
+        $this->patch(route('transporte.servicios.update', $service->id), [
+            'form_key' => $service->id, 'contexto' => $context, 'placa' => 'WEB-02', 'capacidad' => 12,
+            'alcances' => [['grupo_trabajo_id' => $fixture['grupo_trabajo_id']], ['sait_snapshot' => 'SAIT-02']],
+        ])->assertRedirect($url);
+        $this->post(route('transporte.servicios.estado', $service->id), [
+            'estado' => 'CONFIRMADO', 'contexto' => $context,
+        ])->assertRedirect($url);
+        $this->assertSame('CONFIRMADO', $service->refresh()->estado);
+        $this->assertSame('WEB-02', $service->placa);
+        $this->assertSame(12, $service->capacidad);
+        $this->assertSame(2, $service->alcances()->count());
+        $this->assertEquals($driver, DB::table('personal')->where('id', $fixture['conductor_id'])->first());
+    }
+
+    public function test_transport_actions_respect_independent_permissions_and_show_confirmation_gaps(): void
+    {
+        $fixture = $this->fixture();
+        $serviceId = $this->crearServicio($fixture, ['placa' => null, 'conductor_personal_id' => null, 'capacidad' => null], false);
+        $this->crearServicio($fixture);
+        DB::table('transporte_servicios')->where('id', $serviceId)->update(['conductor_nombre_snapshot' => null]);
+        $url = route('transporte.planificacion', [
+            'rq_mina_id' => $fixture['rq_mina_id'], 'rq_mina_plan_id' => $fixture['plan_id'],
+            'fecha' => '2026-08-01', 'turno' => 'A',
+        ]);
+        $this->withoutVite();
+
+        foreach ([
+            [['ver'], false, false, false],
+            [['ver', 'crear'], true, false, false],
+            [['ver', 'editar'], false, true, false],
+            [['ver', 'entregar'], false, false, true],
+            [['ver', 'recepcionar'], false, false, false],
+        ] as [$actions, $create, $edit, $add]) {
+            $token = $this->tokenForRole(['transportes' => $actions], $fixture['mina_id']);
+            $response = $this->withSession(['auth_token' => $token, 'user_id' => $this->actorForToken($token)->id])->get($url)
+                ->assertOk()->assertSee('Falta para confirmar')->assertSee('Conductor')->assertSee('Alcance');
+            $create ? $response->assertSee('Crear servicio') : $response->assertDontSee('Crear servicio');
+            $edit ? $response->assertSee('Editar servicio') : $response->assertDontSee('Editar servicio');
+            $add ? $response->assertSee('Agregar pasajero') : $response->assertDontSee('Agregar pasajero');
+            $response->assertDontSee(route('transporte.servicios.estado', $serviceId), false);
+        }
+    }
+
+    public function test_failed_web_edit_restores_only_its_form_and_safe_context(): void
+    {
+        $fixture = $this->fixture();
+        $serviceId = $this->crearServicio($fixture);
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $this->withoutVite();
+        $this->withSession(['auth_token' => $token, 'user_id' => $this->actorForToken($token)->id]);
+        $context = [
+            'rq_mina_id' => $fixture['rq_mina_id'], 'rq_mina_plan_id' => $fixture['plan_id'],
+            'fecha' => '2026-08-01', 'turno' => 'A', 'lista' => ['q' => 'C2'],
+        ];
+        $editUrl = route('transporte.planificacion', [...$context, 'editar' => $serviceId]).'#transporte-editar';
+        $this->from('https://example.invalid/')->patch(route('transporte.servicios.update', $serviceId), [
+            'contexto' => [...$context, 'lista' => ['q' => 'C2', 'redirect' => 'https://example.invalid/']],
+            'form_key' => $serviceId, 'placa' => 'SIN-GUARDAR', 'capacidad' => -1,
+            'conductor_personal_id' => $fixture['conductor_id'],
+        ])->assertRedirect($editUrl)->assertSessionHasErrors('capacidad');
+
+        $response = $this->get($editUrl)->assertOk()->assertSee('value="SIN-GUARDAR"', false);
+        $this->assertSame(1, substr_count($response->getContent(), 'value="SIN-GUARDAR"'));
+        $this->assertDatabaseHas('transporte_servicios', ['id' => $serviceId, 'placa' => 'CAR-123']);
+    }
+
+    public function test_failed_relocation_preserves_origin_passenger_and_events(): void
+    {
+        $fixture = $this->fixture();
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $serviceId = $this->crearServicio($fixture);
+        $passengerId = $this->assignPassenger($fixture, $serviceId);
+        $withoutScope = $this->crearServicio($fixture, withScope: false);
+        $withoutSeats = $this->crearServicio($fixture, ['capacidad' => 0]);
+        $cargo = $this->crearServicio($fixture, ['tipo' => 'CARGA']);
+        $wrongTurn = $this->crearServicio($fixture, ['turno' => 'B']);
+        $wrongDate = $this->crearServicio($fixture, ['fecha' => '2026-08-02']);
+        $wrongLeg = $this->crearServicio($fixture, ['tramo' => 'RETORNO']);
+        $finished = $this->crearServicio($fixture);
+        DB::table('transporte_servicios')->where('id', $finished)->update(['estado' => 'FINALIZADO']);
+        $other = $this->crearServicio($this->fixture());
+
+        foreach ([
+            [$withoutScope, 422, 'TRANSPORTE_PASSENGER_CONTEXT_INVALID'],
+            [$withoutSeats, 422, 'TRANSPORTE_CAPACITY_EXCEEDED'],
+            [$cargo, 422, 'TRANSPORTE_RELOCATION_INVALID'],
+            [$wrongTurn, 422, 'TRANSPORTE_RELOCATION_INVALID'],
+            [$wrongDate, 422, 'TRANSPORTE_RELOCATION_INVALID'],
+            [$wrongLeg, 422, 'TRANSPORTE_RELOCATION_INVALID'],
+            [$finished, 422, 'TRANSPORTE_SERVICE_READ_ONLY'],
+            [$other, 403, 'TRANSPORTE_PASSENGER_FORBIDDEN'],
+            [$serviceId, 422, 'TRANSPORTE_RELOCATION_INVALID'],
+        ] as [$destinationId, $status, $code]) {
+            $before = $this->transportSnapshot([$serviceId, $destinationId]);
+            $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$serviceId}/pasajeros/{$passengerId}/reubicar", [
+                'destino_servicio_id' => $destinationId,
+                'motivo' => 'Cambio de unidad',
+            ])->assertStatus($status)->assertJsonPath('code', $code);
+            $this->assertSame($before, $this->transportSnapshot([$serviceId, $destinationId]));
+        }
+
+        $before = $this->transportSnapshot([$serviceId, $withoutSeats]);
+        $retireOnly = $this->tokenForRole(['transportes' => ['recepcionar']], $fixture['mina_id']);
+        $this->withToken($retireOnly)->postJson("/api/v1/transporte/servicios/{$serviceId}/pasajeros/{$passengerId}/reubicar", [
+            'destino_servicio_id' => $withoutSeats,
+            'motivo' => 'Sin permiso de asignar',
+        ])->assertForbidden()->assertJsonPath('code', 'TRANSPORTE_PASSENGER_FORBIDDEN');
+        $this->assertSame($before, $this->transportSnapshot([$serviceId, $withoutSeats]));
+    }
+
+    public function test_relocation_rolls_back_passengers_when_destination_event_fails(): void
+    {
+        $fixture = $this->fixture();
+        $token = $this->tokenForScopedUser($fixture['mina_id']);
+        $origin = $this->crearServicio($fixture);
+        $destination = $this->crearServicio($fixture);
+        $passenger = $this->assignPassenger($fixture, $origin);
+        $before = $this->transportSnapshot([$origin, $destination]);
+
+        Event::listen('eloquent.creating: '.TransporteServicioEvento::class, function (TransporteServicioEvento $event) use ($destination): void {
+            if ($event->transporte_servicio_id === $destination) {
+                throw new \RuntimeException('Falla simulada al registrar el evento de destino.');
+            }
+        });
+
+        $this->withToken($token)->postJson("/api/v1/transporte/servicios/{$origin}/pasajeros/{$passenger}/reubicar", [
+            'destino_servicio_id' => $destination,
+            'motivo' => 'Cambio de unidad',
+        ])->assertServerError();
+        $this->assertSame($before, $this->transportSnapshot([$origin, $destination]));
+    }
+
+    public function test_man_power_retirement_rolls_back_when_transport_history_cannot_be_saved(): void
+    {
+        $fixture = $this->fixture();
+        $token = $this->tokenForRole(['man_power' => ['ver', 'asignar']], $fixture['mina_id']);
+        $serviceId = $this->crearServicio($fixture);
+        $this->assignPassenger($fixture, $serviceId);
+        $before = $this->transportSnapshot([$serviceId]);
+        Event::listen('eloquent.creating: '.TransporteServicioEvento::class, function (TransporteServicioEvento $event) use ($serviceId): void {
+            if ($event->transporte_servicio_id === $serviceId) {
+                throw new \RuntimeException('Falla simulada al registrar el retiro.');
+            }
+        });
+
+        $this->withToken($token)->postJson("/api/v1/man-power/grupos/{$fixture['grupo_trabajo_id']}/integrantes/{$fixture['detalle_id']}/retirar", [
+            'motivo' => 'Retiro de prueba',
+        ])->assertServerError();
+        $this->assertDatabaseHas('grupo_trabajo_detalle', [
+            'id' => $fixture['detalle_id'],
+            'estado_distribucion' => 'ASIGNADO',
+        ]);
+        $this->assertSame($before, $this->transportSnapshot([$serviceId]));
+    }
+
+    private function assignPassenger(array $fixture, string $serviceId): string
+    {
+        $id = (string) Str::uuid();
+        DB::table('transporte_servicio_pasajeros')->insert([
+            'id' => $id,
+            'transporte_servicio_id' => $serviceId,
+            'grupo_trabajo_detalle_id' => $fixture['detalle_id'],
+            'personal_id' => $fixture['personal_id'],
+            'tramo' => 'IDA',
+            'estado' => TransporteServicioPasajero::ESTADO_ASIGNADO,
+            'asignado_at' => now(),
+        ]);
+
+        return $id;
+    }
+
+    private function actorForToken(string $token): Usuario
+    {
+        $id = DB::table('auth_tokens')->where('token_hash', hash('sha256', $token))->value('usuario_id');
+
+        return Usuario::query()->findOrFail($id);
+    }
+
+    private function transportSnapshot(array $serviceIds): array
+    {
+        $rows = [];
+        foreach (['transporte_servicios', 'transporte_servicio_alcances', 'transporte_servicio_pasajeros', 'transporte_servicio_eventos'] as $table) {
+            $rows[$table] = DB::table($table)
+                ->whereIn($table === 'transporte_servicios' ? 'id' : 'transporte_servicio_id', $serviceIds)
+                ->orderBy('id')
+                ->get()
+                ->toJson();
+        }
+
+        return $rows;
     }
 
     public function test_transporte_legacy_visible_y_backfill_ambiguo_e_idempotente(): void
@@ -688,14 +1112,14 @@ class TransporteApiTest extends TestCase
         return $this->tokenForRole(['transportes' => ['ver', 'crear', 'editar', 'actualizar', 'entregar', 'recepcionar']]);
     }
 
-    private function tokenForRole(array $permissions): string
+    private function tokenForRole(array $permissions, ?string $minaId = null, string $roleState = 'ACTIVO'): string
     {
         $roleId = (string) Str::uuid();
         DB::table('roles')->insert([
             'id' => $roleId,
             'nombre' => 'TRANSPORTE_ROLE_'.Str::upper(Str::random(6)),
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections($permissions)),
-            'estado' => 'ACTIVO',
+            'estado' => $roleState,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -709,6 +1133,14 @@ class TransporteApiTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        if ($minaId !== null) {
+            DB::table('usuario_mina_scope')->insert([
+                'id' => (string) Str::uuid(),
+                'usuario_id' => $usuarioId,
+                'mina_id' => $minaId,
+            ]);
+        }
 
         $plain = Str::random(80);
         DB::table('auth_tokens')->insert([

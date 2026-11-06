@@ -119,7 +119,8 @@ Destino de esta revision (no activar los paquetes anteriores):
 /sistema.proserge.com/Proserge-Asistencia-Minera/storage/app/private/deployment-releases/release-20261010-fixed-r3/
 ```
 
-La activacion requiere consola del hosting:
+Procedimiento ZIP anterior, sustituido por la subida directa documentada al
+final de este reporte. No ejecutar ahora este deploy.sh:
 
 ```bash
 cd ~/public_html/sistema.proserge.com/Proserge-Asistencia-Minera
@@ -186,3 +187,127 @@ Compilacion Blade y git diff --check repetidos al finalizar: correctos.
 Los cambios se sincronizan en codex/pending-work-2026-10-05, sin merge a main.
 La suite verde no sustituye la prueba de migraciones sobre copia de produccion
 ni la validacion autenticada posterior a la activacion del hosting.
+
+## Primer intento de activacion: 2026-10-11
+
+El operador ejecuto r3. La captura confirma hashes y extraccion de 8579
+archivos, pero el preflight aborto por APP_DEBUG=true antes de mantenimiento,
+respaldo MySQL, reemplazo activo o migraciones. La carpeta de diagnostico no
+acredita todavia un respaldo de base completado.
+
+Inspeccion FTP privada: .env y cache ambos tenian debug=true. Se compararon
+sin conectar a MySQL las identidades de conexion cacheada y definida en .env;
+coinciden. La cache se leyo como AST de constantes, sin ejecutar PHP remoto.
+Se modifico unicamente APP_DEBUG=false en .env, conservando copia privada y
+verificando por descarga/hash y parser que las demas variables no cambiaron.
+No se modificaron credenciales, datos, archivos de cache ni codigo funcional.
+
+El usuario solicito sustituir la activacion del ZIP por subida directa FTP.
+No repetir el deploy.sh r3 durante este nuevo procedimiento. La configuracion
+efectiva seguira cacheada hasta la limpieza desde consola. El respaldo MySQL
+verificable y las migraciones todavia requieren al operador del hosting.
+
+## Subida directa FTP: preparacion 2026-10-11
+
+El operador puede ejecutar las migraciones al terminar la subida; el usuario
+autorizo una ventana de mantenimiento. La preparacion usa un directorio privado
+independiente, direct-20261011, sin sobrescribir los paquetes anteriores.
+
+Se compararon las dependencias instaladas: 87 coinciden exactamente con las
+versiones y referencias de produccion nuevas. Se agregan cinco paquetes para
+PDF/QR y se actualiza el autoload generado, sin borrar los existentes. El plan
+coherente comprende 789 archivos de runtime y 345 de dependencias/autoload.
+
+Primero se descargan los archivos anteriores, se preparan los nuevos en privado
+y se verifican hashes. Solo despues de comprobar un respaldo de codigo se
+activa mantenimiento y se reemplazan archivos activos. No se transfieren .env,
+documentos personales, caches locales, dependencias de desarrollo ni tests.
+
+Se detecto que el index.php del document root separado busca mantenimiento en
+una carpeta incorrecta. Su ajuste operativo debe apuntar a storage/framework
+dentro de Proserge-Asistencia-Minera; no cambia el public/index.php del repo.
+
+El paso de consola nuevo no instala codigo ni extrae el ZIP. Verifica el codigo
+activo, obtiene y comprueba respaldo MySQL/documentos, ejecuta migraciones y
+caches, revisa esquema/conteos y sale de mantenimiento solo si todo termina.
+No ejecutar up manualmente antes de completar esa fase.
+
+## Subida directa completada: 2026-10-11
+
+Estado final de archivos: ACTIVE_CODE_TRANSFERRED, a las 2026-10-12
+02:24:26 UTC. Se comprobaron 1134 archivos: 620 requerian alta/reemplazo y 514
+ya coincidian. Los 620 quedaron activos por FTP. No se sustituyeron las 87
+dependencias existentes de versiones identicas; se agregaron las cinco faltantes
+y se actualizo el autoload de produccion, sin dependencias de desarrollo.
+
+Los 620 archivos cambiados se verificaron por descarga/SHA-256 en preparacion.
+Tras activarlos se descargaron y cotejaron 619. La fuente QR de 16427228 bytes
+se renombro dentro del servidor desde la copia preparada ya verificada y se
+comprobo su tamano; su hash activo queda pendiente del control obligatorio en
+consola. El script comprueba los hashes de los 1134 archivos antes de cualquier
+migracion. No se presenta esa comprobacion pendiente como ya ejecutada.
+
+Respaldo de codigo anterior: code-before.zip, comprobado entrada por entrada
+contra los hashes descargados, subido al directorio privado y vuelto a descargar
+para cotejo. SHA-256:
+c9371fa366aaf9116bff7b0eab33e45f232c84d9ef849c0fe395699b14b619f9.
+Incluye metadatos de preparacion y el index/build anterior del document root.
+Esto no acredita todavia respaldo MySQL ni ensayo de restauracion.
+
+Se corrigio solo la ruta de mantenimiento en el index.php publico separado y
+se publico el manifiesto Vite en ambos destinos. .env no se cambio durante esta
+fase; se conserva APP_DEBUG=false preparado anteriormente. No se tocaron datos,
+documentos personales ni caches de produccion mediante FTP.
+
+Directorio remoto de control y respaldo:
+
+```text
+/sistema.proserge.com/Proserge-Asistencia-Minera/storage/app/private/deployment-releases/direct-20261011
+```
+
+Se reforzo su .htaccess y se comprobo HTTP 403 para los archivos de preparacion
+y el respaldo. GET /login devuelve el aviso esperado con HTTP 503. El sitio
+permanece en mantenimiento hasta completar la fase de consola; no esta declarado
+listo para uso operativo. Los procesos auxiliares de transferencia terminaron.
+
+Comando vigente para el operador, sin reinstalar codigo ni extraer ZIP:
+
+```bash
+cd ~/public_html/sistema.proserge.com/Proserge-Asistencia-Minera
+bash storage/app/private/deployment-releases/direct-20261011/database-update.sh
+```
+
+El script comprueba herramientas/hashes y archivos activos, limpia config cache,
+valida conexion/configuracion y obtiene respaldo MySQL y storage/app fuera del
+document root. Verifica integridad comprimida/hashes antes de migrate --force.
+Luego ejecuta package:discover, optimize:clear, config:cache, route:cache,
+view:cache, verifica esquema/conteos y ejecuta up. Solo el resultado final
+DATABASE_UPDATE_OK acredita que termino esa fase. Si falla, mantiene
+mantenimiento; no ejecutar up ni rollback de BD a ciegas.
+
+Verificaciones adicionales de esta fase: siete casos aislados del control de
+codigo/mantenimiento, sintaxis bash/PHP/PowerShell, autoload PDF/FPDI/QR/Kardex,
+renombrado FTP con sobreescritura en un ensayo privado y git diff --check.
+No se repitio la suite funcional completa: el codigo de aplicacion coincide con
+el paquete previamente probado; no se modifico funcionalidad durante esta subida.
+Pendientes al cierre de la subida: respaldo/migraciones efectivos del operador
+y prueba autenticada de Logistica/EPP, entrega, constancia y Kardex despues de
+DATABASE_UPDATE_OK. Ver la comprobacion posterior siguiente.
+
+## Finalizacion comprobada: 2026-10-12
+
+Revision de solo lectura por FTPS despues de la ejecucion del operador:
+server-code-verified.json existe con fecha 08:21:07 y database-update-ok existe
+con fecha 08:26:06, ambas America/Lima. Este ultimo marcador solo se escribe
+al terminar correctamente database-update.sh, despues del respaldo verificado,
+migraciones, caches, comprobaciones de esquema/conteos y salida de mantenimiento.
+La captura enviada mostraba una fase anterior del respaldo, no el resultado final.
+
+storage/framework/down ya no existe y GET /login devuelve HTTP 200.
+No repetir el script ni ejecutar up por separado. Esta comprobacion no accedio
+directamente a MySQL ni reprodujo el respaldo o las migraciones; confirma el
+marcador de finalizacion del procedimiento y la disponibilidad del login.
+No equivale a ensayo de restauracion ni a pruebas autenticadas del negocio.
+Sigue pendiente validar operativamente los modulos con usuarios autorizados,
+incluyendo Logistica/EPP, entrega, constancia, Kardex, Personal, habilitacion,
+asistencias y evaluaciones. En esta revision no se modifico produccion.

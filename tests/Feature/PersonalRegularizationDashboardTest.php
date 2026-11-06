@@ -6,6 +6,7 @@ use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalFicha;
 use App\Models\PersonalFichaArchivo;
+use App\Modules\Personal\Services\PersonalFichaService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,40 @@ use Tests\TestCase;
 class PersonalRegularizationDashboardTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_foreign_birthplace_is_not_a_missing_field_or_regularization_issue(): void
+    {
+        $this->authenticateWithPermissions(PermissionCatalog::fullAccessMatrix());
+        $personal = $this->createPersonal('ACTIVO', 'TRABAJADOR NACIMIENTO OPCIONAL');
+        $ficha = PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $personal->dni,
+            'datos_json' => [
+                'pais_nacimiento' => 'Otro',
+                'pais_nacimiento_otro' => 'Chile',
+                'lugar_nacimiento_extranjero' => '',
+            ],
+        ]);
+
+        $this->assertNotContains('lugar_nacimiento_extranjero', app(PersonalFichaService::class)->missingRequiredFieldKeys($ficha));
+        $this->get(route('personal.regularizacion.index', ['q' => $personal->dni]))
+            ->assertOk()
+            ->assertSee('Apellido materno')
+            ->assertDontSee('Lugar de nacimiento extranjero separado por /');
+        $this->assertSame('', $ficha->fresh()->datos_json['lugar_nacimiento_extranjero']);
+
+        $service = app(PersonalFichaService::class);
+        $otherCountry = $service->missingRequiredFieldKeys(new PersonalFicha(['datos_json' => ['pais_nacimiento' => 'Otro']]));
+        $this->assertContains('pais_nacimiento_otro', $otherCountry);
+        $this->assertNotContains('lugar_nacimiento_extranjero', $otherCountry);
+        $peru = $service->missingRequiredFieldKeys(new PersonalFicha(['datos_json' => ['pais_nacimiento' => 'Peru']]));
+        foreach (['departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento'] as $key) {
+            $this->assertContains($key, $peru);
+        }
+    }
 
     public function test_dashboard_lists_missing_data_and_documents_without_exposing_file_paths(): void
     {

@@ -11,13 +11,17 @@ use App\Models\Personal;
 use App\Models\PersonalContrato;
 use App\Models\PersonalMina;
 use App\Models\RQMinaActividadTransporte;
+use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\Usuario;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
 use Carbon\Carbon;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -312,6 +316,47 @@ class LogisticaDashboardServiceTest extends TestCase
         $this->assertSame(3, $updated->dias_uso);
     }
 
+    public function test_logistica_relee_la_atencion_actual_dentro_de_la_transaccion(): void
+    {
+        $this->assertSame('proserge_app_test', DB::connection()->getDatabaseName());
+        $mineId = $this->createMine('Mina de prueba de relectura');
+        $usuario = $this->createLogisticsUser();
+        $transportId = $this->createRqTransportRequirement($mineId, $usuario->id);
+        $changed = false;
+        DB::table('rq_mina_actividad_transportes')->where('id', $transportId)->update([
+            'placas_asignadas' => 'ANT-001',
+            'origen' => 'EMPRESA',
+            'estado_logistico' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
+        ]);
+
+        // Representa una atencion confirmada entre la lectura inicial y el bloqueo.
+        Event::listen(TransactionBeginning::class, function () use ($transportId, &$changed): void {
+            if ($changed) {
+                return;
+            }
+            $changed = true;
+            DB::table('rq_mina_actividad_transportes')->where('id', $transportId)->update([
+                'placas_asignadas' => 'NUE-001',
+                'origen' => 'EMPRESA',
+                'estado_logistico' => RQMinaActividadTransporte::ESTADO_EN_USO,
+            ]);
+        });
+
+        $updated = app(LogisticaDashboardService::class)->updateTransportRequirement($transportId, [
+            'recepcion_estado' => RQMinaActividadTransporte::RECEPCION_RECIBIDO,
+            'recepcion_fecha' => '2026-07-13',
+        ], $usuario);
+
+        $this->assertTrue($changed);
+        $this->assertSame('NUE-001', $updated->placas_asignadas);
+        $this->assertSame(RQMinaActividadTransporte::ESTADO_EN_USO, $updated->estado_logistico);
+        $this->assertDatabaseHas('rq_mina_actividad_transporte_eventos', [
+            'transporte_id' => $transportId,
+            'estado_anterior' => RQMinaActividadTransporte::ESTADO_EN_USO,
+            'estado_nuevo' => RQMinaActividadTransporte::ESTADO_EN_USO,
+        ]);
+    }
+
     public function test_requerimientos_de_servicios_se_filtran_por_parada_y_estado(): void
     {
         $mineId = $this->createMine('BOROO');
@@ -337,6 +382,91 @@ class LogisticaDashboardServiceTest extends TestCase
             'servicio_estado' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
         ])['serviceRows'];
         $this->assertCount(0, $porEstado);
+    }
+
+    public function test_servicios_no_expone_paradas_ni_transportes_fuera_del_alcance(): void
+    {
+        $allowed = $this->createMine('Mina permitida de prueba');
+        $other = $this->createMine('Mina ajena de prueba');
+        $actor = $this->createLogisticsUser();
+        $visible = $this->createRqTransportRequirement($allowed, $actor->id, false);
+        $hidden = $this->createRqTransportRequirement($other, $actor->id, false);
+        DB::table('usuario_mina_scope')->insert([
+            'id' => (string) Str::uuid(), 'usuario_id' => $actor->id, 'mina_id' => $allowed,
+        ]);
+        $otherParada = RQMinaActividadTransporte::query()->findOrFail($hidden)->grupo->rq_mina_id;
+        $service = app(LogisticaDashboardService::class);
+
+        $minimal = $service->serviciosPageData(['tab' => 'servicios'], $actor);
+        self::assertSame([$visible], $minimal['serviceRows']->pluck('id')->all());
+        self::assertSame([$allowed], $minimal['options']['paradas']->pluck('mina_id')->unique()->all());
+        self::assertSame([$allowed], $minimal['options']['minas']->pluck('id')->all());
+        self::assertCount(0, $service->serviciosPageData(['tab' => 'servicios', 'servicio_parada_id' => $otherParada], $actor)['serviceRows']);
+        self::assertCount(0, $service->pageData(['tab' => 'servicios', 'minas' => [$other]], $actor)['serviceRows']);
+        self::assertSame([$visible], $service->pageData(['tab' => 'servicios'], $actor)['serviceRows']->pluck('id')->all());
+
+        DB::table('usuario_mina_scope')->where('usuario_id', $actor->id)->delete();
+        $empty = $service->serviciosPageData(['tab' => 'servicios'], $actor);
+        self::assertCount(0, $empty['options']['paradas']);
+        self::assertCount(0, $empty['serviceRows']);
+    }
+
+    public function test_rechazar_guardado_conserva_documento_de_transporte_anterior(): void
+    {
+        Storage::fake('local');
+        $mine = $this->createMine('Mina de prueba de documentos');
+        $actor = $this->createLogisticsUser();
+        $id = $this->createRqTransportRequirement($mine, $actor->id);
+        $path = 'logistica/transportes/'.$id.'/evidencia.pdf';
+        Storage::disk('local')->put($path, 'Evidencia anterior');
+        $transport = RQMinaActividadTransporte::query()->findOrFail($id);
+        $transport->forceFill(['documentos' => [['nombre' => 'Evidencia', 'path' => $path]]])->save();
+
+        try {
+            app(LogisticaDashboardService::class)->updateTransportRequirement($id, [
+                'estado_logistico' => RQMinaActividadTransporte::ESTADO_ASIGNADO,
+                'documentos_eliminar' => [0],
+            ], $actor);
+            self::fail('El requerimiento no tiene unidad asignada.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('placa', $exception->getMessage());
+        }
+
+        self::assertSame($path, $transport->fresh()->documentos[0]['path']);
+        self::assertSame('Evidencia anterior', Storage::disk('local')->get($path));
+    }
+
+    public function test_transport_panels_preserve_the_other_panel_and_document_ids_remain_stable(): void
+    {
+        Storage::fake('local');
+        $mine = $this->createMine('Mina de prueba');
+        $actor = $this->createLogisticsUser();
+        $id = $this->createRqTransportRequirement($mine, $actor->id);
+        $transport = RQMinaActividadTransporte::query()->findOrFail($id);
+        $first = 'logistica/transportes/'.$id.'/primero.pdf';
+        $second = 'logistica/transportes/'.$id.'/segundo.pdf';
+        Storage::disk('local')->put($first, 'Evidencia de prueba');
+        $transport->forceFill([
+            'documentos' => [['nombre' => 'Primero', 'path' => $first], ['nombre' => 'Segundo', 'path' => $second]],
+            'doc_vehiculo_path' => $first,
+            'estado_logistico' => 'EN_USO', 'recepcion_estado' => 'RECIBIDO', 'placas_asignadas' => 'ABC-123',
+        ])->save();
+        $service = app(LogisticaDashboardService::class);
+        $docs = $service->serviciosPageData(['tab' => 'servicios'], $actor)['serviceRows']->first()['documentos'];
+        $slot = $docs[0]['slot'];
+        $payload = ['panel' => 'entrega', 'estado_logistico' => 'REQUERIDO', 'recepcion_estado' => 'PENDIENTE', 'documentos_retirar' => [$slot]];
+        $service->updateTransportRequirement($id, $payload, $actor);
+        $after = $service->updateTransportRequirement($id, $payload, $actor);
+        self::assertSame('EN_USO', $after->estado_logistico);
+        self::assertSame('RECIBIDO', $after->recepcion_estado);
+        self::assertSame([$second], array_column($after->documentos, 'path'));
+        self::assertNull($service->transportDocumentSlot($after, $slot));
+        self::assertNull($service->transportDocumentSlot($after, 'adicional-0'));
+        self::assertNull($service->transportDocumentSlot($after, 'legacy-vehiculo'));
+        self::assertSame($second, $service->transportDocumentSlot($after, $docs[1]['slot'])['path']);
+        $event = RQMinaActividadTransporteEvento::query()->where('transporte_id', $id)->firstOrFail();
+        self::assertSame($first, $event->transporte_snapshot['documentos_retirados'][0]['path']);
+        Storage::disk('local')->assertExists($first);
     }
 
     public function test_documentos_de_transporte_se_resuelven_por_slot(): void
@@ -704,8 +834,13 @@ class LogisticaDashboardServiceTest extends TestCase
         return Usuario::query()->findOrFail($userId);
     }
 
-    private function createRqTransportRequirement(string $mineId, string $userId): string
+    private function createRqTransportRequirement(string $mineId, string $userId, bool $addScope = true): string
     {
+        if ($addScope) {
+            DB::table('usuario_mina_scope')->insert([
+                'id' => (string) Str::uuid(), 'usuario_id' => $userId, 'mina_id' => $mineId,
+            ]);
+        }
         $rqMinaId = (string) Str::uuid();
         $groupId = (string) Str::uuid();
         $transportId = (string) Str::uuid();

@@ -125,6 +125,8 @@ Modelos relacionados: `RQProserge`, `RQProsergeDetalle`, `GrupoTrabajo`,
 | Necesidad | Archivos principales |
 |---|---|
 | Usuarios | `UsuarioPageController`, `UsuarioController`, `Usuario` |
+| Alta múltiple de usuarios | `UsuarioAltaLoteController`, `UsuarioAltaLoteService`, `StoreUsuarioAltaLoteRequest`, `resources/views/seguridad/usuarios/lotes` |
+| Búsqueda en el alta de usuarios | `UsuarioTrabajadorSearchService`, `resources/js/modules/usuario-worker-search.js`, `seguridad/usuarios/partials/buscador-trabajador.blade.php` |
 | Roles | `RolPageController`, `RolController`, `RoleManagementService`, `Rol` |
 | Scope de minas | `UsuarioMinaScopeController`, `UsuarioMinaScope`, `EnsureMinaScope` |
 | Catalogo/matriz de permisos | `PermissionCatalog`, `PermissionMatrix`, vistas `resources/views/seguridad` |
@@ -146,6 +148,7 @@ Modelos: `NotificationType`, `NotificationEvent`, `NotificationRecipient`,
 | Evaluaciones | `app/Modules/Evaluaciones`, `resources/views/evaluaciones` |
 | Bienestar/bloqueos | `app/Modules/Bienestar`, `resources/views/bienestar` |
 | Dashboard | `app/Modules/Dashboard`, `resources/views/dashboard` |
+| Tarjetas de Inicio y dashboards independientes | `HomeDashboardCatalog`, `HomeDashboardPageController`, `ExistingDashboardPageController`, `HomeSummaryDashboardService`, `resources/views/personal/home.blade.php`, `resources/css/modules/home-dashboards.css` |
 | Mi asistencia | `app/Modules/MiAsistencia`, `resources/views/mi-asistencia` |
 | Perfil | `app/Modules/Perfil`, `resources/views/perfil` |
 
@@ -252,3 +255,45 @@ Se omite el bloque tecnico sin borrar operaciones, evidencia o constancias.
 nuevas entregas. `app/Shared/Support/SearchTerms.php` unifica busquedas por
 palabras sin orden en EPP y Logistica. `EppService::pageData` filtra la mina por
 paradas RQ solapadas, conservando el alcance autorizado del usuario.
+
+En Identificacion de items, `LogisticaDashboardService::identityRows` combina
+el catalogo registrado y el aprendido de paradas sin duplicados. `pageData`
+conserva `identityCatalogRows` completo y aplica `ident_q` sobre nombre/codigo
+con `SearchTerms::matches` para el resultado inicial. La vista
+`logistica/index.blade.php` y `logistica/partials/item-search-script.blade.php`
+filtran mientras se escribe sin recargar ni perder foco, ofrecen Limpiar,
+contador y estado sin coincidencias y conservan la consulta al cambiar
+EPP/Herramientas/Consumibles. Borrar texto permite ampliar la lista completa.
+Validacion: `LogisticaItemSearchTest` y `tests/Browser/logistics-item-search.cjs`.
+Despliegue: `docs/FTP_BUSCADOR_ITEMS_LOGISTICA.md`.
+
+## Actualización y lotes de RR. HH.
+
+- `app/Modules/Personal/Services/PersonalIngresoRevisionService.php` y
+  `PersonalIngresoLinkService.php` gestionan la propuesta y el enlace individual.
+- `app/Modules/Personal/Support/PersonalIngresoPurpose.php` y
+  `PersonalIngresoFamilyProposal.php` delimitan datos generales, dependencias y
+  altas familiares sin reemplazar familiares existentes.
+- `PersonalIngresoUpdateController.php` y
+  `resources/views/ficha-public/actualizacion.blade.php` implementan el acceso
+  público con identificador de sesión por pestaña.
+- `PersonalIngresoBatchReviewService.php`, su controlador y
+  `resources/views/personal/fichas/ingresos-lote.blade.php` conservan selección,
+  periodos, revisiones y resultados de aceptación.
+- `PersonalContratoSignedBatchService.php`, su controlador y
+  `resources/views/personal/contratos/carga-firmados.blade.php` implementan la
+  recepción de PDF individuales y la activación revisada de firmados futuros.
+- `PersonalArchivoVersionService.php` conserva versiones de archivos de fichas
+  e Ingresos y coordina limpieza tras rollback.
+- `app/Modules/Evaluaciones/Services/EvaluacionAsistenciaRevisionService.php`
+  y `resources/views/evaluaciones/revisiones-asistencia.blade.php` gestionan
+  decisiones sobre evaluaciones afectadas por la asistencia.
+- `app/Modules/Seguridad/Services/RoleChangeNotificationService.php` y
+  `app/Console/Commands/RetryRoleChangeNotificationsCommand.php` entregan
+  avisos de cambios de rol desde su auditoría persistida.
+- `tests/Browser/rrhh-batches.cjs`, `personal-update-link.cjs` y
+  `mining-attempt-recovery.cjs` verifican los recorridos sintéticos a 390/1440 px.
+- `tests/Feature/PersonalRrhhBatchConcurrencyTest.php` y su worker verifican
+  lotes simultáneos, reintentos y revocación de permisos con conexiones reales.
+  `RrhhIncrementalSchemaTest.php` ensaya variantes históricas en esquemas
+  desechables de la instancia aislada de pruebas.

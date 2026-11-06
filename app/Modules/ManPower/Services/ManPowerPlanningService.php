@@ -284,7 +284,7 @@ class ManPowerPlanningService
 
     private function listParadas(Usuario $usuario, string $search, string $fecha): Collection
     {
-        if (!$this->policy->viewParadas($usuario)) {
+        if (!$this->policy->viewParadas($usuario) && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'dashboards')) {
             return collect();
         }
 

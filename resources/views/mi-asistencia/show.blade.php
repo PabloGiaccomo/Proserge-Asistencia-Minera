@@ -6,6 +6,7 @@
 @php
     $integrantes = collect($grupo['integrantes'] ?? []);
     $isClosed = ($grupo['asistencia']['estado'] ?? 'PENDIENTE') === 'CERRADO';
+    $isCancelled = $grupo['estado_grupo'] === 'CANCELADO';
     $metrics = $grupo['asistencia']['metricas'] ?? [];
     $fecha = \Illuminate\Support\Carbon::parse($grupo['fecha'])->locale('es')->translatedFormat('d \d\e F \d\e Y');
 @endphp
@@ -20,7 +21,7 @@
 >
     <header class="mia-page-head mia-detail-head">
         <div>
-            <a href="{{ route('mi-asistencia.index', ['fecha' => $grupo['fecha']]) }}" class="mia-back-link">← Volver a la jornada</a>
+            <a href="{{ $returnUrl }}" class="mia-back-link">← Volver a la jornada</a>
             <h1>{{ $grupo['destino']['nombre'] ?: $grupo['mina_nombre'] ?: 'Grupo de trabajo' }}</h1>
             <p>{{ $grupo['turno'] === 'DIA' ? 'Turno día' : 'Turno noche' }} · {{ $fecha }}</p>
         </div>
@@ -32,7 +33,7 @@
     <section class="mia-account mia-account-compact">
         <div class="mia-account-avatar">{{ mb_strtoupper(mb_substr((string) ($user->name ?: $user->email), 0, 2)) }}</div>
         <div>
-            <span>Registrando como</span>
+            <span>{{ $canRegister || $canClose ? 'Registrando como' : 'Consultando como' }}</span>
             <strong>{{ $user->name ?: $user->email }}</strong>
             <small>{{ $user->email }}</small>
         </div>
@@ -43,15 +44,12 @@
         <section class="mia-notice is-error">{{ $errors->first() }}</section>
     @endif
 
-    @if(!$grupo['supervisor']['id'] && !$grupo['asistencia']['id'] && $canRegister)
+    @if($isCancelled)
+        <section class="mia-notice is-warning">Grupo cancelado. Puedes consultar sus datos.</section>
+    @elseif(!$grupo['supervisor']['id'] && !$grupo['asistencia']['responsable_registro'])
         <section class="mia-notice is-warning">
             <strong>Este grupo no tiene responsable asignado.</strong>
-            <span>Como tu rol permite gestionar todas las asistencias, el registro quedara a nombre de tu cuenta.</span>
-        </section>
-    @elseif(!$attendanceReady)
-        <section class="mia-notice is-warning">
-            <strong>No se puede identificar quien registra la asistencia.</strong>
-            <span>Vincula esta cuenta con un trabajador o asigna un responsable al grupo en Man Power.</span>
+            <span>{{ $canRegister || $canClose ? 'El registro quedará a nombre de tu cuenta.' : 'Solicita la asignación de un responsable en Man Power.' }}</span>
         </section>
     @endif
 
@@ -59,7 +57,7 @@
         <div><span>Unidad minera</span><strong>{{ $grupo['mina_nombre'] ?: 'Sin definir' }}</strong></div>
         <div><span>Responsable</span><strong>{{ $grupo['supervisor']['nombre_completo'] ?: ($grupo['asistencia']['responsable_registro'] ?: ($canRegister ? ($user->personal?->nombre_completo ?: $user->email) : 'Sin responsable')) }}</strong></div>
         <div><span>Horario</span><strong>{{ substr((string) ($grupo['horario_salida'] ?? ''), 0, 5) ?: '--:--' }}</strong></div>
-        <div><span>Estado</span><strong>{{ $isClosed ? 'Cerrada' : 'Abierta' }}</strong></div>
+        <div><span>Estado</span><strong>{{ $isCancelled ? 'Grupo cancelado' : ($isClosed ? 'Cerrada' : 'Abierta') }}</strong></div>
     </section>
 
     <section class="mia-attendance-card">
@@ -126,7 +124,7 @@
 
         <div class="mia-notice is-warning mia-inline-notice" id="miaScheduleNotice" @if(!$grupo['horario_marcacion']['mensaje']) hidden @endif>{{ $grupo['horario_marcacion']['mensaje'] }}</div>
 
-        @if(!$canRegister && !$isClosed && $attendanceReady)
+        @if(!$canRegister && !$isClosed && !$isCancelled && $attendanceReady)
             <div class="mia-notice is-warning mia-inline-notice">
                 Puedes revisar este grupo, pero tu rol no permite registrar su asistencia.
             </div>

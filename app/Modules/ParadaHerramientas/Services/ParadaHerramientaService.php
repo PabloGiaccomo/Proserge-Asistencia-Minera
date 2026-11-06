@@ -13,6 +13,7 @@ use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -120,6 +121,15 @@ class ParadaHerramientaService
         return $rq;
     }
 
+    public function accessibleParadasQuery(Usuario $usuario): Builder
+    {
+        $query = RQMina::query();
+        $this->applyMineScope($query, $usuario);
+        $this->applySupervisorScope($query, $usuario);
+
+        return $query;
+    }
+
     public function ensureLista(RQMina $rq, Usuario $usuario): ParadaHerramientaLista
     {
         $fechaInicio = Carbon::parse($rq->fecha_inicio);
@@ -151,6 +161,10 @@ class ParadaHerramientaService
 
     public function saveLista(Usuario $usuario, RQMina $rq, array $payload): array
     {
+        if (!PermissionMatrix::userCanDirect($usuario, 'herramientas', 'actualizar') || !$this->canAccessRQMina($usuario, $rq)) {
+            return ['ok' => false, 'message' => 'No tienes permiso para guardar esta solicitud.'];
+        }
+
         $lista = $this->ensureLista($rq, $usuario);
 
         if (!$this->canEditLista($usuario, $rq, $lista)) {
@@ -176,66 +190,116 @@ class ParadaHerramientaService
             ];
         }
 
-        DB::transaction(function () use ($lista, $usuario, $payload, $groups, $lateChangeComment): void {
-            $lista->fill([
-                'observaciones' => trim((string) ($payload['observaciones'] ?? '')) ?: null,
-                'updated_by_usuario_id' => $usuario->id,
-            ]);
-            $lista->save();
-
-            $lista->grupos()->delete();
-
-            foreach ($groups as $groupIndex => $group) {
-                $grupo = ParadaHerramientaGrupo::query()->create([
-                    'id' => (string) Str::uuid(),
-                    'lista_id' => $lista->id,
-                    'grupo_trabajo_id' => $group['grupo_trabajo_id'] ?: null,
-                    'nombre' => $group['nombre'],
-                    'orden' => $groupIndex + 1,
-                    'observaciones' => $group['observaciones'] ?: null,
-                ]);
-
-                $rows = [];
-                $order = 1;
-                foreach ($group['items'] as $item) {
-                    $rows[] = [
-                        'id' => (string) Str::uuid(),
-                        'grupo_id' => $grupo->id,
-                        'tipo' => $item['tipo'],
-                        'categoria' => $item['categoria'],
-                        'descripcion' => $item['descripcion'],
-                        'cantidad_solicitada' => $item['cantidad_solicitada'],
-                        'cantidad_entregada' => $item['cantidad_entregada'],
-                        'cantidad_recibida' => $item['cantidad_recibida'],
-                        'unidad' => $item['unidad'],
-                        'observaciones' => $item['observaciones'] ?: null,
-                        'incidencia_durante_parada' => $item['incidencia_durante_parada'] ?: null,
-                        'pedido_solicitado_at' => $item['pedido_solicitado_at'] ?? null,
-                        'pedido_llego_at' => $item['pedido_llego_at'] ?? null,
-                        'recepcion_estado' => $item['recepcion_estado'],
-                        'recepcion_fecha' => $item['recepcion_fecha'] ?? null,
-                        'recepcion_observacion' => $item['recepcion_observacion'] ?: null,
-                        'recepcion_registrada_at' => $item['recepcion_registrada_at'] ?? null,
-                        'recepcion_registrada_por_usuario_id' => $item['recepcion_registrada_por_usuario_id'] ?: null,
-                        'comentario_cambio_previo' => $lateChangeComment !== '' ? $lateChangeComment : ($item['comentario_cambio_previo'] ?: null),
-                        'orden' => $order++,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                }
-
-                if (!empty($rows)) {
-                    $grupo->items()->insert($rows);
-                    $this->rememberCatalogRows($rows, $usuario);
-                }
-            }
-        });
+        try {
+            DB::transaction(function () use ($lista, $usuario, $payload, $groups, $lateChangeComment, $rq): void {
+                $locked = ParadaHerramientaLista::query()->lockForUpdate()->findOrFail($lista->id);
+                $this->syncRequestedGroups($locked, $rq, $usuario, $groups, $lateChangeComment);
+                $locked->fill([
+                    'observaciones' => trim((string) ($payload['observaciones'] ?? '')) ?: null,
+                    'updated_by_usuario_id' => $usuario->id,
+                ])->save();
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return ['ok' => false, 'message' => $exception->getMessage()];
+        }
 
         return [
             'ok' => true,
             'lista' => $lista->fresh(['grupos.items', 'rqMina.mina']),
             'message' => 'Lista de herramientas guardada correctamente.',
         ];
+    }
+
+    private function syncRequestedGroups(ParadaHerramientaLista $lista, RQMina $rq, Usuario $usuario, array $groups, string $reason): void
+    {
+        $existingGroups = $lista->grupos()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $existingItems = ParadaHerramientaItem::query()->whereIn('grupo_id', $existingGroups->keys())
+            ->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $keptGroups = [];
+        $keptItems = [];
+
+        foreach ($groups as $index => $group) {
+            $groupId = $group['id'];
+            if ($groupId === '') {
+                $legacyGroupIds = collect($group['items'])->pluck('id')->filter()
+                    ->map(fn ($id) => $existingItems->get($id)?->grupo_id)->filter()->unique();
+                $groupId = $legacyGroupIds->count() === 1 ? (string) $legacyGroupIds->first() : '';
+            }
+            $record = $existingGroups->get($groupId);
+            if ($groupId !== '' && (!$record || isset($keptGroups[$groupId]))) {
+                throw new \InvalidArgumentException('El grupo cambió o no pertenece a esta lista. Vuelve a abrir la solicitud.');
+            }
+            $grupoTrabajo = $group['grupo_trabajo_id'] ?: null;
+            if ($grupoTrabajo !== ($record?->grupo_trabajo_id ?: null) && $grupoTrabajo !== null
+                && !$rq->gruposTrabajo()->whereKey($grupoTrabajo)->exists()) {
+                throw new \InvalidArgumentException('El grupo de trabajo no pertenece a esta parada.');
+            }
+
+            $record ??= new ParadaHerramientaGrupo(['id' => (string) Str::uuid(), 'lista_id' => $lista->id]);
+            $record->fill([
+                'grupo_trabajo_id' => $grupoTrabajo,
+                'nombre' => $group['nombre'],
+                'orden' => $index + 1,
+                'observaciones' => $group['observaciones'] ?: null,
+            ])->save();
+            $keptGroups[(string) $record->id] = true;
+
+            $catalogRows = [];
+            foreach ($group['items'] as $position => $requested) {
+                $itemId = $requested['id'];
+                $item = $existingItems->get($itemId);
+                if ($itemId !== '' && (!$item || $item->grupo_id !== $record->id || isset($keptItems[$itemId]))) {
+                    throw new \InvalidArgumentException('Una herramienta cambió de grupo o ya no está disponible. Vuelve a abrir la solicitud.');
+                }
+                $data = [
+                    'tipo' => $requested['tipo'],
+                    'categoria' => $requested['categoria'],
+                    'descripcion' => $requested['descripcion'],
+                    'cantidad_solicitada' => $requested['cantidad_solicitada'],
+                    'unidad' => $requested['unidad'],
+                    'observaciones' => $requested['observaciones'] ?: null,
+                    'orden' => $position + 1,
+                ];
+                if ($reason !== '') {
+                    $data['comentario_cambio_previo'] = $reason;
+                }
+                if ($item && $this->itemHasAttention($item)) {
+                    foreach (['tipo', 'categoria', 'descripcion', 'unidad'] as $field) {
+                        if ((string) $item->{$field} !== (string) $data[$field]) {
+                            throw new \InvalidArgumentException('Conserva la identificación de los ítems que ya tienen atención.');
+                        }
+                    }
+                    if ($data['cantidad_solicitada'] < max($item->cantidad_entregada, $item->cantidad_recibida)) {
+                        throw new \InvalidArgumentException('La cantidad solicitada no puede ser menor que la atención registrada.');
+                    }
+                }
+
+                $item ??= new ParadaHerramientaItem(['id' => (string) Str::uuid(), 'grupo_id' => $record->id]);
+                $item->fill($data)->save();
+                $keptItems[(string) $item->id] = true;
+                $catalogRows[] = $data;
+            }
+            $this->rememberCatalogRows($catalogRows, $usuario);
+        }
+
+        foreach ($existingItems->except(array_keys($keptItems)) as $item) {
+            if ($this->itemHasAttention($item)) {
+                throw new \InvalidArgumentException('No se puede quitar una herramienta con atención registrada.');
+            }
+            $item->delete();
+        }
+        foreach ($existingGroups->except(array_keys($keptGroups)) as $group) {
+            $group->delete();
+        }
+    }
+
+    private function itemHasAttention(ParadaHerramientaItem $item): bool
+    {
+        return $item->cantidad_entregada > 0 || $item->cantidad_recibida > 0
+            || $item->pedido_solicitado_at || $item->pedido_llego_at || $item->recepcion_fecha
+            || $item->recepcion_registrada_at || $item->recepcion_registrada_por_usuario_id
+            || filled($item->incidencia_durante_parada) || filled($item->recepcion_observacion)
+            || (filled($item->recepcion_estado) && $item->recepcion_estado !== ParadaHerramientaItem::RECEPCION_PENDIENTE);
     }
 
     public function enviarLista(Usuario $usuario, RQMina $rq): array
@@ -390,7 +454,7 @@ class ParadaHerramientaService
         $fechaFin = $rq->fecha_fin ? Carbon::parse($rq->fecha_fin) : null;
         $deadline = Carbon::parse($lista->fecha_limite_envio)->startOfDay();
         $diasParaLimite = now()->startOfDay()->diffInDays($deadline, false);
-        $puedeEditar = $this->canEditLista($usuario, $rq, $lista);
+        $puedeEditar = PermissionMatrix::userCanDirect($usuario, 'herramientas', 'actualizar') && $this->canEditLista($usuario, $rq, $lista);
         $today = now()->startOfDay();
         $paradaIniciada = $today->gte($fechaInicio->copy()->startOfDay());
         $paradaFinalizada = $fechaFin ? $today->gte($fechaFin->copy()->startOfDay()) : false;
@@ -562,6 +626,7 @@ class ParadaHerramientaService
             }
 
             $normalized[] = [
+                'id' => trim((string) ($group['id'] ?? '')),
                 'nombre' => $nombre,
                 'grupo_trabajo_id' => $grupoTrabajoId,
                 'observaciones' => $observaciones,
@@ -586,19 +651,8 @@ class ParadaHerramientaService
 
             $descripcion = trim((string) ($item['descripcion'] ?? ''));
             $cantidad = max(0, (int) ($item['cantidad_solicitada'] ?? $item['cantidad'] ?? 0));
-            $cantidadEntregada = max(0, (int) ($item['cantidad_entregada'] ?? 0));
-            $cantidadRecibida = max(0, (int) ($item['cantidad_recibida'] ?? 0));
             $unidad = trim((string) ($item['unidad'] ?? ''));
             $observaciones = trim((string) ($item['observaciones'] ?? ''));
-            $pedidoSolicitado = $this->sanitizeDate($item['pedido_solicitado_at'] ?? null);
-            $pedidoLlego = $this->sanitizeDate($item['pedido_llego_at'] ?? null);
-            $incidenciaDuranteParada = trim((string) ($item['incidencia_durante_parada'] ?? ''));
-            $recepcionEstado = $this->normalizeRecepcionEstado($item['recepcion_estado'] ?? ParadaHerramientaItem::RECEPCION_PENDIENTE);
-            $recepcionFecha = $this->sanitizeDate($item['recepcion_fecha'] ?? null);
-            $recepcionObservacion = trim((string) ($item['recepcion_observacion'] ?? ''));
-            $recepcionRegistradaAt = trim((string) ($item['recepcion_registrada_at'] ?? ''));
-            $recepcionRegistradaPor = trim((string) ($item['recepcion_registrada_por_usuario_id'] ?? ''));
-            $comentarioCambioPrevio = trim((string) ($item['comentario_cambio_previo'] ?? ''));
 
             if ($descripcion === '' && $cantidad <= 0 && $observaciones === '') {
                 continue;
@@ -606,23 +660,13 @@ class ParadaHerramientaService
 
             if ($descripcion !== '') {
                 $normalized[] = [
+                    'id' => trim((string) ($item['id'] ?? '')),
                     'tipo' => $tipo,
                     'categoria' => $categoria,
                     'descripcion' => $descripcion,
                     'cantidad_solicitada' => $cantidad,
-                    'cantidad_entregada' => $cantidadEntregada,
-                    'cantidad_recibida' => $cantidadRecibida,
                     'unidad' => $unidad !== '' ? $unidad : null,
                     'observaciones' => $observaciones,
-                    'incidencia_durante_parada' => $incidenciaDuranteParada,
-                    'pedido_solicitado_at' => $pedidoSolicitado,
-                    'pedido_llego_at' => $pedidoLlego,
-                    'recepcion_estado' => $recepcionEstado,
-                    'recepcion_fecha' => $recepcionFecha,
-                    'recepcion_observacion' => $recepcionObservacion,
-                    'recepcion_registrada_at' => $recepcionRegistradaAt !== '' ? $recepcionRegistradaAt : null,
-                    'recepcion_registrada_por_usuario_id' => $recepcionRegistradaPor,
-                    'comentario_cambio_previo' => $comentarioCambioPrevio,
                 ];
             }
         }
@@ -685,7 +729,8 @@ class ParadaHerramientaService
             ->map(fn ($id) => (string) $id)
             ->flip();
 
-        DB::transaction(function () use ($updates, $allowedIds, $mode, $fechaRecepcion, $usuario): void {
+        DB::transaction(function () use ($lista, $updates, $allowedIds, $mode, $fechaRecepcion, $usuario): void {
+            ParadaHerramientaLista::query()->lockForUpdate()->findOrFail($lista->id);
             foreach ($updates as $itemId => $fields) {
                 if (!$allowedIds->has($itemId)) {
                     continue;
@@ -776,14 +821,23 @@ class ParadaHerramientaService
             ];
         }
 
-        $summary = DB::transaction(function () use ($grupo, $parsed, $usuario): array {
-            $this->rememberCatalogRows(array_merge($parsed[self::CATEGORY_TOOL], $parsed[self::CATEGORY_CONSUMABLE]), $usuario);
+        try {
+            $summary = DB::transaction(function () use ($lista, $grupo, $parsed, $usuario): array {
+                ParadaHerramientaLista::query()->lockForUpdate()->findOrFail($lista->id);
+                $lockedGroup = ParadaHerramientaGrupo::query()->where('lista_id', $lista->id)->find($grupo->id);
+                if (!$lockedGroup) {
+                    throw new \InvalidArgumentException('El grupo cambió. Vuelve a abrir la solicitud antes de importar.');
+                }
+                $this->rememberCatalogRows(array_merge($parsed[self::CATEGORY_TOOL], $parsed[self::CATEGORY_CONSUMABLE]), $usuario);
 
-            return [
-                self::CATEGORY_TOOL => $this->syncImportedRows($grupo, self::CATEGORY_TOOL, $parsed[self::CATEGORY_TOOL]),
-                self::CATEGORY_CONSUMABLE => $this->syncImportedRows($grupo, self::CATEGORY_CONSUMABLE, $parsed[self::CATEGORY_CONSUMABLE]),
-            ];
-        });
+                return [
+                    self::CATEGORY_TOOL => $this->syncImportedRows($lockedGroup, self::CATEGORY_TOOL, $parsed[self::CATEGORY_TOOL]),
+                    self::CATEGORY_CONSUMABLE => $this->syncImportedRows($lockedGroup, self::CATEGORY_CONSUMABLE, $parsed[self::CATEGORY_CONSUMABLE]),
+                ];
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return ['ok' => false, 'message' => $exception->getMessage()];
+        }
 
         return [
             'ok' => true,
@@ -1491,6 +1545,9 @@ class ParadaHerramientaService
             ];
 
             if ($item) {
+                if ($this->itemHasAttention($item) && $data['cantidad_solicitada'] < max($item->cantidad_entregada, $item->cantidad_recibida)) {
+                    throw new \InvalidArgumentException('El formato reduce la cantidad de un ítem por debajo de su atención registrada.');
+                }
                 $item->fill($data);
                 $item->save();
                 $keptIds[] = (string) $item->id;
@@ -1514,7 +1571,11 @@ class ParadaHerramientaService
             $deleteQuery->whereNotIn('id', $keptIds);
         }
 
-        $removed = $deleteQuery->count();
+        $removedItems = $deleteQuery->get();
+        if ($removedItems->contains(fn (ParadaHerramientaItem $item): bool => $this->itemHasAttention($item))) {
+            throw new \InvalidArgumentException('El formato omite una herramienta o consumible con atención registrada.');
+        }
+        $removed = $removedItems->count();
         $deleteQuery->delete();
 
         return [

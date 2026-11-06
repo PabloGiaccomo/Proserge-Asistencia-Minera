@@ -41,6 +41,7 @@ class EvaluacionDesempenoPageController extends WebPageController
             'hasta' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:desde'],
             'mina' => ['nullable', 'string', 'max:36'],
             'cargo' => ['nullable', 'string', 'max:191'],
+            'q' => ['nullable', 'string', 'max:191'],
             'evaluacion_tipo' => ['nullable', 'in:desempeno,supervisores,residentes'],
             'origen' => ['nullable', 'in:ASISTENCIA,DIRECTA,HISTORICA,ACTUAL,LEGADO'],
             'estado_supervisor' => ['nullable', 'in:pendientes,regularizadas'],
@@ -85,7 +86,8 @@ class EvaluacionDesempenoPageController extends WebPageController
         if ($data['activeType'] === 'dashboard') {
             $dashboardFilters = ['desde' => $filters['desde'] ?? now()->startOfMonth()->toDateString(),
                 'hasta' => $filters['hasta'] ?? now()->toDateString(), 'mina' => $filters['mina'] ?? '', 'cargo' => $filters['cargo'] ?? '',
-                'evaluacion_tipo' => $filters['evaluacion_tipo'] ?? '', 'origen' => $filters['origen'] ?? ''];
+                'evaluacion_tipo' => $filters['evaluacion_tipo'] ?? '', 'origen' => $filters['origen'] ?? '',
+                'q' => trim($filters['q'] ?? '')];
             if ($dashboardFilters['hasta'] < $dashboardFilters['desde']) {
                 throw ValidationException::withMessages(['hasta' => 'La fecha final debe ser igual o posterior a la inicial.']);
             }

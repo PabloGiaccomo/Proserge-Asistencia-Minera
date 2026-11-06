@@ -2,10 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Models\Falta;
+use App\Models\GrupoTrabajo;
+use App\Models\Usuario;
+use App\Modules\Asistencia\Services\ParadaExecutionMetricsService;
+use App\Modules\Faltas\Services\FaltasService;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class FaltasApiTest extends TestCase
@@ -105,6 +111,35 @@ class FaltasApiTest extends TestCase
             'corregido_por_usuario_id' => $usuarioId,
         ]);
         $this->assertNotNull(DB::table('faltas')->where('id', $faltaId)->value('corregido_at'));
+    }
+
+    public function test_fallo_de_proyeccion_revierte_correccion_y_asistencia(): void
+    {
+        $user = $this->crearUsuario();
+        [$mine, $faltaId, , $groupId] = $this->crearContextoMinaFalta();
+        $this->asignarScope($user, $mine);
+        $group = GrupoTrabajo::findOrFail($groupId);
+        app(ParadaExecutionMetricsService::class)->recalculateGrupo($group, persist: true);
+        $falta = Falta::findOrFail($faltaId);
+
+        DB::connection()->beforeExecuting(function (string $query): void {
+            if (str_starts_with($query, 'update `parada_ejecucion_resumen`')) {
+                throw new RuntimeException('Fallo de proyección simulado');
+            }
+        });
+
+        try {
+            app(FaltasService::class)->corregirAsistencia(Usuario::findOrFail($user), $falta, [
+                'motivo_correccion' => 'Ingreso verificado en campo',
+                'hora_marcado' => '06:25',
+            ]);
+            $this->fail('La corrección debe intentar persistir la proyección.');
+        } catch (RuntimeException $failure) {
+            $this->assertSame('Fallo de proyección simulado', $failure->getMessage());
+        }
+        $this->assertDatabaseHas('faltas', ['id' => $faltaId, 'estado' => 'ACTIVA', 'motivo_correccion' => null]);
+        $this->assertDatabaseHas('asistencia_detalle', ['id' => $falta->asistencia_detalle_id, 'estado' => 'AUSENTE']);
+        $this->assertDatabaseHas('parada_ejecucion_resumen', ['rq_mina_id' => $group->rq_mina_id, 'presentes' => 0, 'ausentes' => 1]);
     }
 
     public function test_no_permite_corregir_dos_veces_ni_sobrescribe_historial(): void

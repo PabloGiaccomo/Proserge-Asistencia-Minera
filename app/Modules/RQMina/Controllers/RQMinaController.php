@@ -12,6 +12,7 @@ use App\Modules\RQMina\Resources\RQMinaResource;
 use App\Modules\RQMina\Services\RQMinaService;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Shared\Support\ApiResponse;
+use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -29,6 +30,14 @@ class RQMinaController extends Controller
         /** @var Usuario $usuario */
         $usuario = $request->user();
 
+        if (!PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'ver')) {
+            return ApiResponse::error(
+                message: 'No autorizado para consultar RQ Mina',
+                code: 'RQ_MINA_FORBIDDEN_VIEW',
+                status: 403,
+            );
+        }
+
         $filters = $request->validate([
             'mina_id' => ['nullable', 'string', 'size:36'],
             'estado' => ['nullable', 'string', 'max:30'],
@@ -37,6 +46,8 @@ class RQMinaController extends Controller
             'fecha_inicio_hasta' => ['nullable', 'date'],
             'fecha_fin_desde' => ['nullable', 'date'],
             'fecha_fin_hasta' => ['nullable', 'date'],
+            'page' => ['sometimes', 'integer', 'min:1', 'max:1000000'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
         if (!empty($filters['mina_id']) && !$this->service->canAccessMina($usuario, $filters['mina_id'])) {
@@ -48,12 +59,22 @@ class RQMinaController extends Controller
             );
         }
 
-        $items = $this->service->listForUser($usuario, $filters);
+        $page = (int) ($filters['page'] ?? 1);
+        $perPage = (int) ($filters['per_page'] ?? 10);
+        unset($filters['page'], $filters['per_page']);
+
+        $result = $this->service->listForUser($usuario, $filters, $perPage, $page);
 
         return ApiResponse::success(
-            data: RQMinaResource::collection($items)->resolve(),
+            data: RQMinaResource::collection($result['items'])->resolve($request),
             message: 'RQ Mina obtenidos',
             code: 'RQ_MINA_LIST_OK',
+            detail: ['pagination' => [
+                'current_page' => $result['current_page'],
+                'per_page' => $result['per_page'],
+                'total' => $result['total'],
+                'total_pages' => $result['total_pages'],
+            ]],
         );
     }
 
@@ -190,7 +211,11 @@ class RQMinaController extends Controller
             );
         }
 
-        $sent = $this->service->send($usuario, $rqMina);
+        try {
+            $sent = $this->service->send($usuario, $rqMina);
+        } catch (\App\Modules\RQMina\Support\RQMinaAtencionRrhhException $exception) {
+            return ApiResponse::error(message: $exception->getMessage(), code: 'RQ_MINA_ATENCION_UNAVAILABLE', status: 503);
+        }
 
         if (!$sent) {
             return ApiResponse::error(

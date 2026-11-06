@@ -576,6 +576,36 @@ class PersonalContratoServiceTest extends TestCase
         $this->assertSame('ACTIVO', DB::table('personal')->where('id', $personalId)->value('estado'));
     }
 
+    public function test_signed_pdf_cannot_be_replaced_from_contract_data_or_stale_preparation(): void
+    {
+        Storage::fake('local');
+        $actor = Usuario::query()->findOrFail($this->createUser($this->createRole('RRHH_CONTRATOS'), 'rrhh'));
+        $personal = Personal::query()->findOrFail($this->createPersonal());
+        $contract = \App\Models\PersonalContrato::query()->create([
+            'id' => (string) Str::uuid(), 'personal_id' => $personal->id, 'contrato_numero' => 1,
+            'estado' => 'PREPARACION', 'fecha_inicio' => now()->subDay()->toDateString(),
+        ]);
+        $service = app(PersonalContratoService::class);
+        $file = UploadedFile::fake()->create('primero.pdf', 24, 'application/pdf');
+        $saved = $service->uploadSignedFileForContract($personal, $contract, $file, $actor);
+
+        foreach ([
+            fn ($replacement) => $service->uploadSignedFileForContract($personal, $contract, $replacement, $actor),
+            fn ($replacement) => app(PersonalContratoDatoService::class)->uploadSignedContract($personal, $replacement, $actor),
+        ] as $upload) {
+            try {
+                $upload(UploadedFile::fake()->create('reemplazo.pdf', 32, 'application/pdf'));
+                self::fail('Un PDF firmado registrado no puede reemplazarse con otro archivo.');
+            } catch (ValidationException $exception) {
+                self::assertArrayHasKey('contrato', $exception->errors());
+            }
+        }
+
+        self::assertSame($saved->signed_contract_path, $contract->fresh()->signed_contract_path);
+        self::assertSame('primero.pdf', $contract->fresh()->signed_contract_original_name);
+        self::assertSame([$saved->signed_contract_path], Storage::disk('local')->allFiles());
+    }
+
     public function test_old_signed_contract_does_not_activate_new_preparing_contract(): void
     {
         $personalId = $this->createPersonal();

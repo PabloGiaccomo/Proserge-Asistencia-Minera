@@ -3,6 +3,8 @@
 namespace App\Modules\Personal\Resources;
 
 use App\Models\PersonalContrato;
+use App\Models\Usuario;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Carbon\Carbon;
@@ -452,7 +454,7 @@ class PersonalResource extends JsonResource
                 'motivo_cese' => trim((string) ($ultimoContratoCerrado->motivo_cese ?? '')),
                 'cerrado_por_nombre' => $ultimoCerradoPorNombre,
             ]) : null,
-            'reactivacion_datos' => $reentryData,
+            'reactivacion_datos' => $this->canViewSensitive($request) ? $reentryData : PersonalFichaAccess::redact($reentryData),
             'telefono' => PersonalNormalizer::combinePhones($telefono1, $telefono2),
             'telefono_1' => $telefono1,
             'telefono_2' => $telefono2,
@@ -510,6 +512,16 @@ class PersonalResource extends JsonResource
             'created_at' => optional($this->created_at)->toIso8601String(),
             'updated_at' => optional($this->updated_at)->toIso8601String(),
         ];
+    }
+
+    private function canViewSensitive(Request $request): bool
+    {
+        $actor = $request->user();
+        if (!$actor instanceof Usuario && !$request->is('api/*') && $request->hasSession()) {
+            $actor = Usuario::query()->find($request->session()->get('user_id'));
+        }
+
+        return $actor instanceof Usuario && PersonalFichaAccess::canSensitive($actor);
     }
 
     private function hasCurrentSignedContract($contratoDatos, $contratoActual, $contratoVigenteFirmado = null): bool

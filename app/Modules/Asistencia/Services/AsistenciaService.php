@@ -9,6 +9,7 @@ use App\Models\GrupoTrabajoDetalle;
 use App\Models\Personal;
 use App\Models\Usuario;
 use App\Modules\Asistencia\Policies\AsistenciaPolicy;
+use App\Modules\Evaluaciones\Services\EvaluacionAsistenciaRevisionService;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,7 @@ class AsistenciaService
         private readonly AsistenciaCierreService $cierreService,
         private readonly ParadaExecutionMetricsService $metricsService,
         private readonly AsistenciaHorarioService $horarioService,
+        private readonly EvaluacionAsistenciaRevisionService $evaluationRevisions,
     ) {
     }
 
@@ -91,6 +93,18 @@ class AsistenciaService
             return null;
         }
 
+        return $this->miAsistenciaRows($usuario, $filters, true);
+    }
+
+    public function listMiAsistenciaForDashboard(Usuario $usuario, array $filters): Collection
+    {
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'dashboards'), 403);
+
+        return $this->miAsistenciaRows($usuario, $filters, false);
+    }
+
+    private function miAsistenciaRows(Usuario $usuario, array $filters, bool $refreshMarks): Collection
+    {
         $canViewAll = $this->policy->canViewAllAttendances($usuario);
         if (!$canViewAll && blank($usuario->personal_id)) {
             return collect();
@@ -117,6 +131,13 @@ class AsistenciaService
             $query->where('turno', strtoupper((string) $filters['turno']));
         }
 
+        if (!empty($filters['fecha_desde'])) {
+            $query->whereDate('fecha', '>=', $filters['fecha_desde']);
+        }
+        if (!empty($filters['fecha_hasta'])) {
+            $query->whereDate('fecha', '<=', $filters['fecha_hasta']);
+        }
+
         if ($canViewAll) {
             if (!$this->isPrivileged($usuario)) {
                 $scopeIds = $usuario->scopesMina()->pluck('mina_id');
@@ -131,8 +152,10 @@ class AsistenciaService
             ->orderByRaw("CASE WHEN turno = 'DIA' THEN 0 ELSE 1 END")
             ->orderBy('horario_salida')
             ->get()
-            ->map(function (GrupoTrabajo $grupo) use ($usuario): array {
-                if ($this->marcarAusentesPorHorario($grupo) > 0) {
+            ->map(function (GrupoTrabajo $grupo) use ($usuario, $refreshMarks): array {
+                $canRegister = $this->policy->canRegisterGrupo($usuario, $grupo)
+                    && $this->policy->canIdentifyAttendanceResponsible($usuario, $grupo);
+                if ($refreshMarks && $canRegister && $this->marcarAusentesPorHorario($grupo) > 0) {
                     $grupo->load('asistencia.detalle');
                 }
                 $integrantes = $grupo->detalle
@@ -143,9 +166,6 @@ class AsistenciaService
                 $ausentes = $marcados->where('estado', AsistenciaDetalle::ESTADO_AUSENTE)->count();
                 $pendientes = max(0, $integrantes->count() - $marcados->whereNotIn('estado', [AsistenciaDetalle::ESTADO_NO_CORRESPONDE])->count());
                 $actividad = $grupo->actividades->first();
-                $canRegister = $this->policy->canRegisterGrupo($usuario, $grupo)
-                    && (filled($grupo->supervisor_id) || filled($grupo->asistencia?->id) || filled($usuario->personal_id));
-
                 return [
                     'id' => (string) $grupo->id,
                     'fecha' => optional($grupo->fecha)->toDateString(),
@@ -161,7 +181,7 @@ class AsistenciaService
                     'responsable_id' => $grupo->supervisor_id,
                     'responsable_registro' => $grupo->asistencia?->supervisor?->nombre_completo,
                     'responsable_pendiente' => blank($grupo->supervisor_id) && !$grupo->asistencia,
-                    'puede_registrar' => $canRegister,
+                    'puede_registrar' => $canRegister && $grupo->asistencia?->estado !== 'CERRADO',
                     'estado_grupo' => (string) $grupo->estado,
                     'estado_asistencia' => $grupo->asistencia?->estado ?? 'PENDIENTE',
                     'total' => $integrantes->count(),
@@ -172,7 +192,7 @@ class AsistenciaService
             });
     }
 
-    public function getGrupo(Usuario $usuario, string $grupoId): ?GrupoTrabajo
+    public function getGrupo(Usuario $usuario, string $grupoId, bool $refreshMarks = true): ?GrupoTrabajo
     {
         $grupo = GrupoTrabajo::query()->with([
             'rqMina.mina:id,nombre',
@@ -199,7 +219,9 @@ class AsistenciaService
             return null;
         }
 
-        if ($this->marcarAusentesPorHorario($grupo) > 0) {
+        if ($refreshMarks && $this->policy->canRegisterGrupo($usuario, $grupo)
+            && $this->policy->canIdentifyAttendanceResponsible($usuario, $grupo)
+            && $this->marcarAusentesPorHorario($grupo) > 0) {
             $grupo->load('asistencia.detalle.marcador.personal');
         }
 
@@ -214,16 +236,18 @@ class AsistenciaService
             return 0;
         }
 
-        $count = DB::transaction(function () use ($grupo, $horario): int {
+        return DB::transaction(function () use ($grupo): int {
             $lockedGroup = GrupoTrabajo::query()->whereKey($grupo->id)->lockForUpdate()->firstOrFail();
-            if ($lockedGroup->estado !== GrupoTrabajo::ESTADO_PROGRAMADO) {
+            $horario = $this->horarioService->resumen($lockedGroup);
+            if (!$horario['vencido'] || !$horario['jornada_actual'] || $lockedGroup->estado !== GrupoTrabajo::ESTADO_PROGRAMADO) {
                 return 0;
             }
             $existing = AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->lockForUpdate()->first();
             if ($existing?->estado === 'CERRADO') {
                 return 0;
             }
-            $active = $lockedGroup->detalle()->get()->filter(fn ($item) => $item->isDistribucionActiva());
+            $active = $lockedGroup->detalle()->orderBy('id')->lockForUpdate()->get()
+                ->filter(fn ($item) => $item->isDistribucionActiva());
             if ($active->isEmpty()) {
                 return 0;
             }
@@ -239,7 +263,7 @@ class AsistenciaService
                 }
             }
             $encabezado = $this->getOrCreateEncabezado($lockedGroup);
-            $details = $encabezado->detalle()->lockForUpdate()->get();
+            $details = $encabezado->detalle()->orderBy('id')->lockForUpdate()->get();
             $count = 0;
             foreach ($details as $detalle) {
                 if (!$detalle->pendienteDeMarcacion()) {
@@ -253,14 +277,15 @@ class AsistenciaService
                     'origen_registro' => 'SISTEMA',
                     'motivo_estado' => 'Ausencia automatica por horario vencido',
                 ])->save();
+                $this->evaluationRevisions->markPendingForDetail($detalle, null);
                 $count++;
             }
+            if ($count > 0) {
+                $this->metricsService->recalculateGrupo($lockedGroup, persist: true);
+            }
+
             return $count;
-        });
-        if ($count > 0) {
-            $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
-        }
-        return $count;
+        }, 3);
     }
 
     public function buscarPersonalPorCodigoDni(GrupoTrabajo $grupo, string $codigo): array
@@ -329,6 +354,11 @@ class AsistenciaService
 
     public function marcar(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
+        return $this->withLockedGroup($usuario, $grupo, fn ($actor, $locked): array => $this->markInGroup($actor, $locked, $payload));
+    }
+
+    private function markInGroup(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
+    {
         if (!$this->policy->canRegisterGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
@@ -340,6 +370,15 @@ class AsistenciaService
         $readiness = $this->validateAttendanceResponsible($grupo, $usuario);
         if (($readiness['ok'] ?? false) === false) {
             return $readiness;
+        }
+
+        if ($grupo->asistencia?->estado === 'CERRADO') {
+            return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
+        }
+
+        $validation = $this->validateStatePayload($payload);
+        if (($validation['ok'] ?? false) === false) {
+            return $validation;
         }
 
         if (empty($payload['registrar_llegada'])) {
@@ -356,33 +395,32 @@ class AsistenciaService
         if (($detalle['ok'] ?? false) === false) {
             return $detalle;
         }
-
-        $validation = $this->validateStatePayload($payload);
-        if (($validation['ok'] ?? false) === false) {
-            return $validation;
+        $marca = $detalle['detalle'];
+        if (!$this->isActiveAttendanceDetail($grupo, $marca)) {
+            return $this->businessError('ASISTENCIA_PERSON_NOT_IN_GROUP', 'Distribucion no activa para este grupo');
+        }
+        if (!empty($payload['solo_marca_propia'])) {
+            if (!$usuario->personal_id || $usuario->personal_id !== $marca->trabajador_id) {
+                return $this->forbidden();
+            }
+            if ($marca->estado === AsistenciaDetalle::ESTADO_NO_CORRESPONDE) {
+                return ['ok' => false, 'code' => 'ASISTENCIA_NOT_APPLICABLE', 'message' => 'Tu registro figura como No corresponde.', 'status' => 409];
+            }
         }
 
-        $marca = DB::transaction(function () use ($usuario, $grupo, $detalle, $payload): AsistenciaDetalle {
-            $locked = AsistenciaDetalle::query()
-                ->where('id', $detalle['detalle']->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if (!empty($payload['registrar_llegada'])) {
-                if (in_array($locked->estado, ['PRESENTE', 'TARDANZA', 'JUSTIFICADO'], true)) {
-                    return $locked;
-                }
-                $payload['estado'] = $this->horarioService->resumen($grupo)['vencido'] ? 'TARDANZA' : 'PRESENTE';
+        if (!empty($payload['registrar_llegada'])) {
+            if (in_array($marca->estado, ['PRESENTE', 'TARDANZA', 'JUSTIFICADO'], true)) {
+                return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false), 'estado' => $marca->estado, 'hora_marcado' => $marca->hora_marcado];
             }
-            $this->horarioService->validarPresente($grupo, $payload);
-            $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
-            $this->markDetalle($usuario, $locked, $payload, !empty($payload['registrar_llegada']) ? 'LECTOR' : 'MANUAL');
-            return $locked;
-        });
+            $payload['estado'] = $this->horarioService->resumen($grupo)['vencido'] ? 'TARDANZA' : 'PRESENTE';
+        }
+        $this->horarioService->validarPresente($grupo, $payload);
+        $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
+        $this->markDetalle($usuario, $marca, $payload, !empty($payload['registrar_llegada']) ? 'LECTOR' : 'MANUAL');
 
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id), 'estado' => $marca->estado, 'hora_marcado' => $marca->hora_marcado];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false), 'estado' => $marca->estado, 'hora_marcado' => $marca->hora_marcado];
     }
 
     private function documentoNormalizado(Personal $personal): string
@@ -391,6 +429,11 @@ class AsistenciaService
     }
 
     public function marcarMasivo(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
+    {
+        return $this->withLockedGroup($usuario, $grupo, fn ($actor, $locked): array => $this->markGroupBatch($actor, $locked, $payload));
+    }
+
+    private function markGroupBatch(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
         if (!$this->policy->canRegisterGrupo($usuario, $grupo)) {
             return $this->forbidden();
@@ -405,6 +448,15 @@ class AsistenciaService
             return $readiness;
         }
 
+        if ($grupo->asistencia?->estado === 'CERRADO') {
+            return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
+        }
+
+        $validation = $this->validateStatePayload($payload);
+        if (($validation['ok'] ?? false) === false) {
+            return $validation;
+        }
+
         $this->horarioService->validarPresente($grupo, $payload);
         $encabezado = $this->getOrCreateEncabezado($grupo, $usuario);
 
@@ -417,37 +469,35 @@ class AsistenciaService
             return $resolved;
         }
 
-        $validation = $this->validateStatePayload($payload);
-        if (($validation['ok'] ?? false) === false) {
-            return $validation;
-        }
-
         $summary = [
             'actualizados' => 0,
             'omitidos' => 0,
             'errores' => [],
         ];
 
-        DB::transaction(function () use ($usuario, $grupo, $payload, $resolved, &$summary): void {
-            $this->horarioService->validarPresente($grupo, $payload);
-            $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
-            foreach ($resolved['detalles'] as $detalle) {
-                if ((string) $detalle->estado === AsistenciaDetalle::ESTADO_NO_CORRESPONDE) {
-                    $summary['omitidos']++;
-                    continue;
-                }
-
-                $this->markDetalle($usuario, $detalle, $payload, 'MASIVO');
-                $summary['actualizados']++;
+        $this->horarioService->validarPresente($grupo, $payload);
+        $payload['hora_marcado'] = $this->horarioService->resumen($grupo)['hora_actual'];
+        foreach ($resolved['detalles']->sortBy('id') as $detalle) {
+            if ((string) $detalle->estado === AsistenciaDetalle::ESTADO_NO_CORRESPONDE || !$this->isActiveAttendanceDetail($grupo, $detalle)) {
+                $summary['omitidos']++;
+                continue;
             }
-        });
+
+            $this->markDetalle($usuario, $detalle, $payload, 'MASIVO');
+            $summary['actualizados']++;
+        }
 
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id), 'resumen' => $summary];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false), 'resumen' => $summary];
     }
 
     public function cerrar(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
+    {
+        return $this->withLockedGroup($usuario, $grupo, fn ($actor, $locked): array => $this->closeGroup($actor, $locked, $payload));
+    }
+
+    private function closeGroup(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
         if (!$this->policy->canCloseGrupo($usuario, $grupo)) {
             return $this->forbidden();
@@ -471,34 +521,50 @@ class AsistenciaService
 
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id)];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false)];
     }
 
     public function reabrir(Usuario $usuario, GrupoTrabajo $grupo): array
+    {
+        return $this->withLockedGroup($usuario, $grupo, fn ($actor, $locked): array => $this->reopenGroup($actor, $locked));
+    }
+
+    private function reopenGroup(Usuario $usuario, GrupoTrabajo $grupo): array
     {
         if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'reabrir') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
         }
 
-        $encabezado = AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->first();
+        if ($grupo->estado === GrupoTrabajo::ESTADO_CANCELADO) {
+            return $this->businessError('ASISTENCIA_GROUP_CANCELLED', 'No se puede reabrir asistencia de un grupo cancelado');
+        }
+
+        $encabezado = AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->lockForUpdate()->first();
 
         if (!$encabezado) {
             return $this->businessError('ASISTENCIA_NOT_FOUND', 'Asistencia no existe para este grupo');
         }
 
+        if ($encabezado->estado === 'CERRADO') {
+            $this->syncPadron($encabezado, $grupo);
+        }
         $result = $this->cierreService->reabrir($usuario, $grupo, $encabezado);
 
         if (($result['ok'] ?? false) === false) {
             return $result;
         }
 
-        $this->syncPadron($encabezado, $grupo);
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id)];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false)];
     }
 
     public function sincronizarPadron(Usuario $usuario, GrupoTrabajo $grupo): array
+    {
+        return $this->withLockedGroup($usuario, $grupo, fn ($actor, $locked): array => $this->syncGroupRoster($actor, $locked));
+    }
+
+    private function syncGroupRoster(Usuario $usuario, GrupoTrabajo $grupo): array
     {
         if (!PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar') || !$this->policy->manageGrupo($usuario, $grupo)) {
             return $this->forbidden();
@@ -518,10 +584,26 @@ class AsistenciaService
             return $this->businessError('ASISTENCIA_ALREADY_CLOSED', 'Asistencia cerrada');
         }
 
-        $this->syncPadron($encabezado, $grupo);
         $this->metricsService->recalculateGrupo($grupo->fresh(), persist: true);
 
-        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id)];
+        return ['ok' => true, 'grupo' => $this->getGrupo($usuario, $grupo->id, refreshMarks: false)];
+    }
+
+    private function withLockedGroup(Usuario $usuario, GrupoTrabajo $grupo, callable $operation): array
+    {
+        return DB::transaction(function () use ($usuario, $grupo, $operation): array {
+            $locked = GrupoTrabajo::query()->whereKey($grupo->id)->lockForUpdate()->first();
+            if (!$locked) {
+                return ['ok' => false, 'code' => 'ASISTENCIA_GRUPO_NOT_FOUND', 'message' => 'El grupo ya no está disponible.', 'status' => 404];
+            }
+
+            $actor = $usuario->fresh();
+            if (!$actor || $actor->estado !== 'ACTIVO') {
+                return $this->forbidden();
+            }
+
+            return $operation($actor, $locked);
+        }, 3);
     }
 
     public function asignarActividadPrincipal(Usuario $usuario, GrupoTrabajo $grupo, string $detalleId, string $actividadId, ?string $observacion = null): array
@@ -653,10 +735,13 @@ class AsistenciaService
 
     private function syncPadron(AsistenciaEncabezado $encabezado, GrupoTrabajo $grupo): void
     {
-        $detalles = GrupoTrabajoDetalle::query()
+        $detalles = $grupo->detalle()
             ->with(['rqProsergeDetalle'])
-            ->where('grupo_trabajo_id', $grupo->id)
+            ->orderBy('id')
+            ->lockForUpdate()
             ->get();
+        $grupo->setRelation('detalle', $detalles);
+        $encabezado->detalle()->orderBy('id')->lockForUpdate()->get(['id']);
 
         $activeDetails = $detalles->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva());
 
@@ -709,6 +794,12 @@ class AsistenciaService
         }
 
         $this->autoAssignSingleActivity($grupo, $activeDetails);
+    }
+
+    private function isActiveAttendanceDetail(GrupoTrabajo $grupo, AsistenciaDetalle $marca): bool
+    {
+        return $grupo->detalle->contains(fn (GrupoTrabajoDetalle $item): bool => $item->isDistribucionActiva()
+            && ($marca->grupo_trabajo_detalle_id ? $item->id === $marca->grupo_trabajo_detalle_id : $item->personal_id === $marca->trabajador_id));
     }
 
     private function autoAssignSingleActivity(GrupoTrabajo $grupo, Collection $activeDetails): void
@@ -764,10 +855,7 @@ class AsistenciaService
         }
 
         if (!empty($payload['grupo_trabajo_detalle_id'])) {
-            $detalleGrupo = GrupoTrabajoDetalle::query()
-                ->where('grupo_trabajo_id', $grupo->id)
-                ->where('id', $payload['grupo_trabajo_detalle_id'])
-                ->first();
+            $detalleGrupo = $grupo->detalle->find($payload['grupo_trabajo_detalle_id']);
 
             if (!$detalleGrupo || !$detalleGrupo->isDistribucionActiva()) {
                 return $this->businessError('ASISTENCIA_PERSON_NOT_IN_GROUP', 'Distribucion no activa para este grupo');
@@ -817,10 +905,7 @@ class AsistenciaService
 
         if (!empty($payload['grupo_trabajo_detalle_ids'])) {
             $ids = collect($payload['grupo_trabajo_detalle_ids'])->filter()->values();
-            $validIds = GrupoTrabajoDetalle::query()
-                ->where('grupo_trabajo_id', $grupo->id)
-                ->whereIn('id', $ids)
-                ->get()
+            $validIds = $grupo->detalle->whereIn('id', $ids)
                 ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva())
                 ->pluck('id')
                 ->values();
@@ -876,6 +961,7 @@ class AsistenciaService
             'updated_by' => $usuario->id,
             'origen_registro' => $origen,
         ]))->save();
+        $this->evaluationRevisions->markPendingForDetail($detalle, $usuario);
     }
 
     private function detalleSnapshot(GrupoTrabajoDetalle $detalleGrupo, array $base): array
@@ -897,10 +983,7 @@ class AsistenciaService
 
     private function validateAttendanceResponsible(GrupoTrabajo $grupo, Usuario $usuario): array
     {
-        if (filled($grupo->supervisor_id)
-            || filled($usuario->personal_id)
-            || AsistenciaEncabezado::query()->where('grupo_trabajo_id', $grupo->id)->exists()
-            || PermissionMatrix::userCanDirect($usuario, 'mi_asistencia', 'ver_todas_asistencias')) {
+        if ($this->policy->canIdentifyAttendanceResponsible($usuario, $grupo)) {
             return ['ok' => true];
         }
 

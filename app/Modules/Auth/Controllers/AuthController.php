@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AuthToken;
 use App\Models\Usuario;
+use App\Modules\Auth\Services\LoginAttemptLimiter;
 use App\Support\Rbac\PermissionMatrix;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
@@ -13,12 +14,22 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
-    public function login(Request $request)
+    public function login(Request $request, LoginAttemptLimiter $attempts)
     {
         $payload = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
         ]);
+
+        $retryAfter = $attempts->retryAfter($payload['email'], $request->ip());
+        if ($retryAfter > 0) {
+            return ApiResponse::error(
+                message: 'Demasiados intentos. Espera antes de volver a intentar.',
+                code: 'AUTH_TOO_MANY_ATTEMPTS',
+                detail: ['retry_after' => $retryAfter],
+                status: 429,
+            )->header('Retry-After', (string) $retryAfter);
+        }
 
         $usuario = Usuario::query()
             ->with(['rol:id,nombre,estado,permisos', 'rolesAdicionales:id,nombre,estado,permisos'])
@@ -26,6 +37,8 @@ class AuthController extends Controller
             ->first();
 
         if (!$usuario || strtoupper((string) ($usuario->estado ?? 'ACTIVO')) !== 'ACTIVO' || !Hash::check($payload['password'], $usuario->password)) {
+            $attempts->failed($payload['email'], $request->ip());
+
             return ApiResponse::error(
                 message: 'Credenciales invalidas',
                 code: 'AUTH_INVALID_CREDENTIALS',
@@ -43,6 +56,7 @@ class AuthController extends Controller
             'ip_address' => $request->ip(),
             'user_agent' => substr((string) $request->userAgent(), 0, 255),
         ]);
+        $attempts->succeeded($payload['email'], $request->ip());
 
         return ApiResponse::success(
             data: [

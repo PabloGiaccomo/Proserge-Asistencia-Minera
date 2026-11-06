@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Support\Rbac\PermissionCatalog;
 use App\Modules\Notificaciones\Services\NotificationService;
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -15,14 +15,14 @@ class UsuarioNotificationTest extends TestCase
 
     public function test_crear_usuario_notifica_a_roles_personalizados_con_permiso(): void
     {
-        $actorRoleId = $this->createRole('CREADOR_USUARIOS_' . Str::upper(Str::random(6)), [
+        $actorRoleId = $this->createRole('CREADOR_USUARIOS_'.Str::upper(Str::random(6)), [
             'usuarios' => ['crear', 'ver', 'asignar'],
         ]);
-        $recipientRoleId = $this->createRole('JEFE_USUARIOS_' . Str::upper(Str::random(6)), [
+        $recipientRoleId = $this->createRole('JEFE_USUARIOS_'.Str::upper(Str::random(6)), [
             'usuarios' => ['crear', 'ver'],
             'notificaciones' => ['ver'],
         ]);
-        $newUserRoleId = $this->createRole('USUARIO_NUEVO_' . Str::upper(Str::random(6)), [
+        $newUserRoleId = $this->createRole('USUARIO_NUEVO_'.Str::upper(Str::random(6)), [
             'inicio' => ['ver'],
         ]);
 
@@ -44,7 +44,7 @@ class UsuarioNotificationTest extends TestCase
             ])
             ->post('/usuarios', [
                 'personal_id' => $personalId,
-                'email' => 'nuevo-' . Str::lower(Str::random(8)) . '@test.local',
+                'email' => 'nuevo-'.Str::lower(Str::random(8)).'@test.local',
                 'password' => 'secret123',
                 'password_confirmation' => 'secret123',
                 'rol_id' => $newUserRoleId,
@@ -72,8 +72,8 @@ class UsuarioNotificationTest extends TestCase
 
     public function test_usuario_con_notificaciones_denegadas_no_recibe_notificaciones(): void
     {
-        $roleId = $this->createRole('DESTINO_NOTIF_' . Str::upper(Str::random(6)), [
-            'usuarios' => ['ver'],
+        $roleId = $this->createRole('DESTINO_NOTIF_'.Str::upper(Str::random(6)), [
+            'usuarios' => ['ver', 'crear'],
             'notificaciones' => ['ver'],
         ]);
         $allowedUserId = $this->createUser($roleId, 'permitido');
@@ -94,7 +94,7 @@ class UsuarioNotificationTest extends TestCase
             'message' => 'Notificacion de prueba para preferencias de usuario.',
             'target_user_ids' => [$allowedUserId, $deniedUserId],
             'require_permission' => false,
-            'dedupe_key' => 'usuario_creado:preferencias:' . Str::uuid(),
+            'dedupe_key' => 'usuario_creado:preferencias:'.Str::uuid(),
             'priority' => 'high',
             'category' => 'seguridad',
         ]);
@@ -112,7 +112,7 @@ class UsuarioNotificationTest extends TestCase
 
     public function test_preferencia_permitida_no_concede_notificaciones_sin_permiso_de_rol(): void
     {
-        $roleId = $this->createRole('SIN_MODULO_NOTIF_' . Str::upper(Str::random(6)), [
+        $roleId = $this->createRole('SIN_MODULO_NOTIF_'.Str::upper(Str::random(6)), [
             'inicio' => ['ver'],
         ]);
         $userId = $this->createUser($roleId, 'notif-general');
@@ -145,7 +145,7 @@ class UsuarioNotificationTest extends TestCase
 
     public function test_permiso_general_denegado_bloquea_notificaciones_aunque_el_rol_tenga_permiso(): void
     {
-        $roleId = $this->createRole('CON_MODULO_NOTIF_' . Str::upper(Str::random(6)), [
+        $roleId = $this->createRole('CON_MODULO_NOTIF_'.Str::upper(Str::random(6)), [
             'inicio' => ['ver'],
             'notificaciones' => ['ver', 'actualizar'],
         ]);
@@ -189,7 +189,7 @@ class UsuarioNotificationTest extends TestCase
 
         DB::table('usuarios')->insert([
             'id' => $id,
-            'email' => $prefix . '-' . Str::lower(Str::random(8)) . '@test.local',
+            'email' => $prefix.'-'.Str::lower(Str::random(8)).'@test.local',
             'password' => bcrypt('secret123'),
             'rol_id' => $roleId,
             'personal_id' => null,
@@ -207,9 +207,9 @@ class UsuarioNotificationTest extends TestCase
         DB::table('personal')->insert([
             'id' => $id,
             'dni' => (string) random_int(10000000, 99999999),
-            'nombre_completo' => 'Trabajador ' . $prefix . ' ' . $token,
+            'nombre_completo' => 'Trabajador '.$prefix.' '.$token,
             'puesto' => 'Operario',
-            'qr_code' => 'QR-' . $token,
+            'qr_code' => 'QR-'.$token,
             'estado' => 'ACTIVO',
             'created_at' => now(),
             'updated_at' => now(),

@@ -5,6 +5,8 @@ namespace App\Modules\Notificaciones\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\NotificationRecipient;
 use App\Models\PersonalFicha;
+use App\Models\Usuario;
+use App\Modules\Notificaciones\Policies\NotificacionesPolicy;
 use App\Modules\Notificaciones\Services\NotificationInboxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -14,13 +16,11 @@ use Illuminate\Support\Facades\Schema;
 
 class NotificacionPageController extends Controller
 {
-    public function __construct(private readonly NotificationInboxService $inbox)
-    {
-    }
+    public function __construct(private readonly NotificationInboxService $inbox, private readonly NotificacionesPolicy $policy) {}
 
     public function index(Request $request): RedirectResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return redirect()->route('inicio')->with('error', 'Debes crear las tablas de notificaciones antes de abrir la bandeja.');
         }
 
@@ -34,7 +34,7 @@ class NotificacionPageController extends Controller
 
     public function count(Request $request): JsonResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return response()->json(['count' => 0]);
         }
 
@@ -48,7 +48,7 @@ class NotificacionPageController extends Controller
 
     public function markRead(Request $request, string $recipientId): RedirectResponse|JsonResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
@@ -60,7 +60,7 @@ class NotificacionPageController extends Controller
 
     public function markAllRead(Request $request): RedirectResponse|JsonResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
@@ -76,7 +76,7 @@ class NotificacionPageController extends Controller
 
     public function archive(Request $request, string $recipientId): RedirectResponse|JsonResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return $this->notificationErrorResponse($request, 'No existen tablas de notificaciones en la base de datos.');
         }
 
@@ -88,38 +88,30 @@ class NotificacionPageController extends Controller
 
     public function openAction(string $recipientId): RedirectResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             return redirect()->route('inicio')->with('error', 'No existen tablas de notificaciones en la base de datos.');
         }
 
-        $recipient = $this->findRecipientForCurrentUser($recipientId);
-        $this->inbox->markAsRead($recipient);
-
-        if ($recipient->status !== 'ARCHIVED') {
-            $recipient->status = 'ACTIONED';
-            $recipient->actioned_at = now();
-            $recipient->save();
-        }
+        $recipient = $this->findRecipientForCurrentUser($recipientId, 'ver');
 
         $route = $this->resolveActionRoute($recipient);
 
-        if (!$route) {
+        if (! $route) {
             return redirect()->route('notificaciones.index');
         }
 
         return redirect($route);
     }
 
-    private function findRecipientForCurrentUser(string $recipientId): NotificationRecipient
+    private function findRecipientForCurrentUser(string $recipientId, string $action = 'actualizar'): NotificationRecipient
     {
         $userId = (string) session('user.id', '');
         abort_if($userId === '', 401);
 
-        return NotificationRecipient::query()
-            ->where('id', $recipientId)
-            ->where('usuario_id', $userId)
-            ->with('event')
-            ->firstOrFail();
+        $recipient = $this->inbox->findForUser($userId, $recipientId, $action);
+        abort_if(! $recipient, 404);
+
+        return $recipient;
     }
 
     private function resolveActionRoute(NotificationRecipient $recipient): ?string
@@ -129,6 +121,12 @@ class NotificacionPageController extends Controller
         $title = mb_strtolower((string) ($event?->title ?? ''));
         $label = mb_strtolower((string) ($event?->action_label ?? ''));
         $payload = is_array($event?->payload ?? null) ? $event->payload : [];
+
+        if ($event?->type?->code === 'personal_ficha_aprobada_falta_contrato') {
+            $personalId = (string) ($payload['personal_id'] ?? $event->entity_id ?? '');
+
+            return $personalId !== '' ? route('personal.contrato-datos.edit', $personalId) : null;
+        }
 
         $looksLikeFichaReview = $event?->entity_type === PersonalFicha::class
             || str_contains($route, '/personal/fichas/')
@@ -187,7 +185,7 @@ class NotificacionPageController extends Controller
 
     public function poll(Request $request): JsonResponse
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             Log::warning('notificaciones.poll_tables_not_ready', [
                 'session_user_id' => session('user.id'),
             ]);
@@ -222,8 +220,10 @@ class NotificacionPageController extends Controller
 
         $notifications = $this->inbox->latestForHeader($userId, $limit);
         $count = $this->inbox->unreadCount($userId);
+        $user = $request->user();
+        $canUpdate = $user instanceof Usuario && $this->policy->canUse($user, 'actualizar');
 
-        $items = $notifications->map(function (NotificationRecipient $recipient): array {
+        $items = $notifications->map(function (NotificationRecipient $recipient) use ($canUpdate): array {
             $event = $recipient->event;
 
             return [
@@ -236,9 +236,9 @@ class NotificacionPageController extends Controller
                 'created_at' => $recipient->created_at?->toIso8601String(),
                 'occurred_at' => $event?->occurred_at?->toIso8601String(),
                 'action_label' => (string) ($event?->action_label ?? 'Abrir'),
-                'action_url' => !empty($event?->action_route) ? route('notificaciones.action', $recipient->id) : null,
-                'mark_read_url' => route('notificaciones.mark-read', $recipient->id),
-                'archive_url' => route('notificaciones.archive', $recipient->id),
+                'action_url' => ! empty($event?->action_route) ? route('notificaciones.action', $recipient->id) : null,
+                'mark_read_url' => $canUpdate ? route('notificaciones.mark-read', $recipient->id) : null,
+                'archive_url' => $canUpdate ? route('notificaciones.archive', $recipient->id) : null,
             ];
         })->values()->all();
 
@@ -253,6 +253,7 @@ class NotificacionPageController extends Controller
             'ok' => true,
             'count' => $count,
             'items' => $items,
+            'can_update' => $canUpdate,
             'timestamp' => now()->timestamp,
         ]);
     }

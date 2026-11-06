@@ -26,7 +26,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -79,12 +78,10 @@ class LogisticaDashboardService
     {
         $tabs = $this->tabs();
         $filters = $this->filters($query, array_keys($tabs));
-        $options = $this->options();
-        if ($actor && ! MinaScopeAccess::isPrivileged($actor)) {
-            $allowed = $actor->scopesMina()->pluck('mina_id')->all();
+        $allowed = $this->serviceMineIds($actor);
+        $options = $this->options($allowed);
+        if ($allowed !== null) {
             $filters['minas'] = ($filters['minas'] === [] ? $allowed : array_values(array_intersect($filters['minas'], $allowed))) ?: ['00000000-0000-0000-0000-000000000000'];
-            $options['minas'] = $options['minas']->whereIn('id', $allowed)->values();
-            $options['paradas'] = $options['paradas']->whereIn('mina_id', $allowed)->values();
             $options['cargos'] = collect();
         }
         $workers = $this->workers($filters);
@@ -144,6 +141,7 @@ class LogisticaDashboardService
             $operationQuery->whereIn('mina_id', $filters['minas']);
         }
         $operationIds = (clone $operationQuery)->where('tipo', 'ENTREGA')->pluck('id');
+        $identityCatalogRows = $this->identityRows($filters);
 
         return [
             'tabs' => $this->tabOptions($tabs),
@@ -191,8 +189,9 @@ class LogisticaDashboardService
             'filteredExpiringDeliveries' => $filteredExpiringDeliveries,
             'urgentActions' => $urgentActions,
             'toolsRows' => $this->toolsRows(),
-            'serviceRows' => $this->serviceRows($filters),
-            'identityRows' => $this->identityRows($filters),
+            'serviceRows' => $this->serviceRows($filters, $allowed),
+            'identityRows' => $identityCatalogRows->filter(static fn (array $row): bool => SearchTerms::matches($row['nombre'].' '.$row['codigo'], $filters['ident_q']))->values(),
+            'identityCatalogRows' => $identityCatalogRows,
             'costRows' => $this->costRows($catalog),
             'ceasedRows' => $ceasedRows,
             'ceasedSummary' => [
@@ -207,21 +206,29 @@ class LogisticaDashboardService
      * Contexto minimo para el tab Servicios y alquileres: paradas, minas y
      * requerimientos de transporte, sin cargar el dashboard completo de EPP.
      */
-    public function serviciosPageData(array $query): array
+    public function serviciosPageData(array $query, Usuario $actor): array
     {
         $filters = $this->filters($query, array_keys($this->tabs()));
+        $allowed = $this->serviceMineIds($actor);
 
         return [
             'tabs' => $this->tabOptions($this->tabs()),
             'activeTab' => $filters['tab'],
             'filters' => $filters,
-            'options' => $this->transportOptions() + [
+            'options' => $this->transportOptions($allowed) + [
                 'servicio_estados' => RQMinaActividadTransporte::estadosLogisticosLabels(),
                 'servicio_recepciones' => RQMinaActividadTransporte::estadosRecepcionLabels(),
             ],
-            'serviceRows' => $this->serviceRows($filters),
+            'serviceRows' => $this->serviceRows($filters, $allowed),
             'metrics' => [],
         ];
+    }
+
+    private function serviceMineIds(?Usuario $actor): ?array
+    {
+        return $actor && ! MinaScopeAccess::isPrivileged($actor)
+            ? $actor->scopesMina()->pluck('mina_id')->all()
+            : null;
     }
 
     private function tabs(): array
@@ -269,6 +276,7 @@ class LogisticaDashboardService
             'epps' => $this->arrayFilter($query['epps'] ?? []),
             'tallas' => $this->arrayFilter($query['tallas'] ?? []),
             'ident_categoria' => strtoupper(trim((string) ($query['ident_categoria'] ?? 'EPP'))),
+            'ident_q' => trim((string) ($query['ident_q'] ?? '')),
             'servicio_parada_id' => trim((string) ($query['servicio_parada_id'] ?? '')),
             'servicio_estado' => trim((string) ($query['servicio_estado'] ?? '')),
             'servicio_recepcion' => trim((string) ($query['servicio_recepcion'] ?? '')),
@@ -312,26 +320,25 @@ class LogisticaDashboardService
      *
      * @return array{minas: Collection, paradas: Collection}
      */
-    private function transportOptions(): array
+    private function transportOptions(?array $allowed = null): array
     {
         return [
             'minas' => $this->hasTable('minas')
-                ? Mina::query()->activeOperational()->orderBy('nombre')->get(['id', 'nombre'])
+                ? Mina::query()->activeOperational()
+                    ->when($allowed !== null, fn ($query) => $query->whereIn('id', $allowed))
+                    ->orderBy('nombre')->get(['id', 'nombre'])
                 : collect(),
-            'paradas' => $this->paradaOptions(),
+            'paradas' => $this->paradaOptions($allowed),
         ];
     }
 
-    private function options(): array
+    private function options(?array $allowed = null): array
     {
         $epps = $this->hasTable('epp_registro')
             ? EppRegistro::query()->orderBy('nombre')->get(['id', 'nombre', 'tallas'])
             : collect();
 
-        return [
-            'minas' => $this->hasTable('minas')
-                ? Mina::query()->activeOperational()->orderBy('nombre')->get(['id', 'nombre'])
-                : collect(),
+        return $this->transportOptions($allowed) + [
             'cargos' => $this->hasTable('personal')
                 ? Personal::query()
                     ->whereNotNull('puesto')
@@ -341,7 +348,6 @@ class LogisticaDashboardService
                     ->limit(250)
                     ->pluck('puesto')
                 : collect(),
-            'paradas' => $this->paradaOptions(),
             'estados' => collect([
                 'ENTREGADO' => 'Entregado',
                 'PENDIENTE' => 'Pendiente',
@@ -364,7 +370,7 @@ class LogisticaDashboardService
         ];
     }
 
-    private function paradaOptions(): Collection
+    private function paradaOptions(?array $allowed = null): Collection
     {
         if (! $this->hasTable('rq_mina')) {
             return collect();
@@ -375,6 +381,7 @@ class LogisticaDashboardService
         return RQMina::query()
             ->with(['mina' => fn ($mine) => $mine->activeOperational()->select('id', 'nombre')])
             ->whereHas('mina', fn ($mine) => $mine->activeOperational())
+            ->when($allowed !== null, fn ($query) => $query->whereIn('mina_id', $allowed))
             ->latest('fecha_inicio')
             ->limit(150)
             ->get(['id', 'mina_id', 'area', 'fecha_inicio', 'fecha_fin'])
@@ -1710,7 +1717,7 @@ class LogisticaDashboardService
      * Los filtros se aplican en base de datos para que una parada con muchos
      * requerimientos no pierda filas por el limite de la vista.
      */
-    private function serviceRows(array $filters = []): Collection
+    private function serviceRows(array $filters = [], ?array $allowed = null): Collection
     {
         if (! $this->hasTable('rq_mina_actividad_transportes')) {
             return collect();
@@ -1718,7 +1725,14 @@ class LogisticaDashboardService
 
         $query = RQMinaActividadTransporte::query()
             ->with(['grupo.rqMina.mina:id,nombre'])
-            ->whereHas('grupo.rqMina');
+            ->whereHas('grupo.rqMina', function ($parada) use ($allowed, $filters): void {
+                if ($allowed !== null) {
+                    $parada->whereIn('mina_id', $allowed);
+                }
+                if (!empty($filters['minas'])) {
+                    $parada->whereIn('mina_id', $filters['minas']);
+                }
+            });
 
         $paradaId = trim((string) ($filters['servicio_parada_id'] ?? ''));
         if ($paradaId !== '') {
@@ -1840,7 +1854,10 @@ class LogisticaDashboardService
                     'doc_mantenimiento_path' => $transporte->doc_mantenimiento_path ?: '',
                     'doc_checklist_path' => $transporte->doc_checklist_path ?: '',
                     'documentos' => $this->hasColumn('rq_mina_actividad_transportes', 'documentos')
-                        ? $this->normalizeTransportDocuments($transporte->documentos)
+                        ? array_map(fn (array $document): array => [
+                            'nombre' => $document['nombre'],
+                            'slot' => $this->transportDocumentId($document['path']),
+                        ], $this->normalizeTransportDocuments($transporte->documentos))
                         : [],
                     'eventos' => $historial[(string) $transporte->id] ?? [],
                 ];
@@ -1905,15 +1922,26 @@ class LogisticaDashboardService
      */
     public function updateTransportRequirement(string $id, array $payload, Usuario $usuario): RQMinaActividadTransporte
     {
-        $transporte = RQMinaActividadTransporte::query()
-            ->with('grupo.rqMina')
+        $contexto = RQMinaActividadTransporte::query()
+            ->with('grupo')
             ->findOrFail($id);
-        $previousState = (string) ($transporte->estado_logistico ?: RQMinaActividadTransporte::ESTADO_REQUERIDO);
-        $before = $this->transportAuditSnapshot($transporte);
-        $data = $this->normalizeTransportPayload($payload, $transporte);
-        $this->assertTransportCoherence($data, $transporte);
+        $rqMinaId = (string) $contexto->grupo?->rq_mina_id;
 
-        return DB::transaction(function () use ($transporte, $data, $previousState, $before, $usuario): RQMinaActividadTransporte {
+        return DB::transaction(function () use ($id, $rqMinaId, $payload, $usuario): RQMinaActividadTransporte {
+            // Mismo orden de bloqueo que el editor del plan: parada, luego fila.
+            $parada = RQMina::query()->lockForUpdate()->findOrFail($rqMinaId);
+            abort_unless(MinaScopeAccess::allows($usuario, $parada->mina_id), 403, 'No tienes acceso a la mina de este requerimiento de transporte.');
+            $transporte = RQMinaActividadTransporte::query()
+                ->whereHas('grupo', fn ($query) => $query->where('rq_mina_id', $rqMinaId))
+                ->with('grupo')
+                ->lockForUpdate()
+                ->findOrFail($id);
+            $previousState = (string) ($transporte->estado_logistico ?: RQMinaActividadTransporte::ESTADO_REQUERIDO);
+            $before = $this->transportAuditSnapshot($transporte);
+            $previousDocuments = collect($this->normalizeTransportDocuments($transporte->documentos));
+            $data = $this->normalizeTransportPayload($this->transportPanelPayload($payload), $transporte);
+            $this->assertTransportCoherence($data, $transporte);
+
             $transporte->forceFill($data)->save();
             $transporte->refresh();
 
@@ -1922,7 +1950,6 @@ class LogisticaDashboardService
                 return $transporte;
             }
 
-            $rqMinaId = (string) ($transporte->grupo?->rq_mina_id ?: $transporte->grupo?->rqMina?->id ?: '');
             if ($rqMinaId !== '') {
                 RQMinaActividadTransporteEvento::query()->create([
                     'id' => (string) Str::uuid(),
@@ -1932,7 +1959,7 @@ class LogisticaDashboardService
                     'estado_anterior' => $previousState,
                     'estado_nuevo' => (string) $transporte->estado_logistico,
                     'descripcion' => $transporte->comentario_cambio ?: $transporte->incidencia_operativa ?: $transporte->recepcion_observacion,
-                    'transporte_snapshot' => $transporte->only([
+                    'transporte_snapshot' => [...$transporte->only([
                         'alcance',
                         'unidad_carga',
                         'origen',
@@ -1955,6 +1982,13 @@ class LogisticaDashboardService
                         'doc_checklist_path',
                         'documentos',
                     ]),
+                        'documentos_retirados' => $previousDocuments
+                            ->whereNotIn('path', collect($this->normalizeTransportDocuments($transporte->documentos))->pluck('path'))
+                            ->values()->all(),
+                        'documentos_legacy_anteriores' => collect($before)
+                            ->only(['doc_vehiculo_path', 'doc_proserge_path', 'doc_mantenimiento_path', 'doc_checklist_path'])
+                            ->filter(fn ($path, $field) => $path !== '' && $path !== (string) $transporte->{$field})->all(),
+                    ],
                     'fecha_evento' => now(),
                     'usuario_id' => $usuario->id,
                 ]);
@@ -1962,6 +1996,20 @@ class LogisticaDashboardService
 
             return $transporte;
         });
+    }
+
+    private function transportPanelPayload(array $payload): array
+    {
+        $fields = match ($payload['panel'] ?? null) {
+            'atencion' => ['origen', 'placas_asignadas', 'fecha_inicio', 'fecha_fin', 'estado_logistico', 'comentario_cambio'],
+            'cambio' => ['origen', 'placas_asignadas', 'fecha_inicio', 'fecha_fin', 'estado_logistico', 'comentario_cambio', 'incidencia_operativa'],
+            'recepcion' => ['recepcion_fecha', 'recepcion_estado', 'recepcion_observacion'],
+            'entrega' => ['origen', 'placas_asignadas', 'capacidad_camion', 'doc_vehiculo_path', 'doc_proserge_path',
+                'doc_mantenimiento_path', 'doc_checklist_path', 'documentos_nuevos', 'documentos_retirar'],
+            default => null,
+        };
+
+        return $fields === null ? $payload : array_intersect_key($payload, array_flip($fields));
     }
 
     /**
@@ -2088,11 +2136,17 @@ class LogisticaDashboardService
         ];
 
         if ($this->hasColumn('rq_mina_actividad_transportes', 'documentos')) {
+            $previous = $this->normalizeTransportDocuments($transporte->documentos);
             $existentes = $this->removeTransportDocuments(
-                $this->normalizeTransportDocuments($transporte->documentos),
-                $payload['documentos_eliminar'] ?? []
+                $previous,
+                $payload['documentos_retirar'] ?? []
             );
-
+            $removed = array_diff(array_column($previous, 'path'), array_column($existentes, 'path'));
+            foreach (['doc_vehiculo_path', 'doc_proserge_path', 'doc_mantenimiento_path', 'doc_checklist_path'] as $field) {
+                if (in_array($data[$field], $removed, true)) {
+                    $data[$field] = null;
+                }
+            }
             $data['documentos'] = $this->mergeTransportDocuments($existentes, $payload['documentos_nuevos'] ?? []);
         }
 
@@ -2100,40 +2154,24 @@ class LogisticaDashboardService
     }
 
     /**
-     * Quita los documentos adicionales indicados por indice y borra el archivo
-     * local: corresponde a una carga erronea que el usuario corrige.
+     * Quita referencias del listado vigente. La evidencia privada se conserva
+     * porque puede estar vinculada al historial y un rollback no restaura bytes.
      *
      * @param  array<int, array<string, mixed>>  $documents
      * @return array<int, array<string, mixed>>
      */
-    private function removeTransportDocuments(array $documents, mixed $indexes): array
+    private function removeTransportDocuments(array $documents, array $ids): array
     {
-        $indexes = collect(is_array($indexes) ? $indexes : [])
-            ->map(static fn ($index): int => (int) $index)
-            ->filter(static fn (int $index): bool => $index >= 0)
-            ->unique()
-            ->values();
-
-        if ($indexes->isEmpty()) {
+        if ($ids === []) {
             return $documents;
         }
 
-        $restantes = [];
+        return array_values(array_filter($documents, fn (array $document): bool => !in_array($this->transportDocumentId($document['path']), $ids, true)));
+    }
 
-        foreach ($documents as $index => $document) {
-            if ($indexes->contains($index)) {
-                $path = trim((string) ($document['path'] ?? ''));
-                if ($path !== '') {
-                    Storage::disk('local')->delete($path);
-                }
-
-                continue;
-            }
-
-            $restantes[] = $document;
-        }
-
-        return $restantes;
+    private function transportDocumentId(string $path): string
+    {
+        return 'doc-'.hash_hmac('sha256', $path, (string) config('app.key'));
     }
 
     /**
@@ -2157,14 +2195,17 @@ class LogisticaDashboardService
             return $path === '' ? null : ['path' => $path, 'name' => $this->transportDownloadName($legacy[$slot]['name'], $path)];
         }
 
-        if (str_starts_with($slot, 'adicional-')) {
-            $index = (int) substr($slot, strlen('adicional-'));
-            $documento = $this->normalizeTransportDocuments($transporte->documentos)[$index] ?? null;
-
-            if ($documento === null) {
-                return null;
-            }
-
+        $documents = $this->normalizeTransportDocuments($transporte->documentos);
+        if (str_starts_with($slot, 'adicional-') && RQMinaActividadTransporteEvento::query()
+            ->where('transporte_id', $transporte->id)->whereJsonLength('transporte_snapshot->documentos_retirados', '>', 0)->exists()) {
+            return null;
+        }
+        $documento = match (true) {
+            preg_match('/^doc-[a-f0-9]{64}$/D', $slot) === 1 => collect($documents)->first(fn ($doc) => hash_equals($this->transportDocumentId($doc['path']), $slot)),
+            preg_match('/^adicional-(\d+)$/D', $slot, $legacySlot) === 1 => $documents[(int) $legacySlot[1]] ?? null,
+            default => null,
+        };
+        if ($documento !== null) {
             return [
                 'path' => $documento['path'],
                 'name' => $this->transportDownloadName($documento['nombre'] ?: 'documento-transporte', $documento['path']),

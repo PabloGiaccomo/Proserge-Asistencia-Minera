@@ -66,6 +66,12 @@ class ParadaHerramientaPageController extends WebPageController
             return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
+        $request->validate([
+            'grupos' => ['nullable', 'array'],
+            'grupos.*' => ['array'],
+            'grupos.*.items' => ['nullable', 'array'],
+            'grupos.*.items.*' => ['array'],
+        ]);
         $result = $this->service->saveLista($usuario, $rq, [
             'observaciones' => $request->input('observaciones'),
             'comentario_cambio_previo' => $request->input('comentario_cambio_previo'),
@@ -185,8 +191,10 @@ class ParadaHerramientaPageController extends WebPageController
             return redirect()->route('logistica.index', ['tab' => 'herramientas'])->with('error', 'Parada no encontrada o sin permisos.');
         }
 
+        $mode = $request->validate(['modo' => ['required', 'in:entrega,recepcion']])['modo'];
+
         $result = $this->service->updatePedido($usuario, $rq, [
-            'modo' => $request->input('modo'),
+            'modo' => $mode,
             'fecha_recepcion' => $request->input('fecha_recepcion'),
             'grupos' => $request->input('grupos', []),
         ]);

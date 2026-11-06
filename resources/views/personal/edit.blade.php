@@ -13,14 +13,14 @@
     $canViewContracts = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'ver_contratos')
         || \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal_contratos', 'ver');
     $canCeasePersonal = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'personal', 'cesar_trabajador');
-    $selectedLocations = collect(old('minas', $trabajador['minas'] ?? []))
+    $canViewMining = \App\Support\Rbac\PermissionMatrix::allowsDirect($personalPermissions, 'habilitacion_minera', 'ver');
+    $selectedLocations = collect(old('ubicaciones_internas_enviadas') ? old('ubicaciones_internas', []) : ($trabajador['minas'] ?? []))
         ->map(fn ($value) => trim((string) $value))
         ->filter(fn (string $value) => $value !== '')
         ->unique()
         ->values()
         ->all();
 
-    $stateByLocation = old('mina_estado', $trabajador['minas_estado'] ?? []);
     $familyRows = old('familiares', app(\App\Modules\Personal\Services\PersonalFichaService::class)->familyRowsForEdit($ficha));
 @endphp
 
@@ -37,6 +37,7 @@
                 @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Volver</a>
                 @if($canUpdatePersonal)
+                    <button type="button" class="btn btn-outline" id="open-update-request">Solicitar actualización</button>
                     <button type="submit" form="personalEditForm" class="btn btn-primary">Guardar cambios</button>
                 @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline">Cancelar</a>
@@ -74,6 +75,9 @@
         @endif
     </div>
 
+    @if($canUpdatePersonal)
+        @include('personal.fichas.partials.solicitar-actualizacion')
+    @endif
     @if(!empty($trabajador['puede_cesar']))
         <form id="ceaseWorkerForm" method="POST" action="{{ route('personal.cease', $trabajador['id'] ?? request('id')) }}" style="display:none;">
             @csrf
@@ -196,6 +200,7 @@
                     </section>
                 @endforeach
 
+                @if($canViewSensitiveFichaData)
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">Remuneraciones percibidas de otros empleadores</h3>
@@ -219,6 +224,7 @@
                     </div>
                 </section>
 
+                @endif
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">Familiares o contactos de emergencia</h3>
@@ -298,6 +304,7 @@
                     </div>
                 </section>
 
+                @if($canViewSensitiveFichaData)
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">Firma y huella</h3>
@@ -305,8 +312,8 @@
                     <div class="ficha-fields">
                         <div class="ficha-field ficha-field-wide">
                             <label class="ficha-label">Firma digital</label>
-                            @if($ficha?->firma_base64)
-                                <img class="ficha-preview-image" src="{{ $ficha->firma_base64 }}" alt="Firma digital">
+                            @if($firmaBase64)
+                                <img class="ficha-preview-image" src="{{ $firmaBase64 }}" alt="Firma digital">
                             @else
                                 <div class="ficha-alert ficha-alert-warning">Sin firma registrada.</div>
                             @endif
@@ -338,6 +345,7 @@
                         </div>
                     </div>
                 </section>
+                @endif
             </div>
         </div>
 
@@ -350,7 +358,16 @@
                             <span data-toggle-arrow="configuracion-interna">▼</span>
                         </button>
                     </div>
-                    <p class="ficha-card-subtitle">Controla el perfil interno, oficinas y talleres del trabajador. Las minas se gestionan desde Habilitacion minera.</p>
+                    <p class="ficha-card-subtitle">Gestiona el perfil interno, las oficinas y los talleres del trabajador.</p>
+                    <p class="ficha-card-subtitle">
+                        Las asignaciones a minas se gestionan desde
+                        @if($canViewMining)
+                            <a href="{{ route('personal.habilitacion-minera.index') }}">Habilitación minera</a>.
+                        @else
+                            Habilitación minera.
+                        @endif
+                    </p>
+                    @error('minas') <span class="ficha-error">{{ $message }}</span> @enderror
                 </div>
             </div>
             <div class="ficha-card-body" id="configuracion-interna-panel-body">
@@ -384,22 +401,17 @@
                     </div>
                 </section>
 
-                @foreach($catalogMinas as $mina)
-                    @if(in_array($mina, $selectedLocations, true))
-                        <input type="hidden" name="minas[]" value="{{ $mina }}">
-                        <input type="hidden" name="mina_estado[{{ $mina }}]" value="{{ $stateByLocation[$mina] ?? 'habilitado' }}">
-                    @endif
-                @endforeach
-
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">Oficinas y talleres</h3>
                     </div>
+                    <input type="hidden" name="ubicaciones_internas_enviadas" value="1">
+                    @error('ubicaciones_internas') <span class="ficha-error">{{ $message }}</span> @enderror
                     <div class="mines-grid">
                         @foreach($catalogOficinas as $oficina)
                             <div class="mine-selection-item">
                                 <div class="mine-checkbox">
-                                    <input type="checkbox" name="minas[]" value="{{ $oficina }}" id="oficina_{{ md5($oficina) }}" {{ in_array($oficina, $selectedLocations, true) ? 'checked' : '' }}>
+                                    <input type="checkbox" name="ubicaciones_internas[]" value="{{ $oficina }}" id="oficina_{{ md5($oficina) }}" @checked(in_array($oficina, $selectedLocations, true))>
                                     <label for="oficina_{{ md5($oficina) }}" class="mine-checkbox-label">
                                         <span class="checkbox-custom"></span>
                                         <span class="checkbox-text">{{ $oficina }}</span>
@@ -411,7 +423,7 @@
                         @foreach($catalogTalleres as $taller)
                             <div class="mine-selection-item">
                                 <div class="mine-checkbox">
-                                    <input type="checkbox" name="minas[]" value="{{ $taller }}" id="taller_{{ md5($taller) }}" {{ in_array($taller, $selectedLocations, true) ? 'checked' : '' }}>
+                                    <input type="checkbox" name="ubicaciones_internas[]" value="{{ $taller }}" id="taller_{{ md5($taller) }}" @checked(in_array($taller, $selectedLocations, true))>
                                     <label for="taller_{{ md5($taller) }}" class="mine-checkbox-label">
                                         <span class="checkbox-custom"></span>
                                         <span class="checkbox-text">{{ $taller }}</span>
@@ -421,12 +433,6 @@
                         @endforeach
                     </div>
 
-                    @foreach($catalogOficinas as $oficina)
-                        <input type="hidden" name="mina_estado[{{ $oficina }}]" value="{{ $stateByLocation[$oficina] ?? 'habilitado' }}">
-                    @endforeach
-                    @foreach($catalogTalleres as $taller)
-                        <input type="hidden" name="mina_estado[{{ $taller }}]" value="{{ $stateByLocation[$taller] ?? 'habilitado' }}">
-                    @endforeach
                 </section>
             </div>
         </div>
@@ -641,25 +647,6 @@
                 fechaCeseInput.dispatchEvent(new Event('change', { bubbles: true }));
             });
         }
-
-        document.querySelectorAll('input[name="minas[]"]').forEach(function (checkbox) {
-            const statusSelect = checkbox.closest('.mine-selection-item')?.querySelector('select');
-
-            if (!statusSelect) {
-                return;
-            }
-
-            const syncStatusControl = function () {
-                statusSelect.disabled = !checkbox.checked;
-
-                if (!checkbox.checked) {
-                    statusSelect.value = 'habilitado';
-                }
-            };
-
-            checkbox.addEventListener('change', syncStatusControl);
-            syncStatusControl();
-        });
 
         const escapeHtml = function (value) {
             return String(value ?? '').replace(/[&<>"']/g, function (char) {

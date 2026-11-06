@@ -1,12 +1,6 @@
 @extends('layouts.app')
 
 @section('title', 'Evaluaciones - Proserge')
-@push('styles')
-<link rel="stylesheet" href="{{ asset('css/evaluations-dashboard.css') }}?v={{ filemtime(public_path('css/evaluations-dashboard.css')) }}">
-@endpush
-@push('scripts')
-<script src="{{ asset('js/evaluations-dashboard.js') }}?v={{ filemtime(public_path('js/evaluations-dashboard.js')) }}" defer></script>
-@endpush
 
 @section('content')
 @php
@@ -32,6 +26,7 @@
             <p>Seguimiento operativo de desempeño, supervisores y residentes.</p>
         </div>
         @if($activeType === 'desempeno')
+            <a class="btn btn-outline" href="{{ route('evaluaciones.revisiones-asistencia') }}">Revisiones de asistencia</a>
             <form method="GET" action="{{ route('evaluaciones.index') }}" class="eval-date-filter">
                 <input type="hidden" name="tipo" value="desempeno">
                 <label for="evaluation-date">Día de evaluación</label>

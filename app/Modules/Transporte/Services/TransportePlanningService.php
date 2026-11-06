@@ -16,15 +16,23 @@ use App\Models\TransporteServicioEvento;
 use App\Models\TransporteServicioPasajero;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
+use App\Modules\ManPower\Policies\ManPowerPolicy;
+use App\Modules\Transporte\Policies\TransportePolicy;
+use App\Support\Rbac\MinaScopeAccess;
 use App\Support\Rbac\PermissionMatrix;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class TransportePlanningService
 {
+    public function __construct(
+        private readonly TransportePolicy $policy,
+        private readonly ManPowerPolicy $manPowerPolicy,
+    ) {}
+
     public function buildContext(Usuario $usuario, array $filters): array
     {
         $fecha = $this->normalizeDate((string) ($filters['fecha'] ?? now()->addDay()->toDateString()));
@@ -41,7 +49,7 @@ class TransportePlanningService
             ? RQMina::query()->with(['mina:id,nombre', 'planes'])->find($rqMinaId)
             : null;
 
-        if (!$rqMina || !$this->canAccessMina($usuario, (string) $rqMina->mina_id)) {
+        if (!$rqMina || !MinaScopeAccess::allows($usuario, $rqMina->mina_id)) {
             return $this->emptyContext($paradas, $fecha, $turno);
         }
 
@@ -49,7 +57,8 @@ class TransportePlanningService
         $fecha = $this->clampDateToPlan($fecha, $plan);
         $requirements = $this->requirements($rqMina, $plan, $fecha, $turno);
         $groups = $this->manPowerGroups($rqMina, $plan, $fecha, $turno);
-        $services = $this->services($rqMina, $plan, $fecha, $turno);
+        $services = $this->services($usuario, $rqMina, $plan, $fecha, $turno);
+        $canCreate = $this->policy->canCreate($usuario, $rqMina) && $plan?->estado !== RQMinaPlan::ESTADO_ARCHIVADO;
         $passengers = collect($services)->flatMap(fn (array $service): array => $service['pasajeros'])->values();
         $activeDetails = collect($groups)->flatMap(fn (array $group): array => $group['integrantes'])->values();
         $transportedDetailIds = $passengers
@@ -89,6 +98,13 @@ class TransportePlanningService
                 'estado' => $plan->estado,
                 'archivado' => $plan->estado === RQMinaPlan::ESTADO_ARCHIVADO,
             ] : null,
+            'can_create' => $canCreate,
+            'conductores' => ($canCreate || collect($services)->contains('capabilities.editar', true))
+                ? Personal::query()->select('id', 'nombre_completo')
+                    ->where('estado', 'ACTIVO')
+                    ->whereHas('relacionesMina', fn ($query) => $query->where('mina_id', $rqMina->mina_id)->where('activo', true))
+                    ->orderBy('nombre_completo')->get()->toArray()
+                : [],
             'requerimientos' => $requirements,
             'grupos_man_power' => $groups,
             'servicios' => $services,
@@ -102,28 +118,51 @@ class TransportePlanningService
 
     public function createServicio(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['crear', 'administrar'])) {
+        if (!$this->policy->grants($usuario, 'crear')) {
             return $this->forbidden('TRANSPORTE_CREATE_FORBIDDEN');
         }
 
         $normalized = $this->normalizeServicePayload($payload);
+        $requestedScopes = $payload['alcances'] ?? [];
 
-        return DB::transaction(function () use ($usuario, $normalized): array {
-            $validation = $this->validateServicePayload($usuario, $normalized);
-            if (($validation['ok'] ?? false) === false) {
+        return DB::transaction(function () use ($usuario, $normalized, $requestedScopes): array {
+            $proposed = new TransporteServicio($normalized);
+            $validation = $this->validateContext($usuario, $proposed);
+            if (!$validation['ok']) {
                 return $validation;
             }
 
-            $driver = $this->resolveDriver($normalized['conductor_personal_id'] ?? null);
+            if ($normalized['estado'] !== TransporteServicio::ESTADO_BORRADOR) {
+                return $this->businessError('TRANSPORTE_STATE_CHANGE_REQUIRED', 'El servicio debe crearse en borrador.');
+            }
+
+            $alcances = $this->prepareAlcances($proposed, $requestedScopes);
+            if (!$alcances['ok']) {
+                return $alcances;
+            }
+
+            $driver = $this->resolveDriver($usuario, $normalized['conductor_personal_id']);
+            if ($normalized['conductor_personal_id'] && !$driver) {
+                return $this->forbidden('TRANSPORTE_DRIVER_FORBIDDEN');
+            }
+
+            $validation = $this->validateResources($normalized);
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
             $service = TransporteServicio::query()->create([
-                ...collect($normalized)->except(['alcances'])->all(),
+                ...$normalized,
                 'id' => (string) Str::uuid(),
                 'conductor_nombre_snapshot' => $driver?->nombre_completo,
                 'created_by' => $usuario->id,
                 'updated_by' => $usuario->id,
             ]);
+            if (!$service->exists) {
+                throw new \RuntimeException('No se pudo guardar el servicio de transporte.');
+            }
 
-            $this->syncAlcances($usuario, $service, $normalized['alcances'] ?? []);
+            $this->replaceAlcances($usuario, $service, $alcances['rows']);
             $this->recordEvent($service, 'CREACION', null, $service->estado, $service->toArray(), $usuario, 'Servicio de transporte creado.');
 
             return ['ok' => true, 'servicio' => $this->loadServicio($service)];
@@ -137,29 +176,71 @@ class TransportePlanningService
 
     public function updateServicio(Usuario $usuario, TransporteServicio $service, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['editar', 'actualizar', 'administrar'])) {
-            return $this->forbidden('TRANSPORTE_UPDATE_FORBIDDEN');
-        }
+        return DB::transaction(function () use ($usuario, $service, $payload): array {
+            $service = $this->lockServicio($service->id);
+            $validation = $this->authorizeMutation($usuario, $service, 'editar', 'TRANSPORTE_UPDATE_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
 
-        $normalized = $this->normalizeServicePayload([...$service->toArray(), ...$payload]);
+            $normalized = $this->normalizeServicePayload([...$service->attributesToArray(), ...$payload]);
+            $proposed = new TransporteServicio($normalized);
+            $validation = $this->validateContext($usuario, $proposed);
+            if (!$validation['ok']) {
+                return $validation;
+            }
 
-        return DB::transaction(function () use ($usuario, $service, $normalized, $payload): array {
-            $service->refresh();
-            $validation = $this->validateServicePayload($usuario, $normalized, $service);
-            if (($validation['ok'] ?? false) === false) {
+            if ($proposed->estado !== $service->estado) {
+                return $this->businessError('TRANSPORTE_STATE_CHANGE_REQUIRED', 'Usa la accion de cambio de estado del servicio.');
+            }
+
+            $driverName = $service->conductor_nombre_snapshot;
+            if ($proposed->conductor_personal_id !== $service->conductor_personal_id) {
+                $driver = $this->resolveDriver($usuario, $proposed->conductor_personal_id);
+                if ($proposed->conductor_personal_id && !$driver) {
+                    return $this->forbidden('TRANSPORTE_DRIVER_FORBIDDEN');
+                }
+                $driverName = $driver?->nombre_completo;
+            }
+
+            $validation = $this->validateResources($normalized, $service);
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            $replaceScopes = array_key_exists('alcances', $payload);
+            $activePassengers = $service->pasajeros()->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO)->get();
+            $existingScopes = $service->alcances()->get();
+            $alcances = $this->prepareAlcances($proposed, $replaceScopes ? ($payload['alcances'] ?? []) : $existingScopes->toArray());
+            if (!$alcances['ok']) {
+                return $alcances;
+            }
+
+            $proposed->conductor_nombre_snapshot = $driverName;
+            $proposed->setRelation('alcances', $alcances['rows']);
+            $proposed->setRelation('pasajeros', $activePassengers);
+            $validation = $this->validatePassengerContexts($proposed);
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            $validation = $this->validateStateChange($proposed, $proposed->estado);
+            if (!$validation['ok']) {
                 return $validation;
             }
 
             $previous = $service->only(['placa', 'conductor_personal_id', 'capacidad', 'estado']);
-            $driver = $this->resolveDriver($normalized['conductor_personal_id'] ?? null);
-            $service->forceFill([
-                ...collect($normalized)->except(['alcances'])->all(),
-                'conductor_nombre_snapshot' => $driver?->nombre_completo,
+            $saved = $service->forceFill([
+                ...$normalized,
+                'conductor_nombre_snapshot' => $driverName,
                 'updated_by' => $usuario->id,
             ])->save();
+            if (!$saved) {
+                throw new \RuntimeException('No se pudo actualizar el servicio de transporte.');
+            }
 
-            if (array_key_exists('alcances', $payload)) {
-                $this->syncAlcances($usuario, $service, $normalized['alcances'] ?? []);
+            if ($replaceScopes) {
+                $this->replaceAlcances($usuario, $service, $alcances['rows']);
             }
 
             $this->recordEvent($service, 'MODIFICACION', $previous['estado'] ?? null, $service->estado, [
@@ -171,10 +252,52 @@ class TransportePlanningService
         });
     }
 
-    public function syncAlcances(Usuario $usuario, TransporteServicio $service, array $alcances): void
+    public function syncAlcances(Usuario $usuario, TransporteServicio $service, array $alcances): array
     {
+        return DB::transaction(function () use ($usuario, $service, $alcances): array {
+            $service = $this->lockServicio($service->id);
+            $validation = $this->authorizeMutation($usuario, $service, 'alcances', 'TRANSPORTE_SCOPES_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            $prepared = $this->prepareAlcances($service, $alcances);
+            if (!$prepared['ok']) {
+                return $prepared;
+            }
+
+            $service->setRelation('alcances', $prepared['rows']);
+            $service->load('pasajeros');
+            $validation = $this->validatePassengerContexts($service);
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            $validation = $this->validateStateChange($service, $service->estado);
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            $this->replaceAlcances($usuario, $service, $prepared['rows']);
+
+            return ['ok' => true, 'servicio' => $this->loadServicio($service)];
+        });
+    }
+
+    private function prepareAlcances(TransporteServicio $service, mixed $alcances): array
+    {
+        if (!is_array($alcances)) {
+            return $this->businessError('TRANSPORTE_SCOPE_INVALID', 'El listado de alcances no es válido.');
+        }
+
+        $fields = ['rq_mina_actividad_grupo_id', 'rq_mina_actividad_id', 'grupo_trabajo_id', 'sait_snapshot'];
+        foreach ($alcances as $item) {
+            if (!is_array($item) || collect($item)->only($fields)->contains(fn ($value): bool => $value !== null && !is_string($value))) {
+                return $this->businessError('TRANSPORTE_SCOPE_INVALID', 'Hay una fila de alcance inválida.');
+            }
+        }
+
         $rows = collect($alcances)
-            ->filter(fn ($item): bool => is_array($item))
             ->map(fn (array $item): array => [
                 'rq_mina_actividad_grupo_id' => trim((string) ($item['rq_mina_actividad_grupo_id'] ?? '')) ?: null,
                 'rq_mina_actividad_id' => trim((string) ($item['rq_mina_actividad_id'] ?? '')) ?: null,
@@ -185,18 +308,32 @@ class TransportePlanningService
             ->unique(fn (array $item): string => implode('|', array_map(fn ($value) => (string) $value, $item)))
             ->values();
 
+        foreach ($rows as $row) {
+            $message = $this->invalidAlcanceMessage($service, $row);
+            if ($message !== null) {
+                return $this->businessError('TRANSPORTE_SCOPE_INVALID', $message);
+            }
+        }
+
+        return ['ok' => true, 'rows' => $rows];
+    }
+
+    private function replaceAlcances(Usuario $usuario, TransporteServicio $service, Collection $rows): void
+    {
         TransporteServicioAlcance::query()
             ->where('transporte_servicio_id', $service->id)
             ->delete();
 
         foreach ($rows as $index => $row) {
-            $this->validateAlcanceBelongs($service, $row);
-            TransporteServicioAlcance::query()->create([
+            $scope = TransporteServicioAlcance::query()->create([
                 'id' => (string) Str::uuid(),
                 'transporte_servicio_id' => $service->id,
                 ...$row,
                 'orden' => $index + 1,
             ]);
+            if (!$scope->exists) {
+                throw new \RuntimeException('No se pudo guardar el alcance de transporte.');
+            }
         }
 
         $this->recordEvent($service, 'ALCANCES_SYNC', null, $service->estado, ['alcances' => $rows->all()], $usuario, 'Alcances de transporte actualizados.');
@@ -204,76 +341,77 @@ class TransportePlanningService
 
     public function addPasajeros(Usuario $usuario, TransporteServicio $service, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['entregar', 'actualizar', 'administrar'])) {
+        if (!$this->policy->allows($usuario, 'agregar_pasajeros', $service)) {
             return $this->forbidden('TRANSPORTE_PASSENGER_FORBIDDEN');
         }
 
-        return DB::transaction(function () use ($usuario, $service, $payload): array {
-            $service = $this->loadServicio($service);
+        $selectedIds = collect($payload['grupo_trabajo_detalle_ids'] ?? [])
+            ->push($payload['grupo_trabajo_detalle_id'] ?? null)
+            ->filter()
+            ->unique()
+            ->values();
+        $groupId = $payload['grupo_trabajo_id'] ?? null;
+        $groupDetailIds = $groupId
+            ? GrupoTrabajoDetalle::query()->where('grupo_trabajo_id', $groupId)->pluck('id')
+            : collect();
+        $detailIds = $selectedIds->merge($groupDetailIds)->unique();
+        $lockIds = $this->relatedDetailIds($detailIds->all(), $service);
+
+        return DB::transaction(function () use ($usuario, $service, $detailIds, $lockIds, $selectedIds, $groupId): array {
+            $details = $this->lockDetails($lockIds)->only($detailIds->all())->keyBy('id');
+            $lockedService = $this->lockServicio($service->id);
+            $dateChanged = !$service->fecha->isSameDay($lockedService->fecha);
+            $service = $lockedService;
+            $validation = $this->authorizeMutation($usuario, $service, 'agregar_pasajeros', 'TRANSPORTE_PASSENGER_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
+            if ($dateChanged) {
+                return $this->invalidPassengerContext();
+            }
+
             if ($service->tipo !== TransporteServicio::TIPO_PERSONAL) {
                 return $this->businessError('TRANSPORTE_CARGA_NO_PASAJEROS', 'Un servicio de carga no admite pasajeros.');
             }
 
-            $detailIds = collect($payload['grupo_trabajo_detalle_ids'] ?? [])
-                ->push($payload['grupo_trabajo_detalle_id'] ?? null)
-                ->filter()
-                ->unique()
-                ->values();
+            $groupIds = $service->alcances()->whereNotNull('grupo_trabajo_id')->pluck('grupo_trabajo_id');
+            $assigned = $this->assignedPeople($details->pluck('personal_id')->unique()->all(), $service);
+            $details->load('grupoTrabajo');
+            $candidates = $details
+                ->filter(fn (GrupoTrabajoDetalle $detail): bool => ($selectedIds->contains($detail->id) || $detail->grupo_trabajo_id === $groupId)
+                    && $this->isEligiblePassenger($detail, $service, $groupIds)
+                    && !$assigned->contains($detail->personal_id));
 
-            if (!empty($payload['grupo_trabajo_id'])) {
-                $detailIds = $detailIds
-                    ->merge($this->candidatePassengers($service, (string) $payload['grupo_trabajo_id'])->pluck('grupo_trabajo_detalle_id'))
-                    ->unique()
-                    ->values();
+            if ($selectedIds->diff($candidates->keys())->isNotEmpty()
+                || $candidates->pluck('personal_id')->duplicates()->isNotEmpty()
+                || ($groupId && !$groupIds->contains($groupId))) {
+                return $this->invalidPassengerContext();
             }
 
-            if ($detailIds->isEmpty()) {
+            if ($candidates->isEmpty()) {
                 return $this->businessError('TRANSPORTE_NO_PASSENGERS', 'Selecciona al menos un pasajero.');
             }
 
-            $candidates = $this->candidatePassengers($service)
-                ->whereIn('grupo_trabajo_detalle_id', $detailIds->all())
-                ->values();
-
-            if ($candidates->count() !== $detailIds->count()) {
-                return $this->businessError('TRANSPORTE_PASSENGER_CONTEXT_INVALID', 'Hay pasajeros fuera del contexto del servicio o ya asignados al mismo tramo.');
+            $validation = $this->validateCapacity($service, $candidates->count());
+            if (!$validation['ok']) {
+                return $validation;
             }
 
-            $available = $this->availableSeats($service);
-            if ($available !== null && $candidates->count() > $available) {
-                return $this->businessError('TRANSPORTE_CAPACITY_EXCEEDED', 'La cantidad supera la capacidad disponible.', [
-                    'capacidad_disponible' => $available,
-                    'candidatos' => $candidates->count(),
-                    'exceso' => $candidates->count() - $available,
-                ]);
-            }
-
-            foreach ($candidates as $candidate) {
-                TransporteServicioPasajero::query()->create([
-                    'id' => (string) Str::uuid(),
-                    'transporte_servicio_id' => $service->id,
-                    'grupo_trabajo_detalle_id' => $candidate['grupo_trabajo_detalle_id'],
-                    'personal_id' => $candidate['personal_id'],
-                    'tramo' => $service->tramo,
-                    'estado' => TransporteServicioPasajero::ESTADO_ASIGNADO,
-                    'asignado_por_id' => $usuario->id,
-                    'asignado_at' => now(),
-                ]);
-            }
-
-            $this->recordEvent($service, 'PASAJEROS_ASIGNADOS', null, $service->estado, ['cantidad' => $candidates->count()], $usuario, 'Pasajeros asignados al transporte.');
+            $this->writePassengers($usuario, $service, $candidates);
 
             return ['ok' => true, 'servicio' => $this->loadServicio($service)];
-        });
+        }, 3);
     }
 
     public function retirePasajero(Usuario $usuario, TransporteServicio $service, string $pasajeroId, string $motivo, string $estado = TransporteServicioPasajero::ESTADO_RETIRADO): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['actualizar', 'recepcionar', 'administrar'])) {
-            return $this->forbidden('TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN');
-        }
-
         return DB::transaction(function () use ($usuario, $service, $pasajeroId, $motivo, $estado): array {
+            $service = $this->lockServicio($service->id);
+            $validation = $this->authorizeMutation($usuario, $service, 'retirar_pasajero', 'TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
             $pasajero = TransporteServicioPasajero::query()
                 ->where('transporte_servicio_id', $service->id)
                 ->where('id', $pasajeroId)
@@ -284,14 +422,7 @@ class TransportePlanningService
                 return $this->businessError('TRANSPORTE_PASSENGER_NOT_FOUND', 'Pasajero activo no encontrado.');
             }
 
-            $pasajero->forceFill([
-                'estado' => $estado,
-                'retirado_por_id' => $usuario->id,
-                'retirado_at' => now(),
-                'motivo_retiro' => $motivo,
-            ])->save();
-
-            $this->recordEvent($service, 'PASAJERO_RETIRADO', null, $service->estado, $pasajero->toArray(), $usuario, $motivo);
+            $this->writeRetirement($usuario, $service, $pasajero, $motivo, $estado);
 
             return ['ok' => true, 'servicio' => $this->loadServicio($service)];
         });
@@ -299,46 +430,160 @@ class TransportePlanningService
 
     public function reubicarPasajero(Usuario $usuario, TransporteServicio $service, string $pasajeroId, string $destinoId, string $motivo): array
     {
-        return DB::transaction(function () use ($usuario, $service, $pasajeroId, $destinoId, $motivo): array {
-            $destino = TransporteServicio::query()->find($destinoId);
-            if (!$destino || $destino->fecha?->toDateString() !== $service->fecha?->toDateString() || $destino->turno !== $service->turno || $destino->tipo !== TransporteServicio::TIPO_PERSONAL) {
-                return $this->businessError('TRANSPORTE_RELOCATION_INVALID', 'El destino debe ser un transporte de personal de la misma fecha y turno.');
+        if (!$this->policy->allows($usuario, 'retirar_pasajero', $service)) {
+            return $this->forbidden('TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN');
+        }
+
+        $detailId = $service->pasajeros()->whereKey($pasajeroId)->value('grupo_trabajo_detalle_id');
+        $lockIds = $detailId ? $this->relatedDetailIds([$detailId], $service) : [];
+
+        return DB::transaction(function () use ($usuario, $service, $pasajeroId, $destinoId, $motivo, $detailId, $lockIds): array {
+            $detail = $detailId ? $this->lockDetails($lockIds)->get($detailId) : null;
+            $parents = $this->lockServicios([$service->id, $destinoId]);
+            $origin = $parents->get($service->id);
+            $destination = $parents->get($destinoId);
+            if (!$origin || !$destination) {
+                return $this->invalidRelocation();
             }
 
-            $pasajero = TransporteServicioPasajero::query()
-                ->where('transporte_servicio_id', $service->id)
-                ->where('id', $pasajeroId)
-                ->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO)
-                ->lockForUpdate()
-                ->first();
+            $validation = $this->authorizeMutation($usuario, $origin, 'retirar_pasajero', 'TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
 
-            if (!$pasajero) {
+            $validation = $this->authorizeMutation($usuario, $destination, 'agregar_pasajeros', 'TRANSPORTE_PASSENGER_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
+            if (!$service->fecha->isSameDay($origin->fecha)) {
+                return $this->invalidPassengerContext();
+            }
+
+            $passenger = $origin->pasajeros()->lockForUpdate()->find($pasajeroId);
+            if (!$detail || !$passenger || $passenger->grupo_trabajo_detalle_id !== $detail->id
+                || $passenger->estado !== TransporteServicioPasajero::ESTADO_ASIGNADO) {
                 return $this->businessError('TRANSPORTE_PASSENGER_NOT_FOUND', 'Pasajero activo no encontrado.');
             }
 
-            $retired = $this->retirePasajero($usuario, $service, $pasajeroId, $motivo, TransporteServicioPasajero::ESTADO_REUBICADO);
-            if (($retired['ok'] ?? false) === false) {
-                return $retired;
+            $validation = $this->validatePassengerTransfer($origin, $destination, $passenger, $detail);
+            if (!$validation['ok']) {
+                return $validation;
             }
 
-            return $this->addPasajeros($usuario, $destino, [
-                'grupo_trabajo_detalle_id' => $pasajero->grupo_trabajo_detalle_id,
+            $this->writeRetirement($usuario, $origin, $passenger, $motivo, TransporteServicioPasajero::ESTADO_REUBICADO);
+            $this->writePassengers($usuario, $destination, collect([$detail]));
+
+            return ['ok' => true, 'servicio' => $this->loadServicio($destination)];
+        }, 3);
+    }
+
+    private function validatePassengerTransfer(
+        TransporteServicio $origin,
+        TransporteServicio $destination,
+        TransporteServicioPasajero $passenger,
+        GrupoTrabajoDetalle $detail,
+    ): array {
+        if ($origin->id === $destination->id
+            || $origin->tipo !== TransporteServicio::TIPO_PERSONAL
+            || $destination->tipo !== TransporteServicio::TIPO_PERSONAL
+            || !$origin->fecha->isSameDay($destination->fecha)
+            || !$this->turnsCompatible($origin->turno, $destination->turno)
+            || $passenger->tramo !== $origin->tramo
+            || $destination->tramo !== $origin->tramo) {
+            return $this->invalidRelocation();
+        }
+
+        $groupIds = $destination->alcances()->whereNotNull('grupo_trabajo_id')->pluck('grupo_trabajo_id');
+        if ($passenger->personal_id !== $detail->personal_id
+            || !$this->isEligiblePassenger($detail, $destination, $groupIds)
+            || $this->assignedPeople([$detail->personal_id], $destination, $passenger->id)->isNotEmpty()) {
+            return $this->invalidPassengerContext();
+        }
+
+        return $this->validateCapacity($destination, 1);
+    }
+
+    private function invalidRelocation(): array
+    {
+        return $this->businessError('TRANSPORTE_RELOCATION_INVALID', 'Elige otro transporte de personal de la misma fecha, turno y tramo.');
+    }
+
+    private function invalidPassengerContext(): array
+    {
+        return $this->businessError('TRANSPORTE_PASSENGER_CONTEXT_INVALID', 'Hay pasajeros fuera del contexto del servicio o ya asignados al mismo tramo.');
+    }
+
+    private function validateCapacity(TransporteServicio $service, int $candidates): array
+    {
+        $available = $this->availableSeats($service);
+        if ($available !== null && $candidates > $available) {
+            return $this->businessError('TRANSPORTE_CAPACITY_EXCEEDED', 'La cantidad supera la capacidad disponible.', [
+                'capacidad_disponible' => $available,
+                'candidatos' => $candidates,
+                'exceso' => $candidates - $available,
             ]);
-        });
+        }
+
+        return ['ok' => true];
+    }
+
+    private function writePassengers(Usuario $usuario, TransporteServicio $service, Collection $details): void
+    {
+        foreach ($details as $detail) {
+            $passenger = TransporteServicioPasajero::query()->create([
+                'id' => (string) Str::uuid(),
+                'transporte_servicio_id' => $service->id,
+                'grupo_trabajo_detalle_id' => $detail->id,
+                'personal_id' => $detail->personal_id,
+                'tramo' => $service->tramo,
+                'estado' => TransporteServicioPasajero::ESTADO_ASIGNADO,
+                'asignado_por_id' => $usuario->id,
+                'asignado_at' => now(),
+            ]);
+            if (!$passenger->exists) {
+                throw new \RuntimeException('No se pudo guardar el pasajero de transporte.');
+            }
+        }
+
+        $this->recordEvent($service, 'PASAJEROS_ASIGNADOS', null, $service->estado, ['cantidad' => $details->count()], $usuario, 'Pasajeros asignados al transporte.');
+    }
+
+    private function writeRetirement(Usuario $usuario, TransporteServicio $service, TransporteServicioPasajero $passenger, string $reason, string $state): void
+    {
+        $saved = $passenger->forceFill([
+            'estado' => $state,
+            'retirado_por_id' => $usuario->id,
+            'retirado_at' => now(),
+            'motivo_retiro' => $reason,
+        ])->save();
+        if (!$saved) {
+            throw new \RuntimeException('No se pudo retirar al pasajero de transporte.');
+        }
+
+        $this->recordEvent($service, 'PASAJERO_RETIRADO', null, $service->estado, $passenger->toArray(), $usuario, $reason);
     }
 
     public function copyServicio(Usuario $usuario, TransporteServicio $service, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['crear', 'duplicar', 'administrar'])) {
-            return $this->forbidden('TRANSPORTE_COPY_FORBIDDEN');
-        }
+        return DB::transaction(function () use ($usuario, $service, $payload): array {
+            $service = $this->lockServicio($service->id);
+            $validation = $this->authorizeMutation($usuario, $service, 'copiar', 'TRANSPORTE_COPY_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
 
+            return $this->createServicio($usuario, $this->copyPayload($service, $payload));
+        });
+    }
+
+    private function copyPayload(TransporteServicio $service, array $payload): array
+    {
         $fecha = $this->normalizeDate((string) $payload['fecha']);
         $turno = $this->normalizeTurno((string) $payload['turno']) ?? 'A';
         $copyPlate = (bool) ($payload['copiar_placa'] ?? false);
         $copyDriver = (bool) ($payload['copiar_conductor'] ?? false);
 
-        $data = [
+        return [
             ...$service->only([
                 'rq_mina_id',
                 'rq_mina_plan_id',
@@ -369,28 +614,35 @@ class TransportePlanningService
                 ->values()
                 ->all(),
         ];
-
-        return $this->createServicio($usuario, $data);
     }
 
     public function changeEstado(Usuario $usuario, TransporteServicio $service, string $estado, ?string $observacion = null): array
     {
-        if (!PermissionMatrix::userCanDirectAny($usuario, 'transportes', ['actualizar', 'entregar', 'recepcionar', 'administrar'])) {
-            return $this->forbidden('TRANSPORTE_STATE_FORBIDDEN');
-        }
-
         return DB::transaction(function () use ($usuario, $service, $estado, $observacion): array {
-            $service = $this->loadServicio($service);
+            $service = $this->lockServicio($service->id);
+            $validation = $this->authorizeMutation($usuario, $service, 'cambiar_estado', 'TRANSPORTE_STATE_FORBIDDEN');
+            if (!$validation['ok']) {
+                return $validation;
+            }
+
+            if (!in_array($estado, TransporteServicio::estados(), true)) {
+                return $this->businessError('TRANSPORTE_STATE_INVALID', 'Estado de servicio invalido.');
+            }
+
+            $service->load(['alcances', 'pasajeros']);
             $previous = $service->estado;
             $validation = $this->validateStateChange($service, $estado);
             if (($validation['ok'] ?? false) === false) {
                 return $validation;
             }
 
-            $service->forceFill([
+            $saved = $service->forceFill([
                 'estado' => $estado,
                 'updated_by' => $usuario->id,
             ])->save();
+            if (!$saved) {
+                throw new \RuntimeException('No se pudo guardar el estado de transporte.');
+            }
 
             $this->recordEvent($service, 'CAMBIO_ESTADO', $previous, $estado, $this->serviceMetrics($service), $usuario, $observacion);
 
@@ -398,52 +650,58 @@ class TransportePlanningService
         });
     }
 
-    public function retireActivePassengerForDetail(Usuario $usuario, string $grupoTrabajoDetalleId, string $motivo = 'INTEGRANTE_RETIRADO_DE_MAN_POWER'): void
+    /** The calling Man Power operation holds the distribution locks and records the withdrawal in this transaction. */
+    public function retireActivePassengersForDetails(Usuario $usuario, Collection $retiredDetails, string $reason = 'INTEGRANTE_RETIRADO_DE_MAN_POWER'): bool
     {
-        TransporteServicioPasajero::query()
-            ->with('servicio')
-            ->where('grupo_trabajo_detalle_id', $grupoTrabajoDetalleId)
-            ->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO)
-            ->get()
-            ->each(function (TransporteServicioPasajero $pasajero) use ($usuario, $motivo): void {
-                if ($pasajero->servicio) {
-                    $this->retirePasajero($usuario, $pasajero->servicio, $pasajero->id, $motivo);
-                }
-            });
-    }
-
-    public function candidatePassengers(TransporteServicio $service, ?string $grupoTrabajoId = null): Collection
-    {
-        $service = $this->loadServicio($service);
-        $scopeGroupIds = $service->alcances->pluck('grupo_trabajo_id')->filter()->values();
-
-        if ($grupoTrabajoId !== null) {
-            $scopeGroupIds = collect([$grupoTrabajoId]);
+        if (DB::transactionLevel() === 0) {
+            throw new \LogicException('El retiro de transporte debe ocurrir dentro de la operacion de Man Power.');
         }
 
-        if ($scopeGroupIds->isEmpty()) {
-            return collect();
+        $actions = match ($reason) {
+            'GRUPO_REEMPLAZADO_AL_PEGAR_DIA' => ['crear', 'duplicar'],
+            'GRUPO_CANCELADO_DESDE_MAN_POWER' => ['editar', 'actualizar'],
+            'INTEGRANTE_RETIRADO_DE_MAN_POWER' => ['asignar'],
+            default => [],
+        };
+        if (!PermissionMatrix::userCanDirectAny($usuario, 'man_power', $actions)) {
+            throw new AuthorizationException();
         }
 
-        $assignedDetailIds = TransporteServicioPasajero::query()
-            ->where('tramo', $service->tramo)
-            ->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO)
-            ->pluck('grupo_trabajo_detalle_id');
+        $details = $this->lockDetails($retiredDetails->pluck('id')->all());
+        $history = TransporteServicioPasajero::query()
+            ->whereIn('grupo_trabajo_detalle_id', $details->keys()->all())
+            ->get(['id', 'transporte_servicio_id', 'estado']);
 
-        return GrupoTrabajoDetalle::query()
-            ->with(['personal:id,nombre_completo,dni,numero_documento,puesto', 'grupoTrabajo:id,fecha,turno,servicio,area,paradero,rq_mina_actividad_grupo_id,sait_snapshot'])
-            ->whereIn('grupo_trabajo_id', $scopeGroupIds->all())
-            ->whereNotIn('id', $assignedDetailIds->all())
-            ->where(function ($q): void {
-                if (Schema::hasColumn('grupo_trabajo_detalle', 'estado_distribucion')) {
-                    $q->where('estado_distribucion', GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO)
-                        ->orWhereNull('estado_distribucion');
-                }
-            })
-            ->get()
-            ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $this->detailFitsService($detalle, $service))
-            ->map(fn (GrupoTrabajoDetalle $detalle): array => $this->detailPassengerArray($detalle))
-            ->values();
+        $details->load('grupoTrabajo.rqMina');
+        foreach ($retiredDetails as $expected) {
+            $detail = $details->get($expected->id);
+            if (!$detail || !$detail->grupoTrabajo || $detail->grupo_trabajo_id !== $expected->grupo_trabajo_id
+                || $detail->isDistribucionActiva() || $detail->retirado_por_id !== $usuario->id
+                || !$this->manPowerPolicy->manageGrupo($usuario, $detail->grupoTrabajo)) {
+                throw new AuthorizationException();
+            }
+        }
+
+        $active = $history->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO);
+        $services = $this->lockServicios($active->pluck('transporte_servicio_id')->all());
+        $passengers = TransporteServicioPasajero::query()->whereKey($active->modelKeys())
+            ->orderBy('id')->lockForUpdate()->get();
+
+        foreach ($passengers as $passenger) {
+            if ($passenger->estado !== TransporteServicioPasajero::ESTADO_ASIGNADO) {
+                continue;
+            }
+            $service = $services->get($passenger->transporte_servicio_id);
+            $detail = $details->get($passenger->grupo_trabajo_detalle_id);
+            if (!$service || !$detail || $service->rq_mina_id !== $detail->grupoTrabajo->rq_mina_id
+                || $passenger->personal_id !== $detail->personal_id) {
+                throw new \RuntimeException('El pasajero no corresponde al integrante retirado de Man Power.');
+            }
+
+            $this->writeRetirement($usuario, $service, $passenger, $reason, TransporteServicioPasajero::ESTADO_RETIRADO);
+        }
+
+        return $history->isNotEmpty();
     }
 
     private function listParadas(Usuario $usuario): Collection
@@ -457,7 +715,7 @@ class TransportePlanningService
             })
             ->orderByDesc('created_at');
 
-        if (!$this->isPrivileged($usuario)) {
+        if (!MinaScopeAccess::isPrivileged($usuario)) {
             $query->whereIn('mina_id', UsuarioMinaScope::query()
                 ->where('usuario_id', $usuario->id)
                 ->pluck('mina_id'));
@@ -567,10 +825,11 @@ class TransportePlanningService
         })->values()->all();
     }
 
-    private function services(RQMina $rqMina, ?RQMinaPlan $plan, string $fecha, string $turno): array
+    private function services(Usuario $usuario, RQMina $rqMina, ?RQMinaPlan $plan, string $fecha, string $turno): array
     {
         $query = TransporteServicio::query()
             ->with([
+                'plan:id,estado',
                 'conductor:id,nombre_completo,dni,numero_documento,puesto',
                 'alcances.grupoOperativo:id,nombre,area_operativa,modulo',
                 'alcances.actividad:id,sait,sector,area,ait_trabajo',
@@ -589,9 +848,37 @@ class TransportePlanningService
         }
 
         return $query->orderBy('hora_salida')->orderBy('created_at')->get()
-            ->map(fn (TransporteServicio $service): array => $this->serviceArray($service))
+            ->map(function (TransporteServicio $service) use ($usuario, $rqMina, $plan): array {
+                $service->setRelation('rqMina', $rqMina);
+
+                return [
+                    ...$this->serviceArray($service),
+                    'capabilities' => $this->capabilities($usuario, $service, $plan),
+                    'faltantes_confirmacion' => $this->confirmationRequirements($service),
+                ];
+            })
             ->values()
             ->all();
+    }
+
+    private function capabilities(Usuario $usuario, TransporteServicio $service, ?RQMinaPlan $selectedPlan): array
+    {
+        $writable = !$this->isReadOnly($service)
+            && $service->plan?->estado !== RQMinaPlan::ESTADO_ARCHIVADO
+            && $selectedPlan?->estado !== RQMinaPlan::ESTADO_ARCHIVADO;
+        $personal = $writable && $service->tipo === TransporteServicio::TIPO_PERSONAL;
+        $add = $personal && $this->policy->allows($usuario, 'agregar_pasajeros', $service);
+        $retire = $personal && $this->policy->allows($usuario, 'retirar_pasajero', $service);
+
+        return [
+            'editar' => $writable && $this->policy->allows($usuario, 'editar', $service),
+            'confirmar' => $writable && $service->estado !== TransporteServicio::ESTADO_CONFIRMADO
+                && $this->policy->allows($usuario, 'cambiar_estado', $service),
+            'agregar_pasajeros' => $add,
+            'retirar_pasajero' => $retire,
+            'copiar' => $writable && $this->policy->allows($usuario, 'copiar', $service),
+            'reubicar' => $add && $retire,
+        ];
     }
 
     private function serviceArray(TransporteServicio $service): array
@@ -609,6 +896,7 @@ class TransportePlanningService
             'transportista' => $service->transportista,
             'tipo_vehiculo' => $service->tipo_vehiculo,
             'placa' => $service->placa,
+            'conductor_personal_id' => $service->conductor_personal_id,
             'conductor' => $service->conductor_nombre_snapshot ?: $service->conductor?->nombre_completo,
             'capacidad' => $service->capacidad,
             'hora_salida' => $service->hora_salida,
@@ -619,6 +907,9 @@ class TransportePlanningService
             'observaciones' => $service->observaciones,
             'alcances' => $service->alcances->map(fn (TransporteServicioAlcance $alcance): array => [
                 'id' => $alcance->id,
+                'rq_mina_actividad_grupo_id' => $alcance->rq_mina_actividad_grupo_id,
+                'rq_mina_actividad_id' => $alcance->rq_mina_actividad_id,
+                'grupo_trabajo_id' => $alcance->grupo_trabajo_id,
                 'grupo_operativo' => $alcance->grupoOperativo?->nombre,
                 'actividad' => $alcance->actividad?->sait ?: $alcance->actividad?->ait_trabajo,
                 'grupo_man_power' => $alcance->grupoManPower?->servicio,
@@ -678,40 +969,100 @@ class TransportePlanningService
         ];
     }
 
-    private function validateServicePayload(Usuario $usuario, array $payload, ?TransporteServicio $current = null): array
+    private function lockServicio(string $id): TransporteServicio
     {
-        $rqMina = RQMina::query()->find((string) $payload['rq_mina_id']);
-        if (!$rqMina || !$this->canAccessMina($usuario, (string) $rqMina->mina_id)) {
-            return $this->businessError('TRANSPORTE_RQ_FORBIDDEN', 'Parada no encontrada o sin acceso.');
+        return TransporteServicio::query()->lockForUpdate()->findOrFail($id);
+    }
+
+    private function lockServicios(array $ids): Collection
+    {
+        return TransporteServicio::query()->whereKey(array_unique($ids))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+    }
+
+    private function lockDetails(array $ids): Collection
+    {
+        return GrupoTrabajoDetalle::query()->whereKey($ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+    }
+
+    private function relatedDetailIds(array $detailIds, TransporteServicio $service): array
+    {
+        // A shared Man Power position may have several distributions for one worker on the same day.
+        $people = GrupoTrabajoDetalle::query()->whereKey($detailIds)->select('personal_id');
+
+        return GrupoTrabajoDetalle::query()
+            ->whereIn('personal_id', $people)
+            ->whereHas('grupoTrabajo', fn ($query) => $query->whereDate('fecha', $service->fecha->toDateString()))
+            ->pluck('id')->merge($detailIds)->unique()->all();
+    }
+
+    private function assignedPeople(array $people, TransporteServicio $service, ?string $excludedPassenger = null): Collection
+    {
+        $turns = $this->normalizeTurno($service->turno) === 'B' ? ['B', 'NOCHE', 'NIGHT'] : ['A', 'DIA', 'DÍA', 'DAY'];
+
+        return TransporteServicioPasajero::query()
+            ->whereIn('personal_id', $people)
+            ->where('tramo', $service->tramo)
+            ->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO)
+            ->whereHas('servicio', fn ($query) => $query->whereDate('fecha', $service->fecha->toDateString())->whereIn('turno', $turns))
+            ->when($excludedPassenger, fn ($query) => $query->where('id', '!=', $excludedPassenger))
+            ->pluck('personal_id');
+    }
+
+    private function authorizeMutation(Usuario $usuario, TransporteServicio $service, string $action, string $code): array
+    {
+        if (!$this->policy->grants($usuario, $action)) {
+            return $this->forbidden($code);
         }
 
-        if (!$this->dateFits($payload['fecha'], $rqMina->fecha_inicio?->toDateString(), $rqMina->fecha_fin?->toDateString())) {
+        $service->setRelation('rqMina', RQMina::query()->sharedLock()->find($service->rq_mina_id));
+        if (!$this->policy->allows($usuario, $action, $service)) {
+            return $this->forbidden($code);
+        }
+        if ($this->isReadOnly($service)) {
+            return $this->businessError('TRANSPORTE_SERVICE_READ_ONLY', 'El servicio cerrado es solo consulta.');
+        }
+
+        return $this->validateContext($usuario, $service);
+    }
+
+    private function isReadOnly(TransporteServicio $service): bool
+    {
+        return in_array($service->estado, [TransporteServicio::ESTADO_FINALIZADO, TransporteServicio::ESTADO_CANCELADO, 'ANULADO'], true);
+    }
+
+    private function validateContext(Usuario $usuario, TransporteServicio $service): array
+    {
+        if (!$service->relationLoaded('rqMina')) {
+            $service->setRelation('rqMina', RQMina::query()->sharedLock()->find($service->rq_mina_id));
+        }
+        $rqMina = $service->rqMina;
+        if (!$rqMina || !MinaScopeAccess::allows($usuario, $rqMina->mina_id)) {
+            return $this->forbidden('TRANSPORTE_RQ_FORBIDDEN');
+        }
+
+        $fecha = $service->fecha->toDateString();
+        if (!$this->dateFits($fecha, $rqMina->fecha_inicio?->toDateString(), $rqMina->fecha_fin?->toDateString())) {
             return $this->businessError('TRANSPORTE_DATE_OUT_OF_RQ', 'La fecha del servicio debe estar dentro de la parada.');
         }
 
-        if (!empty($payload['rq_mina_plan_id'])) {
-            $plan = RQMinaPlan::query()->find((string) $payload['rq_mina_plan_id']);
+        if ($service->rq_mina_plan_id) {
+            $plan = RQMinaPlan::query()->sharedLock()->find($service->rq_mina_plan_id);
             if (!$plan || $plan->rq_mina_id !== $rqMina->id) {
                 return $this->businessError('TRANSPORTE_PLAN_INVALID', 'El plan no pertenece a la parada.');
             }
             if ($plan->estado === RQMinaPlan::ESTADO_ARCHIVADO) {
                 return $this->businessError('TRANSPORTE_PLAN_ARCHIVED', 'El plan archivado es solo consulta.');
             }
-            if (!$this->dateFits($payload['fecha'], $plan->fecha_inicio?->toDateString(), $plan->fecha_fin?->toDateString())) {
+            if (!$this->dateFits($fecha, $plan->fecha_inicio?->toDateString(), $plan->fecha_fin?->toDateString())) {
                 return $this->businessError('TRANSPORTE_DATE_OUT_OF_PLAN', 'La fecha del servicio debe estar dentro del plan.');
             }
         }
 
-        if ($payload['estado'] === TransporteServicio::ESTADO_CONFIRMADO) {
-            $fake = $current ?: new TransporteServicio();
-            $fake->forceFill($payload);
-            $fake->setRelation('alcances', collect($payload['alcances'] ?? []));
-            $state = $this->validateStateChange($fake, TransporteServicio::ESTADO_CONFIRMADO);
-            if (($state['ok'] ?? false) === false) {
-                return $state;
-            }
-        }
+        return ['ok' => true];
+    }
 
+    private function validateResources(array $payload, ?TransporteServicio $current = null): array
+    {
         if ($this->hasPlateConflict($payload, $current)) {
             return $this->businessError('TRANSPORTE_PLATE_DUPLICATED', 'La placa ya esta asignada en la misma fecha, turno y tramo.');
         }
@@ -725,51 +1076,88 @@ class TransportePlanningService
 
     private function validateStateChange(TransporteServicio $service, string $targetState): array
     {
-        if ($targetState !== TransporteServicio::ESTADO_CONFIRMADO) {
+        $missing = $targetState === TransporteServicio::ESTADO_CONFIRMADO
+            ? ($this->confirmationRequirements($service)[0] ?? null)
+            : null;
+        if ($missing === null) {
             return ['ok' => true];
         }
 
-        if ($service->tipo === TransporteServicio::TIPO_PERSONAL) {
-            if (trim((string) $service->placa) === '') {
-                return $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_PLATE', 'Para confirmar transporte de personal se requiere placa.');
-            }
-            if (trim((string) $service->conductor_personal_id) === '' && trim((string) $service->conductor_nombre_snapshot) === '') {
-                return $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_DRIVER', 'Para confirmar transporte de personal se requiere conductor.');
-            }
-            if (!$service->capacidad || $service->capacidad <= 0) {
-                return $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_CAPACITY', 'Para confirmar transporte de personal se requiere capacidad.');
-            }
-            if ($this->serviceMetrics($service)['sobreocupacion'] > 0) {
-                return $this->businessError('TRANSPORTE_CONFIRM_OVERBOOKED', 'No se puede confirmar un transporte sobreocupado.');
-            }
-        }
-
-        if ($service->relationLoaded('alcances') && $service->alcances->count() === 0) {
-            return $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_SCOPE', 'Para confirmar se requiere al menos un alcance.');
-        }
-
-        return ['ok' => true];
+        return match ($missing) {
+            'placa' => $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_PLATE', 'Para confirmar transporte de personal se requiere placa.'),
+            'conductor' => $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_DRIVER', 'Para confirmar transporte de personal se requiere conductor.'),
+            'capacidad' => $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_CAPACITY', 'Para confirmar transporte de personal se requiere capacidad.'),
+            'sobreocupacion' => $this->businessError('TRANSPORTE_CONFIRM_OVERBOOKED', 'No se puede confirmar un transporte sobreocupado.'),
+            'alcance' => $this->businessError('TRANSPORTE_CONFIRM_REQUIRES_SCOPE', 'Para confirmar se requiere al menos un alcance.'),
+        };
     }
 
-    private function validateAlcanceBelongs(TransporteServicio $service, array $row): void
+    public function confirmationRequirements(TransporteServicio $service): array
+    {
+        $service->loadMissing(['alcances', 'pasajeros']);
+        $missing = [];
+
+        if ($service->tipo === TransporteServicio::TIPO_PERSONAL) {
+            if (trim((string) $service->placa) === '') {
+                $missing[] = 'placa';
+            }
+            if (trim((string) $service->conductor_personal_id) === '' && trim((string) $service->conductor_nombre_snapshot) === '') {
+                $missing[] = 'conductor';
+            }
+            if (!$service->capacidad || $service->capacidad <= 0) {
+                $missing[] = 'capacidad';
+            }
+            if ($this->serviceMetrics($service)['sobreocupacion'] > 0) {
+                $missing[] = 'sobreocupacion';
+            }
+        }
+
+        if ($service->alcances->isEmpty()) {
+            $missing[] = 'alcance';
+        }
+
+        return $missing;
+    }
+
+    private function invalidAlcanceMessage(TransporteServicio $service, array $row): ?string
     {
         if (!empty($row['rq_mina_actividad_grupo_id'])) {
             $group = RQMinaActividadGrupo::query()->find($row['rq_mina_actividad_grupo_id']);
-            abort_if(!$group || $group->rq_mina_id !== $service->rq_mina_id, 422, 'El grupo operativo no pertenece a la parada.');
-            abort_if($service->rq_mina_plan_id && $group->rq_mina_plan_id && $group->rq_mina_plan_id !== $service->rq_mina_plan_id, 422, 'El grupo operativo no pertenece al plan.');
+            if (!$group || $group->rq_mina_id !== $service->rq_mina_id) {
+                return 'El grupo operativo no pertenece a la parada.';
+            }
+            if ($service->rq_mina_plan_id && $group->rq_mina_plan_id && $group->rq_mina_plan_id !== $service->rq_mina_plan_id) {
+                return 'El grupo operativo no pertenece al plan.';
+            }
         }
 
         if (!empty($row['rq_mina_actividad_id'])) {
             $activity = RQMinaActividad::query()->with('grupo')->find($row['rq_mina_actividad_id']);
-            abort_if(!$activity || $activity->grupo?->rq_mina_id !== $service->rq_mina_id, 422, 'La actividad no pertenece a la parada.');
-            abort_if($service->rq_mina_plan_id && $activity->grupo?->rq_mina_plan_id && $activity->grupo->rq_mina_plan_id !== $service->rq_mina_plan_id, 422, 'La actividad no pertenece al plan.');
+            if (!$activity || $activity->grupo?->rq_mina_id !== $service->rq_mina_id) {
+                return 'La actividad no pertenece a la parada.';
+            }
+            if ($service->rq_mina_plan_id && $activity->grupo?->rq_mina_plan_id && $activity->grupo->rq_mina_plan_id !== $service->rq_mina_plan_id) {
+                return 'La actividad no pertenece al plan.';
+            }
+            if (!empty($row['rq_mina_actividad_grupo_id']) && $activity->grupo_id !== $row['rq_mina_actividad_grupo_id']) {
+                return 'La actividad no pertenece al grupo operativo seleccionado.';
+            }
         }
 
         if (!empty($row['grupo_trabajo_id'])) {
             $group = GrupoTrabajo::query()->find($row['grupo_trabajo_id']);
-            abort_if(!$group || $group->rq_mina_id !== $service->rq_mina_id, 422, 'El grupo de Man Power no pertenece a la parada.');
-            abort_if(optional($group->fecha)->toDateString() !== optional($service->fecha)->toDateString() || !$this->turnsCompatible((string) $group->turno, (string) $service->turno), 422, 'El grupo de Man Power debe ser de la misma fecha y turno.');
+            if (!$group || $group->rq_mina_id !== $service->rq_mina_id) {
+                return 'El grupo de Man Power no pertenece a la parada.';
+            }
+            if ($service->rq_mina_plan_id && $group->rq_mina_plan_id && $group->rq_mina_plan_id !== $service->rq_mina_plan_id) {
+                return 'El grupo de Man Power no pertenece al plan.';
+            }
+            if (!$this->groupFitsService($group, $service)) {
+                return 'El grupo de Man Power debe ser de la misma fecha y turno.';
+            }
         }
+
+        return null;
     }
 
     private function normalizeServicePayload(array $payload): array
@@ -796,7 +1184,6 @@ class TransportePlanningService
             'destino' => trim((string) ($payload['destino'] ?? '')) ?: null,
             'estado' => in_array($estado, TransporteServicio::estados(), true) ? $estado : TransporteServicio::ESTADO_BORRADOR,
             'observaciones' => trim((string) ($payload['observaciones'] ?? '')) ?: null,
-            'alcances' => is_array($payload['alcances'] ?? null) ? $payload['alcances'] : [],
         ];
     }
 
@@ -836,9 +1223,43 @@ class TransportePlanningService
     {
         $group = $detalle->grupoTrabajo;
 
-        return $group
-            && optional($group->fecha)->toDateString() === optional($service->fecha)->toDateString()
+        return $group && $this->groupFitsService($group, $service);
+    }
+
+    private function isEligiblePassenger(GrupoTrabajoDetalle $detail, TransporteServicio $service, Collection $groupIds): bool
+    {
+        return $detail->isDistribucionActiva()
+            && $groupIds->contains($detail->grupo_trabajo_id)
+            && $detail->grupoTrabajo?->estado !== GrupoTrabajo::ESTADO_CANCELADO
+            && $this->detailFitsService($detail, $service);
+    }
+
+    private function groupFitsService(GrupoTrabajo $group, TransporteServicio $service): bool
+    {
+        return $group->rq_mina_id === $service->rq_mina_id
+            && (!$group->rq_mina_plan_id || !$service->rq_mina_plan_id || $group->rq_mina_plan_id === $service->rq_mina_plan_id)
+            && $group->fecha?->toDateString() === $service->fecha?->toDateString()
             && $this->turnsCompatible((string) $group->turno, (string) $service->turno);
+    }
+
+    private function validatePassengerContexts(TransporteServicio $service): array
+    {
+        $activePassengers = $service->pasajeros->where('estado', TransporteServicioPasajero::ESTADO_ASIGNADO);
+        $activePassengers->loadMissing('grupoTrabajoDetalle.grupoTrabajo');
+        $groupIds = $service->alcances->pluck('grupo_trabajo_id')->filter();
+
+        foreach ($activePassengers as $passenger) {
+            $detail = $passenger->grupoTrabajoDetalle;
+            if ($service->tipo !== TransporteServicio::TIPO_PERSONAL
+                || $passenger->tramo !== $service->tramo
+                || !$detail
+                || !$groupIds->contains($detail->grupo_trabajo_id)
+                || !$this->detailFitsService($detail, $service)) {
+                return $this->businessError('TRANSPORTE_PASSENGER_CONTEXT_INVALID', 'El cambio deja pasajeros activos fuera del contexto del servicio.');
+            }
+        }
+
+        return ['ok' => true];
     }
 
     private function detailPassengerArray(GrupoTrabajoDetalle $detalle): array
@@ -898,7 +1319,7 @@ class TransportePlanningService
 
     private function recordEvent(TransporteServicio $service, string $type, ?string $previous, ?string $next, array $snapshot, Usuario $usuario, ?string $observacion = null): void
     {
-        TransporteServicioEvento::query()->create([
+        $event = TransporteServicioEvento::query()->create([
             'id' => (string) Str::uuid(),
             'transporte_servicio_id' => $service->id,
             'tipo' => $type,
@@ -909,11 +1330,22 @@ class TransportePlanningService
             'usuario_id' => $usuario->id,
             'fecha_evento' => now(),
         ]);
+        if (!$event->exists) {
+            throw new \RuntimeException('No se pudo guardar el evento de transporte.');
+        }
     }
 
-    private function resolveDriver(?string $personalId): ?Personal
+    private function resolveDriver(Usuario $usuario, ?string $personalId): ?Personal
     {
-        return $personalId ? Personal::query()->find($personalId) : null;
+        if (!$personalId) {
+            return null;
+        }
+
+        return Personal::query()->select('id', 'nombre_completo')
+            ->when(!MinaScopeAccess::isPrivileged($usuario), function ($query) use ($usuario): void {
+                $scopes = UsuarioMinaScope::query()->where('usuario_id', $usuario->id)->select('mina_id');
+                $query->whereHas('relacionesMina', fn ($relations) => $relations->whereIn('mina_id', $scopes)->where('activo', true));
+            })->find($personalId);
     }
 
     private function resolvePlan(RQMina $rqMina, string $planId, string $fecha): ?RQMinaPlan
@@ -996,24 +1428,6 @@ class TransportePlanningService
         return $this->normalizeTurno($groupTurn) === $this->normalizeTurno($serviceTurn);
     }
 
-    private function canAccessMina(Usuario $usuario, string $minaId): bool
-    {
-        if ($this->isPrivileged($usuario)) {
-            return true;
-        }
-
-        return UsuarioMinaScope::query()
-            ->where('usuario_id', $usuario->id)
-            ->where('mina_id', $minaId)
-            ->exists();
-    }
-
-    private function isPrivileged(Usuario $usuario): bool
-    {
-        return count(array_intersect(PermissionMatrix::activeRoleNames($usuario), ['ADMIN', 'GERENTE', 'SUPERADMIN'])) > 0
-            || PermissionMatrix::userCanDirect($usuario, 'transportes', 'administrar');
-    }
-
     private function emptyContext(Collection $paradas, string $fecha, string $turno): array
     {
         return [
@@ -1022,6 +1436,8 @@ class TransportePlanningService
             'rq_mina' => null,
             'plans' => [],
             'plan' => null,
+            'can_create' => false,
+            'conductores' => [],
             'requerimientos' => [],
             'grupos_man_power' => [],
             'servicios' => [],

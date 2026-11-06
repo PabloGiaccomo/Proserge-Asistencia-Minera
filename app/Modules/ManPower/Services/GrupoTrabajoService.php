@@ -4,12 +4,14 @@ namespace App\Modules\ManPower\Services;
 
 use App\Models\GrupoTrabajo;
 use App\Models\GrupoTrabajoDetalle;
+use App\Models\GrupoTrabajoDetalleMovimiento;
 use App\Models\Mina;
 use App\Models\Oficina;
 use App\Models\RQMina;
 use App\Models\RQMinaActividad;
 use App\Models\RQMinaActividadGrupo;
 use App\Models\RQMinaPlan;
+use App\Models\RQProserge;
 use App\Models\RQProsergeDetalle;
 use App\Models\Taller;
 use App\Models\Usuario;
@@ -35,7 +37,12 @@ class GrupoTrabajoService
 
     public function createGrupo(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear') || !$this->policy->manageGrupos($usuario)) {
+        return $this->createAuthorizedGrupo($usuario, $payload, 'crear');
+    }
+
+    private function createAuthorizedGrupo(Usuario $usuario, array $payload, string $action): array
+    {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', $action)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -47,6 +54,10 @@ class GrupoTrabajoService
 
         if (!$this->policy->canAccessMina($usuario, (string) $rqMina->mina_id)) {
             return $this->forbidden('MINA_SCOPE_FORBIDDEN');
+        }
+
+        if (!$this->rqProsergeBelongsToRqMina($rqMina->id, $payload['rq_proserge_id'] ?? null)) {
+            return $this->businessError('MANPOWER_RQ_PROSERGE_MISMATCH', 'El RQ Proserge no pertenece a la parada seleccionada');
         }
 
         if (!$this->dateFitsRqMina($rqMina, (string) $payload['fecha'])) {
@@ -211,6 +222,10 @@ class GrupoTrabajoService
             return $this->businessError('MANPOWER_RQ_MINA_NOT_FOUND', 'Grupo sin RQ Mina valido');
         }
 
+        if (!$this->rqProsergeBelongsToRqMina($grupo->rq_mina_id, $grupo->rq_proserge_id)) {
+            return $this->businessError('MANPOWER_RQ_PROSERGE_MISMATCH', 'El RQ Proserge no pertenece a la parada seleccionada');
+        }
+
         $minaId = (string) optional($grupo->rqMina)->mina_id;
         if ($this->groupHasClosedAttendance($grupo) || $this->hasAsistenciaIniciada($minaId, $grupo->fecha->toDateString())) {
             return $this->businessError('MANPOWER_ASSISTENCIA_LOCKED', 'No se puede modificar integrantes con asistencia cerrada');
@@ -346,7 +361,20 @@ class GrupoTrabajoService
             return $this->businessError('MANPOWER_PERSON_GROUP_CONFLICT', 'El trabajador ya esta asignado en otro turno o en un grupo incompatible de esta fecha');
         }
 
-        $this->addAssignmentToGrupo($grupo, $assignment, $usuario);
+        $result = DB::transaction(function () use ($grupo, $assignment, $usuario): ?array {
+            $locked = GrupoTrabajo::query()->lockForUpdate()->findOrFail($grupo->id);
+            $mine = (string) $locked->rqMina?->mina_id;
+            if ($this->groupHasClosedAttendance($locked) || $this->hasAsistenciaIniciada($mine, $locked->fecha->toDateString())) {
+                return $this->businessError('MANPOWER_ASSISTENCIA_LOCKED', 'No se puede modificar grupo con asistencia cerrada');
+            }
+
+            $this->addAssignmentToGrupo($locked, $assignment, $usuario);
+
+            return null;
+        }, 3);
+        if ($result) {
+            return $result;
+        }
 
         return [
             'ok' => true,
@@ -429,14 +457,16 @@ class GrupoTrabajoService
             return $this->businessError('MANPOWER_PERSON_NOT_IN_GROUP', 'Personal no pertenece al grupo');
         }
 
-        DB::transaction(function () use ($detalle, $usuario): void {
-            if ($detalle->rq_proserge_detalle_id) {
-                $this->markDetalleRetired($detalle, $usuario, 'Retirado desde Man Power');
-            } else {
+        DB::transaction(function () use ($grupo, $detalle, $usuario): void {
+            $detalle = GrupoTrabajoDetalle::query()->where('grupo_trabajo_id', $grupo->id)->lockForUpdate()->findOrFail($detalle->id);
+            if (!$detalle->isDistribucionActiva()) {
+                return;
+            }
+            $this->markDetalleRetired($detalle, $usuario, 'Retirado desde Man Power');
+            $hasTransportHistory = $this->transportePlanningService->retireActivePassengersForDetails($usuario, collect([$detalle]));
+            if (!$detalle->rq_proserge_detalle_id && !$hasTransportHistory && !$detalle->asistenciaDetalles()->exists()) {
                 $detalle->delete();
             }
-
-            $this->transportePlanningService->retireActivePassengerForDetail($usuario, $detalle->id);
         });
 
         return [
@@ -461,9 +491,13 @@ class GrupoTrabajoService
             return $this->businessError('MANPOWER_PERSON_NOT_IN_GROUP', 'Integrante no pertenece al grupo');
         }
 
-        DB::transaction(function () use ($detalle, $usuario, $motivo): void {
+        DB::transaction(function () use ($grupo, $detalle, $usuario, $motivo): void {
+            $detalle = GrupoTrabajoDetalle::query()->where('grupo_trabajo_id', $grupo->id)->lockForUpdate()->findOrFail($detalle->id);
+            if (!$detalle->isDistribucionActiva()) {
+                return;
+            }
             $this->markDetalleRetired($detalle, $usuario, $motivo);
-            $this->transportePlanningService->retireActivePassengerForDetail($usuario, $detalle->id);
+            $this->transportePlanningService->retireActivePassengersForDetails($usuario, collect([$detalle]));
         });
 
         return [
@@ -483,7 +517,7 @@ class GrupoTrabajoService
             return $this->businessError('MANPOWER_DESTINATION_GROUP_NOT_FOUND', 'Grupo destino no encontrado o sin acceso');
         }
 
-        if ($origen->rq_mina_id !== $destino->rq_mina_id || !$origen->fecha->isSameDay($destino->fecha)) {
+        if ($origen->id === $destino->id || $origen->rq_mina_id !== $destino->rq_mina_id || !$origen->fecha->isSameDay($destino->fecha)) {
             return $this->businessError('MANPOWER_RELOCATE_CONTEXT_MISMATCH', 'La reubicacion debe ser en la misma parada y fecha');
         }
 
@@ -503,6 +537,10 @@ class GrupoTrabajoService
                 throw new \RuntimeException('MANPOWER_PERSON_GROUP_CONFLICT');
             }
 
+            if (!$detalle->isDistribucionActiva()) {
+                throw new \RuntimeException('MANPOWER_PERSON_NOT_IN_GROUP');
+            }
+            $originState = $detalle->estado_distribucion ?? GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO;
             $detalle->fill($this->filterColumns('grupo_trabajo_detalle', [
                 'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_REUBICADO,
                 'retirado_por_id' => $usuario->id,
@@ -510,14 +548,23 @@ class GrupoTrabajoService
                 'motivo_retiro' => $motivo,
             ]));
             $detalle->save();
-            $this->transportePlanningService->retireActivePassengerForDetail($usuario, $detalle->id, 'INTEGRANTE_RETIRADO_DE_MAN_POWER');
+            $this->appendMovement($detalle, [
+                'tipo' => 'REUBICACION', 'origen' => 'MAN_POWER', 'actor_id' => $usuario->id,
+                'grupo_destino_id' => $destino->id, 'estado_anterior' => $originState,
+                'asignacion_anterior_id' => $detalle->rq_proserge_detalle_id, 'asignacion_nueva_id' => null,
+                'motivo' => $motivo,
+            ]);
 
             $existingInDestino = GrupoTrabajoDetalle::query()
                 ->where('grupo_trabajo_id', $destino->id)
                 ->where('personal_id', $detalle->personal_id)
+                ->lockForUpdate()
                 ->first();
 
+            $destinationState = $existingInDestino?->estado_distribucion;
+            $previousAssignment = $existingInDestino?->rq_proserge_detalle_id;
             if ($existingInDestino) {
+                $this->preserveLegacyExit($existingInDestino);
                 $existingInDestino->fill($this->filterColumns('grupo_trabajo_detalle', [
                     'rq_proserge_detalle_id' => $detalle->rq_proserge_detalle_id,
                     'puesto_asignado_snapshot' => $detalle->puesto_asignado_snapshot,
@@ -525,12 +572,15 @@ class GrupoTrabajoService
                     'tipo_asignacion_snapshot' => $detalle->tipo_asignacion_snapshot,
                     'estado_habilitacion_snapshot' => $detalle->estado_habilitacion_snapshot,
                     'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO,
+                    'retirado_por_id' => null,
+                    'retirado_at' => null,
+                    'motivo_retiro' => null,
                     'estado_asistencia' => 'AUSENTE',
                     'observaciones' => null,
                 ]));
                 $existingInDestino->save();
             } else {
-                GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
+                $existingInDestino = GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
                     'id' => (string) Str::uuid(),
                     'grupo_trabajo_id' => $destino->id,
                     'personal_id' => $detalle->personal_id,
@@ -546,10 +596,19 @@ class GrupoTrabajoService
                     'observaciones' => null,
                 ]));
             }
+            $this->appendMovement($existingInDestino, [
+                'tipo' => 'INGRESO_REUBICADO', 'origen' => 'MAN_POWER', 'actor_id' => $usuario->id,
+                'estado_anterior' => $destinationState, 'asignacion_anterior_id' => $previousAssignment,
+                'motivo' => $motivo,
+            ]);
+            $this->transportePlanningService->retireActivePassengersForDetails($usuario, collect([$detalle]));
             });
         } catch (\RuntimeException $exception) {
             if ($exception->getMessage() === 'MANPOWER_PERSON_GROUP_CONFLICT') {
                 return $this->businessError('MANPOWER_PERSON_GROUP_CONFLICT', 'Personal ya pertenece a otro grupo incompatible');
+            }
+            if ($exception->getMessage() === 'MANPOWER_PERSON_NOT_IN_GROUP') {
+                return $this->businessError('MANPOWER_PERSON_NOT_IN_GROUP', 'El integrante ya no está activo en el grupo de origen');
             }
 
             throw $exception;
@@ -560,16 +619,19 @@ class GrupoTrabajoService
 
     public function copyGrupo(Usuario $usuario, GrupoTrabajo $grupo, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar') && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar')) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
-        if (!$this->policy->manageGrupo($usuario, $grupo)) {
+        if (!$grupo->rqMina || !$this->policy->canAccessMina($usuario, $grupo->rqMina->mina_id)) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
         $grupo->loadMissing(['detalle.rqProsergeDetalle', 'actividades', 'rqMina']);
         $copiarIntegrantes = (bool) ($payload['copiar_integrantes'] ?? true);
+        if ($copiarIntegrantes && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar')) {
+            return $this->forbidden('MANPOWER_FORBIDDEN');
+        }
         $copiados = [];
         $omitidos = [];
         $assignmentIds = [];
@@ -601,7 +663,7 @@ class GrupoTrabajoService
             ? $grupo->supervisor_id
             : null;
 
-        $result = $this->createGrupo($usuario, [
+        $result = $this->createAuthorizedGrupo($usuario, [
             'rq_mina_id' => $grupo->rq_mina_id,
             'rq_proserge_id' => $grupo->rq_proserge_id,
             'rq_mina_plan_id' => $payload['rq_mina_plan_id'] ?? $grupo->rq_mina_plan_id,
@@ -623,7 +685,7 @@ class GrupoTrabajoService
             'observacion_planificacion' => $grupo->observacion_planificacion,
             'justificacion_brecha' => $grupo->justificacion_brecha,
             'rq_proserge_detalle_ids' => $assignmentIds,
-        ]);
+        ], 'duplicar');
 
         $result['copiados'] = $copiados;
         $result['omitidos'] = $omitidos;
@@ -633,12 +695,13 @@ class GrupoTrabajoService
 
     public function copyDayGroups(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar') && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar')) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
         $rqMina = RQMina::query()->find($payload['rq_mina_id']);
-        if (!$rqMina || !$this->policy->manageGrupos($usuario)) {
+        if (!$rqMina || !$this->policy->canAccessMina($usuario, $rqMina->mina_id)
+            || (($payload['copiar_integrantes'] ?? true) && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar'))) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -684,6 +747,7 @@ class GrupoTrabajoService
                 $membersSkipped = 0;
                 $groupsSkipped = 0;
                 $groupsReplaced = 0;
+                $retiredDetails = collect();
                 $overwriteDestination = (bool) ($payload['sobrescribir_destino'] ?? true);
 
                 if ($overwriteDestination) {
@@ -705,15 +769,17 @@ class GrupoTrabajoService
                         $destinationGroupsQuery->whereHas('actividades', fn ($query) => $query->where('rq_mina_actividades.id', $destinationActivityId));
                     }
 
-                    $destinationGroups = $destinationGroupsQuery->lockForUpdate()->get();
+                    $destinationGroups = $destinationGroupsQuery->orderBy('id')->lockForUpdate()->get();
+                    $detailsByGroup = GrupoTrabajoDetalle::query()
+                        ->whereIn('grupo_trabajo_id', $destinationGroups->modelKeys())
+                        ->orderBy('id')->lockForUpdate()->get()->groupBy('grupo_trabajo_id');
+                    if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar')
+                        && $detailsByGroup->flatten()->contains(fn ($detail) => $detail->isDistribucionActiva())) {
+                        throw new \Illuminate\Auth\Access\AuthorizationException('Necesitas permiso de asignación para reemplazar grupos con integrantes.');
+                    }
 
                     foreach ($destinationGroups as $destinationGroup) {
-                        $destinationDetails = GrupoTrabajoDetalle::query()
-                            ->where('grupo_trabajo_id', $destinationGroup->id)
-                            ->lockForUpdate()
-                            ->get();
-
-                        foreach ($destinationDetails as $detalle) {
+                        foreach ($detailsByGroup->get($destinationGroup->id, []) as $detalle) {
                             if (!$detalle->isDistribucionActiva()) {
                                 continue;
                             }
@@ -723,11 +789,7 @@ class GrupoTrabajoService
                                 $usuario,
                                 'Reemplazado al pegar los grupos del '.$payload['fecha_origen']
                             );
-                            $this->transportePlanningService->retireActivePassengerForDetail(
-                                $usuario,
-                                $detalle->id,
-                                'GRUPO_REEMPLAZADO_AL_PEGAR_DIA'
-                            );
+                            $retiredDetails->push($detalle);
                         }
 
                         $destinationGroup->fill([
@@ -794,6 +856,8 @@ class GrupoTrabajoService
                     $membersSkipped += count($result['omitidos'] ?? []);
                 }
 
+                $this->transportePlanningService->retireActivePassengersForDetails($usuario, $retiredDetails, 'GRUPO_REEMPLAZADO_AL_PEGAR_DIA');
+
                 return [
                     'ok' => true,
                     'grupos_copiados' => $groupsCopied,
@@ -810,12 +874,13 @@ class GrupoTrabajoService
 
     public function copyDayGroupsToRange(Usuario $usuario, array $payload): array
     {
-        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar') && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'crear')) {
+        if (!PermissionMatrix::userCanDirect($usuario, 'man_power', 'duplicar')) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
         $rqMina = RQMina::query()->find($payload['rq_mina_id']);
-        if (!$rqMina || !$this->policy->manageGrupos($usuario)) {
+        if (!$rqMina || !$this->policy->canAccessMina($usuario, $rqMina->mina_id)
+            || (($payload['copiar_integrantes'] ?? true) && !PermissionMatrix::userCanDirect($usuario, 'man_power', 'asignar'))) {
             return $this->forbidden('MANPOWER_FORBIDDEN');
         }
 
@@ -937,34 +1002,28 @@ class GrupoTrabajoService
                 $groupsQuery->whereNull('rq_mina_plan_id');
             }
 
-            $groups = $groupsQuery->with('asistencia:id,grupo_trabajo_id,estado')->lockForUpdate()->get();
+            $groups = $groupsQuery->orderBy('id')->lockForUpdate()->get();
             if ($groups->isEmpty()) {
                 return $this->businessError('MANPOWER_DAY_CANCEL_EMPTY', 'No hay grupos preparados para eliminar en este dia');
             }
 
+            $detailsByGroup = GrupoTrabajoDetalle::query()
+                ->whereIn('grupo_trabajo_id', $groups->modelKeys())
+                ->orderBy('id')->lockForUpdate()->get()->groupBy('grupo_trabajo_id');
+            $groups->load('asistencia:id,grupo_trabajo_id,estado');
             if ($groups->contains(fn (GrupoTrabajo $group): bool => $group->asistencia !== null)) {
                 return $this->businessError('MANPOWER_ASSISTENCIA_LOCKED', 'No se pueden eliminar grupos que ya tienen asistencia registrada');
             }
 
-            $membersRetired = 0;
+            $retiredDetails = collect();
             foreach ($groups as $group) {
-                $details = GrupoTrabajoDetalle::query()
-                    ->where('grupo_trabajo_id', $group->id)
-                    ->lockForUpdate()
-                    ->get();
-
-                foreach ($details as $detail) {
+                foreach ($detailsByGroup->get($group->id, []) as $detail) {
                     if (!$detail->isDistribucionActiva()) {
                         continue;
                     }
 
                     $this->markDetalleRetired($detail, $usuario, 'Grupo cancelado desde la seleccion diaria de Man Power');
-                    $this->transportePlanningService->retireActivePassengerForDetail(
-                        $usuario,
-                        $detail->id,
-                        'GRUPO_CANCELADO_DESDE_MAN_POWER'
-                    );
-                    $membersRetired++;
+                    $retiredDetails->push($detail);
                 }
 
                 $group->fill([
@@ -973,10 +1032,12 @@ class GrupoTrabajoService
                 ])->save();
             }
 
+            $this->transportePlanningService->retireActivePassengersForDetails($usuario, $retiredDetails, 'GRUPO_CANCELADO_DESDE_MAN_POWER');
+
             return [
                 'ok' => true,
                 'grupos_cancelados' => $groups->count(),
-                'integrantes_retirados' => $membersRetired,
+                'integrantes_retirados' => $retiredDetails->count(),
             ];
         });
     }
@@ -987,7 +1048,11 @@ class GrupoTrabajoService
             return null;
         }
 
-        return $this->loadGrupo($grupo);
+        return $this->loadGrupo($grupo)->load([
+            'movimientos.personal:id,nombre_completo',
+            'movimientos.actor:id,personal_id,email',
+            'movimientos.actor.personal:id,nombre_completo',
+        ]);
     }
 
     public function listForUser(Usuario $usuario, array $filters): array
@@ -1067,6 +1132,14 @@ class GrupoTrabajoService
         return $result['ok'] ?? false
             ? ['success' => true, 'message' => 'Personal removido']
             : ['success' => false, 'message' => $result['message'] ?? 'Error'];
+    }
+
+    private function rqProsergeBelongsToRqMina(string $rqMinaId, ?string $rqProsergeId): bool
+    {
+        return $rqProsergeId === null || $rqProsergeId === '' || RQProserge::query()
+            ->where('rq_mina_id', $rqMinaId)
+            ->whereKey($rqProsergeId)
+            ->exists();
     }
 
     private function resolveAssignments(string $rqMinaId, string $fecha, array $payload): array
@@ -1177,30 +1250,23 @@ class GrupoTrabajoService
         $desiredIds = $assignmentItems->pluck('id')->all();
         $existing = GrupoTrabajoDetalle::query()
             ->where('grupo_trabajo_id', $grupo->id)
+            ->orderBy('id')->lockForUpdate()
             ->get();
 
         foreach ($existing as $detalle) {
             $currentId = $detalle->rq_proserge_detalle_id;
-            if ($currentId && in_array($currentId, $desiredIds, true)) {
+            if (!$detalle->isDistribucionActiva() || ($currentId && in_array($currentId, $desiredIds, true))) {
                 continue;
             }
 
-            if ($detalle->rq_proserge_detalle_id) {
-                $this->markDetalleRetired($detalle, $usuario, 'Actualizacion de grupo');
-            } else {
+            $this->markDetalleRetired($detalle, $usuario, 'Actualizacion de grupo');
+            if (!$currentId && !$detalle->asistenciaDetalles()->exists() && !$detalle->serviciosTransporte()->exists()) {
                 $detalle->delete();
             }
         }
 
         foreach ($assignmentItems as $assignment) {
-            $exists = GrupoTrabajoDetalle::query()
-                ->where('grupo_trabajo_id', $grupo->id)
-                ->where('rq_proserge_detalle_id', $assignment->id)
-                ->exists();
-
-            if (!$exists) {
-                $this->addAssignmentToGrupo($grupo, $assignment, $usuario);
-            }
+            $this->addAssignmentToGrupo($grupo, $assignment, $usuario);
         }
     }
 
@@ -1209,9 +1275,17 @@ class GrupoTrabajoService
         $existingRetired = GrupoTrabajoDetalle::query()
             ->where('grupo_trabajo_id', $grupo->id)
             ->where('personal_id', $assignment->personal_id)
+            ->lockForUpdate()
             ->first();
 
         if ($existingRetired) {
+            if ($existingRetired->isDistribucionActiva() && $existingRetired->rq_proserge_detalle_id === $assignment->id) {
+                return;
+            }
+            $previousAssignment = $existingRetired->rq_proserge_detalle_id;
+            $previousState = $existingRetired->estado_distribucion ?? GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO;
+            $kind = $existingRetired->isDistribucionActiva() ? 'REASIGNACION' : 'REINGRESO';
+            $this->preserveLegacyExit($existingRetired);
             $existingRetired->fill($this->filterColumns('grupo_trabajo_detalle', [
                 'rq_proserge_detalle_id' => $assignment->id,
                 'puesto_asignado_snapshot' => $assignment->puesto_asignado_snapshot ?: $assignment->puesto_asignado ?: $assignment->personal?->puesto,
@@ -1226,11 +1300,15 @@ class GrupoTrabajoService
                 'motivo_retiro' => null,
             ]));
             $existingRetired->save();
+            $this->appendMovement($existingRetired, [
+                'tipo' => $kind, 'origen' => 'RQ_PROSERGE', 'actor_id' => $usuario->id,
+                'estado_anterior' => $previousState, 'asignacion_anterior_id' => $previousAssignment,
+            ]);
 
             return;
         }
 
-        GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
+        $detalle = GrupoTrabajoDetalle::query()->create($this->filterColumns('grupo_trabajo_detalle', [
             'id' => (string) Str::uuid(),
             'grupo_trabajo_id' => $grupo->id,
             'personal_id' => $assignment->personal_id,
@@ -1245,10 +1323,12 @@ class GrupoTrabajoService
             'estado_asistencia' => 'AUSENTE',
             'observaciones' => null,
         ]));
+        $this->appendMovement($detalle, ['tipo' => 'ASIGNACION', 'origen' => 'RQ_PROSERGE', 'actor_id' => $usuario->id]);
     }
 
     private function markDetalleRetired(GrupoTrabajoDetalle $detalle, Usuario $usuario, string $motivo): void
     {
+        $previousState = $detalle->estado_distribucion ?? GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_ASIGNADO;
         $detalle->fill($this->filterColumns('grupo_trabajo_detalle', [
             'estado_distribucion' => GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_RETIRADO,
             'retirado_por_id' => $usuario->id,
@@ -1256,6 +1336,38 @@ class GrupoTrabajoService
             'motivo_retiro' => $motivo,
         ]));
         $detalle->save();
+        $this->appendMovement($detalle, [
+            'tipo' => 'RETIRO', 'origen' => 'MAN_POWER', 'actor_id' => $usuario->id,
+            'estado_anterior' => $previousState, 'asignacion_anterior_id' => $detalle->rq_proserge_detalle_id,
+            'asignacion_nueva_id' => null, 'motivo' => $motivo,
+        ]);
+    }
+
+    private function preserveLegacyExit(GrupoTrabajoDetalle $detalle): void
+    {
+        if ($detalle->isDistribucionActiva() || $detalle->movimientos()->where('estado_nuevo', $detalle->estado_distribucion)->exists()) {
+            return;
+        }
+
+        $this->appendMovement($detalle, [
+            'tipo' => $detalle->estado_distribucion === GrupoTrabajoDetalle::ESTADO_DISTRIBUCION_REUBICADO ? 'REUBICACION' : 'RETIRO',
+            'origen' => 'LEGADO', 'actor_id' => $detalle->retirado_por_id,
+            'asignacion_anterior_id' => $detalle->rq_proserge_detalle_id, 'asignacion_nueva_id' => null,
+            'motivo' => $detalle->motivo_retiro, 'ocurrido_at' => $detalle->retirado_at,
+        ]);
+    }
+
+    private function appendMovement(GrupoTrabajoDetalle $detalle, array $movement): void
+    {
+        GrupoTrabajoDetalleMovimiento::query()->create([
+            'grupo_trabajo_id' => $detalle->grupo_trabajo_id,
+            'grupo_trabajo_detalle_id' => $detalle->id,
+            'personal_id' => $detalle->personal_id,
+            'estado_nuevo' => $detalle->estado_distribucion,
+            'asignacion_nueva_id' => $detalle->rq_proserge_detalle_id,
+            'ocurrido_at' => now(),
+            ...$movement,
+        ]);
     }
 
     private function attachActivities(GrupoTrabajo $grupo, array $activityIds, array $quantities): void

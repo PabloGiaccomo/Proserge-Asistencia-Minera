@@ -34,6 +34,72 @@ pertenece a la parada, se rechaza y se vuelve al plan valido.
 El guardado de plan operativo incluye `plan_id` como campo oculto para que el
 backend reemplace solo los grupos del plan seleccionado.
 
+## Guardado y recuperacion del editor web
+
+El editor carga los datos guardados en el sistema. Cuando hay una copia
+pendiente del mismo usuario y plan, ofrece recuperarla o descartarla. La
+recuperacion exige que la copia parta de los mismos datos que muestra el
+servidor. Las copias anteriores sin identificacion de usuario quedan fuera
+de la recuperacion. Tras un guardado confirmado se limpia la copia enviada.
+
+Ante un error, el formulario recupera tambien los datos completos enviados
+para la misma parada y plan desde la sesion, aunque el almacenamiento local
+del navegador falle. Conserva la revision enviada y marca esos datos como
+pendientes. Una copia recuperada no adopta una revision mas reciente del
+servidor: un conflicto exige revisar los cambios antes de volver a guardar.
+
+La grilla genera una fila por fecha del plan seleccionado, desde el inicio
+hasta el fin, ambos incluidos. Al crearse, el plan inicial toma las fechas de
+la parada. Los planes con un intervalo propio muestran su rango guardado.
+La fecha se muestra con su día, por ejemplo `7/11 sáb`. Cada cantidad nueva
+o modificada se guarda en esa fecha, incluso si el plan abarca varios sábados.
+
+Las cantidades semanales anteriores sirven de referencia cuando la fecha no
+tiene un turno propio. El editor conserva esos registros de origen y prioriza
+los turnos ya fechados. Las celdas de ejecución se muestran en su fecha
+registrada. Las filas nuevas vacías sirven de guía en la pantalla y sólo se
+guardan cuando se edita la programación de esa fecha.
+Los registros anteriores fuera del intervalo o con fechas repetidas se
+conservan. La grilla editable muestra una fila por fecha del intervalo.
+
+El programa se envía en un campo JSON para que las filas por fecha no agoten
+el límite de campos del formulario PHP. El servidor conserva la recuperación
+de datos y rechaza envíos incompletos o ilegibles.
+
+Al crear o editar los datos generales, la fecha de fin debe ser igual o
+posterior a la de inicio. El formulario conserva los campos enviados y
+muestra los errores para permitir su correccion. Para acortar una parada,
+sus planes guardados deben caber en el nuevo rango.
+
+## Pedido de personal y atencion de RR. HH.
+
+El primer guardado web con un cargo y una cantidad positiva registra el pedido
+en RQ Proserge dentro de la misma transaccion. El usuario necesita permiso de
+guardado y el permiso vigente `rq_mina,enviar` para iniciar la atencion. Con
+permiso de guardado solamente, el pedido queda en preparacion. Guardar sin
+cargos conserva la parada sin generar un puesto de personal ficticio.
+
+El estado interno `ENVIADO` se presenta como pedido registrado en RR. HH. El
+envio explicito sigue disponible para integraciones API y requiere cargos reales.
+Los usuarios que tienen permiso de envio y consulta, sin acceso al guardado del
+plan, pueden revisar y registrar el pedido ya guardado desde el detalle.
+El editor web verifica la revision de la parada, el pedido y el plan antes de
+escribir. Si otra sesion guardo cambios, conserva la version del sistema y deja
+la copia local pendiente de revision.
+
+La reduccion de cantidad cuenta solo asignaciones activas y registra el retiro
+del excedente sin borrar su historial. Si el retiro afectaria una distribucion
+activa o una asignacion con asistencia, se rechaza el cambio. Un cargo con
+historial requiere revision con RR. HH. antes de retirarlo del pedido.
+
+La pantalla mantiene el contexto y el selector del plan, con las acciones
+administrativas en una seccion desplegable. Guardar queda visible antes del
+editor y al final del formulario. Crear, duplicar, editar datos o archivar un
+plan requiere guardar primero los cambios pendientes del programa. El titulo
+del programa muestra el rango de semanas del plan seleccionado.
+El programa distingue el area operativa del grupo y el area de cada actividad;
+las acciones para agregar y quitar usan siempre el nombre grupo / frente.
+
 ## Plan inicial y compatibilidad legacy
 
 `RQMinaPlanService::ensureDefaultPlan()` crea o retorna el plan inicial:
@@ -104,11 +170,10 @@ registro: `rq_mina_actividad_transporte_eventos` sigue apuntando al mismo
 `transporte_id` y la carpeta de documentos no cambia de dueno.
 
 Si el payload **no** trae ids (payload legacy o cliente antiguo), el guardado
-conserva igualmente la atencion de Logistica: origen, placas, capacidad del
-camion, documentos, estado logistico, incidencias y recepcion. La logica vive en
-`RQMinaService::reservarDatosLogisticos()` y
-`aplicarDatosLogisticosReservados()`, que emparejan cada requerimiento nuevo por
-posicion dentro del grupo y por firma `alcance + unidad de carga`.
+recupera el grupo por nombre unico y la actividad por SAIT unico. Un transporte
+solo recupera su identidad si la firma `alcance + unidad de carga` es unica
+dentro del mismo grupo. Asi conserva la misma fila, sus eventos y su atencion.
+Una coincidencia ambigua no permite sustituir una fila con evidencia.
 
 Los documentos se entregan al modelo como una lista de metadatos con `path`;
 Eloquent serializa esa lista una sola vez mediante el cast `array`. El rescate
@@ -117,12 +182,16 @@ codifico dos veces. Dos guardados consecutivos sin ids conservan las mismas
 rutas y metadatos: no se mueven ni borran los archivos privados. Esta correccion
 no ejecuta una reparacion masiva de registros existentes.
 
-Quitar del plan un requerimiento ya atendido borra su placa, documentos y
-recepcion. Para evitarlo sin bloquear la operacion, el editor muestra un aviso
-`Logistica: <estado>` con placa y recepcion, y pide confirmacion antes de
-quitarlo.
+El editor impide quitar un transporte con atencion y explica que su retiro debe
+revisarse con Logistica. El backend rechaza tambien la omision directa de filas
+con placas, documentos, recepcion o eventos, y el retiro de grupos o actividades
+vinculados a Man Power, ejecucion o transporte. Toda la operacion se revierte
+para conservar las filas y su historial.
 
-El editor del plan registra ademas la estructura que consumen Logistica y Transporte operativo: `tipo_transporte` (`PERSONAL`/`CARGA`), `turno` (`A`, `B` o vacio = ambos turnos) y `cantidad_unidades_requeridas` / `capacidad_requerida`. Un requerimiento sin estructura se sigue mostrando como `TRANSPORTE LEGACY SIN ESTRUCTURA COMPLETA`.
+Logistica bloquea primero la parada y relee el transporte dentro de la misma
+transaccion antes de actualizarlo. El editor del plan usa el mismo orden de
+bloqueo, evitando guardar contra una fila retirada o auditar un estado anterior
+obsoleto.
 
 El editor del plan registra ademas la estructura que consumen Logistica y Transporte operativo: `tipo_transporte` (`PERSONAL`/`CARGA`), `turno` (`A`, `B` o vacio = ambos turnos) y `cantidad_unidades_requeridas` / `capacidad_requerida`. Un requerimiento sin estructura se sigue mostrando como `TRANSPORTE LEGACY SIN ESTRUCTURA COMPLETA`.
 
@@ -182,3 +251,25 @@ con pruebas de aislamiento entre planes.
 - No se agregaron notificaciones por cambios de plan.
 - No se implementaron KPI transversales.
 - No se elimino `rq_mina_id` de `rq_mina_actividad_grupos` por compatibilidad.
+
+## Validacion local de las correcciones del 2026-11-04
+
+- RQ Mina: 92 pruebas PHP, 531 aserciones, incluidas transaccion RR. HH.,
+  conflictos de revision, permisos, recuperacion, fechas e historial logistico.
+- Integraciones RQ Proserge, Man Power, Transporte, Logistica y herramientas:
+  111 pruebas PHP, 647 aserciones.
+- Editor: 21 pruebas Node de calendario, copia local y administracion de planes.
+- Navegador Chrome: 55 comprobaciones con vistas Blade actuales y datos
+  sinteticos, en 1440 x 900 y 390 x 900, sin errores JavaScript ni desbordamiento
+  horizontal del documento. Las tablas amplias conservan desplazamiento interno.
+- Sintaxis PHP, Pint de los tests y archivos nuevos, `view:cache` y
+  `git diff --check` correctos.
+
+Las pruebas MySQL usaron una instancia MariaDB aislada en 127.0.0.1:13376 con
+la base `proserge_app_test`; las pruebas reducidas usan SQLite en memoria.
+El navegador no envio escrituras HTTP ni uso datos reales. No sustituye una
+prueba tactil ni la comprobacion operativa en el servidor desplegado.
+
+Las correcciones quedan en local, sin despliegue FTP ni migraciones nuevas.
+Los estilos y scripts de esta entrega viven en Blade; no se modificaron fuentes
+compilables de Vite y no se requirio reconstruir assets por estas correcciones.

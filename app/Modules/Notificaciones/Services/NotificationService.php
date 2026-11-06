@@ -5,21 +5,20 @@ namespace App\Modules\Notificaciones\Services;
 use App\Models\NotificationEvent;
 use App\Models\NotificationRecipient;
 use App\Models\NotificationType;
+use App\Modules\Notificaciones\Policies\NotificacionesPolicy;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class NotificationService
 {
-    public function __construct(private readonly NotificationRecipientResolverService $recipientResolver)
-    {
-    }
+    public function __construct(private readonly NotificationRecipientResolverService $recipientResolver, private readonly NotificacionesPolicy $policy) {}
 
     public function emit(string $typeCode, array $context = []): ?NotificationEvent
     {
-        if (!$this->notificationTablesReady()) {
+        if (! $this->notificationTablesReady()) {
             Log::warning('notificaciones.emit_tables_not_ready', [
                 'type_code' => $typeCode,
             ]);
@@ -41,7 +40,7 @@ class NotificationService
             ->where('is_active', true)
             ->first();
 
-        if (!$type) {
+        if (! $type) {
             Log::warning('notificaciones.type_not_found_or_inactive', [
                 'type_code' => $typeCode,
             ]);
@@ -50,7 +49,7 @@ class NotificationService
         }
 
         $priority = strtolower((string) ($context['priority'] ?? $type->default_priority ?? 'medium'));
-        if (!in_array($priority, ['low', 'medium', 'high', 'critical'], true)) {
+        if (! in_array($priority, ['low', 'medium', 'high', 'critical'], true)) {
             $priority = 'medium';
         }
 
@@ -66,6 +65,13 @@ class NotificationService
         }
 
         $payload = $context['payload'] ?? [];
+        unset($payload['_notification_access']);
+        $requirement = $this->policy->contextRequirement($type, $context);
+        if ($requirement) {
+            $payload['_notification_access'] = $requirement;
+        }
+        $mineId = $this->policy->resolveMineId($context);
+        $context['mine_id'] = $mineId !== '' ? $mineId : null;
         $entityId = isset($context['entity_id']) ? (string) $context['entity_id'] : null;
 
         $title = (string) ($context['title'] ?? $type->default_title);
@@ -167,7 +173,7 @@ class NotificationService
 
     private function compileRouteTemplate(?string $template, ?string $entityId, array $payload): ?string
     {
-        if (!$template) {
+        if (! $template) {
             return null;
         }
 
@@ -177,10 +183,10 @@ class NotificationService
         }
 
         foreach ($payload as $key => $value) {
-            if (!is_scalar($value)) {
+            if (! is_scalar($value)) {
                 continue;
             }
-            $route = str_replace('{' . $key . '}', (string) $value, $route);
+            $route = str_replace('{'.$key.'}', (string) $value, $route);
         }
 
         return $route;

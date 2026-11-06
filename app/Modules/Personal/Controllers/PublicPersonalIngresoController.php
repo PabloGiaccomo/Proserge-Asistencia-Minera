@@ -170,7 +170,6 @@ class PublicPersonalIngresoController extends Controller
         $rules['fields.estado_civil_otro'] = ['required_if:fields.estado_civil,Otro', 'nullable', 'string', 'max:120'];
         $rules['fields.nacionalidad_otra'] = ['required_if:fields.nacionalidad,Otra', 'nullable', 'string', 'max:120'];
         $rules['fields.pais_nacimiento_otro'] = ['required_if:fields.pais_nacimiento,Otro', 'nullable', 'string', 'max:120'];
-        $rules['fields.lugar_nacimiento_extranjero'] = ['required_if:fields.pais_nacimiento,Otro', 'nullable', 'string', 'max:191'];
         $rules['fields.domicilio_pais_otro'] = ['required_if:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:120'];
         $rules['fields.domicilio_direccion'] = ['required_unless:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:2000'];
         $rules['fields.domicilio_extranjero'] = ['required_if:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:2000'];

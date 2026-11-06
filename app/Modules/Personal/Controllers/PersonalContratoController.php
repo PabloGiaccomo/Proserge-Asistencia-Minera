@@ -146,7 +146,7 @@ class PersonalContratoController extends WebPageController
         ]);
 
         try {
-            $this->contratoService->uploadSignedFileForContract(
+            $signed = $this->contratoService->uploadSignedFileForContract(
                 $personal,
                 $contract,
                 $validated['contrato_pdf'],
@@ -160,7 +160,27 @@ class PersonalContratoController extends WebPageController
 
         return redirect()
             ->route('personal.contratos.index', $personal->id)
-            ->with('success', 'Contrato firmado subido correctamente.');
+            ->with('success', $signed->estado === PersonalContrato::ESTADO_PREPARACION
+                ? 'PDF guardado. Podrás activar el contrato al llegar su fecha de inicio.'
+                : 'Contrato firmado subido correctamente.');
+    }
+
+    public function activateSignedContract(Request $request, string $id, string $contractId): RedirectResponse
+    {
+        $data = $request->validate(['revision' => ['required', 'string', 'size:64']]);
+        $personal = $this->personalService->find($id);
+        abort_if(!$personal, 404);
+        $contract = $this->contratoService->findForPersonal($personal, $contractId);
+        abort_if(!$contract, 404);
+
+        $back = redirect()->route('personal.contratos.index', $id);
+        try {
+            $this->contratoService->activatePreparedSignedContract($personal, $contract, $this->requireAuthenticatedUser(), $data['revision']);
+        } catch (ValidationException $exception) {
+            return $back->with('error', collect($exception->errors())->flatten()->first());
+        }
+
+        return $back->with('success', 'Contrato firmado activado.');
     }
 
     public function update(Request $request, string $id, string $contractId): RedirectResponse

@@ -4,21 +4,24 @@ namespace App\Modules\Notificaciones\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\NotificationRecipient;
+use App\Modules\Notificaciones\Policies\NotificacionesPolicy;
 use App\Modules\Notificaciones\Services\NotificationInboxService;
 use App\Shared\Support\ApiResponse;
 use Illuminate\Http\Request;
 
 class NotificacionController extends Controller
 {
-    public function __construct(private readonly NotificationInboxService $inbox)
-    {
-    }
+    public function __construct(private readonly NotificationInboxService $inbox, private readonly NotificacionesPolicy $policy) {}
 
     public function index(Request $request)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return ApiResponse::error('No autenticado', 'AUTH_REQUIRED', status: 401);
+        }
+
+        if (! $this->policy->canUse($user)) {
+            return ApiResponse::error('No tienes permiso para consultar notificaciones.', 'NOTIFICATIONS_FORBIDDEN', status: 403);
         }
 
         $filters = $request->only(['status', 'module', 'priority', 'mine_id', 'q']);
@@ -39,8 +42,12 @@ class NotificacionController extends Controller
     public function unreadCount(Request $request)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return ApiResponse::error('No autenticado', 'AUTH_REQUIRED', status: 401);
+        }
+
+        if (! $this->policy->canUse($user)) {
+            return ApiResponse::error('No tienes permiso para consultar notificaciones.', 'NOTIFICATIONS_FORBIDDEN', status: 403);
         }
 
         return ApiResponse::success([
@@ -51,25 +58,35 @@ class NotificacionController extends Controller
     public function markRead(Request $request, string $recipientId)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return ApiResponse::error('No autenticado', 'AUTH_REQUIRED', status: 401);
         }
 
+        if (! $this->policy->canUse($user, 'actualizar')) {
+            return ApiResponse::error('No tienes permiso para actualizar notificaciones.', 'NOTIFICATIONS_FORBIDDEN', status: 403);
+        }
+
         $recipient = $this->findRecipientForUser((string) $user->id, $recipientId);
-        if (!$recipient) {
+        if (! $recipient) {
             return ApiResponse::error('Notificacion no encontrada', 'NOTIFICATION_NOT_FOUND', status: 404);
         }
 
         $this->inbox->markAsRead($recipient);
 
-        return ApiResponse::success($recipient->fresh(['event']), 'Notificacion marcada como leida');
+        $result = $recipient->fresh($this->policy->canUse($user) ? ['event'] : []);
+
+        return ApiResponse::success($result, 'Notificacion marcada como leida');
     }
 
     public function markAllRead(Request $request)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return ApiResponse::error('No autenticado', 'AUTH_REQUIRED', status: 401);
+        }
+
+        if (! $this->policy->canUse($user, 'actualizar')) {
+            return ApiResponse::error('No tienes permiso para actualizar notificaciones.', 'NOTIFICATIONS_FORBIDDEN', status: 403);
         }
 
         $updated = $this->inbox->markAllAsRead((string) $user->id);
@@ -80,30 +97,28 @@ class NotificacionController extends Controller
     public function archive(Request $request, string $recipientId)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return ApiResponse::error('No autenticado', 'AUTH_REQUIRED', status: 401);
         }
 
+        if (! $this->policy->canUse($user, 'actualizar')) {
+            return ApiResponse::error('No tienes permiso para actualizar notificaciones.', 'NOTIFICATIONS_FORBIDDEN', status: 403);
+        }
+
         $recipient = $this->findRecipientForUser((string) $user->id, $recipientId);
-        if (!$recipient) {
+        if (! $recipient) {
             return ApiResponse::error('Notificacion no encontrada', 'NOTIFICATION_NOT_FOUND', status: 404);
         }
 
         $this->inbox->archive($recipient);
 
-        return ApiResponse::success($recipient->fresh(['event']), 'Notificacion archivada');
+        $result = $recipient->fresh($this->policy->canUse($user) ? ['event'] : []);
+
+        return ApiResponse::success($result, 'Notificacion archivada');
     }
 
     private function findRecipientForUser(string $userId, string $recipientId): ?NotificationRecipient
     {
-        if ($userId === '') {
-            return null;
-        }
-
-        return NotificationRecipient::query()
-            ->where('id', $recipientId)
-            ->where('usuario_id', $userId)
-            ->with('event')
-            ->first();
+        return $this->inbox->findForUser($userId, $recipientId);
     }
 }

@@ -49,65 +49,8 @@
         value="{{ $row['observaciones'] ?? '' }}"
         @readonly(!$puedeEditar)
     >
-    <input
-        type="date"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][pedido_solicitado_at]"
-        class="form-control"
-        value="{{ $row['pedido_solicitado_at'] ?? '' }}"
-        @readonly(!($puedeActualizarPedido ?? false))
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][cantidad_entregada]"
-        value="{{ $row['cantidad_entregada'] ?? 0 }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][cantidad_recibida]"
-        value="{{ $row['cantidad_recibida'] ?? 0 }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][incidencia_durante_parada]"
-        value="{{ $row['incidencia_durante_parada'] ?? '' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_estado]"
-        value="{{ $row['recepcion_estado'] ?? 'PENDIENTE' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_fecha]"
-        value="{{ $row['recepcion_fecha'] ?? '' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_observacion]"
-        value="{{ $row['recepcion_observacion'] ?? '' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_registrada_at]"
-        value="{{ $row['recepcion_registrada_at'] ?? '' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][recepcion_registrada_por_usuario_id]"
-        value="{{ $row['recepcion_registrada_por_usuario_id'] ?? '' }}"
-    >
-    <input
-        type="hidden"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][comentario_cambio_previo]"
-        value="{{ $row['comentario_cambio_previo'] ?? '' }}"
-    >
-    <input
-        type="date"
-        name="grupos[{{ $groupIndex }}][{{ $type }}][{{ $rowIndex }}][pedido_llego_at]"
-        class="form-control"
-        value="{{ $row['pedido_llego_at'] ?? '' }}"
-        @readonly(!($puedeActualizarPedido ?? false))
-    >
+    <input type="date" class="form-control" aria-label="Fecha de solicitud registrada" value="{{ $row['pedido_solicitado_at'] ?? '' }}" readonly>
+    <input type="date" class="form-control" aria-label="Fecha de llegada registrada" value="{{ $row['pedido_llego_at'] ?? '' }}" readonly>
     @php
         $pedidoCompleto = !empty($row['pedido_solicitado_at']) && !empty($row['pedido_llego_at']);
     @endphp

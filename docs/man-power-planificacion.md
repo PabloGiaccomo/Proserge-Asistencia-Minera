@@ -97,3 +97,26 @@ Ejecutar primero con `--dry-run` y revisar omitidos antes de aplicar en una copi
 - KPIs avanzados.
 - Modificacion del calculo del 20 % de RQ Mina.
 - Implementacion del 15 % de suplentes EECC.
+
+## Aislamiento del RQ Proserge (2026-10-16)
+
+Crear un grupo valida que su `rq_proserge_id`, cuando se proporciona, pertenezca
+al mismo `rq_mina_id`, incluso si el grupo se prepara sin integrantes.
+Editar un grupo antiguo tambien rechaza un vinculo almacenado contradictorio.
+Copiar un grupo pasa por la misma validacion de creacion y mantiene la parada
+del origen; una copia valida conserva identificadores propios. El vinculo nulo
+sigue permitido. Un cruce responde `MANPOWER_RQ_PROSERGE_MISMATCH` con el mensaje
+"El RQ Proserge no pertenece a la parada seleccionada"; no cambia registros.
+
+## Historial de integrantes
+
+El detalle de cada grupo muestra las asignaciones, los retiros, los reingresos y las reubicaciones registrados en `grupo_trabajo_detalle_movimientos`. El acceso conserva los permisos y el alcance de mina del grupo. Los conteos de cobertura consideran sólo las distribuciones activas.
+
+Al readmitir a una persona, el sistema conserva el identificador de su distribución y registra la asignación de RQ Proserge anterior y la nueva. Si el retiro se registró antes de la bitácora, copia los datos conocidos del retiro antes de volver a activar la fila. Una distribución que tiene referencias de asistencia o transporte conserva su fila. El registro de una reubicación y sus movimientos se guarda en una sola transacción.
+
+Antes de habilitar este cambio, ejecutar la migración `2026_11_04_000800_create_grupo_trabajo_detalle_movimientos.php` según [el procedimiento de despliegue](OPERACION_DESPLIEGUE.md). La migración agrega una tabla y el historial anterior se incorpora cuando se reutiliza una distribución retirada.
+
+Duplicar usa el permiso `man_power.duplicar` y las mismas validaciones de
+parada, plan, fechas y destino de la creación. Copiar integrantes requiere
+`asignar`. Con permiso de duplicación solamente se copia la estructura y
+los datos del grupo. Reemplazar grupos con integrantes también exige asignación.

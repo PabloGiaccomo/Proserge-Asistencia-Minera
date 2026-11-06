@@ -205,6 +205,7 @@ class RQMinaPlanManagementTest extends TestCase
         $this->withSession($session)
             ->get('/rq-mina/' . $rq->id . '/plan?plan_id=' . $planDos->id)
             ->assertOk()
+            ->assertViewHas('item', fn (array $item): bool => $item['semana_plan'] === 'Semanas 15-17 / 2026')
             ->assertSee('Grupo exclusivo plan dos')
             ->assertDontSee('Grupo legacy inicial');
     }
@@ -224,7 +225,12 @@ class RQMinaPlanManagementTest extends TestCase
             'fecha_inicio' => '2026-04-10',
             'fecha_fin' => '2026-04-20',
         ], $usuario);
-        $grupoPlanUno = $this->createPlanStructure((string) $rq->id, (string) $planUno->id, '2026-04-02', '2026-04-03')['grupo_id'];
+        $grupoPlanUno = (string) Str::uuid();
+        // La sustitucion legacy de esta prueba usa un grupo sin atencion ni ejecucion.
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $grupoPlanUno, 'rq_mina_id' => $rq->id, 'rq_mina_plan_id' => $planUno->id,
+            'nombre' => 'Grupo inicial pendiente', 'orden' => 1,
+        ]);
 
         $updatedRq = $rqService->updatePlanOperativo($usuario, $rq, [
             ['nombre' => 'Grupo nuevo plan dos', 'actividades' => [['sait' => 'SAIT-PLAN2']]],
@@ -327,6 +333,7 @@ class RQMinaPlanManagementTest extends TestCase
         $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq, $user);
         $source = $this->createPlanStructure((string) $rq->id, (string) $plan->id, '2026-04-05', '2026-04-07');
         $expected = RQMinaActividadTransporte::findOrFail($source['transporte_id'])->documentos;
+        $this->createTransportEvent((string) $rq->id, $source['transporte_id'], $userId);
         $payload = [['nombre' => 'Grupo operativo', 'actividades' => [['sait' => 'SAIT-100']],
             'transportes' => [['alcance' => 'SAIT-100', 'unidad_carga' => 'Grua 80T']]]];
 
@@ -334,6 +341,8 @@ class RQMinaPlanManagementTest extends TestCase
             app(RQMinaService::class)->updatePlanOperativo($user, $rq->fresh(), $payload, null, (string) $plan->id);
             $transport = RQMinaActividadTransporte::where('rq_mina_plan_id', $plan->id)->firstOrFail();
             $this->assertSame($expected, $transport->documentos);
+            $this->assertSame($source['transporte_id'], $transport->id);
+            $this->assertDatabaseHas('rq_mina_actividad_transporte_eventos', ['transporte_id' => $source['transporte_id']]);
         }
     }
 
@@ -529,7 +538,8 @@ class RQMinaPlanManagementTest extends TestCase
         $this->withSession($this->sessionFor($usuarioId))
             ->get('/rq-mina/' . $rq->id . '/plan?plan_id=' . $archived->id)
             ->assertOk()
-            ->assertSee('Este plan esta archivado');
+            ->assertSee('Este plan está archivado')
+            ->assertDontSee('>Guardar plan operativo</button>', false);
 
         $readOnlyUserId = $this->createUsuario($this->readOnlyRoleId);
         $this->assignMinaScope($readOnlyUserId, $minaId);
@@ -549,6 +559,92 @@ class RQMinaPlanManagementTest extends TestCase
                 'fecha_fin' => '2026-04-21',
             ])
             ->assertStatus(404);
+    }
+
+    public function test_guardar_plan_con_cargos_inicia_rrhh_una_sola_vez(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $rq = $this->createRQMina($minaId, $usuarioId, '2026-04-01', '2026-04-30');
+        $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq);
+        $url = route('rq-mina.plan.update', $rq->id);
+        $payload = [
+            'plan_id' => $plan->id,
+            'plan_editor_submission' => '1',
+            'plan_editor_complete' => '1',
+            'detalle' => [['puesto' => 'Operador de prueba', 'cantidad' => 3]],
+        ];
+
+        $this->withSession($this->sessionFor($usuarioId))->put($url, $payload)
+            ->assertRedirect(route('rq-mina.plan', ['id' => $rq->id, 'plan_id' => $plan->id]))
+            ->assertSessionHas('success', 'Plan guardado. El pedido de personal está registrado en RQ Proserge.');
+        $this->assertSame('ENVIADO', $rq->fresh()->estado);
+        $this->assertDatabaseHas('rq_proserge', ['rq_mina_id' => $rq->id, 'estado' => 'PENDIENTE']);
+
+        $this->put($url, $payload)->assertRedirect();
+        $this->assertSame(1, $rq->rqProserge()->count());
+    }
+
+    public function test_envio_compacto_recupera_un_conflicto_y_guarda_los_turnos_en_su_fecha(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $rq = $this->createRQMina($minaId, $usuarioId, '2026-11-07', '2026-11-16');
+        $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq);
+        $programa = [[
+            'nombre' => 'Frente de prueba',
+            'actividades' => [[
+                'sait' => 'SAIT de prueba',
+                'turnos' => [
+                    ['fecha' => '2026-11-09', 'dia_label' => 'Lun', 'turno_a' => '8'],
+                    ['fecha' => '2026-11-16', 'dia_label' => 'Lun', 'turno_a' => '0', 'turno_b' => '5'],
+                ],
+            ]],
+            'transportes' => [],
+        ]];
+        $payload = [
+            'rq_mina_id' => $rq->id,
+            'plan_id' => $plan->id,
+            'plan_editor_submission' => '1',
+            'plan_editor_complete' => 'json',
+            'plan_operativo_json' => json_encode($programa, JSON_THROW_ON_ERROR),
+            'plan_revision' => 'revision-anterior',
+        ];
+        $url = route('rq-mina.plan.update', $rq->id);
+        $this->withSession($this->sessionFor($usuarioId))->put($url, $payload)->assertRedirect()
+            ->assertSessionHasInput('plan_operativo', $programa)
+            ->assertSessionHasInput('plan_editor_complete', '1')
+            ->assertSessionHasInput('plan_revision', 'revision-anterior');
+        $this->assertSame(0, $plan->grupos()->count());
+
+        $payload['plan_revision'] = app(RQMinaService::class)->revisionPlan($rq->fresh(), $plan->id);
+        $this->put($url, $payload)->assertRedirect()->assertSessionHas('success');
+        $turnos = $plan->grupos()->sole()->actividades()->sole()->turnos()->get();
+        $this->assertSame([
+            ['2026-11-09', '8', null], ['2026-11-16', '0', '5'],
+        ], $turnos->map(fn ($turno) => [$turno->fecha->toDateString(), $turno->turno_a, $turno->turno_b])->all());
+    }
+
+    public function test_envio_compacto_invalido_conserva_el_programa_guardado(): void
+    {
+        $minaId = $this->createMina();
+        $usuarioId = $this->createUsuario($this->adminRoleId);
+        $rq = $this->createRQMina($minaId, $usuarioId, '2026-04-01', '2026-04-30');
+        $plan = app(RQMinaPlanService::class)->ensureDefaultPlan($rq);
+        $this->createPlanStructure($rq->id, $plan->id, '2026-04-10', '2026-04-12');
+        $this->withSession($this->sessionFor($usuarioId));
+
+        foreach (['', '[{', '{}', '[1]', '[{}]', '[{"actividades":"incompleto","transportes":[]}]',
+            '[{"actividades":[{"turnos":[null]}],"transportes":[]}]',
+        ] as $programa) {
+            $this->put(route('rq-mina.plan.update', $rq->id), [
+                'plan_id' => $plan->id,
+                'plan_editor_submission' => '1',
+                'plan_editor_complete' => 'json',
+                'plan_operativo_json' => $programa,
+            ])->assertRedirect()->assertSessionHas('error', 'No se pudo leer el programa del plan. Vuelve a guardar.');
+            $this->assertSame('Grupo operativo', $plan->grupos()->sole()->nombre);
+        }
     }
 
     public function test_no_opera_plan_de_otra_parada_por_ruta_web(): void

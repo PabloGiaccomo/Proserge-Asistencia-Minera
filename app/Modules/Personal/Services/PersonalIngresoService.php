@@ -11,7 +11,9 @@ use App\Models\PersonalIngreso;
 use App\Models\PersonalIngresoArchivo;
 use App\Models\PersonalIngresoClave;
 use App\Models\Usuario;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Modules\Personal\Support\PersonalIngresoPurpose;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -34,6 +36,7 @@ class PersonalIngresoService
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalService $personalService,
         private readonly PersonalContratoService $contratoService,
+        private readonly PersonalArchivoVersionService $fileVersions,
     ) {
     }
 
@@ -92,6 +95,7 @@ class PersonalIngresoService
 
         return PersonalIngreso::query()
             ->with(['archivos', 'personalExistente', 'personalCreado', 'revisadoPor.personal'])
+            ->where('estado', '!=', PersonalIngreso::ESTADO_BORRADOR)
             ->where(function ($query) use ($todayStart, $todayEnd): void {
                 $query->where('estado', '!=', PersonalIngreso::ESTADO_ACEPTADA)
                     ->orWhere(function ($acceptedQuery) use ($todayStart, $todayEnd): void {
@@ -118,6 +122,7 @@ class PersonalIngresoService
                 $data = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
                 $haystack = PersonalNormalizer::normalizeKey(collect([
                     $this->nombreCompleto($data),
+                    $ingreso->personalExistente?->nombre_completo,
                     $ingreso->tipo_documento,
                     $ingreso->numero_documento,
                     $data['puesto'] ?? '',
@@ -139,6 +144,13 @@ class PersonalIngresoService
     }
 
     public function storeSubmission(array $fields, array $familiares, string $firmaBase64, UploadedFile $huella, array $documentos = [], ?string $submissionUuid = null): PersonalIngreso
+    {
+        return DB::transaction(fn (): PersonalIngreso => $this->storeSubmissionWithinTransaction(
+            $fields, $familiares, $firmaBase64, $huella, $documentos, $submissionUuid,
+        ));
+    }
+
+    private function storeSubmissionWithinTransaction(array $fields, array $familiares, string $firmaBase64, UploadedFile $huella, array $documentos, ?string $submissionUuid): PersonalIngreso
     {
         $data = $this->fichaService->normalizeFichaData($fields);
         $this->assertDocumentIsValid($data);
@@ -171,6 +183,8 @@ class PersonalIngresoService
             }
 
             if ($ingreso instanceof PersonalIngreso) {
+                abort_unless(($ingreso->proposito ?? PersonalIngresoPurpose::ALTA) === PersonalIngresoPurpose::ALTA,
+                    409, 'Este identificador de envío pertenece a otra solicitud.');
                 if (in_array($ingreso->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
                     return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
                 }
@@ -186,24 +200,21 @@ class PersonalIngresoService
             ])->fresh(['archivos', 'personalExistente', 'personalCreado']);
         });
 
+        if (in_array($ingreso->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
+            return $ingreso;
+        }
+
         try {
-            $huellaPath = $this->replaceIngresoArchivo($ingreso, 'huella', $huella, false);
-            $ingreso->forceFill(['huella_path' => $huellaPath])->save();
+            $this->replaceIngresoArchivo($ingreso, 'huella', $huella, false);
         } catch (Throwable $exception) {
             Log::error('No se pudo guardar la huella de ingreso publico.', [
                 'personal_ingreso_id' => $ingreso->id,
                 'submission_uuid' => $submissionUuid,
-                'documento' => $data['numero_documento'] ?? null,
-                'error' => $exception->getMessage(),
+                'exception' => $exception::class,
             ]);
 
-            $this->appendIngresoObservation(
-                $ingreso,
-                'La ficha llego al sistema, pero la foto de huella no se guardo correctamente. El trabajador debe reenviar la ficha sin cerrar la pagina.',
-            );
-
             throw ValidationException::withMessages([
-                'huella' => 'La ficha se registro, pero no se pudo guardar la foto de huella. Vuelve a enviarla sin cerrar la pagina.',
+                'huella' => 'No se pudo guardar el envío con la foto de huella. Vuelve a enviarlo sin cerrar la página.',
             ]);
         }
 
@@ -222,8 +233,7 @@ class PersonalIngresoService
                     'personal_ingreso_id' => $ingreso->id,
                     'submission_uuid' => $submissionUuid,
                     'tipo' => $safeTipo,
-                    'documento' => $data['numero_documento'] ?? null,
-                    'error' => $exception->getMessage(),
+                    'exception' => $exception::class,
                 ]);
             }
         }
@@ -238,19 +248,28 @@ class PersonalIngresoService
         return $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
     }
 
-    public function updateIngreso(PersonalIngreso $ingreso, array $fields, array $familiares, ?string $firmaBase64, ?UploadedFile $huella, array $documentos, Usuario $user, bool $canEditSensitiveData = false): PersonalIngreso
+    public function updateIngreso(PersonalIngreso $ingreso, array $fields, array $familiares, array $biometrics, array $documentos, Usuario $user): PersonalIngreso
     {
-        $this->assertIngresoEditable($ingreso);
+        return DB::transaction(function () use ($ingreso, $fields, $familiares, $biometrics, $documentos, $user): PersonalIngreso {
+            $ingreso = PersonalIngreso::query()->lockForUpdate()->findOrFail($ingreso->id);
+            $this->assertIngresoEditable($ingreso);
 
-        if (!$canEditSensitiveData) {
-            $fields = $this->preserveSensitiveFichaFields($ingreso, $fields);
-        }
+            $current = $ingreso->datos_json ?? [];
+            $firmaBase64 = $biometrics['firma_base64'] ?? null;
+            $huella = $biometrics['huella'] ?? null;
+            PersonalFichaAccess::assertSensitiveChangesAllowed(
+                $user,
+                $current,
+                $fields,
+                array_key_exists('firma_base64', $biometrics) && (string) $firmaBase64 !== (string) $ingreso->firma_base64,
+                isset($documentos['huella'])
+                    || (array_key_exists('huella', $biometrics) && ($huella !== null || filled($ingreso->huella_path))),
+            );
 
-        $data = $this->fichaService->normalizeFichaData($fields);
-        $this->assertDocumentIsValid($data);
-        $personalExistente = $this->findPersonalByDocument($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
-
-        return DB::transaction(function () use ($ingreso, $data, $familiares, $firmaBase64, $huella, $documentos, $user, $personalExistente): PersonalIngreso {
+            $data = $this->fichaService->normalizeFichaData(array_replace(PersonalFichaAccess::onlySensitive($current), $fields));
+            $data = PersonalFichaAccess::preserveOmitted($data, $current, $fields);
+            $this->assertDocumentIsValid($data);
+            $personalExistente = $this->findPersonalByDocument($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
             $payload = [
                 'estado' => PersonalIngreso::ESTADO_FALTA_REVISION,
                 'tipo_documento' => $data['tipo_documento'] ?? 'DNI',
@@ -267,14 +286,14 @@ class PersonalIngresoService
             }
 
             if ($huella instanceof UploadedFile) {
-                $payload['huella_path'] = $this->replaceIngresoArchivo($ingreso, 'huella', $huella, false);
+                $payload['huella_path'] = $this->replaceIngresoArchivo($ingreso, 'huella', $huella, false, $user);
             }
 
             $ingreso->forceFill($payload)->save();
 
-            foreach ($documentos as $tipo => $file) {
+            foreach (array_intersect_key($documentos, PersonalFichaCatalog::documentRequirements()) as $tipo => $file) {
                 if ($file instanceof UploadedFile) {
-                    $this->replaceIngresoArchivo($ingreso, $this->safeFileType((string) $tipo), $file, true);
+                    $this->replaceIngresoArchivo($ingreso, $this->safeFileType((string) $tipo), $file, true, $user);
                 }
             }
 
@@ -282,30 +301,14 @@ class PersonalIngresoService
         });
     }
 
-    private function preserveSensitiveFichaFields(PersonalIngreso $ingreso, array $fields): array
-    {
-        $current = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
-        $sensitiveKeys = collect(PersonalFichaCatalog::sections())
-            ->filter(fn (array $section): bool => in_array((string) ($section['title'] ?? ''), ['Datos bancarios', 'Sistema pensionario'], true))
-            ->flatMap(fn (array $section): array => collect($section['fields'] ?? [])
-                ->pluck('key')
-                ->filter()
-                ->values()
-                ->all())
-            ->all();
-
-        foreach ($sensitiveKeys as $key) {
-            if (array_key_exists($key, $current)) {
-                $fields[$key] = $current[$key];
-            }
-        }
-
-        return $fields;
-    }
-
     public function accept(PersonalIngreso $ingreso, Usuario $user, array $contractPayload): Personal
     {
         return $this->persistIntoPersonal($ingreso, $user, false, $contractPayload);
+    }
+
+    public function acceptNewFromBatch(PersonalIngreso $ingreso, Usuario $user, array $contractPayload, array &$newFiles): Personal
+    {
+        return $this->persistIntoPersonal($ingreso, $user, false, $contractPayload, $newFiles);
     }
 
     public function markContractNotSigned(PersonalIngreso $ingreso, Usuario $user): Personal
@@ -315,6 +318,7 @@ class PersonalIngresoService
 
     public function deleteErroneous(PersonalIngreso $ingreso): void
     {
+        abort_if($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION, 403, 'La actualización conserva su historial de revisión.');
         if ($ingreso->personal_creado_id || in_array($ingreso->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
             throw ValidationException::withMessages([
                 'ingreso' => 'Esta ficha ya fue llevada a Personal. No se elimina desde Ingresos para proteger la trazabilidad.',
@@ -399,23 +403,24 @@ class PersonalIngresoService
         };
     }
 
-    private function persistIntoPersonal(PersonalIngreso $ingreso, Usuario $user, bool $contractNotSigned, array $contractPayload = []): Personal
+    private function persistIntoPersonal(PersonalIngreso $ingreso, Usuario $user, bool $contractNotSigned, array $contractPayload = [], ?array &$newFiles = null): Personal
     {
-        $this->assertIngresoEditable($ingreso);
+        return DB::transaction(function () use ($ingreso, $contractNotSigned, $contractPayload, $user, &$newFiles): Personal {
+            $ingreso = PersonalIngreso::query()->with('archivos')->lockForUpdate()->findOrFail($ingreso->id);
+            $this->assertIngresoEditable($ingreso);
+            $data = $this->fichaService->normalizeFichaData($ingreso->datos_json ?? []);
+            $this->assertDocumentIsValid($data);
+            $existing = $this->findPersonalByDocument($data['tipo_documento'] ?? $ingreso->tipo_documento, $data['numero_documento'] ?? $ingreso->numero_documento);
+            if ($newFiles !== null && ($existing || $ingreso->personal_existente_id || $ingreso->personal_creado_id)) {
+                throw ValidationException::withMessages(['ingreso' => 'Ya existe un trabajador con este documento. Revisa la ficha individualmente.']);
+            }
+            $estado = $contractNotSigned
+                ? self::ESTADO_NO_FIRMO_CONTRATO
+                : ($existing ? (string) $existing->estado : PersonalFicha::ESTADO_APROBADO);
+            if (!$contractNotSigned && in_array(strtoupper($estado), ['', PersonalFicha::ESTADO_PENDIENTE, PersonalFicha::ESTADO_ENVIADA, PersonalFicha::ESTADO_OBSERVADO, PersonalFicha::ESTADO_LINK_VENCIDO], true)) {
+                $estado = PersonalFicha::ESTADO_APROBADO;
+            }
 
-        $ingreso = $ingreso->fresh(['archivos', 'personalExistente', 'personalCreado']);
-        $data = $this->fichaService->normalizeFichaData(is_array($ingreso->datos_json) ? $ingreso->datos_json : []);
-        $this->assertDocumentIsValid($data);
-        $existing = $this->findPersonalByDocument($data['tipo_documento'] ?? $ingreso->tipo_documento, $data['numero_documento'] ?? $ingreso->numero_documento);
-        $estado = $contractNotSigned
-            ? self::ESTADO_NO_FIRMO_CONTRATO
-            : ($existing ? (string) $existing->estado : PersonalFicha::ESTADO_APROBADO);
-
-        if (!$contractNotSigned && in_array(strtoupper($estado), ['', PersonalFicha::ESTADO_PENDIENTE, PersonalFicha::ESTADO_ENVIADA, PersonalFicha::ESTADO_OBSERVADO, PersonalFicha::ESTADO_LINK_VENCIDO], true)) {
-            $estado = PersonalFicha::ESTADO_APROBADO;
-        }
-
-        return DB::transaction(function () use ($ingreso, $data, $existing, $estado, $contractNotSigned, $contractPayload, $user): Personal {
             $payload = [
                 ...$this->personalPayloadFromData($data, $estado),
                 'origen_registro' => 'NUEVO',
@@ -431,7 +436,7 @@ class PersonalIngresoService
                 : $this->personalService->create($payload);
 
             $fichaEstado = $contractNotSigned ? PersonalFicha::ESTADO_ENVIADA : PersonalFicha::ESTADO_APROBADO;
-            $this->syncFichaFromIngreso($personal, $ingreso, $fichaEstado, $user);
+            $this->syncFichaFromIngreso($personal, $ingreso, $fichaEstado, $user, $newFiles);
 
             if (!$contractNotSigned) {
                 $signedContractFile = $contractPayload['contrato_pdf'] ?? null;
@@ -472,7 +477,7 @@ class PersonalIngresoService
         });
     }
 
-    private function syncFichaFromIngreso(Personal $personal, PersonalIngreso $ingreso, string $estado, Usuario $user): PersonalFicha
+    private function syncFichaFromIngreso(Personal $personal, PersonalIngreso $ingreso, string $estado, Usuario $user, ?array &$newFiles = null): PersonalFicha
     {
         $data = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
         $ficha = $personal->fichaColaborador ?: new PersonalFicha([
@@ -496,9 +501,9 @@ class PersonalIngresoService
             'approved_by_usuario_id' => $estado === PersonalFicha::ESTADO_APROBADO ? $user->id : null,
         ])->save();
 
-        $this->copyHuellaToFicha($ingreso, $ficha);
+        $this->copyHuellaToFicha($ingreso, $ficha, $user, $newFiles);
         $this->syncFamiliares($ficha, $ingreso);
-        $this->copyArchivosToFicha($ingreso, $ficha);
+        $this->copyArchivosToFicha($ingreso, $ficha, $newFiles);
 
         return $ficha->fresh(['archivos', 'familiares']);
     }
@@ -516,7 +521,7 @@ class PersonalIngresoService
         }
     }
 
-    private function copyHuellaToFicha(PersonalIngreso $ingreso, PersonalFicha $ficha): void
+    private function copyHuellaToFicha(PersonalIngreso $ingreso, PersonalFicha $ficha, Usuario $actor, ?array &$newFiles): void
     {
         if (!$ingreso->huella_path || !Storage::disk('local')->exists($ingreso->huella_path)) {
             return;
@@ -524,11 +529,12 @@ class PersonalIngresoService
 
         $extension = pathinfo($ingreso->huella_path, PATHINFO_EXTENSION) ?: 'jpg';
         $target = 'personal_fichas/' . $ficha->id . '/huella_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . $extension;
-        Storage::disk('local')->copy($ingreso->huella_path, $target);
+        $this->copyToFicha($ingreso->huella_path, $target, $newFiles);
+        $this->fileVersions->archiveCurrent($ficha, 'huella', $actor->id, 'ACEPTACION_INGRESO');
         $ficha->forceFill(['huella_path' => $target])->save();
     }
 
-    private function copyArchivosToFicha(PersonalIngreso $ingreso, PersonalFicha $ficha): void
+    private function copyArchivosToFicha(PersonalIngreso $ingreso, PersonalFicha $ficha, ?array &$newFiles): void
     {
         $ingreso->loadMissing('archivos');
 
@@ -539,25 +545,26 @@ class PersonalIngresoService
 
             $extension = pathinfo($archivo->path, PATHINFO_EXTENSION) ?: 'bin';
             $target = 'personal_fichas/' . $ficha->id . '/documentos/' . $archivo->tipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . $extension;
-            Storage::disk('local')->copy($archivo->path, $target);
+            $this->copyToFicha($archivo->path, $target, $newFiles);
 
             $this->replaceFichaArchivoFromStored($ficha, $archivo, $target);
         }
     }
 
+    private function copyToFicha(string $source, string $target, ?array &$newFiles): void
+    {
+        $this->fileVersions->trackNew($target);
+        if ($newFiles !== null) {
+            $newFiles[] = $target;
+        }
+        if (!Storage::disk('local')->copy($source, $target)) {
+            throw ValidationException::withMessages(['ingreso' => 'No se pudo copiar un archivo de la ficha. Intenta nuevamente.']);
+        }
+    }
+
     private function replaceFichaArchivoFromStored(PersonalFicha $ficha, PersonalIngresoArchivo $source, string $target): PersonalFichaArchivo
     {
-        $existingFiles = PersonalFichaArchivo::query()
-            ->where('personal_ficha_id', $ficha->id)
-            ->where('tipo', $source->tipo)
-            ->get();
-
-        foreach ($existingFiles as $existing) {
-            if ($existing->path && Storage::disk('local')->exists($existing->path)) {
-                Storage::disk('local')->delete($existing->path);
-            }
-            $existing->delete();
-        }
+        $this->fileVersions->archiveCurrent($ficha, $source->tipo, $ficha->approved_by_usuario_id, 'ACEPTACION_INGRESO');
 
         $archivo = PersonalFichaArchivo::query()->create([
             'id' => (string) Str::uuid(),
@@ -598,42 +605,41 @@ class PersonalIngresoService
         ])->save();
     }
 
-    private function replaceIngresoArchivo(PersonalIngreso $ingreso, string $tipo, UploadedFile $file, bool $documento): string
+    private function replaceIngresoArchivo(PersonalIngreso $ingreso, string $tipo, UploadedFile $file, bool $documento, ?Usuario $actor = null): string
     {
-        $safeTipo = $this->safeFileType($tipo);
-        $directory = $documento
-            ? 'personal_ingresos/' . $ingreso->id . '/documentos'
-            : 'personal_ingresos/' . $ingreso->id;
-        $filename = $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($file->getClientOriginalExtension() ?: 'bin');
-        $path = $file->storeAs($directory, $filename, 'local');
-
-        $existingFiles = PersonalIngresoArchivo::query()
-            ->where('personal_ingreso_id', $ingreso->id)
-            ->where('tipo', $safeTipo)
-            ->get();
-
-        foreach ($existingFiles as $existing) {
-            if ($existing->path && Storage::disk('local')->exists($existing->path)) {
-                Storage::disk('local')->delete($existing->path);
+        return DB::transaction(function () use ($ingreso, $tipo, $file, $documento, $actor): string {
+            $owner = PersonalIngreso::query()->lockForUpdate()->findOrFail($ingreso->id);
+            $safeTipo = $this->safeFileType($tipo);
+            if ($actor === null) {
+                abort_unless(($owner->proposito ?? PersonalIngresoPurpose::ALTA) === PersonalIngresoPurpose::ALTA,
+                    409, 'Este identificador de envío pertenece a otra solicitud.');
+                if (in_array($owner->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
+                    return (string) ($safeTipo === 'huella' ? $owner->huella_path : $owner->archivos()->where('tipo', $safeTipo)->value('path'));
+                }
             }
-            $existing->delete();
-        }
+            $directory = 'personal_ingresos/'.$owner->id.($documento ? '/documentos' : '');
+            $filename = $safeTipo.'_'.Str::uuid().'.'.strtolower($file->getClientOriginalExtension() ?: 'bin');
+            $path = $this->fileVersions->store($file, $directory, $filename, 'local');
+            $this->fileVersions->archiveCurrent($owner, $safeTipo, $actor?->id, $actor ? 'RRHH_INGRESO' : 'ENLACE_INGRESO');
+            PersonalIngresoArchivo::query()->create([
+                'id' => (string) Str::uuid(), 'personal_ingreso_id' => $owner->id, 'tipo' => $safeTipo,
+                'nombre_original' => $file->getClientOriginalName(), 'path' => $path,
+                'mime' => $file->getMimeType(), 'size' => $file->getSize(),
+            ]);
+            if ($safeTipo === 'huella') {
+                $owner->forceFill(['huella_path' => $path])->save();
+            }
 
-        PersonalIngresoArchivo::query()->create([
-            'id' => (string) Str::uuid(),
-            'personal_ingreso_id' => $ingreso->id,
-            'tipo' => $safeTipo,
-            'nombre_original' => $file->getClientOriginalName(),
-            'path' => $path,
-            'mime' => $file->getMimeType(),
-            'size' => $file->getSize(),
-        ]);
-
-        return $path;
+            return $path;
+        });
     }
 
     private function refreshExistingPersonalRelation(PersonalIngreso $ingreso): PersonalIngreso
     {
+        if ($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION) {
+            return $ingreso;
+        }
+
         $data = is_array($ingreso->datos_json) ? $ingreso->datos_json : [];
         $personal = $this->findPersonalByDocument($data['tipo_documento'] ?? $ingreso->tipo_documento, $data['numero_documento'] ?? $ingreso->numero_documento);
 
@@ -697,7 +703,6 @@ class PersonalIngresoService
             'fecha_ingreso' => $data['fecha_ingreso'] ?: null,
             'estado' => $estado,
             'es_supervisor' => PersonalNormalizer::isSupervisorOccupation($data['ocupacion'] ?? $data['puesto'] ?? null),
-            'minas' => [],
         ];
     }
 
@@ -750,6 +755,10 @@ class PersonalIngresoService
 
     private function assertIngresoEditable(PersonalIngreso $ingreso): void
     {
+        if ($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION) {
+            throw ValidationException::withMessages(['ingreso' => 'Abre la revisión de actualización para procesar esta propuesta.']);
+        }
+
         if (!in_array($ingreso->estado, [PersonalIngreso::ESTADO_ACEPTADA, PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO], true)) {
             return;
         }

@@ -455,7 +455,7 @@ class WebPermissionMiddlewareTest extends TestCase
             ->assertSee('name="permisos[epps][ver]"', false)
             ->assertSee('name="permisos[epps][confirmar_entrega]"', false)
             ->assertSee('name="permisos[epps][aprobar_excepcion_firma]"', false)
-            ->assertSee('<h3 class="permission-screen-title">EPPs</h3>', false)
+            ->assertSee('<h3 class="permission-screen-title" tabindex="-1">EPPs</h3>', false)
             ->assertSee('Guardar permisos');
     }
 
@@ -1382,8 +1382,9 @@ class WebPermissionMiddlewareTest extends TestCase
                 'detalle' => 'Actualizado desde prueba',
                 'fecha_inicio' => '2026-07-11',
                 'fecha_fin' => '2026-07-12',
+                'motivo_decision' => 'Corrección de datos',
             ])
-            ->assertRedirect(route('bienestar.index'));
+            ->assertRedirect(route('bienestar.show', ['id' => $personalId, 'mes' => '2026-07']));
 
         $this->assertDatabaseHas('personal_bloqueo', [
             'id' => $bloqueoId,
@@ -1398,7 +1399,7 @@ class WebPermissionMiddlewareTest extends TestCase
 
         $this
             ->withSession($this->sessionForPermissionUser($deleterId))
-            ->post(route('bienestar.bloqueos.anular', $bloqueoId))
+            ->post(route('bienestar.bloqueos.anular', $bloqueoId), ['motivo_decision' => 'Anulación autorizada'])
             ->assertRedirect();
 
         $this->assertDatabaseHas('personal_bloqueo', [

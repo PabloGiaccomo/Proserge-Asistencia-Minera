@@ -5,19 +5,32 @@
 @php
 $items = $data['items'] ?? [];
 $minaOptions = $data['minaOptions'] ?? [];
-$lugarOptions = $data['lugarOptions'] ?? [];
 $estadoOptions = $data['estadoOptions'] ?? [];
 $creadores = $data['creadores'] ?? [];
 $activeFilters = $data['filters'] ?? [];
 $pg = $data['pagination'] ?? ['current_page' => 1, 'total_pages' => 1, 'per_page' => 10, 'total' => count($items)];
 $baseQuery = request()->except(['page', 'per_page']);
 $baseUrl = route('rq-mina.index');
+$lista = array_filter($activeFilters, static fn ($value): bool => is_scalar($value) && $value !== '');
+if (request()->has('page')) {
+    $lista['page'] = (int) $pg['current_page'];
+}
+if (request()->has('per_page')) {
+    $lista['per_page'] = (int) $pg['per_page'];
+}
 $rqPermissions = session('user.permissions', []);
 $canCreateRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'crear');
 $canEditRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'editar');
-$canDuplicateRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'duplicar');
-$canSendRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'enviar');
+$canDuplicateRq = $canCreateRq && \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'duplicar');
 $canDeleteRq = \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'eliminar');
+$estadoLabels = [
+    'borrador' => 'Borrador',
+    'enviado' => 'Pedido registrado en RR.HH.',
+    'cerrado' => 'Cerrado',
+    'cancelado' => 'Cancelado',
+    'en_atencion' => 'En atención',
+    'completado' => 'Completado',
+];
 
 $calcPuestos = static function (array $detalle): int {
     return count($detalle);
@@ -44,6 +57,14 @@ $calcTransporteTotal = static function (array $transporte): int {
     return (int) array_sum(array_column($transporte, 'cantidad'));
 };
 
+$gruposNoArchivados = static function (array $rq): \Illuminate\Support\Collection {
+    $archivados = collect($rq['plans'] ?? [])->where('estado', 'ARCHIVADO')->pluck('id')->all();
+
+    return collect($rq['plan_operativo'] ?? [])->reject(
+        static fn (array $grupo): bool => in_array($grupo['rq_mina_plan_id'] ?? '', $archivados, true)
+    );
+};
+
 $visibleItems = collect($items);
 $totalRegistros = (int) ($pg['total'] ?? count($items));
 $rqMetrics = [
@@ -58,23 +79,23 @@ $rqMetrics = [
         'hint' => 'Pagina actual',
     ],
     [
-        'label' => 'Enviadas visibles',
+        'label' => 'Registradas en RR.HH.',
         'value' => $visibleItems->filter(fn (array $rq): bool => strtoupper((string) ($rq['estado'] ?? '')) === 'ENVIADO')->count(),
         'hint' => 'Pagina actual',
     ],
     [
-        'label' => 'Con plan operativo',
-        'value' => $visibleItems->filter(fn (array $rq): bool => count($rq['plan_operativo'] ?? []) > 0 || count($rq['plans'] ?? []) > 0)->count(),
+        'label' => 'Con actividades',
+        'value' => $visibleItems->filter(fn (array $rq): bool => $gruposNoArchivados($rq)->contains(fn (array $grupo): bool => !empty($grupo['actividades'])))->count(),
         'hint' => 'Pagina actual',
     ],
     [
-        'label' => 'Sin plan operativo',
-        'value' => $visibleItems->filter(fn (array $rq): bool => count($rq['plan_operativo'] ?? []) === 0 && count($rq['plans'] ?? []) === 0)->count(),
+        'label' => 'Sin actividades',
+        'value' => $visibleItems->reject(fn (array $rq): bool => $gruposNoArchivados($rq)->contains(fn (array $grupo): bool => !empty($grupo['actividades'])))->count(),
         'hint' => 'Pagina actual',
     ],
     [
-        'label' => 'Con transporte',
-        'value' => $visibleItems->filter(fn (array $rq): bool => $calcTransporteTotal($rq['transporte'] ?? []) > 0)->count(),
+        'label' => 'Con transporte solicitado',
+        'value' => $visibleItems->filter(fn (array $rq): bool => $gruposNoArchivados($rq)->contains(fn (array $grupo): bool => !empty($grupo['transportes'])))->count(),
         'hint' => 'Pagina actual',
     ],
 ];
@@ -98,7 +119,8 @@ if (!empty($activeFilters['mina_id'])) {
     $filterChips[] = ['label' => 'Mina: '.$minaLabel, 'url' => $filterChipUrl('mina_id')];
 }
 if (!empty($activeFilters['estado'])) {
-    $filterChips[] = ['label' => 'Estado: '.ucfirst((string) $activeFilters['estado']), 'url' => $filterChipUrl('estado')];
+    $estadoFiltro = strtolower((string) $activeFilters['estado']);
+    $filterChips[] = ['label' => 'Estado: '.($estadoLabels[$estadoFiltro] ?? $estadoFiltro), 'url' => $filterChipUrl('estado')];
 }
 if (!empty($activeFilters['created_by_usuario_id'])) {
     $creatorLabel = collect($creadores)->firstWhere('id', $activeFilters['created_by_usuario_id'])['nombre'] ?? $activeFilters['created_by_usuario_id'];
@@ -119,7 +141,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
             <p class="page-subtitle">Requerimientos de personal y planificacion de paradas.</p>
         </div>
         @if($canCreateRq)
-            <a href="{{ route('rq-mina.create') }}" class="btn-nuevoRQ">
+            <a href="{{ route('rq-mina.create', ['lista' => $lista]) }}" class="btn-nuevoRQ">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Nueva Parada
             </a>
@@ -204,7 +226,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                             <select name="estado" class="filter-select" data-auto-submit>
                                 <option value="">Todos los estados</option>
                                 @foreach($estadoOptions as $e)
-                                    <option value="{{ $e }}" {{ ($activeFilters['estado'] ?? '') === $e ? 'selected' : '' }}>{{ ucfirst($e) }}</option>
+                                    <option value="{{ $e }}" {{ ($activeFilters['estado'] ?? '') === $e ? 'selected' : '' }}>{{ $estadoLabels[$e] ?? ucfirst($e) }}</option>
                                 @endforeach
                             </select>
                         </div>
@@ -248,7 +270,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                         <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado rápido:</span>
                         <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="">Todos</button>
                         <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="borrador">Borrador</button>
-                        <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="enviado">Enviado</button>
+                        <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="enviado">Pedido registrado en RR.HH.</button>
                         <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="cerrado">Cerrado</button>
                         <button type="button" class="btn-filter-outline !py-1.5 !px-3" data-status="cancelado">Cancelado</button>
                     </div>
@@ -299,7 +321,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                     <h3>No hay paradas registradas</h3>
                     <p>Registra una nueva parada para comenzar el requerimiento de personal y el plan operativo.</p>
                     @if($canCreateRq)
-                        <a href="{{ route('rq-mina.create') }}" class="btn-row btn-send empty-state-action">Nueva parada</a>
+                        <a href="{{ route('rq-mina.create', ['lista' => $lista]) }}" class="btn-row btn-send empty-state-action">Nueva parada</a>
                     @endif
                 @endif
             </div>
@@ -308,12 +330,15 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                 @foreach($items as $rq)
                     @php
                         $detalle = $rq['detalle'] ?? [];
-                        $planOperativo = $rq['plan_operativo'] ?? [];
                         $plans = $rq['plans'] ?? [];
-                        $planGrupos = count($planOperativo);
-                        $planActividades = collect($planOperativo)->sum(fn ($g) => count($g['actividades'] ?? []));
+                        $planOperativo = $gruposNoArchivados($rq);
+                        $planGrupos = $planOperativo->count();
+                        $planActividades = $planOperativo->sum(fn ($g) => count($g['actividades'] ?? []));
                         $planCount = count($plans);
-                        $planArchivado = collect($plans)->contains(fn (array $plan): bool => strtoupper((string) ($plan['estado'] ?? '')) === 'ARCHIVADO');
+                        $planArchivado = collect($plans)->where('estado', 'ARCHIVADO')->count();
+                        $solicitudesTransporte = $planOperativo->flatMap(fn (array $grupo): array => $grupo['transportes'] ?? []);
+                        $cantidadSolicitudesTransporte = $solicitudesTransporte->count();
+                        $unidadesSolicitadas = $solicitudesTransporte->sum(fn (array $transporte): int => max(0, (int) ($transporte['cantidad_unidades_requeridas'] ?? 0)));
                         $transporteDetalle = $rq['transporte'] ?? [];
                         $transporteTotal = $calcTransporteTotal($transporteDetalle);
                         $transporteResumen = collect($transporteDetalle)
@@ -327,9 +352,9 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                             ->values();
                         $transporteResumenTexto = $transporteResumen->take(3)->implode(' / ');
                         $transporteRestantes = max(0, $transporteResumen->count() - 3);
-                        $isBorrador = strtoupper((string) ($rq['estado'] ?? '')) === 'BORRADOR';
-                        $estadoCss = strtolower(str_replace([' ', '_'], '-', (string) ($rq['estado'] ?? 'borrador')));
-                        $estadoLabel = ucfirst(strtolower(str_replace('_', ' ', (string) ($rq['estado'] ?? 'borrador'))));
+                        $estadoKey = strtolower(str_replace(' ', '_', (string) ($rq['estado'] ?? 'borrador')));
+                        $estadoCss = str_replace('_', '-', $estadoKey);
+                        $estadoLabel = $estadoLabels[$estadoKey] ?? ucfirst(str_replace('_', ' ', $estadoKey));
                         $fechaInicioRaw = (string) ($rq['fecha_inicio'] ?? '');
                         $fechaFinRaw = (string) ($rq['fecha_fin'] ?? '');
                         $fechaInicioFmt = $fechaInicioRaw !== ''
@@ -353,7 +378,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                         $totalBackup = $calcBackup($detalle);
                         $totalSolicitado = $calcTotalSolicitado($detalle);
                         $menuId = 'rq-actions-'.$rq['id'];
-                        $hasOverflowActions = $canDuplicateRq || ($isBorrador && $canSendRq) || $canDeleteRq;
+                        $paradaRoute = ['id' => $rq['id'], 'lista' => $lista];
                     @endphp
 
                     <article class="rq-card" aria-labelledby="rq-title-{{ $rq['id'] }}">
@@ -362,7 +387,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                                 <span class="estado-badge {{ $estadoCss }}">{{ $estadoLabel }}</span>
                                 <span class="rq-location">{{ $destinoNombre }}</span>
                                 @if($planArchivado)
-                                    <span class="rq-soft-badge">Plan archivado</span>
+                                    <span class="rq-soft-badge">{{ $planArchivado }} {{ $planArchivado === 1 ? 'plan archivado' : 'planes archivados' }}</span>
                                 @endif
                             </div>
                             <span class="rq-week-badge">{{ $semanaLabel }}</span>
@@ -379,11 +404,11 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                             </div>
 
                             <div class="rq-card-summaries">
-                                <div class="rq-summary {{ $planGrupos > 0 || $planCount > 0 ? '' : 'is-warning' }}">
+                                <div class="rq-summary {{ $planActividades > 0 ? '' : 'is-warning' }}">
                                     <span>Plan operativo</span>
                                     @if($planGrupos > 0 || $planCount > 0)
-                                        <strong>{{ max(1, $planCount) }} plan · {{ $planGrupos }} grupo(s)</strong>
-                                        <small>{{ $planActividades }} actividad(es)</small>
+                                        <strong>{{ $planActividades > 0 ? $planActividades.' actividad(es)' : 'Sin actividades programadas' }}</strong>
+                                        <small>{{ max(1, $planCount) }} {{ $planCount > 1 ? 'planes' : 'plan' }} · {{ $planGrupos }} grupo(s) sin archivar</small>
                                     @else
                                         <strong>Sin plan operativo</strong>
                                         <small>Esta parada todavia no tiene un plan operativo.</small>
@@ -396,14 +421,16 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                                     <small>{{ $totalTitular }} titular(es){{ $totalBackup > 0 ? ' · '.$totalBackup.' backup' : '' }}</small>
                                 </div>
 
-                                <div class="rq-summary {{ $transporteTotal > 0 ? '' : 'is-muted' }}">
-                                    <span>Transporte</span>
-                                    @if($transporteTotal > 0)
-                                        <strong>{{ $transporteTotal }} unidad(es)</strong>
-                                        <small>{{ $transporteResumenTexto }}{{ $transporteRestantes > 0 ? ' + '.$transporteRestantes.' mas' : '' }}</small>
+                                <div class="rq-summary {{ $cantidadSolicitudesTransporte || $transporteTotal > 0 ? '' : 'is-muted' }}">
+                                    <span>Transporte solicitado en planes</span>
+                                    @if($cantidadSolicitudesTransporte)
+                                        <strong>{{ $cantidadSolicitudesTransporte }} {{ $cantidadSolicitudesTransporte === 1 ? 'solicitud de transporte' : 'solicitudes de transporte' }}</strong>
+                                        <small>{{ $unidadesSolicitadas > 0 ? $unidadesSolicitadas.' '.($unidadesSolicitadas === 1 ? 'unidad solicitada' : 'unidades solicitadas') : 'Cantidad de unidades sin indicar' }}</small>
                                     @else
-                                        <strong>Sin transporte</strong>
-                                        <small>Transporte no planificado.</small>
+                                        <strong>Sin solicitudes de transporte</strong>
+                                    @endif
+                                    @if($transporteTotal > 0)
+                                        <small>Registro anterior: {{ $transporteResumenTexto ?: $transporteTotal.' unidad(es)' }}{{ $transporteRestantes > 0 ? ' + '.$transporteRestantes.' más' : '' }}</small>
                                     @endif
                                 </div>
                             </div>
@@ -416,16 +443,9 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                             </div>
 
                             <div class="row-actions">
-                                @if($canEditRq)
-                                    <a href="{{ route('rq-mina.plan', $rq['id']) }}" class="btn-row btn-send">Abrir plan</a>
-                                @endif
-                                <a href="{{ route('rq-mina.dashboard', $rq['id']) }}" class="btn-row btn-row-outline">Dashboard</a>
-                                <a href="{{ route('rq-mina.show', $rq['id']) }}" class="btn-row btn-row-outline">Ver</a>
-                                @if($canEditRq)
-                                    <a href="{{ route('rq-mina.edit', $rq['id']) }}" class="btn-row btn-row-outline">Editar</a>
-                                @endif
+                                <a href="{{ route('rq-mina.show', $paradaRoute) }}" class="btn-row btn-send">Abrir parada</a>
 
-                                @if($hasOverflowActions)
+                                @if($canEditRq || $canDuplicateRq || $canDeleteRq)
                                     <div class="rq-actions-menu">
                                         <button
                                             type="button"
@@ -434,25 +454,14 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
                                             aria-expanded="false"
                                             aria-controls="{{ $menuId }}"
                                         >
-                                            Mas
+                                            Acciones
                                         </button>
                                         <div class="rq-actions-dropdown" id="{{ $menuId }}" data-rq-actions-menu hidden>
-                                            @if($canDuplicateRq)
-                                                <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id']]) }}" class="rq-actions-item">Copiar</a>
+                                            @if($canEditRq)
+                                                <a href="{{ route('rq-mina.edit', $paradaRoute) }}" class="rq-actions-item">Editar datos de parada</a>
                                             @endif
-
-                                            @if($isBorrador && $canSendRq)
-                                                <form
-                                                    method="POST"
-                                                    action="{{ route('rq-mina.enviar', $rq['id']) }}"
-                                                    class="js-rq-send-form"
-                                                    data-rq-title="{{ $tituloParada !== '-' ? $tituloParada : 'Parada sin nombre' }}"
-                                                    data-rq-destination="{{ $destinoNombre }}"
-                                                    data-rq-range="{{ $fechaInicioFmt }} al {{ $fechaFinFmt }}"
-                                                >
-                                                    @csrf
-                                                    <button type="submit" class="rq-actions-item">Enviar</button>
-                                                </form>
+                                            @if($canDuplicateRq)
+                                                <a href="{{ route('rq-mina.create', ['copy_from' => $rq['id'], 'lista' => $lista]) }}" class="rq-actions-item">Copiar datos de parada</a>
                                             @endif
 
                                             @if($canDeleteRq)
@@ -528,304 +537,7 @@ foreach (['fecha_inicio_desde' => 'Inicio desde', 'fecha_inicio_hasta' => 'Inici
     </div>
 </div>
 
-<div class="rq-confirm-overlay" id="rqSendConfirm" hidden>
-    <section
-        class="rq-confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rqSendConfirmTitle"
-        aria-describedby="rqSendConfirmDescription"
-    >
-        <div class="rq-confirm-icon" aria-hidden="true">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="m22 2-7 20-4-9-9-4Z"></path>
-                <path d="M22 2 11 13"></path>
-            </svg>
-        </div>
-        <div class="rq-confirm-copy">
-            <span class="rq-confirm-eyebrow">Confirmar envío</span>
-            <h2 id="rqSendConfirmTitle">Enviar RQ a RR.HH.</h2>
-            <p id="rqSendConfirmDescription">
-                Revisa el requerimiento antes de enviarlo. Después del envío dejará de estar en borrador.
-            </p>
-        </div>
-        <dl class="rq-confirm-summary">
-            <div>
-                <dt>Parada</dt>
-                <dd id="rqSendConfirmRqTitle">-</dd>
-            </div>
-            <div>
-                <dt>Destino</dt>
-                <dd id="rqSendConfirmDestination">-</dd>
-            </div>
-            <div>
-                <dt>Periodo</dt>
-                <dd id="rqSendConfirmRange">-</dd>
-            </div>
-        </dl>
-        <div class="rq-confirm-actions">
-            <button type="button" class="btn-row btn-row-outline" id="rqSendConfirmCancel">Cancelar</button>
-            <button type="button" class="btn-row btn-send" id="rqSendConfirmSubmit">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path d="m22 2-7 20-4-9-9-4Z"></path>
-                    <path d="M22 2 11 13"></path>
-                </svg>
-                Enviar RQ
-            </button>
-        </div>
-    </section>
-</div>
-
-<!-- Modal Nuevo RQ Mina -->
-<div class="rq-mina-desktop-workspace">
-<div class="modalrq-overlay" id="modalRQ" style="display: none;">
-    <div class="modalrq-container">
-        <div class="modalrq-header">
-            <h2 class="modalrq-title" id="modalRQTitle">Nuevo RQ Mina</h2>
-            <button type="button" class="modalrq-close" onclick="closeModalRQ()">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-        </div>
-        <form id="formRQ" class="modalrq-body" method="POST" action="{{ route('rq-mina.store') }}">
-            @csrf
-            <input type="hidden" name="_method" id="formMethodOverride" value="POST">
-            <div class="form-section">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Lugar *</label>
-                        <select name="destino_id" id="inputDestino" class="form-select" required>
-                            <option value="">Seleccionar lugar</option>
-                            @foreach($lugarOptions as $lugar)
-                            @php $value = ($lugar['tipo'] ?? '') . '|' . ($lugar['id'] ?? ''); @endphp
-                            <option value="{{ $value }}">{{ $lugar['label'] ?? (($lugar['tipo'] ?? 'Lugar') . ' - ' . ($lugar['nombre'] ?? '-')) }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Área *</label>
-                        <input type="text" name="area" id="inputArea" class="form-input" placeholder="Ej: C2, Operación Planta" required>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Fecha inicio *</label>
-                        <input type="date" name="fecha_inicio" id="inputFechaInicio" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Fecha fin *</label>
-                        <input type="date" name="fecha_fin" id="inputFechaFin" class="form-input" required>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Observaciones</label>
-                    <textarea name="observaciones" id="inputObs" class="form-textarea" rows="3" placeholder="Descripción del requerimiento..."></textarea>
-                </div>
-            </div>
-            <div class="form-section">
-                @include('rq-mina.partials.supervisor-selector', [
-                    'selectorId' => 'rqModalSupervisorSelector',
-                    'selectedSupervisor' => null,
-                    'title' => 'Supervisor a cargo de herramientas',
-                ])
-                <div style="margin-top: 14px;">
-                    @include('rq-mina.partials.supervisor-selector', [
-                        'selectorId' => 'rqModalSupervisorPetsSelector',
-                        'selectedSupervisor' => null,
-                        'title' => 'Supervisor a cargo de PETS',
-                        'fieldName' => 'supervisor_pets_id',
-                        'emptyText' => 'Sin supervisor PETS seleccionado.',
-                    ])
-                </div>
-            </div>
-            <div class="form-section">
-                @include('rq-mina.partials.plan-operativo-editor', [
-                    'editorId' => 'rqModalPlanOperativoEditor',
-                    'planOperativo' => [],
-                ])
-            </div>
-            <div class="detalle-section">
-                <div class="detalle-header">
-                    <h3 class="detalle-title">Detalle por puesto / cantidad</h3>
-                    <button type="button" class="btn-addfila" onclick="addFila()">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                       Agregar fila
-                    </button>
-                </div>
-                <div class="detalle-lista" id="listaDetalle">
-                    <div class="fila-detalle">
-                        <input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto">
-                        <input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1">
-                        <button type="button" class="btn-removefila" onclick="this.closest('.fila-detalle').remove()">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="detalle-section detalle-section-transporte">
-                <div class="detalle-header">
-                    <h3 class="detalle-title">Detalle de transporte</h3>
-                    <button type="button" class="btn-addfila" onclick="addFilaTransporte()">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                       Agregar fila
-                    </button>
-                </div>
-                <div class="detalle-lista" id="listaTransporte">
-                    <div class="fila-detalle">
-                        <input type="text" name="transporte[0][transporte]" class="input-puesto" placeholder="Transporte">
-                        <input type="number" name="transporte[0][cantidad]" class="input-cantidad" placeholder="Cantidad" min="1" value="1">
-                        <button type="button" class="btn-removefila" onclick="this.closest('.fila-detalle').remove()">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </form>
-        <div class="modalrq-footer">
-            <button type="button" class="btn-cancelarrq" onclick="closeModalRQ()">Cancelar</button>
-            <button type="submit" form="formRQ" class="btn-crear" id="modalRQSubmit">Crear BORRADOR</button>
-        </div>
-    </div>
-</div>
-</div>
-
 <script>
-const rqData = @json($items);
-const rqStoreUrl = @json(route('rq-mina.store'));
-const rqUpdateUrlTemplate = @json(route('rq-mina.update', ['id' => '__ID__']));
-let transporteRowCount = 1;
-
-function createDetalleRow(puesto, cantidad) {
-    return '<div class="fila-detalle"><input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto" value="' + (puesto || '') + '"><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
-}
-
-function createTransporteRow(transporte, cantidad) {
-    const index = transporteRowCount++;
-    return '<div class="fila-detalle"><input type="text" name="transporte[' + index + '][transporte]" class="input-puesto" placeholder="Transporte" value="' + (transporte || '') + '"><input type="number" name="transporte[' + index + '][cantidad]" class="input-cantidad" placeholder="Cantidad" min="1" value="' + (cantidad || 1) + '"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
-}
-
-function destinoValue(rq) {
-    if (rq && rq.destino_tipo && rq.destino_id) {
-        return String(rq.destino_tipo) + '|' + String(rq.destino_id);
-    }
-
-    return rq && rq.mina_id ? 'MINA|' + String(rq.mina_id) : '';
-}
-
-function openModalRQ(mode = 'create', rqId = null) {
-    document.getElementById('modalRQ').style.display = 'flex';
-    const form = document.getElementById('formRQ');
-    const title = document.getElementById('modalRQTitle');
-    const submit = document.getElementById('modalRQSubmit');
-    const methodOverride = document.getElementById('formMethodOverride');
-    const detalle = document.getElementById('listaDetalle');
-    const transporte = document.getElementById('listaTransporte');
-
-    form.reset();
-    detalle.innerHTML = createDetalleRow('', 1);
-    transporteRowCount = 0;
-    transporte.innerHTML = createTransporteRow('', 1);
-    if (window.rqMinaSupervisorSelectorSet) {
-        window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', null);
-        window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', null);
-    }
-    if (window.rqMinaPlanEditorSet) {
-        window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', []);
-    }
-
-    if (mode === 'edit' && rqId) {
-        const rq = rqData.find(item => String(item.id) === String(rqId));
-        if (!rq) return;
-
-        title.textContent = 'Editar RQ Mina';
-        submit.textContent = 'Guardar Cambios';
-        form.action = rqUpdateUrlTemplate.replace('__ID__', String(rq.id));
-        methodOverride.value = 'PUT';
-
-        document.getElementById('inputDestino').value = destinoValue(rq);
-        document.getElementById('inputArea').value = rq.area || '';
-        document.getElementById('inputFechaInicio').value = rq.fecha_inicio || '';
-        document.getElementById('inputFechaFin').value = rq.fecha_fin || '';
-        document.getElementById('inputObs').value = rq.observaciones || '';
-
-        detalle.innerHTML = '';
-        const rqDetalle = Array.isArray(rq.detalle) && rq.detalle.length > 0 ? rq.detalle : [{ puesto: '', cantidad: 1 }];
-        rqDetalle.forEach(item => {
-            detalle.insertAdjacentHTML('beforeend', createDetalleRow(item.puesto, item.cantidad));
-        });
-
-        transporte.innerHTML = '';
-        transporteRowCount = 0;
-        const rqTransporte = Array.isArray(rq.transporte) && rq.transporte.length > 0 ? rq.transporte : [{ transporte: '', cantidad: 1 }];
-        rqTransporte.forEach(item => {
-            transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
-        });
-        if (window.rqMinaSupervisorSelectorSet) {
-            window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
-            window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', rq.supervisor_pets || null);
-        }
-        if (window.rqMinaPlanEditorSet) {
-            window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);
-        }
-    } else if (mode === 'copy' && rqId) {
-        const rq = rqData.find(item => String(item.id) === String(rqId));
-        if (!rq) return;
-
-        title.textContent = 'Copiar RQ Mina';
-        submit.textContent = 'Crear BORRADOR';
-        form.action = rqStoreUrl;
-        methodOverride.value = 'POST';
-
-        document.getElementById('inputDestino').value = destinoValue(rq);
-        document.getElementById('inputArea').value = rq.area || '';
-        document.getElementById('inputFechaInicio').value = rq.fecha_inicio || '';
-        document.getElementById('inputFechaFin').value = rq.fecha_fin || '';
-        document.getElementById('inputObs').value = rq.observaciones || '';
-
-        detalle.innerHTML = '';
-        const rqDetalle = Array.isArray(rq.detalle) && rq.detalle.length > 0 ? rq.detalle : [{ puesto: '', cantidad: 1 }];
-        rqDetalle.forEach(item => {
-            detalle.insertAdjacentHTML('beforeend', createDetalleRow(item.puesto, item.cantidad));
-        });
-
-        transporte.innerHTML = '';
-        transporteRowCount = 0;
-        const rqTransporte = Array.isArray(rq.transporte) && rq.transporte.length > 0 ? rq.transporte : [{ transporte: '', cantidad: 1 }];
-        rqTransporte.forEach(item => {
-            transporte.insertAdjacentHTML('beforeend', createTransporteRow(item.transporte, item.cantidad));
-        });
-        if (window.rqMinaSupervisorSelectorSet) {
-            window.rqMinaSupervisorSelectorSet('rqModalSupervisorSelector', rq.supervisor || null);
-            window.rqMinaSupervisorSelectorSet('rqModalSupervisorPetsSelector', rq.supervisor_pets || null);
-        }
-        if (window.rqMinaPlanEditorSet) {
-            window.rqMinaPlanEditorSet('rqModalPlanOperativoEditor', rq.plan_operativo || []);
-        }
-    } else {
-        title.textContent = 'Nuevo RQ Mina';
-        submit.textContent = 'Crear BORRADOR';
-        form.action = rqStoreUrl;
-        methodOverride.value = 'POST';
-    }
-}
-function closeModalRQ() {
-    document.getElementById('modalRQ').style.display = 'none';
-}
-function addFila() {
-    const container = document.getElementById('listaDetalle');
-    const row = document.createElement('div');
-    row.className = 'fila-detalle';
-    row.innerHTML = '<input type="text" name="puesto[]" class="input-puesto" placeholder="Puesto"><input type="number" name="cantidad[]" class="input-cantidad" placeholder="Cantidad" min="1" value="1"><button type="button" class="btn-removefila" onclick="this.closest(\'.fila-detalle\').remove()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
-    container.appendChild(row);
-}
-
-function addFilaTransporte() {
-    const container = document.getElementById('listaTransporte');
-    container.insertAdjacentHTML('beforeend', createTransporteRow('', 1));
-}
-function saveRQ(e) {
-    // Reserved for future custom validation hooks.
-}
-
 function initializeRQMinaAutoFilters() {
     const form = document.getElementById('rqMinaFiltersForm');
     if (!form) return;
@@ -1003,75 +715,9 @@ function initializeRQMinaActionMenus() {
     });
 }
 
-function initializeRQSendConfirmation() {
-    const overlay = document.getElementById('rqSendConfirm');
-    const cancelButton = document.getElementById('rqSendConfirmCancel');
-    const submitButton = document.getElementById('rqSendConfirmSubmit');
-    const title = document.getElementById('rqSendConfirmRqTitle');
-    const destination = document.getElementById('rqSendConfirmDestination');
-    const range = document.getElementById('rqSendConfirmRange');
-    let pendingForm = null;
-    let triggerButton = null;
-
-    if (!overlay || !cancelButton || !submitButton) return;
-
-    const closeConfirmation = () => {
-        overlay.hidden = true;
-        document.body.classList.remove('rq-confirm-open');
-        pendingForm = null;
-
-        if (triggerButton) {
-            triggerButton.focus({ preventScroll: true });
-            triggerButton = null;
-        }
-    };
-
-    document.querySelectorAll('.js-rq-send-form').forEach((form) => {
-        form.addEventListener('submit', (event) => {
-            if (form.dataset.confirmed === 'true') return;
-
-            event.preventDefault();
-            pendingForm = form;
-            triggerButton = event.submitter || form.querySelector('button[type="submit"]');
-            title.textContent = form.dataset.rqTitle || 'Parada sin nombre';
-            destination.textContent = form.dataset.rqDestination || '-';
-            range.textContent = form.dataset.rqRange || '-';
-            overlay.hidden = false;
-            document.body.classList.add('rq-confirm-open');
-            submitButton.focus({ preventScroll: true });
-        });
-    });
-
-    cancelButton.addEventListener('click', closeConfirmation);
-    submitButton.addEventListener('click', () => {
-        if (!pendingForm) return;
-
-        submitButton.disabled = true;
-        submitButton.textContent = 'Enviando...';
-        pendingForm.dataset.confirmed = 'true';
-        pendingForm.submit();
-    });
-
-    overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) {
-            closeConfirmation();
-        }
-    });
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !overlay.hidden) {
-            closeConfirmation();
-        }
-    });
-}
-
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalRQ(); });
-document.getElementById('modalRQ').addEventListener('click', e => { if (e.target.id === 'modalRQ') closeModalRQ(); });
-
 document.addEventListener('DOMContentLoaded', function () {
     initializeRQMinaAutoFilters();
     initializeRQMinaActionMenus();
-    initializeRQSendConfirmation();
 
     if (window.ProsergeUI) {
         window.ProsergeUI.initCollapsiblePanel({

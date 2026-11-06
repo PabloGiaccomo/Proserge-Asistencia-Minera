@@ -5,6 +5,7 @@
     $fieldName = $fieldName ?? 'supervisor_id';
     $placeholder = $placeholder ?? 'Buscar supervisor por nombre, DNI o puesto';
     $emptyText = $emptyText ?? 'Sin supervisor seleccionado.';
+    $errorMessage = $errorMessage ?? null;
 @endphp
 
 @once
@@ -162,11 +163,14 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
     <div class="rq-supervisor-search-wrap">
         <input type="hidden" name="{{ $fieldName }}" data-rq-supervisor-id>
-        <input type="text" class="rq-supervisor-search-input" data-rq-supervisor-search placeholder="{{ $placeholder }}" autocomplete="off">
+        <input type="text" class="rq-supervisor-search-input" data-rq-supervisor-search aria-label="{{ $title }}" placeholder="{{ $placeholder }}" autocomplete="off" @if($errorMessage) aria-invalid="true" aria-describedby="{{ $selectorId }}Error" @endif>
         <button type="button" class="rq-supervisor-clear" data-rq-supervisor-clear aria-label="Quitar supervisor" title="Quitar supervisor">&times;</button>
         <div class="rq-supervisor-results" data-rq-supervisor-results></div>
     </div>
     <div class="rq-supervisor-selected" data-rq-supervisor-selected data-empty-text="{{ $emptyText }}">{{ $emptyText }}</div>
+    @if($errorMessage)
+        <p id="{{ $selectorId }}Error">{{ $errorMessage }}</p>
+    @endif
 </div>
 
 <script type="application/json" data-rq-supervisor-initial="{{ $selectorId }}">@json($selectedSupervisor)</script>

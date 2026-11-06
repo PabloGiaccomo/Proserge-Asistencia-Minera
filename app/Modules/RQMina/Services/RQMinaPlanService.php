@@ -19,7 +19,7 @@ class RQMinaPlanService
     public function createDefaultPlan(RQMina $rqMina, ?Usuario $usuario = null): RQMinaPlan
     {
         return DB::transaction(function () use ($rqMina, $usuario): RQMinaPlan {
-            RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->first();
+            $rqMina = RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->firstOrFail();
 
             $existing = $this->defaultPlanQuery($rqMina)->lockForUpdate()->first();
             if ($existing) {
@@ -55,7 +55,7 @@ class RQMinaPlanService
     public function createPlan(RQMina $rqMina, array $payload, ?Usuario $usuario = null): RQMinaPlan
     {
         return DB::transaction(function () use ($rqMina, $payload, $usuario): RQMinaPlan {
-            RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->first();
+            $rqMina = RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->firstOrFail();
             $this->ensureDefaultPlan($rqMina, $usuario);
 
             $fechaInicio = $this->toDateString($payload['fecha_inicio'] ?? null);
@@ -87,6 +87,8 @@ class RQMinaPlanService
         $this->assertPlanBelongsToRQMina($rqMina, $plan);
 
         return DB::transaction(function () use ($rqMina, $plan, $payload, $usuario): RQMinaPlan {
+            $rqMina = RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->firstOrFail();
+
             $locked = RQMinaPlan::query()
                 ->whereKey((string) $plan->id)
                 ->where('rq_mina_id', (string) $rqMina->id)
@@ -137,7 +139,7 @@ class RQMinaPlanService
         $this->assertPlanBelongsToRQMina($rqMina, $sourcePlan);
 
         return DB::transaction(function () use ($rqMina, $sourcePlan, $payload, $usuario): RQMinaPlan {
-            RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->first();
+            $rqMina = RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->firstOrFail();
 
             $source = RQMinaPlan::query()
                 ->with(['grupos.actividades.turnos', 'grupos.transportes'])
@@ -183,6 +185,8 @@ class RQMinaPlanService
         $this->assertPlanBelongsToRQMina($rqMina, $plan);
 
         return DB::transaction(function () use ($rqMina, $plan, $usuario): RQMinaPlan {
+            $rqMina = RQMina::query()->whereKey((string) $rqMina->id)->lockForUpdate()->firstOrFail();
+
             $locked = RQMinaPlan::query()
                 ->whereKey((string) $plan->id)
                 ->where('rq_mina_id', (string) $rqMina->id)
@@ -580,7 +584,7 @@ class RQMinaPlanService
         return $text ?: $this->buildSemanaReferencia($fechaInicio, $fechaFin);
     }
 
-    private function buildSemanaReferencia(mixed $fechaInicio, mixed $fechaFin): string
+    public function buildSemanaReferencia(mixed $fechaInicio, mixed $fechaFin): string
     {
         $inicio = Carbon::parse($fechaInicio)->startOfDay();
         $fin = Carbon::parse($fechaFin)->startOfDay();

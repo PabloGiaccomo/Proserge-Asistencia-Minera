@@ -8,6 +8,8 @@ use App\Modules\Catalogos\Controllers\MinaPageController;
 use App\Modules\Catalogos\Controllers\OficinaPageController;
 use App\Modules\Catalogos\Controllers\ParaderoPageController;
 use App\Modules\Catalogos\Controllers\TallerPageController;
+use App\Modules\Dashboard\Controllers\HomeDashboardPageController;
+use App\Modules\Dashboard\Controllers\ExistingDashboardPageController;
 use App\Modules\Epps\Controllers\EppDeliverySignatureController;
 use App\Modules\Epps\Controllers\EppCatalogReturnController;
 use App\Modules\Epps\Controllers\EppEvidenceController;
@@ -25,12 +27,15 @@ use App\Modules\ParadaHerramientas\Controllers\ParadaHerramientaPageController;
 use App\Modules\Perfil\Controllers\PerfilPageController;
 use App\Modules\Personal\Controllers\MiningExamCatalogPageController;
 use App\Modules\Personal\Controllers\PersonalContratoController;
+use App\Modules\Personal\Controllers\PersonalContratoSignedBatchController;
 use App\Modules\Personal\Controllers\PersonalContratoDatoController;
 use App\Modules\Personal\Controllers\PersonalContratoFormatoController;
 use App\Modules\Personal\Controllers\PersonalDocumentoController;
 use App\Modules\Personal\Controllers\PersonalFichaController;
 use App\Modules\Personal\Controllers\PersonalImportController;
 use App\Modules\Personal\Controllers\PersonalIngresoController;
+use App\Modules\Personal\Controllers\PersonalIngresoUpdateController;
+use App\Modules\Personal\Controllers\PersonalIngresoBatchReviewController;
 use App\Modules\Personal\Controllers\PersonalMinaHabilitacionController;
 use App\Modules\Personal\Controllers\PersonalMinaScheduledControlExportController;
 use App\Modules\Personal\Controllers\PersonalPageController;
@@ -44,6 +49,7 @@ use App\Modules\RQMina\Controllers\RQMinaPlanController;
 use App\Modules\RQProserge\Controllers\RQProsergePageController;
 use App\Modules\Seguridad\Controllers\PermisoPageController;
 use App\Modules\Seguridad\Controllers\RolPageController;
+use App\Modules\Seguridad\Controllers\UsuarioAltaLoteController;
 use App\Modules\Seguridad\Controllers\UsuarioPageController;
 use App\Modules\Transporte\Controllers\TransportePageController;
 use Illuminate\Support\Facades\Route;
@@ -101,6 +107,10 @@ Route::post('/logout', [LoginPageController::class, 'logout'])->name('logout');
 Route::get('/ficha-colaborador', [PublicPersonalIngresoController::class, 'show'])->name('personal.ingresos.public.show');
 Route::post('/ficha-colaborador/clave', [PublicPersonalIngresoController::class, 'verifyKey'])->name('personal.ingresos.public.key');
 Route::post('/ficha-colaborador', [PublicPersonalIngresoController::class, 'submit'])->name('personal.ingresos.public.submit');
+Route::get('/ficha-colaborador/actualizar', [PersonalIngresoUpdateController::class, 'publicShow'])->name('personal.actualizacion.public.show');
+Route::post('/ficha-colaborador/actualizar/canje', [PersonalIngresoUpdateController::class, 'exchange'])->middleware('throttle:12,1')->name('personal.actualizacion.public.exchange');
+Route::post('/ficha-colaborador/actualizar/borrador', [PersonalIngresoUpdateController::class, 'draft'])->middleware('throttle:60,1')->name('personal.actualizacion.public.draft');
+Route::post('/ficha-colaborador/actualizar/enviar', [PersonalIngresoUpdateController::class, 'submit'])->middleware('throttle:20,1')->name('personal.actualizacion.public.submit');
 Route::get('/ficha-colaborador/{token}', [PublicPersonalFichaController::class, 'show'])->name('ficha-colaborador.show');
 Route::post('/ficha-colaborador/{token}/archivo-borrador', [PublicPersonalFichaController::class, 'storeDraftArchivo'])->name('ficha-colaborador.archivo-borrador');
 Route::post('/ficha-colaborador/{token}/datos-borrador', [PublicPersonalFichaController::class, 'storeDraftData'])->name('ficha-colaborador.datos-borrador');
@@ -109,6 +119,20 @@ Route::post('/ficha-colaborador/{token}', [PublicPersonalFichaController::class,
 Route::middleware('web.auth')->group(function (): void {
     // Inicio - Home principal
     Route::get('/inicio', [PersonalPageController::class, 'home'])->middleware('web.permission:inicio,ver')->name('inicio');
+
+    foreach (['personal', 'mi_asistencia', 'rq_mina', 'rq_proserge', 'bienestar', 'catalogos'] as $dashboardModule) {
+        Route::get('/inicio/dashboards/'.$dashboardModule, [HomeDashboardPageController::class, 'show'])
+            ->defaults('module', $dashboardModule)
+            ->middleware('web.permission:'.$dashboardModule.',dashboards')
+            ->name('inicio.dashboard.'.$dashboardModule);
+    }
+    foreach (['asistencias', 'faltas', 'evaluaciones', 'man_power', 'logistica'] as $dashboardModule) {
+        Route::get('/inicio/dashboards/'.$dashboardModule, [ExistingDashboardPageController::class, $dashboardModule])
+            ->middleware('web.permission:'.$dashboardModule.','.($dashboardModule === 'logistica' ? 'ver_logistica_dashboard' : 'dashboards'))
+            ->name('inicio.dashboard.'.$dashboardModule);
+    }
+    Route::get('/inicio/dashboards/rq_mina/{rqMina}', [ExistingDashboardPageController::class, 'parada'])
+        ->whereUuid('rqMina')->middleware('web.permission:rq_mina,dashboards')->name('inicio.dashboard.rq_mina.parada');
 
     // Perfil
     Route::get('/perfil', [PerfilPageController::class, 'index'])->middleware('web.permission:perfil,ver')->name('perfil.index');
@@ -143,7 +167,19 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/{id}/regularizar-antiguo', [PersonalPageController::class, 'regularizeAntiguo'])->middleware('web.permission:personal,actualizar')->name('personal.antiguo.regularize');
     Route::post('/personal/{id}/regularizar-antiguo', [PersonalPageController::class, 'updateRegularizacionAntiguo'])->middleware('web.permission:personal,actualizar')->name('personal.antiguo.regularize.update');
     Route::get('/personal/fichas/temporales', [PersonalIngresoController::class, 'index'])->middleware('web.permission:personal_ingresos,ver')->name('personal.fichas.temporales');
+    Route::prefix('/personal/ingresos/lotes')->name('personal.ingresos.lotes.')
+        ->middleware(['web.permission:personal_ingresos,ver', 'web.permission:personal_ingresos,aprobar'])
+        ->controller(PersonalIngresoBatchReviewController::class)->group(function (): void {
+            Route::post('/', 'preview')->name('preview');
+            Route::get('/{lote}', 'show')->whereUuid('lote')->name('show');
+            Route::get('/{lote}/filas/{fila}/revision', 'details')->whereUuid(['lote', 'fila'])->name('details');
+            Route::post('/{lote}/confirmar', 'confirm')->whereUuid('lote')->name('confirm');
+        });
     Route::get('/personal/ingresos/{id}', [PersonalIngresoController::class, 'show'])->middleware('web.permission:personal_ingresos,ver')->name('personal.ingresos.show');
+    Route::get('/personal/ingresos/{id}/actualizacion', [PersonalIngresoUpdateController::class, 'review'])->middleware('web.permission:personal_ingresos,ver')->name('personal.ingresos.actualizacion.show');
+    Route::post('/personal/ingresos/{id}/aceptar-actualizacion', [PersonalIngresoUpdateController::class, 'accept'])->middleware('web.permission:personal_ingresos,aprobar')->name('personal.ingresos.actualizacion.accept');
+    Route::post('/personal/ingresos/{id}/observar-actualizacion', [PersonalIngresoUpdateController::class, 'observe'])->middleware('web.permission:personal_ingresos,aprobar')->name('personal.ingresos.actualizacion.observe');
+    Route::post('/personal/ingresos/links/{linkId}/revocar', [PersonalIngresoUpdateController::class, 'revoke'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.actualizacion.revoke');
     Route::get('/personal/ingresos/{id}/editar', [PersonalIngresoController::class, 'edit'])->middleware('web.permission:personal_ingresos,editar')->name('personal.ingresos.edit');
     Route::get('/personal/ingresos/{id}/archivos/{archivoId}', [PersonalIngresoController::class, 'downloadArchivo'])->middleware('web.permission:personal_ingresos,ver')->name('personal.ingresos.archivos.download');
     Route::put('/personal/ingresos/{id}', [PersonalIngresoController::class, 'update'])->middleware('web.permission:personal_ingresos,actualizar')->name('personal.ingresos.update');
@@ -170,6 +206,22 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/fichas/exportar/pdf/{jobId}/procesar', [PersonalFichaController::class, 'processPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.process');
     Route::get('/personal/fichas/exportar/pdf/{jobId}/descargar', [PersonalFichaController::class, 'downloadPdfExport'])->middleware('web.permission:personal,exportar')->name('personal.fichas.export.pdf.download');
     Route::post('/personal/documentos/descargar', [PersonalDocumentoController::class, 'downloadBulk'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.download-bulk');
+    Route::prefix('/personal/contratos/firmados')->name('personal.contratos.firmados.')
+        ->middleware('web.permission:personal,subir_contrato_firmado')
+        ->controller(PersonalContratoSignedBatchController::class)->group(function (): void {
+            Route::get('/', 'index')->name('index');
+            Route::post('/lotes', 'start')->name('start');
+            Route::post('/buscar', 'search')->name('search');
+            Route::get('/listos', 'ready')->name('ready');
+            Route::post('/activar', 'activate')->name('activate');
+            Route::get('/lotes/{lote}', 'show')->whereUuid('lote')->name('show');
+            Route::post('/lotes/{lote}/archivos', 'stage')->whereUuid('lote')->name('stage');
+            Route::patch('/lotes/{lote}/archivos/{archivo}', 'assign')->whereUuid(['lote', 'archivo'])->name('assign');
+            Route::delete('/lotes/{lote}/archivos/{archivo}', 'discard')->whereUuid(['lote', 'archivo'])->name('discard');
+            Route::get('/lotes/{lote}/archivos/{archivo}/pdf', 'pdf')->whereUuid(['lote', 'archivo'])
+                ->middleware('web.permission:personal,descargar_documentos')->name('pdf');
+            Route::post('/lotes/{lote}/confirmar', 'confirm')->whereUuid('lote')->name('confirm');
+        });
     Route::get('/personal/contratos/vencimientos', [PersonalContratoController::class, 'expiring'])->middleware('web.permission:vencimientos,ver')->name('personal.contratos.expiring');
     Route::get('/personal/contratos/vencimientos/exportar', [PersonalContratoController::class, 'exportExpiring'])->middleware('web.permission:vencimientos,exportar')->name('personal.contratos.expiring.export');
     Route::post('/personal/contratos/decisiones/registrar', [PersonalContratoController::class, 'bulkDecision'])->middleware('web.permission:vencimientos,registrar')->name('personal.contratos.bulk-decision');
@@ -222,6 +274,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::post('/personal/{id}/contratos/reingresar', [PersonalContratoController::class, 'reentry'])->middleware('web.permission:personal,reingresar|actualizar')->name('personal.contratos.reentry');
     Route::get('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'downloadSignedContract'])->middleware('web.permission:personal,descargar_documentos')->name('personal.contratos.signed.download');
     Route::post('/personal/{id}/contratos/{contractId}/firmado', [PersonalContratoController::class, 'uploadSignedContract'])->middleware('web.permission:personal,subir_contrato_firmado')->name('personal.contratos.signed');
+    Route::post('/personal/{id}/contratos/{contractId}/activar-firmado', [PersonalContratoController::class, 'activateSignedContract'])->middleware('web.permission:personal,subir_contrato_firmado')->name('personal.contratos.activate-signed');
     Route::put('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'update'])->middleware('web.permission:personal,editar_datos_contrato')->name('personal.contratos.update');
     Route::get('/personal/{id}/contratos/{contractId}', [PersonalContratoController::class, 'show'])->middleware('web.permission:personal,ver_contratos')->name('personal.contratos.show');
     Route::post('/personal/{id}/contratos/{contractId}/eliminar', [PersonalContratoController::class, 'destroy'])->middleware('web.permission:personal,eliminar')->name('personal.contratos.destroy');
@@ -233,6 +286,7 @@ Route::middleware('web.auth')->group(function (): void {
     Route::get('/personal/{id}/gestacion/{bloqueoId}/pdf', [PersonalDocumentoController::class, 'gestacionPdf'])->middleware('web.permission:personal,descargar_documentos')->name('personal.documentos.gestacion.pdf');
     Route::get('/personal/{id}/editar', [PersonalPageController::class, 'edit'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.edit');
     Route::put('/personal/{id}', [PersonalPageController::class, 'update'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.update');
+    Route::post('/personal/{id}/solicitar-actualizacion', [PersonalIngresoUpdateController::class, 'issue'])->middleware('web.permission:personal,editar|actualizar|editar_ficha')->name('personal.actualizacion.issue');
     Route::post('/personal/{id}/cesar', [PersonalPageController::class, 'cease'])->middleware('web.permission:personal,cesar_trabajador')->name('personal.cease');
     Route::post('/personal/{id}/lista-negra', [PersonalPageController::class, 'addToListaNegra'])->middleware('web.permission:personal,gestionar_lista_negra')->name('personal.lista-negra.store');
     Route::post('/personal/{id}/lista-negra/quitar', [PersonalPageController::class, 'removeFromListaNegra'])->middleware('web.permission:personal,gestionar_lista_negra')->name('personal.lista-negra.remove');
@@ -266,13 +320,13 @@ Route::middleware('web.auth')->group(function (): void {
     Route::put('/logistica/transportes/{id}', [LogisticaPageController::class, 'updateTransport'])->middleware('web.permission:logistica,actualizar')->name('logistica.transportes.update');
     Route::get('/logistica/transportes/{id}/documentos/{slot}', [LogisticaPageController::class, 'downloadTransportDocument'])->middleware('web.permission:logistica,ver|ver_logistica_servicios')->name('logistica.transportes.documento');
 
-    Route::get('/transporte/planificacion', [TransportePageController::class, 'index'])->middleware('web.permission:transportes,ver')->name('transporte.planificacion');
-    Route::post('/transporte/servicios', [TransportePageController::class, 'store'])->middleware('web.permission:transportes,crear')->name('transporte.servicios.store');
-    Route::patch('/transporte/servicios/{servicio}', [TransportePageController::class, 'update'])->middleware('web.permission:transportes,editar|actualizar')->name('transporte.servicios.update');
-    Route::post('/transporte/servicios/{servicio}/pasajeros', [TransportePageController::class, 'pasajeros'])->middleware('web.permission:transportes,entregar|actualizar')->name('transporte.servicios.pasajeros');
-    Route::post('/transporte/servicios/{servicio}/pasajeros/{pasajero}/retirar', [TransportePageController::class, 'retirarPasajero'])->middleware('web.permission:transportes,recepcionar|actualizar')->name('transporte.servicios.pasajeros.retirar');
-    Route::post('/transporte/servicios/{servicio}/copiar', [TransportePageController::class, 'copiar'])->middleware('web.permission:transportes,crear')->name('transporte.servicios.copiar');
-    Route::post('/transporte/servicios/{servicio}/estado', [TransportePageController::class, 'estado'])->middleware('web.permission:transportes,actualizar|entregar|recepcionar')->name('transporte.servicios.estado');
+    Route::get('/transporte/planificacion', [TransportePageController::class, 'index'])->middleware('web.permission:transportes,ver|administrar')->name('transporte.planificacion');
+    Route::post('/transporte/servicios', [TransportePageController::class, 'store'])->middleware('web.permission:transportes,crear|administrar')->name('transporte.servicios.store');
+    Route::patch('/transporte/servicios/{servicio}', [TransportePageController::class, 'update'])->middleware('web.permission:transportes,editar|actualizar|administrar')->name('transporte.servicios.update');
+    Route::post('/transporte/servicios/{servicio}/pasajeros', [TransportePageController::class, 'pasajeros'])->middleware('web.permission:transportes,entregar|actualizar|administrar')->name('transporte.servicios.pasajeros');
+    Route::post('/transporte/servicios/{servicio}/pasajeros/{pasajero}/retirar', [TransportePageController::class, 'retirarPasajero'])->middleware('web.permission:transportes,recepcionar|actualizar|administrar')->name('transporte.servicios.pasajeros.retirar');
+    Route::post('/transporte/servicios/{servicio}/copiar', [TransportePageController::class, 'copiar'])->middleware('web.permission:transportes,crear|administrar')->name('transporte.servicios.copiar');
+    Route::post('/transporte/servicios/{servicio}/estado', [TransportePageController::class, 'estado'])->middleware('web.permission:transportes,actualizar|entregar|recepcionar|administrar')->name('transporte.servicios.estado');
 
     Route::get('/herramientas-parada', [ParadaHerramientaPageController::class, 'index'])->middleware('web.permission:herramientas,ver')->name('herramientas-parada.index');
     Route::post('/herramientas-parada/catalogo/importar', [ParadaHerramientaPageController::class, 'importarCatalogo'])->middleware('web.permission:herramientas,importar')->name('herramientas-parada.catalogo.importar');
@@ -389,6 +443,10 @@ Route::middleware('web.auth')->group(function (): void {
 
     // Evaluaciones
     Route::get('/evaluaciones', [EvaluacionDesempenoPageController::class, 'index'])->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno|ver_supervisores|evaluar_supervisores|ver_residentes|evaluar_residentes')->name('evaluaciones.index');
+    Route::get('/evaluaciones/revisiones-asistencia', [\App\Modules\Evaluaciones\Controllers\EvaluacionAsistenciaRevisionController::class, 'index'])
+        ->middleware('web.permission:evaluaciones,ver_desempeno|evaluar_desempeno')->name('evaluaciones.revisiones-asistencia');
+    Route::post('/evaluaciones/revisiones-asistencia/{id}', [\App\Modules\Evaluaciones\Controllers\EvaluacionAsistenciaRevisionController::class, 'resolve'])
+        ->middleware('web.permission:evaluaciones,evaluar_desempeno')->name('evaluaciones.revisiones-asistencia.resolve');
     Route::get('/evaluaciones/historico/importar', [EvaluacionesHistoricalImportPageController::class, 'index'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.importar');
     Route::post('/evaluaciones/historico/revisar', [EvaluacionesHistoricalImportPageController::class, 'preview'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.preview');
     Route::post('/evaluaciones/historico/confirmar', [EvaluacionesHistoricalImportPageController::class, 'confirm'])->middleware('web.permission:evaluaciones,administrar')->name('evaluaciones.historico.confirmar');
@@ -407,6 +465,13 @@ Route::middleware('web.auth')->group(function (): void {
     // Usuarios
     Route::get('/usuarios', [UsuarioPageController::class, 'index'])->middleware('web.permission:usuarios,ver')->name('usuarios.index');
     Route::get('/usuarios/crear', [UsuarioPageController::class, 'create'])->middleware('web.permission:usuarios,crear')->name('usuarios.create');
+    Route::get('/usuarios/buscar-trabajadores', [UsuarioPageController::class, 'buscarTrabajadores'])->middleware('web.permission:usuarios,crear')->name('usuarios.buscar-trabajadores');
+    Route::middleware(['web.permission:usuarios,crear', 'web.permission:usuarios,asignar'])->group(function (): void {
+        Route::get('/usuarios/crear/varios', [UsuarioAltaLoteController::class, 'create'])->name('usuarios.lotes.create');
+        Route::post('/usuarios/lotes', [UsuarioAltaLoteController::class, 'store'])->name('usuarios.lotes.store');
+        Route::get('/usuarios/lotes/{lote}', [UsuarioAltaLoteController::class, 'show'])->whereUuid('lote')->name('usuarios.lotes.show');
+        Route::post('/usuarios/lotes/{lote}/excel', [UsuarioAltaLoteController::class, 'export'])->whereUuid('lote')->name('usuarios.lotes.export');
+    });
     Route::post('/usuarios', [UsuarioPageController::class, 'store'])->middleware('web.permission:usuarios,crear')->name('usuarios.store');
     Route::get('/usuarios/{id}', [UsuarioPageController::class, 'show'])->middleware('web.permission:usuarios,ver')->name('usuarios.show');
     Route::get('/usuarios/{id}/editar', [UsuarioPageController::class, 'edit'])->middleware('web.permission:usuarios,editar|actualizar')->name('usuarios.edit');

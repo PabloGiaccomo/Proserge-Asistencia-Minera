@@ -75,7 +75,7 @@
                 'readonly' => false,
                 'formMode' => 'internal',
                 'archivos' => $ingreso->archivos,
-                'firmaBase64' => $ingreso->firma_base64,
+                'firmaBase64' => $canViewSensitiveFichaData ? $ingreso->firma_base64 : null,
                 'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
             ])
         </form>
@@ -84,7 +84,7 @@
             'readonly' => true,
             'formMode' => 'internal',
             'archivos' => $ingreso->archivos,
-            'firmaBase64' => $ingreso->firma_base64,
+            'firmaBase64' => $canViewSensitiveFichaData ? $ingreso->firma_base64 : null,
             'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
         ])
     @endif

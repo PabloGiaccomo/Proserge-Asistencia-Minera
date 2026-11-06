@@ -6,7 +6,6 @@
 @php
     $canViewSensitiveFichaData = (bool) ($canViewSensitiveFichaData ?? false);
     $canExportSensitiveFichaPdf = (bool) ($canExportSensitiveFichaPdf ?? false);
-    $sensitiveFichaSections = ['Datos bancarios', 'Sistema pensionario'];
     $normalizeFichaOption = static function (?string $value): string {
         $normalized = \Illuminate\Support\Str::of((string) $value)
             ->trim()
@@ -80,12 +79,12 @@
                 $currentFieldValue = fn (string $key): string => (string) ($data[$key] ?? '');
             @endphp
             @foreach($sections as $section)
-                @if(!$canViewSensitiveFichaData && in_array($section['title'] ?? '', $sensitiveFichaSections, true))
+                @php
+                    $isSensitiveFichaSection = \App\Modules\Personal\Support\PersonalFichaAccess::isSensitiveSection($section);
+                @endphp
+                @if(!$canViewSensitiveFichaData && $isSensitiveFichaSection)
                     @continue
                 @endif
-                @php
-                    $isSensitiveFichaSection = in_array($section['title'] ?? '', $sensitiveFichaSections, true);
-                @endphp
                 <section class="ficha-section">
                     <div class="ficha-section-header">
                         <h3 class="ficha-section-title">{{ $section['title'] }}</h3>

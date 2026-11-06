@@ -1,8 +1,7 @@
 @php
     $editorId = $editorId ?? 'rqPlanOperativoEditor';
     $planOperativo = $planOperativo ?? [];
-    $weekNumber = $weekNumber ?? null;
-    $weekYear = $weekYear ?? null;
+    $weekLabel = $weekLabel ?? '';
     $paradaFechaInicio = $paradaFechaInicio ?? '';
     $paradaFechaFin = $paradaFechaFin ?? '';
     $readOnly = (bool) ($readOnly ?? false);
@@ -30,6 +29,7 @@ function initRQMinaPlanEditor(root) {
     const collapsedGroups = new Set();
     const collapsedActivities = new Set();
     const readOnly = root.dataset.readonly === '1';
+    const calendar = calendarDays(paradaFechas());
 
     function applyCollapseState() {
         root.classList.toggle('is-collapsed', isCollapsed);
@@ -44,7 +44,7 @@ function initRQMinaPlanEditor(root) {
     }
 
     function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"']/g, function(char) {
+        return String(value ?? '').replace(/[&<>"']/g, function(char) {
             return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'}[char];
         });
     }
@@ -95,18 +95,53 @@ function initRQMinaPlanEditor(root) {
 
     function paradaFechas() {
         return {
-            inicio: '{{ $paradaFechaInicio }}',
-            fin: '{{ $paradaFechaFin }}',
+            inicio: root.dataset.fechaInicio,
+            fin: root.dataset.fechaFin,
         };
     }
 
-    function weekDays(existingTurnos) {
-        return ['Lun','Mar','Mie','Jue','Vie','Sab','Dom'].map((label, index) => ({
-            fecha: '',
-            dia_label: label,
-            orden: index + 1,
-            key: label.toLowerCase(),
-        }));
+    function calendarDays({ inicio, fin }) {
+        const labels = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+        const current = new Date(inicio + 'T00:00:00Z');
+        const last = new Date(fin + 'T00:00:00Z');
+        const days = [];
+        while (current <= last) {
+            const dia_label = labels[current.getUTCDay()];
+            days.push({
+                fecha: current.toISOString().slice(0, 10),
+                dia_label,
+                heading: current.getUTCDate() + '/' + (current.getUTCMonth() + 1) + ' ' + dia_label.toLowerCase(),
+            });
+            current.setUTCDate(current.getUTCDate() + 1);
+        }
+
+        return days;
+    }
+
+    function scheduleDays(turnos) {
+        const byDateOrWeekday = new Map();
+        for (const turno of turnos) {
+            const key = turno.fecha || weekDayKey(turno.dia_label);
+            if (key && !byDateOrWeekday.has(key)) {
+                byDateOrWeekday.set(key, turno);
+            }
+        }
+
+        const shown = new Set();
+        const days = calendar.map(day => {
+            const existing = byDateOrWeekday.get(day.fecha);
+            if (existing) shown.add(existing);
+            const weekly = byDateOrWeekday.get(weekDayKey(day.dia_label));
+            const initial = { dia_label: day.dia_label, turno_a: weekly?.turno_a, turno_b: weekly?.turno_b };
+            return {
+                ...day,
+                turno: existing || initial,
+                initial,
+                saved: Boolean(existing && !existing._nuevo),
+            };
+        });
+
+        return { days, preserved: turnos.filter(turno => !shown.has(turno)) };
     }
 
     function weekDayKey(value) {
@@ -178,38 +213,29 @@ function initRQMinaPlanEditor(root) {
         const key = activity.client_key || activity.id || (Date.now() + '-' + groupIndex + '-' + activityIndex);
         const prefix = 'plan_operativo[' + groupIndex + '][actividades][' + activityIndex + ']';
         const activityCollapsed = collapsedActivities.has(String(key));
-        const days = weekDays(activity.turnos || []);
-        const byDay = {};
-        const byIndex = {};
-        (activity.turnos || []).forEach((turno, index) => {
-            const key = weekDayKey(turno.dia_label || '');
-            if (key && !byDay[key]) {
-                byDay[key] = turno;
-            }
-            byIndex[index] = turno;
-        });
-        const scheduleRows = days.map((day, turnIndex) => {
-            const saved = byDay[day.key] || byIndex[turnIndex] || day;
+        const schedule = scheduleDays(activity.turnos || []);
+        const scheduleRows = schedule.days.map((day, turnIndex) => {
             const sp = prefix + '[turnos][' + turnIndex + ']';
-            return '<tr>' +
-                '<th>' + escapeHtml(day.dia_label || day.fecha || '') +
-                    '<input type="hidden" name="' + sp + '[fecha]" value="' + escapeHtml(day.fecha || '') + '">' +
-                    '<input type="hidden" name="' + sp + '[dia_label]" value="' + escapeHtml(day.dia_label || '') + '">' +
+            const turno = day.turno;
+            return '<tr data-saved="' + (day.saved ? '1' : '0') + '" data-initial-a="' + escapeHtml(day.initial.turno_a) + '" data-initial-b="' + escapeHtml(day.initial.turno_b) + '">' +
+                '<th scope="row"><time datetime="' + day.fecha + '" style="white-space:nowrap">' + escapeHtml(day.heading) + '</time>' +
+                    '<input type="hidden" name="' + sp + '[fecha]" value="' + day.fecha + '">' +
+                    '<input type="hidden" name="' + sp + '[dia_label]" value="' + escapeHtml(turno.dia_label) + '">' +
                 '</th>' +
-                '<td>' + input(sp + '[turno_a]', saved.turno_a || '', 'Turno A', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
-                '<td>' + realInput(sp + '[real_turno_a]', saved.real_turno_a || '', 'Real turno A') + '</td>' +
-                '<td>' + input(sp + '[turno_b]', saved.turno_b || '', 'Turno B', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
-                '<td>' + realInput(sp + '[real_turno_b]', saved.real_turno_b || saved.real || '', 'Real turno B') + '</td>' +
+                '<td>' + input(sp + '[turno_a]', turno.turno_a ?? '', 'Turno A', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
+                '<td>' + realInput(sp + '[real_turno_a]', turno.real_turno_a ?? '', 'Real turno A') + '</td>' +
+                '<td>' + input(sp + '[turno_b]', turno.turno_b ?? '', 'Turno B', '', '', false, ' autocomplete="off" inputmode="numeric"') + '</td>' +
+                '<td>' + realInput(sp + '[real_turno_b]', turno.real_turno_b ?? turno.real ?? '', 'Real turno B') + '</td>' +
             '</tr>';
         }).join('');
 
-        return '<div class="rq-plan-activity' + (activityCollapsed ? ' is-activity-collapsed' : '') + '" data-activity-index="' + activityIndex + '">' +
+        return '<div class="rq-plan-activity' + (activityCollapsed ? ' is-activity-collapsed' : '') + '" data-activity-index="' + activityIndex + '" data-preserved-turnos="' + escapeHtml(JSON.stringify(schedule.preserved)) + '">' +
             '<input type="hidden" name="' + prefix + '[id]" value="' + escapeHtml(activity.id || '') + '">' +
             '<input type="hidden" name="' + prefix + '[client_key]" value="' + escapeHtml(key) + '">' +
             '<div class="rq-plan-activity-head">' +
                 '<div class="rq-plan-field"><label>SAIT / Punto</label>' + input(prefix + '[sait]', activity.sait || '', 'Ej. SAIT 01', '', 'rq_mina.plan.sait') + '</div>' +
                 '<div class="rq-plan-field"><label>Sector</label>' + input(prefix + '[sector]', activity.sector || '', 'Sector', '', 'rq_mina.plan.sector') + '</div>' +
-                '<div class="rq-plan-field"><label>Area</label>' + input(prefix + '[area]', activity.area || '', 'Area', '', 'rq_mina.plan.actividad_area') + '</div>' +
+                '<div class="rq-plan-field"><label>Área de la actividad</label>' + input(prefix + '[area]', activity.area || '', 'Área de la actividad', '', 'rq_mina.plan.actividad_area') + '</div>' +
                 '<div class="rq-plan-field"><label>AIT trabajo</label>' + textarea(prefix + '[ait_trabajo]', activity.ait_trabajo || '', 'Puede contener mas de un AIT', 'rq_mina.plan.ait_trabajo') + '</div>' +
                 '<div class="rq-plan-activity-actions">' +
                     (readOnly ? '' : '<button type="button" class="rq-plan-btn danger" data-remove-activity>Quitar actividad</button>') +
@@ -228,7 +254,7 @@ function initRQMinaPlanEditor(root) {
                 '<div class="rq-plan-field"><label>Sup. seguridad dia</label>' + input(prefix + '[supervisor_seguridad_dia]', activity.supervisor_seguridad_dia || '', 'Buscar supervisor', '', '', 'supervisor') + '</div>' +
                 '<div class="rq-plan-field"><label>Sup. seguridad noche</label>' + input(prefix + '[supervisor_seguridad_noche]', activity.supervisor_seguridad_noche || '', 'Buscar supervisor', '', '', 'supervisor') + '</div>' +
             '</div>' +
-            '<div class="rq-plan-schedule"><table><thead><tr><th>Dia</th><th>Turno A / Dia</th><th>Real turno A</th><th>Turno B / Noche</th><th>Real turno B</th></tr></thead><tbody>' + scheduleRows + '</tbody></table></div>' +
+            '<div class="rq-plan-schedule"><table><thead><tr><th>Fecha</th><th>Turno A / Día</th><th>Real turno A</th><th>Turno B / Noche</th><th>Real turno B</th></tr></thead><tbody>' + scheduleRows + '</tbody></table></div>' +
             '</div>' +
         '</div>';
     }
@@ -311,6 +337,8 @@ function initRQMinaPlanEditor(root) {
             // El id viaja de vuelta para actualizar el requerimiento en su lugar: asi se
             // conservan los eventos de Logistica y la carpeta de documentos.
             '<input type="hidden" name="' + prefix + '[id]" value="' + escapeHtml(row.id || '') + '">' +
+            '<input type="hidden" name="' + prefix + '[actividad_key]" value="' + escapeHtml(row.actividad_key || '') + '">' +
+            '<input type="hidden" name="' + prefix + '[fecha]" value="' + escapeHtml(row.fecha || '') + '">' +
             '<div class="rq-plan-transport-header">' +
                 '<span class="rq-plan-transport-number"><span class="rq-plan-transport-number-badge">' + num + '</span> Transporte #' + num + logisticaBadgeHtml(row) + '</span>' +
                 (readOnly ? '' : '<button type="button" class="rq-plan-transport-remove" data-remove-transport>Quitar</button>') +
@@ -340,7 +368,7 @@ function initRQMinaPlanEditor(root) {
     function render() {
         body.innerHTML = '';
         if (!plan.length) {
-            body.innerHTML = '<div class="rq-plan-empty">Sin areas cargadas. Agrega un area de la parada para registrar SAIT, actividades, turnos y transporte.</div>';
+            body.innerHTML = '<div class="rq-plan-empty">Sin grupos cargados. Agrega un grupo o frente para registrar SAIT, actividades, turnos y transporte.</div>';
         }
 
         plan.forEach((group, groupIndex) => {
@@ -352,13 +380,13 @@ function initRQMinaPlanEditor(root) {
                 '<input type="hidden" name="' + groupPrefix + '[id]" value="' + escapeHtml(group.id || '') + '">' +
                 '<div class="rq-plan-group-head">' +
                     '<div class="rq-plan-group-main">' +
-                        '<div class="rq-plan-field"><label>Area</label>' + input(groupPrefix + '[area_operativa]', group.area_operativa || '', 'C1, C2', '', 'rq_mina.plan.area_operativa') + '</div>' +
+                        '<div class="rq-plan-field"><label>Área operativa</label>' + input(groupPrefix + '[area_operativa]', group.area_operativa || '', 'C1, C2', '', 'rq_mina.plan.area_operativa') + '</div>' +
                         '<div class="rq-plan-field"><label>Modulo</label>' + input(groupPrefix + '[modulo]', group.modulo || '', 'Seca, Humeda', '', 'rq_mina.plan.modulo') + '</div>' +
                         '<div class="rq-plan-field"><label>Grupo / frente</label>' + input(groupPrefix + '[nombre]', group.nombre || ('Grupo ' + (groupIndex + 1)), 'Grupo', '', 'rq_mina.plan.grupo_nombre') + '</div>' +
                         '<div class="rq-plan-field"><label>Observaciones</label>' + input(groupPrefix + '[observaciones]', group.observaciones || '', 'Observaciones', '', 'rq_mina.plan.grupo_observaciones') + '</div>' +
                     '</div>' +
                     '<div class="rq-plan-group-actions">' +
-                        (readOnly ? '' : '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo</button>') +
+                        (readOnly ? '' : '<button type="button" class="rq-plan-btn danger" data-remove-group>Quitar grupo / frente</button>') +
                         '<button type="button" class="rq-plan-btn rq-plan-group-toggle' + (groupCollapsed ? ' is-collapsed' : '') + '" data-toggle-group aria-expanded="' + (groupCollapsed ? 'false' : 'true') + '" title="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '" aria-label="' + (groupCollapsed ? 'Mostrar actividades del grupo' : 'Ocultar actividades del grupo') + '">' +
                             '<span class="rq-plan-group-toggle-icon" data-group-toggle-icon>' + (groupCollapsed ? '&darr;' : '&uarr;') + '</span>' +
                         '</button>' +
@@ -392,10 +420,39 @@ function initRQMinaPlanEditor(root) {
         return field ? field.value : '';
     }
 
+    function collectTurnos(activityEl) {
+        const turnos = [];
+        activityEl.querySelectorAll('.rq-plan-schedule tbody tr').forEach(row => {
+            const turnoA = fieldValue(row, '[turno_a]');
+            const turnoB = fieldValue(row, '[turno_b]');
+            const saved = row.dataset.saved === '1';
+            if (!saved && turnoA === row.dataset.initialA && turnoB === row.dataset.initialB) {
+                return;
+            }
+
+            const realTurnoB = fieldValue(row, '[real_turno_b]');
+            turnos.push({
+                fecha: fieldValue(row, '[fecha]'),
+                dia_label: fieldValue(row, '[dia_label]'),
+                turno_a: turnoA,
+                real_turno_a: fieldValue(row, '[real_turno_a]'),
+                turno_b: turnoB,
+                real_turno_b: realTurnoB,
+                real: realTurnoB,
+                ...(!saved ? { _nuevo: true } : {}),
+            });
+        });
+
+        return turnos.concat(JSON.parse(activityEl.dataset.preservedTurnos || '[]'));
+    }
+
     function syncFromDom() {
+        const transportById = new Map(plan.flatMap(group => group.transportes || [])
+            .filter(transport => transport.id).map(transport => [transport.id, transport]));
         const next = [];
         body.querySelectorAll('.rq-plan-group').forEach((groupEl) => {
             const group = {
+                id: fieldValue(groupEl, '[id]'),
                 area_operativa: fieldValue(groupEl, '[area_operativa]'),
                 modulo: fieldValue(groupEl, '[modulo]'),
                 nombre: fieldValue(groupEl, '[nombre]'),
@@ -406,6 +463,7 @@ function initRQMinaPlanEditor(root) {
 
             groupEl.querySelectorAll('.rq-plan-activity').forEach((activityEl) => {
                 const activity = {
+                    id: fieldValue(activityEl, '[id]'),
                     client_key: fieldValue(activityEl, '[client_key]'),
                     sait: fieldValue(activityEl, '[sait]'),
                     sector: fieldValue(activityEl, '[sector]'),
@@ -416,26 +474,19 @@ function initRQMinaPlanEditor(root) {
                     supervisor_campo_noche: fieldValue(activityEl, '[supervisor_campo_noche]'),
                     supervisor_seguridad_dia: fieldValue(activityEl, '[supervisor_seguridad_dia]'),
                     supervisor_seguridad_noche: fieldValue(activityEl, '[supervisor_seguridad_noche]'),
-                    turnos: [],
+                    turnos: collectTurnos(activityEl),
                 };
-
-                activityEl.querySelectorAll('.rq-plan-schedule tbody tr').forEach((row) => {
-                    activity.turnos.push({
-                        fecha: fieldValue(row, '[fecha]'),
-                        dia_label: fieldValue(row, '[dia_label]'),
-                        turno_a: fieldValue(row, '[turno_a]'),
-                        real_turno_a: fieldValue(row, '[real_turno_a]'),
-                        turno_b: fieldValue(row, '[turno_b]'),
-                        real_turno_b: fieldValue(row, '[real_turno_b]'),
-                        real: fieldValue(row, '[real_turno_b]'),
-                    });
-                });
 
                 group.actividades.push(activity);
             });
 
             groupEl.querySelectorAll('.rq-plan-transport-row').forEach((transportEl) => {
+                const id = fieldValue(transportEl, '[id]');
                 group.transportes.push({
+                    ...transportById.get(id),
+                    id,
+                    actividad_key: fieldValue(transportEl, '[actividad_key]'),
+                    fecha: fieldValue(transportEl, '[fecha]'),
                     alcance: fieldValue(transportEl, '[alcance]'),
                     unidad_carga: fieldValue(transportEl, '[unidad_carga]'),
                     tipo_transporte: fieldValue(transportEl, '[tipo_transporte]'),
@@ -531,10 +582,8 @@ function initRQMinaPlanEditor(root) {
             const rowIndex = rows.indexOf(event.target);
             const rowEl = event.target.closest('[data-atencion-logistica]');
 
-            // Quitar un requerimiento ya atendido borra del plan la placa, los
-            // documentos y la recepcion que registro Logistica.
-            if (rowEl && rowEl.dataset.atencionLogistica === '1'
-                && ! window.confirm('Logistica ya tiene atencion registrada en este transporte (placa, documentos o recepcion). Si lo quitas se perdera esa informacion en el plan. ¿Deseas quitarlo de todos modos?')) {
+            if (rowEl && rowEl.dataset.atencionLogistica === '1') {
+                window.alert('Este transporte tiene atención registrada. Revisa su retiro con Logística para conservar las placas, los documentos y el historial.');
                 return;
             }
 
@@ -592,18 +641,18 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 @endonce
 
-<div id="{{ $editorId }}" class="rq-plan-editor {{ $readOnly ? 'is-readonly' : '' }}" data-rq-plan-editor data-readonly="{{ $readOnly ? '1' : '0' }}">
+<div id="{{ $editorId }}" class="rq-plan-editor {{ $readOnly ? 'is-readonly' : '' }}" data-rq-plan-editor data-readonly="{{ $readOnly ? '1' : '0' }}" data-fecha-inicio="{{ $paradaFechaInicio }}" data-fecha-fin="{{ $paradaFechaFin }}">
     <div class="rq-plan-head">
         <div>
-            <h3>Areas y plan operativo semanal</h3>
-            <span>Primero registra las areas de la parada; dentro de cada area carga SAIT, actividades, turnos, supervisores y transporte.</span>
-            @if($weekNumber)
-                <span class="rq-plan-week-pill">Semana {{ $weekNumber }} / {{ $weekYear }}</span>
+            <h3>Grupos y programa de trabajo</h3>
+            <span>Organiza el trabajo por grupos o frentes. Dentro de cada grupo registra las actividades, turnos, supervisores y transporte.</span>
+            @if($weekLabel)
+                <span class="rq-plan-week-pill">{{ $weekLabel }}</span>
             @endif
         </div>
         <div class="rq-plan-actions">
             @unless($readOnly)
-                <button type="button" class="rq-plan-btn primary" data-add-plan-group>Agregar area</button>
+                <button type="button" class="rq-plan-btn primary" data-add-plan-group>Agregar grupo / frente</button>
             @endunless
             <button type="button" class="rq-plan-btn rq-plan-toggle" data-toggle-plan-body aria-expanded="true" title="Ocultar plan operativo" aria-label="Ocultar plan operativo">
                 <span class="rq-plan-toggle-icon">&uarr;</span>

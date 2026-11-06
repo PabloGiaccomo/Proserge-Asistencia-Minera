@@ -265,6 +265,15 @@ Validacion de esta vista:
 - La cuenta operativa se vincula al trabajador mediante `usuarios.personal_id`.
 - El responsable de cada grupo se toma de `grupo_trabajo.supervisor_id`, asignado desde Man Power.
 - Con acceso normal a `mi_asistencia`, un usuario solo puede listar, abrir y registrar los grupos donde ambos identificadores coinciden.
-- La acción `mi_asistencia.ver_todas_asistencias` habilita la consulta global, respetando el alcance de minas del usuario. Esta acción por sí sola no concede edición de grupos ajenos.
-- Los roles privilegiados o con permisos operativos de `asistencias` conservan sus capacidades de registro y cierre.
+- La acción `mi_asistencia.ver_todas_asistencias` habilita la consulta de grupos dentro del alcance de minas del usuario.
+- En grupos ajenos, `asistencias.registrar` habilita las marcas individuales y masivas, y `asistencias.cerrar` habilita el cierre. Los roles con alcance global siguen sujetos a sus permisos de acción. El responsable del grupo conserva ambas acciones con `mi_asistencia.ver`.
+- Para registrar o cerrar se requiere una identidad vinculada a la cuenta, un responsable del grupo o un responsable del encabezado. Si falta, se puede consultar el grupo y se indica cómo resolver la asignación.
+- **Mi Marca** permite filtrar por fecha y turno. Abre el único grupo disponible o pide elegirlo si hay varios. La marca propia requiere permiso de registro, una cuenta vinculada, un detalle propio activo y una asistencia abierta. El servidor determina si corresponde presente o tardanza. Para gestionar integrantes se abre el detalle del grupo.
+- Si la respuesta de la marca se pierde, Mi Marca verifica el estado del detalle propio antes de permitir otro intento. Los errores conservan la fecha, el turno y el grupo en la URL de la pantalla.
 - Toda marcación real se guarda en `asistencia_encabezado` y `asistencia_detalle`, incluyendo usuario y fecha de registro; no se usa almacenamiento local del navegador.
+
+## Concurrencia y corrección de faltas
+
+- Las marcas individuales y masivas, el cierre, la reapertura y el barrido por horario usan una transacción por grupo. Adquieren primero el bloqueo de `grupo_trabajo`, después el encabezado y los detalles, antes de escribir las faltas y sus proyecciones.
+- Al recuperar el bloqueo se comprueban la autorización vigente, el estado del grupo y las distribuciones activas. Si el cierre se completó antes, la marca se rechaza y conserva la falta generada.
+- Corregir una falta con asistencia vinculada al grupo actualiza el detalle, la falta y el resumen de ejecución en una sola transacción. Un fallo al guardar el resumen revierte la corrección. Para asistencias históricas sin grupo se conserva el registro de origen.

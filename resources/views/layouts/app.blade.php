@@ -20,7 +20,16 @@
 
         <div class="app-main">
             @include('partials.header')
-            <main class="app-content">@yield('content')</main>
+            <main class="app-content">
+                @if(request()->routeIs('inicio.dashboard.*'))
+                    @allowed('inicio', 'ver')
+                        <nav class="dashboard-return" aria-label="Volver al inicio">
+                            <a class="btn btn-outline" href="{{ route('inicio') }}">&larr; Volver a Inicio</a>
+                        </nav>
+                    @endallowed
+                @endif
+                @yield('content')
+            </main>
             <footer class="app-footer"><span>&copy; {{ date('Y') }} Proserge</span></footer>
         </div>
     </div>

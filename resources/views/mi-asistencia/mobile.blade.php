@@ -4,192 +4,145 @@
 
 @section('content')
 @php
-    $personal = $user->personal;
-    $horaActual = now()->format('H:i');
-    $horaEntrada = $grupo['horario_entrada'] ?? '07:00';
-    $horaLimite = $grupo['horario_limite_tardanza'] ?? '07:30';
-    $isClosed = ($grupo['asistencia']['estado'] ?? '') === 'CERRADO';
-    $miEstado = $miAsistencia['estado'] ?? null;
-    $miHora = $miAsistencia['hora_marcado'] ?? null;
-    $puedeMarcar = $canRegister && !$isClosed;
-    $yaMarco = filled($miEstado);
-
-    if ($yaMarco) {
-        $esTardanza = $miEstado === 'TARDANZA' || ($miHora && $horaEntrada && $miHora > $horaLimite);
-        $claseBtn = $esTardanza ? 'late' : 'marked';
-        $icono = $esTardanza ? '&#9201;' : '&#10003;';
-        $texto = $esTardanza ? 'Tardanza registrada' : 'Presente registrado';
-    } elseif ($horaActual > $horaLimite && $puedeMarcar) {
-        $claseBtn = 'late';
-        $icono = '&#9201;';
-        $texto = 'Marcar (llegaste tarde)';
-    } elseif ($puedeMarcar) {
-        $claseBtn = 'primary';
-        $icono = '&#10003;';
-        $texto = 'Marcar asistencia';
-    } else {
-        $claseBtn = 'disabled';
-        $icono = '&#128274;';
-        $texto = $isClosed ? 'Asistencia cerrada' : 'Sin permiso para registrar';
-    }
+    $nombre = $user->personal?->nombre_completo ?? $user->email;
+    $filtros = ['fecha' => $fecha, 'turno' => $turno];
+    $estados = [
+        'PENDIENTE' => 'Pendiente',
+        'PRESENTE' => 'Presente',
+        'TARDANZA' => 'Tardanza',
+        'AUSENTE' => 'Ausente',
+        'JUSTIFICADO' => 'Justificado',
+        'NO_CORRESPONDE' => 'No corresponde',
+    ];
+    $marca = $grupo['marca_propia'] ?? null;
+    $puedeMarcar = ($grupo['puede_marcar'] ?? false) && in_array($marca['estado'] ?? '', ['PENDIENTE', 'AUSENTE'], true);
 @endphp
 
 <div class="mob-page">
     <header class="mob-header">
         <div class="mob-header-top">
-            <div class="mob-avatar">{{ mb_strtoupper(mb_substr((string) ($personal?->nombre_completo ?? $user->name ?? $user->email ?? '??'), 0, 2)) }}</div>
+            <div class="mob-avatar" aria-hidden="true">{{ mb_strtoupper(mb_substr($nombre, 0, 2)) }}</div>
             <div class="mob-header-info">
-                <div class="mob-label">Registrando como</div>
-                <div class="mob-name">{{ $personal?->nombre_completo ?? $user->name ?? $user->email }}</div>
+                <h1 class="mob-label">Mi Marca</h1>
+                <div class="mob-name">{{ $nombre }}</div>
             </div>
-        </div>
-        <div class="mob-header-meta">
-            <span>&#128205; {{ $grupo['mina_nombre'] ?: 'Sin mina' }}</span>
-            <span>&#128197; {{ now()->locale('es')->translatedFormat('d \\d\\e F') }}</span>
         </div>
     </header>
 
-    <div class="mob-body">
-        {{-- Boton principal de marcacion --}}
-        @if($puedeMarcar && !$yaMarco)
-            <button type="button"
-                class="mob-mark-btn {{ $claseBtn }} mob-animate"
-                id="mobMarkBtn"
-                data-url="{{ route('mi-asistencia.marcar', $grupo['grupo_id']) }}"
-                data-detail-id="{{ $grupo['personal_detalle_id'] ?? '' }}">
-                <span style="font-size:22px;">{!! $icono !!}</span>
-                {{ $texto }}
-            </button>
-        @elseif($yaMarco)
-            <div class="mob-card">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <span style="font-size:28px;" class="mob-animate">{!! $icono !!}</span>
-                    <div>
-                        <div style="font-size:15px;font-weight:800;color:{{ $esTardanza ? '#956000' : '#087443' }};">{{ $texto }}</div>
-                        <div style="font-size:12px;color:#7b8da6;">Marcado a las {{ substr($miHora, 0, 5) }}</div>
-                    </div>
-                </div>
+    <main class="mob-body">
+        <form class="mob-card mob-filter" method="GET" action="{{ route('mi-asistencia.mobile') }}">
+            <div>
+                <label for="mobDate">Fecha</label>
+                <input id="mobDate" name="fecha" type="date" value="{{ $fecha }}" required>
             </div>
-        @else
-            <div class="mob-notice info">{{ $texto }}</div>
+            <div>
+                <label for="mobShift">Turno</label>
+                <select id="mobShift" name="turno">
+                    <option value="" @selected($turno === '')>Todos</option>
+                    <option value="DIA" @selected($turno === 'DIA')>Día</option>
+                    <option value="NOCHE" @selected($turno === 'NOCHE')>Noche</option>
+                </select>
+            </div>
+            <button type="submit" class="mob-action">Buscar grupos</button>
+        </form>
+
+        @if($errors->any())
+            <p class="mob-notice warning" role="alert">{{ $errors->first() }}</p>
         @endif
 
-        {{-- Resumen del dia --}}
-        <div class="mob-card">
-            <div class="mob-card-title">Mi registro del dia</div>
+        @if($selectionUnavailable)
+            <p class="mob-notice warning" role="alert">El grupo seleccionado ya no está disponible para esta fecha y turno. Revisa los grupos de la jornada.</p>
+        @endif
 
-            @if($yaMarco)
-                <div class="mob-record">
-                    <div class="mob-record-dot {{ $esTardanza ? 'tardanza' : 'presente' }}"></div>
-                    <div class="mob-record-info">
-                        <div class="mob-rec-label">{{ $esTardanza ? 'Tardanza' : 'Presente' }}</div>
-                        <div class="mob-rec-sub">Horario: {{ $horaEntrada }}</div>
-                    </div>
-                    <div class="mob-record-time">{{ substr($miHora, 0, 5) }}</div>
+        @if($grupos->count() > 1 || ($grupos->isNotEmpty() && (!$grupo || $grupo['estado'] === 'Cancelado')))
+            <form class="mob-card mob-filter" method="GET" action="{{ route('mi-asistencia.mobile') }}">
+                <input type="hidden" name="fecha" value="{{ $fecha }}">
+                <input type="hidden" name="turno" value="{{ $turno }}">
+                <div class="mob-full-width">
+                    <label for="mobGroup">Elige un grupo</label>
+                    <select id="mobGroup" name="grupo_id" required>
+                        <option value="">Selecciona un grupo</option>
+                        @foreach($grupos as $opcion)
+                            <option value="{{ $opcion['id'] }}" @selected(($grupo['id'] ?? null) === $opcion['id'])>
+                                {{ $opcion['servicio'] }} · {{ $opcion['mina'] }} · {{ $opcion['turno'] === 'DIA' ? 'Día' : 'Noche' }}
+                                @if($opcion['area']) · {{ $opcion['area'] }} @endif
+                                @if($opcion['sait']) · SAIT {{ $opcion['sait'] }} @endif
+                                @if($opcion['horario']) · {{ $opcion['horario'] }} @endif
+                            </option>
+                        @endforeach
+                    </select>
                 </div>
-            @else
-                <div class="mob-empty">
-                    <div style="font-size:28px;margin-bottom:6px;">&#9200;</div>
-                    Sin registro hoy.<br>
-                    @if($puedeMarcar)
-                        Presiona el boton de arriba para marcar.
-                    @endif
+                <button type="submit" class="mob-action">Abrir grupo</button>
+            </form>
+        @endif
+
+        @if($grupo)
+            <section class="mob-card" aria-labelledby="mobGroupTitle">
+                <h2 id="mobGroupTitle" class="mob-card-title">{{ $grupo['servicio'] }}</h2>
+                <dl class="mob-group-data">
+                    <div><dt>Unidad minera</dt><dd>{{ $grupo['mina'] }}</dd></div>
+                    <div><dt>Turno</dt><dd>{{ $grupo['turno'] === 'DIA' ? 'Día' : 'Noche' }}</dd></div>
+                    <div><dt>Hora límite</dt><dd>{{ $grupo['horario'] ?: 'Sin horario' }}</dd></div>
+                    <div><dt>Integrantes activos</dt><dd>{{ $grupo['total'] }}</dd></div>
+                    <div><dt>Estado</dt><dd>{{ $grupo['estado'] }}</dd></div>
+                </dl>
+            </section>
+
+            @if($grupo['mensaje'])
+                <p class="mob-notice info">{{ $grupo['mensaje'] }}</p>
+            @endif
+            @if($grupo['sin_responsable'] && $grupo['puede_registrar'])
+                <p class="mob-notice warning">El grupo no tiene responsable asignado. El registro quedará a nombre de tu cuenta.</p>
+            @endif
+
+            @if($marca)
+                <section class="mob-card" aria-labelledby="mobRecordTitle">
+                    <h2 id="mobRecordTitle" class="mob-card-title">Mi registro del día</h2>
+                    <p id="mobRecord" role="status">{{ $estados[$marca['estado']] ?? $marca['estado'] }}{{ $marca['hora'] && $marca['hora'] !== '00:00:00' ? ' · '.substr($marca['hora'], 0, 5) : '' }}</p>
+                </section>
+            @endif
+
+            @if($puedeMarcar)
+                <div class="mob-mark-actions">
+                    <p id="mobMarkFeedback" class="mob-notice info" role="status" tabindex="-1" hidden></p>
+                    <a id="mobLogin" class="mob-action" href="{{ route('login') }}" target="_blank" rel="noopener" hidden>Iniciar sesión</a>
+                    <button id="mobCheckStatus" class="mob-action" type="button" hidden>Consultar estado</button>
+                    <button id="mobReload" class="mob-action" type="button" hidden>Recargar esta jornada</button>
+                    <button type="button" class="mob-mark-btn primary" id="mobMarkBtn"
+                        data-url="{{ route('mi-asistencia.marcar-mobile', $grupo['id']) }}"
+                        data-status-url="{{ route('mi-asistencia.estado', ['id' => $grupo['id'], 'propio' => 1]) }}"
+                        data-detail-id="{{ $grupo['detalle_propio_id'] }}">
+                        Marcar mi asistencia
+                    </button>
                 </div>
             @endif
 
-            @if($yaMarco && $horaEntrada)
-                @php
-                    $diffMin = 0;
-                    if ($miHora && $horaEntrada) {
-                        $marcado = \Illuminate\Support\Carbon::parse($miHora);
-                        $entrada = \Illuminate\Support\Carbon::parse($horaEntrada);
-                        $diffMin = max(0, $marcado->diffInMinutes($entrada));
-                    }
-                @endphp
-                @if($diffMin > 0)
-                    <div style="margin-top:10px;padding:10px;background:{{ $esTardanza ? '#fff4ce' : '#def8e8' }};border-radius:8px;font-size:12px;font-weight:600;color:{{ $esTardanza ? '#956000' : '#087443' }};">
-                        {{ $esTardanza ? '&#9888; Llegaste ' . $diffMin . ' minutos tarde' : '&#10003; Puntual' }}
-                    </div>
-                @endif
-            @endif
-        </div>
+            <a class="mob-action" href="{{ route('mi-asistencia.show', ['id' => $grupo['id'], 'volver_movil' => 1, 'turno' => $turno]) }}">
+                {{ $grupo['puede_registrar'] ? 'Tomar asistencia del grupo' : 'Consultar detalle del grupo' }}
+            </a>
+        @elseif($grupos->isEmpty())
+            @include('mi-asistencia.mobile-empty')
+        @endif
 
-        {{-- Info del grupo --}}
-        <div class="mob-card">
-            <div class="mob-card-title">Datos del grupo</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px;">
-                <div>
-                    <div style="color:#7b8da6;font-weight:700;text-transform:uppercase;font-size:10px;">Horario</div>
-                    <div style="font-weight:700;margin-top:2px;">{{ $horaEntrada }} - {{ $grupo['horario_salida'] ?? '--:--' }}</div>
-                </div>
-                <div>
-                    <div style="color:#7b8da6;font-weight:700;text-transform:uppercase;font-size:10px;">Estado</div>
-                    <div style="font-weight:700;margin-top:2px;color:{{ $isClosed ? '#aa2020' : '#087443' }};">{{ $isClosed ? 'Cerrada' : 'Abierta' }}</div>
-                </div>
-                <div>
-                    <div style="color:#7b8da6;font-weight:700;text-transform:uppercase;font-size:10px;">Turno</div>
-                    <div style="font-weight:700;margin-top:2px;">{{ $grupo['turno'] === 'DIA' ? 'Dia' : 'Noche' }}</div>
-                </div>
-                <div>
-                    <div style="color:#7b8da6;font-weight:700;text-transform:uppercase;font-size:10px;">Integrantes</div>
-                    <div style="font-weight:700;margin-top:2px;">{{ $grupo['total_integrantes'] ?? 0 }}</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="mob-footer">Proserge &copy; {{ date('Y') }}</div>
-    </div>
+        <p><a class="mob-action" href="{{ route('mi-asistencia.index', $filtros) }}">Ver lista de la jornada</a></p>
+    </main>
 </div>
 @endsection
 
-@push('scripts')
-<script>
-(function () {
-    var btn = document.getElementById('mobMarkBtn');
-    if (!btn) return;
-
-    var csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-
-    btn.addEventListener('click', async function () {
-        if (btn.classList.contains('marked') || btn.classList.contains('disabled')) return;
-
-        btn.disabled = true;
-        btn.style.opacity = '.6';
-
-        try {
-            var now = new Date();
-            var timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-
-            var response = await fetch(btn.dataset.url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-CSRF-TOKEN': csrf,
-                },
-                body: JSON.stringify({
-                    grupo_trabajo_detalle_id: btn.dataset.detailId,
-                    estado: 'PRESENTE',
-                    hora_marcado: timeStr,
-                    observaciones: '',
-                }),
-            });
-
-            var data = await response.json().catch(function () { return {}; });
-
-            if (response.ok) {
-                window.location.reload();
-            } else {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                alert(data.message || 'Error al marcar asistencia.');
-            }
-        } catch (err) {
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            alert('Error de conexion. Intenta de nuevo.');
-        }
-    });
-})();
-</script>
+@push('styles')
+<style>
+    .mob-filter, .mob-group-data { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    .mob-filter label, .mob-group-data dt { display: block; margin-bottom: 4px; font-size: .8rem; font-weight: 700; }
+    .mob-filter input, .mob-filter select { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #94a3b8; border-radius: 8px; padding: 8px; font: inherit; }
+    .mob-full-width, .mob-filter button { grid-column: 1 / -1; }
+    .mob-group-data dd { overflow-wrap: anywhere; }
+    .mob-action { display: inline-flex; align-items: center; min-height: 44px; margin: 0 0 8px; border: 1px solid #94a3b8; border-radius: 8px; padding: 8px 12px; background: #fff; color: #163c60; font: inherit; font-weight: 700; }
+    .mob-filter button { justify-content: center; margin: 0; }
+    .mob-mark-actions { margin-bottom: 16px; }
+    .mob-mark-btn.primary { background: #087b72; color: white; }
+    .mob-mark-btn:disabled { opacity: .6; cursor: default; }
+    .mob-mark-actions [hidden] { display: none; }
+</style>
 @endpush
+
+@include('mi-asistencia._mobile-mark-script')

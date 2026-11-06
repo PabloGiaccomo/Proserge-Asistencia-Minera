@@ -4,6 +4,33 @@ Las operaciones por lote usan permisos directos del modulo `epps`, separados
 de la visibilidad de las pestanas de Logistica. El modulo EPP aparece en el
 editor de permisos; el menu operativo sigue dentro de Logistica.
 
+## Configurar entregas y devoluciones desde Logistica
+
+En Seguridad > Roles, marcar las acciones generales de Logistica no habilita
+los botones `Registrar entrega` y `Registrar devolucion`. Para el flujo habitual:
+
+1. En Logistica, conceder `Ver entregas y cambios de EPP`.
+2. En EPPs, conceder `Ver modulo` (`epps.ver`) para buscar trabajadores y
+   `Registrar entrega y devolucion` (`epps.registrar`) para ambos botones.
+3. Si el operador tambien finaliza con firma, conceder explicitamente
+   `Confirmar entrega firmada` y/o `Confirmar devolucion firmada` segun su tarea.
+
+El editor enlaza desde Logistica al bloque EPPs y permite encontrarlo buscando
+Logistica, Registrar entrega o Registrar devolucion (con o sin tildes). El enlace
+solo navega: no marca checks. Los permisos siguen siendo independientes y no
+se conceden Administrar, inventario ni excepcion de firma como requisito.
+Guardar actualiza el rol; la siguiente peticion recarga los permisos sin exigir
+cerrar sesion. El alcance por mina del usuario sigue aplicandose.
+
+La mejora visual del editor vive en
+`resources/views/seguridad/roles/_form.blade.php`. Para desplegar solo esta mejora
+por WinSCP, transferir ese archivo conservando su ruta y ejecutar
+`php artisan view:clear` en la raiz Laravel. No requiere build ni migracion.
+Transferir archivos no modifica los permisos guardados: el rol debe configurarse
+en Seguridad > Roles del ambiente correspondiente.
+
+## Capacidades
+
 Capacidades: `ver_operaciones`, `preparar_entrega`, `confirmar_entrega`,
 `preparar_devolucion`, `confirmar_devolucion`, `ver_evidencia`,
 `descargar_constancia`, `gestionar_inventario`, `ajustar_inventario`,

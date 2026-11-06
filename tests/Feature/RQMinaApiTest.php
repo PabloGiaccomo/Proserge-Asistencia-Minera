@@ -784,6 +784,113 @@ class RQMinaApiTest extends TestCase
             'updated_at' => now(),
         ]);
 
+        $grupoDetalleId = (string) Str::uuid();
+        $actividadGrupoId = (string) Str::uuid();
+        $actividadId = (string) Str::uuid();
+        DB::table('grupo_trabajo_detalle')->insert([
+            'id' => $grupoDetalleId,
+            'grupo_trabajo_id' => $grupoTrabajoId,
+            'personal_id' => $personalId,
+            'estado_asistencia' => 'AUSENTE',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('rq_mina_actividad_grupos')->insert([
+            'id' => $actividadGrupoId,
+            'rq_mina_id' => $rqId,
+            'nombre' => 'Grupo operativo de prueba',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('rq_mina_actividades')->insert([
+            'id' => $actividadId,
+            'grupo_id' => $actividadGrupoId,
+            'ait_trabajo' => 'Actividad de prueba',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('grupo_trabajo_detalle_actividades')->insert([
+            'id' => (string) Str::uuid(),
+            'grupo_trabajo_detalle_id' => $grupoDetalleId,
+            'rq_mina_actividad_id' => $actividadId,
+            'es_principal' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('grupo_trabajo_actividades')->insert([
+            'id' => (string) Str::uuid(),
+            'grupo_trabajo_id' => $grupoTrabajoId,
+            'rq_mina_actividad_id' => $actividadId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $asistenciaId = (string) Str::uuid();
+        $asistenciaDetalleId = (string) Str::uuid();
+        DB::table('asistencia_encabezado')->insert([
+            'id' => $asistenciaId,
+            'grupo_trabajo_id' => $grupoTrabajoId,
+            'fecha' => '2026-06-20',
+            'hora_ingreso' => '07:00:00',
+            'mina_id' => $minaId,
+            'supervisor_id' => $personalId,
+            'estado' => 'CERRADO',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('asistencia_detalle')->insert([
+            'id' => $asistenciaDetalleId,
+            'asistencia_id' => $asistenciaId,
+            'grupo_trabajo_detalle_id' => $grupoDetalleId,
+            'trabajador_id' => $personalId,
+            'hora_marcado' => '00:00:00',
+            'estado' => 'AUSENTE',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $faltaId = (string) Str::uuid();
+        DB::table('faltas')->insert([
+            'id' => $faltaId,
+            'trabajador_id' => $personalId,
+            'fecha' => '2026-06-20',
+            'motivo' => 'INASISTENCIA_ASISTENCIA',
+            'estado' => 'ACTIVA',
+            'registrada_por_id' => $personalId,
+            'asistencia_encabezado_id' => $asistenciaId,
+            'asistencia_detalle_id' => $asistenciaDetalleId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $planId = (string) Str::uuid();
+        DB::table('rq_mina_planes')->insert([
+            'id' => $planId,
+            'rq_mina_id' => $rqId,
+            'codigo' => 'PLAN-TEST',
+            'nombre' => 'Plan de prueba',
+            'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-30',
+        ]);
+        DB::table('parada_ejecucion_resumen')->insert([
+            'id' => (string) Str::uuid(),
+            'rq_mina_id' => $rqId,
+            'rq_mina_plan_id' => $planId,
+            'rq_mina_actividad_grupo_id' => $actividadGrupoId,
+            'rq_mina_actividad_id' => $actividadId,
+            'fecha' => '2026-06-20',
+            'turno' => 'DIA',
+            'ausentes' => 1,
+        ]);
+        $otroRqId = $this->createRQMina($minaId, $usuarioId, 'ENVIADO');
+        $otroResumenId = (string) Str::uuid();
+        DB::table('parada_ejecucion_resumen')->insert([
+            'id' => $otroResumenId,
+            'rq_mina_id' => $otroRqId,
+            'fecha' => '2026-06-20',
+            'turno' => 'DIA',
+            'presentes' => 2,
+        ]);
+
         $response = $this->withSession([
             'auth_token' => 'test-token',
             'user_id' => $usuarioId,
@@ -796,6 +903,18 @@ class RQMinaApiTest extends TestCase
         $this->assertDatabaseMissing('rq_proserge', ['id' => $rqProsergeId]);
         $this->assertDatabaseMissing('rq_proserge_detalle', ['rq_proserge_id' => $rqProsergeId]);
         $this->assertDatabaseMissing('grupo_trabajo', ['id' => $grupoTrabajoId]);
+        $this->assertDatabaseMissing('grupo_trabajo_detalle_actividades', ['grupo_trabajo_detalle_id' => $grupoDetalleId]);
+        $this->assertDatabaseMissing('rq_mina_actividades', ['id' => $actividadId]);
+        $this->assertDatabaseHas('personal', ['id' => $personalId]);
+        $this->assertDatabaseHas('minas', ['id' => $minaId]);
+        $this->assertDatabaseMissing('grupo_trabajo_actividades', ['grupo_trabajo_id' => $grupoTrabajoId]);
+        $this->assertDatabaseMissing('asistencia_encabezado', ['id' => $asistenciaId]);
+        $this->assertDatabaseMissing('asistencia_detalle', ['id' => $asistenciaDetalleId]);
+        $this->assertDatabaseMissing('faltas', ['id' => $faltaId]);
+        $this->assertDatabaseMissing('rq_mina_planes', ['id' => $planId]);
+        $this->assertDatabaseMissing('parada_ejecucion_resumen', ['rq_mina_id' => $rqId]);
+        $this->assertDatabaseHas('rq_mina', ['id' => $otroRqId]);
+        $this->assertDatabaseHas('parada_ejecucion_resumen', ['id' => $otroResumenId, 'presentes' => 2]);
     }
 
     public function test_web_permite_eliminar_rq_aunque_la_parada_ya_termino(): void
@@ -912,10 +1031,15 @@ class RQMinaApiTest extends TestCase
             'cantidad_atendida' => 2,
         ]);
 
-        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[0]]);
-        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[1]]);
-        $this->assertDatabaseMissing('rq_proserge_detalle', ['id' => $assignmentIds[2]]);
-        $this->assertDatabaseMissing('rq_proserge_detalle', ['id' => $assignmentIds[3]]);
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[0], 'estado' => 'ASIGNADO']);
+        $this->assertDatabaseHas('rq_proserge_detalle', ['id' => $assignmentIds[1], 'estado' => 'ASIGNADO']);
+        foreach (array_slice($assignmentIds, 2) as $assignmentId) {
+            $this->assertDatabaseHas('rq_proserge_detalle', [
+                'id' => $assignmentId,
+                'estado' => 'RETIRADO',
+                'retirado_por_id' => $usuarioId,
+            ]);
+        }
         $this->assertDatabaseHas('rq_mina_detalle_cambios', [
             'rq_mina_id' => $rqId,
             'rq_mina_detalle_id' => $detalleId,

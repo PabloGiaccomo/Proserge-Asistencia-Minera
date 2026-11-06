@@ -12,9 +12,7 @@
     $dias = (int) ($item['dias_para_limite'] ?? 0);
     $limiteEnvioVencido = (bool) ($item['limite_envio_vencido'] ?? ($dias < 0));
     $deadlineClass = $dias < 0 ? 'expired' : ($dias <= 2 ? 'urgent' : 'ok');
-    $formAction = $puedeEditar
-        ? route('herramientas-parada.save', $item['rq_mina_id'])
-        : ($puedeActualizarPedido ? route('herramientas-parada.pedido', $item['rq_mina_id']) : route('herramientas-parada.show', $item['rq_mina_id']));
+    $formAction = route('herramientas-parada.save', $item['rq_mina_id']);
     $toolBuckets = ['base', 'adicional', 'consumibles_base', 'consumibles_adicional'];
     $importRoutes = [];
     $pedidoTotal = 0;
@@ -129,6 +127,7 @@
                     <div class="tool-group" data-group-index="{{ $groupIndex }}" data-active-category="herramientas">
                         <div class="tool-group-head">
                             <div class="group-name-fields">
+                                <input type="hidden" name="grupos[{{ $groupIndex }}][id]" value="{{ $group['id'] ?? '' }}">
                                 <input type="hidden" name="grupos[{{ $groupIndex }}][grupo_trabajo_id]" value="{{ $group['grupo_trabajo_id'] ?? '' }}">
                                 <div class="form-group">
                                     <label class="form-label">Grupo</label>
@@ -289,9 +288,10 @@
 
         <div class="form-actions tools-actions">
             @if($puedeEditar)
-                <button type="submit" class="btn btn-primary">Guardar borrador</button>
-            @elseif($puedeActualizarPedido)
-                <button type="submit" class="btn btn-primary">Actualizar pedido</button>
+                <button type="submit" class="btn btn-primary">Guardar solicitud</button>
+            @endif
+            @if($puedeActualizarPedido)
+                <a href="{{ route('herramientas-parada.confirmar-pedido', $item['rq_mina_id']) }}" class="btn btn-outline">Ver entregas y recepción</a>
             @endif
         </div>
     </form>
@@ -342,7 +342,6 @@
 
 <script>
 let toolGroupIndex = {{ count($item['grupos'] ?? []) }};
-const pedidoReadonlyAttr = @json($puedeActualizarPedido ? '' : 'readonly');
 const toolImportRoutes = @json($importRoutes);
 const canEditTools = @json($puedeEditar);
 const toolCatalogSuggestionsUrl = @json(route('herramientas-parada.catalogo.sugerencias'));
@@ -387,17 +386,8 @@ function toolRowTemplate(groupIndex, type, rowIndex, row = {}, category = 'herra
             <input type="number" name="${prefix}[cantidad_solicitada]" class="form-control qty" min="0" value="${escapeHtml(row.cantidad_solicitada ?? 1)}">
             ${unitInput}
             <input type="text" name="${prefix}[observaciones]" class="form-control js-tool-observation" list="toolObservationSuggestions" data-tool-category="${toolCategory}" placeholder="Observaciones" value="${escapeHtml(row.observaciones || '')}">
-            <input type="date" name="${prefix}[pedido_solicitado_at]" class="form-control" value="${escapeHtml(row.pedido_solicitado_at || '')}" ${pedidoReadonlyAttr}>
-            <input type="date" name="${prefix}[pedido_llego_at]" class="form-control" value="${escapeHtml(row.pedido_llego_at || '')}" ${pedidoReadonlyAttr}>
-            <input type="hidden" name="${prefix}[cantidad_entregada]" value="${escapeHtml(row.cantidad_entregada || 0)}">
-            <input type="hidden" name="${prefix}[cantidad_recibida]" value="${escapeHtml(row.cantidad_recibida || 0)}">
-            <input type="hidden" name="${prefix}[incidencia_durante_parada]" value="${escapeHtml(row.incidencia_durante_parada || '')}">
-            <input type="hidden" name="${prefix}[recepcion_estado]" value="${escapeHtml(row.recepcion_estado || 'PENDIENTE')}">
-            <input type="hidden" name="${prefix}[recepcion_fecha]" value="${escapeHtml(row.recepcion_fecha || '')}">
-            <input type="hidden" name="${prefix}[recepcion_observacion]" value="${escapeHtml(row.recepcion_observacion || '')}">
-            <input type="hidden" name="${prefix}[recepcion_registrada_at]" value="${escapeHtml(row.recepcion_registrada_at || '')}">
-            <input type="hidden" name="${prefix}[recepcion_registrada_por_usuario_id]" value="${escapeHtml(row.recepcion_registrada_por_usuario_id || '')}">
-            <input type="hidden" name="${prefix}[comentario_cambio_previo]" value="${escapeHtml(row.comentario_cambio_previo || '')}">
+            <input type="date" class="form-control" aria-label="Fecha de solicitud registrada" readonly>
+            <input type="date" class="form-control" aria-label="Fecha de llegada registrada" readonly>
             <span class="tools-status pending">Pedido pendiente</span>
             <button type="button" class="btn-remove-tool" onclick="this.closest('.tool-row').remove()" aria-label="Quitar fila" title="Quitar fila">X</button>
         </div>
@@ -408,7 +398,9 @@ function addToolRow(button, type, category = 'herramienta') {
     const group = button.closest('.tool-group');
     const groupIndex = group.dataset.groupIndex;
     const list = group.querySelector('[data-list-type="' + type + '"]');
-    const rowIndex = list.querySelectorAll('.tool-row').length;
+    const rowIndexes = Array.from(list.querySelectorAll('.tool-row input[type="hidden"]'))
+        .map(input => Number(input.name.match(/\[(\d+)\]\[id\]$/)?.[1] ?? -1));
+    const rowIndex = Math.max(-1, ...rowIndexes) + 1;
     list.insertAdjacentHTML('beforeend', toolRowTemplate(groupIndex, type, rowIndex, {}, category));
 }
 

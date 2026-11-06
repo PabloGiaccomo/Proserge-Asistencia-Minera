@@ -24,6 +24,11 @@ Reglas:
 - Cese no borra documentos ni contratos.
 - Reactivacion/reingreso no debe activar sin contrato firmado vigente.
 - Importaciones Excel deben tratar `ACTIVO` como intencion, no como verdad.
+- `lugar_nacimiento_extranjero` es opcional, incluso si el pais de nacimiento
+  es `Otro`: no bloquea envio ni cuenta como dato pendiente de regularizacion.
+  El campo y sus datos se conservan en formularios y almacenamiento. Si se
+  completa, mantiene la validacion de texto de hasta 191 caracteres. El pais
+  especifico y las demas reglas de nacimiento no cambian.
 
 ## Documentos
 
@@ -386,3 +391,60 @@ Informacion restringida por permisos:
 
 Antes de exponer un dato a varias areas, confirmar si es dato operativo,
 administrativo, sensible o historico.
+
+## Actualización individual y revisión de varias fichas
+
+El enlace de actualización solicita datos personales, nacimiento, contacto,
+domicilio, estudios, tallas y nuevos familiares, según los campos seleccionados
+por RR. HH. La identidad documental y los datos laborales, contractuales,
+bancarios, pensionarios y biométricos se gestionan en la revisión autenticada.
+La propuesta se guarda cifrada y aparece en Ingresos después del envío. RR. HH. compara la versión
+recibida con la vigente antes de aceptar. Un conflicto de versión exige revisar
+de nuevo. El enlace tiene 72 horas y la sesión pública dura 30 minutos. El
+formulario público inicia vacío y muestra un comprobante después del envío.
+
+La revisión masiva admite hasta 50 fichas seleccionadas y ejecuta hasta 10 por
+solicitud. Cada fila conserva su resultado con el cambio de negocio en la misma
+transacción. Las altas coincidentes con un trabajador existente y los documentos
+repetidos en la selección requieren decisión individual. La aplicación de
+datos sensibles exige el permiso correspondiente. Una actualización general
+aplica únicamente los valores propuestos en los campos solicitados y conserva
+los valores omitidos. Los familiares nuevos se agregan después de aceptar;
+no se modifican ni eliminan familiares existentes mediante el enlace.
+Una coincidencia documental exacta con los mismos datos evita duplicados.
+Las diferencias, o coincidencias de nombre, parentesco y fecha sin documento,
+requieren revisión interna. La fecha de nacimiento familiar es opcional.
+Los enlaces anteriores de contacto y domicilio siguen siendo revisables.
+
+La revisión muestra dentro del lote los datos y familiares declarados de cada
+alta, y los valores actual y propuesto y nuevos familiares de una actualización.
+El resumen inicial contiene datos mínimos. Sólo el propietario del lote puede
+consultarlo. Ingresos permite retomar sus revisiones recientes.
+Cada formulario público se liga a su propia sesión de pestaña. La entrega
+inicial conserva el bloqueo del ingreso hasta completar los adjuntos, y un
+reintento de una ficha ya procesada devuelve su resultado.
+
+## PDF firmados
+
+RR. HH. puede seleccionar varios PDF individuales desde Contratos o Vencimientos.
+Cada archivo se asocia explícitamente a un contrato en preparación y a su periodo.
+La confirmación admite hasta 20 archivos por solicitud y conserva el resultado
+por PDF para consultar o reintentar. Los temporales pertenecen a su usuario,
+vencen a las dos horas y permanecen en almacenamiento privado. Su vista previa
+exige permiso de descarga. El programador limpia temporales vencidos.
+
+Un PDF de un periodo anterior solo se reutiliza con equivalencia verificable
+de periodo y se conserva su fecha de firma. Un firmado futuro queda preparado.
+Al llegar su fecha, RR. HH. lo puede activar desde la bandeja de firmados o
+desde el historial del trabajador. La activación vuelve a validar fechas,
+periodos en conflicto y el archivo guardado. Las preparaciones firmadas
+requieren anulación y otro contrato para cambiar de periodo.
+
+## Versiones de documentos de ficha
+
+Cada reemplazo conserva los bytes anteriores en privado y registra referencia,
+huella SHA-256 cuando existe el archivo, procedencia, actor y fecha en
+`personal_archivo_versiones`. Los metadatos de la versión se cifran. Las
+escrituras y copias nuevas se comprueban antes de reemplazar la referencia.
+Si falla una transacción, se conserva el documento anterior y se retiran las
+copias nuevas sin referencia.

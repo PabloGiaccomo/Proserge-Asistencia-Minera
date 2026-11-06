@@ -12,6 +12,7 @@ use App\Modules\Personal\Services\PersonalFichaPdfService;
 use App\Modules\Personal\Services\PersonalFichaEmailTemplateService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalService;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\JsonResponse;
@@ -116,13 +117,13 @@ class PersonalFichaController extends WebPageController
             ->with(['personal', 'familiares', 'link', 'archivos', 'documentoEstados'])
             ->findOrFail($id);
         $permissions = session('user.permissions', []);
-        $canViewSensitiveFichaData = $this->canViewSensitiveFichaData($permissions);
+        $canViewSensitiveFichaData = $this->canViewSensitiveFichaData();
         $canExportSensitiveFichaPdf = $canViewSensitiveFichaData
             && PermissionMatrix::allowsDirect($permissions, 'personal', 'exportar');
 
         return view('personal.fichas.review', [
             'ficha' => $ficha,
-            'data' => $ficha->datos_json ?? [],
+            'data' => $canViewSensitiveFichaData ? ($ficha->datos_json ?? []) : PersonalFichaAccess::redact($ficha->datos_json ?? []),
             'sections' => PersonalFichaCatalog::sections(),
             'estadoLabel' => PersonalFichaCatalog::stateLabel($ficha->estado),
             'huellaDataUrl' => $canViewSensitiveFichaData ? $this->fichaService->imageDataUrl($ficha->huella_path) : null,
@@ -203,7 +204,7 @@ class PersonalFichaController extends WebPageController
     public function pdf(string $id): Response
     {
         abort_unless(
-            $this->canViewSensitiveFichaData(session('user.permissions', []))
+            $this->canViewSensitiveFichaData()
                 && PermissionMatrix::allowsDirect(session('user.permissions', []), 'personal', 'exportar'),
             403
         );
@@ -219,12 +220,14 @@ class PersonalFichaController extends WebPageController
     {
         return $this->exportService->downloadExcel(
             $request->all(),
-            'fichas_personal_' . now()->format('Ymd_His') . '.xlsx'
+            'fichas_personal_' . now()->format('Ymd_His') . '.xlsx',
+            $this->canViewSensitiveFichaData(),
         );
     }
 
     public function startPdfExport(Request $request): JsonResponse
     {
+        abort_unless($this->canViewSensitiveFichaData(), 403);
         $job = $this->exportService->startPdfJob($request->all());
 
         return response()->json($job);
@@ -232,11 +235,13 @@ class PersonalFichaController extends WebPageController
 
     public function processPdfExport(string $jobId): JsonResponse
     {
+        abort_unless($this->canViewSensitiveFichaData(), 403);
         return response()->json($this->exportService->processPdfJob($jobId));
     }
 
     public function downloadPdfExport(string $jobId)
     {
+        abort_unless($this->canViewSensitiveFichaData(), 403);
         $path = $this->exportService->zipDownloadPath($jobId);
 
         return response()->download($path, 'fichas_personal_' . $jobId . '.zip');
@@ -253,17 +258,15 @@ class PersonalFichaController extends WebPageController
 
         $archivo = PersonalFichaArchivo::query()->findOrFail($id);
 
+        abort_if($archivo->tipo === 'huella' && !$this->canViewSensitiveFichaData(), 403);
         abort_unless(Storage::disk('local')->exists($archivo->path), 404);
 
         return Storage::disk('local')->download($archivo->path, $archivo->nombre_original ?: basename($archivo->path));
     }
 
-    private function canViewSensitiveFichaData(?array $permissions = null): bool
+    private function canViewSensitiveFichaData(): bool
     {
-        $permissions ??= session('user.permissions', []);
-
-        return PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles')
-            || PermissionMatrix::allowsDirect($permissions, 'personal_ingresos', 'ver_datos_sensibles');
+        return PersonalFichaAccess::canSensitive($this->requireAuthenticatedUser());
     }
 
     public function extendTemporal(Request $request, string $id): JsonResponse|RedirectResponse

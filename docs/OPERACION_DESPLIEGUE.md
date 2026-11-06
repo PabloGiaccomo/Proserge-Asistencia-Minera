@@ -75,6 +75,30 @@ composer dev
 
 Esto inicia servidor, queue listener, Pail y Vite mediante `concurrently`.
 
+### Conflicto local con XAMPP en el puerto 8000
+
+La configuracion local de Apache usa `Listen 8000` y sirve
+`C:/xampp/htdocs`. No ejecutar Apache y `php artisan serve` en ese mismo
+puerto: se puede abrir la bienvenida de XAMPP o recibir un 404 de Apache en
+lugar de una ruta de Proserge, incluso si Laravel esta iniciado.
+
+Para trabajar con `php artisan serve --host=127.0.0.1 --port=8000`, mantener
+MySQL iniciado en XAMPP y Apache detenido. Abrir
+`http://127.0.0.1:8000/login`; `/dashboard/` corresponde a la bienvenida de
+XAMPP, no al inicio de Proserge. La pantalla inicial de Proserge es `/inicio`.
+Si se necesita Apache para otro proyecto, usar puertos distintos y actualizar
+la URL local de manera coordinada.
+
+Un error SQLSTATE 2002 de conexión rechazada en `127.0.0.1:3306` requiere
+comprobar que MySQL esté iniciado en XAMPP y que use el puerto configurado.
+La página GET de login puede abrir incluso con la base detenida; comprobar
+también la consulta al enviar el formulario. Si el registro de MariaDB contiene
+errores InnoDB, preservar primero una copia consistente del directorio de datos
+y su configuración; evitar eliminar tablespaces o redo logs como solución.
+El [registro local del 5 de noviembre](superpowers/reports/2026-11-05-recuperacion-mysql-local.md)
+documenta el arranque y las nueve migraciones de la entrega en la base local.
+No certifica un despliegue en el hosting.
+
 ## 4. Base de datos
 
 Para una instalacion existente:
@@ -127,6 +151,12 @@ que hay dos opciones correctas:
 No ejecutar `php artisan view:cache` antes de asegurar que el build existe.
 
 ## 6. Despliegue cPanel actual
+
+Para la correccion del dashboard de Evaluaciones y su paquete WinSCP, seguir
+[`FTP_EVALUACIONES_DASHBOARD.md`](FTP_EVALUACIONES_DASHBOARD.md). Sus estilos y
+scripts forman parte de Vite; transferir el build completo de la misma version
+que las vistas. La regla `.gitignore` de `public/build` puede excluir los hashes
+nuevos aunque los anteriores esten versionados. No requiere migraciones.
 
 Ruta conocida:
 
@@ -347,3 +377,60 @@ acredita que el despliegue o el ensayo sobre copia realista ya se hayan realizad
 - Auditar la exposicion automatica de `storage/{path}`.
 - Mantener Laravel, PHP y dependencias actualizadas tras probar regresiones.
 - Registrar quien descarga, aprueba, cesa o elimina datos sensibles.
+
+## Correcciones de módulos y RR. HH. del 4 de noviembre de 2026
+
+La entrega se prepara localmente. El registro de ejecución está en
+`docs/superpowers/reports/2026-11-04-correcciones-modulos-implementadas.md`.
+Publicar el código y `public/build` de la misma compilación después de respaldar
+MySQL, documentos privados y clave de aplicación. Ensayar sobre copia
+representativa y aplicar las migraciones incrementales con el procedimiento
+habitual. Las propuestas y metadatos cifrados requieren conservar APP_KEY.
+
+Las migraciones nuevas del 4 de noviembre agregan versiones documentales,
+propósito/revisión de Ingresos, enlaces de actualización, lotes de revisión,
+lotes de firmados, movimientos de Man Power, revisión de evaluaciones,
+eventos de Roles y eventos de Bienestar. El código de esos flujos requiere
+el esquema correspondiente antes de recibir solicitudes.
+
+Las nueve migraciones se ensayaron en esquemas desechables con identificadores
+históricos CHAR(36) y VARCHAR(36), conservando las filas anteriores. También se
+ensayó reanudar las ampliaciones parciales de Ingresos y Evaluaciones. Las
+versiones documentales admiten rutas históricas de hasta 500 caracteres. Estos
+ensayos locales no sustituyen la prueba sobre una copia representativa del
+ambiente de destino.
+
+Comprobar el scheduler existente de cPanel. Se agregan la limpieza de PDFs
+temporales cada 30 minutos y `roles:retry-change-notifications` cada 5 minutos.
+El reintento automático de Roles procesa hasta 100 eventos por ejecución y
+hasta 10 intentos por evento. Las decisiones de permisos quedan auditadas
+independientemente del estado del aviso.
+
+Para el piloto, recorrer emisión/canje/envío/aceptación de actualización,
+selección/revisión/aceptación de fichas, asociación/confirmación de cada firmado,
+activación futura, conductor/confirmación de transporte y selección de grupo
+en Mi Asistencia. Ensayar tamaño y volumen de archivos con los límites efectivos
+de PHP de cPanel. El lector FPDI instalado rechaza algunos PDF con compresión
+de referencias y documentos cifrados. La pantalla informa el caso y permite
+continuar desde el contrato individual para el formato no admitido.
+
+## Alta múltiple de usuarios
+
+La pantalla y la exportación requieren la migración incremental
+`2026_11_06_000100_create_usuario_alta_lotes.php` y los assets del build Vite de
+la misma versión. Aplicar la migración después del respaldo y el ensayo de
+despliegue habituales. La tabla registra los lotes, sus titulares y los
+resultados cifrados. Conservar `APP_KEY` mientras haya resultados vigentes.
+
+Comprobar que el scheduler ejecute `usuarios:purge-expired-batch-credentials`
+cada cinco minutos. El vencimiento se aplica en el momento de consultar o
+exportar y la tarea elimina las credenciales vencidas conservando la auditoría.
+En la prueba de aceptación usar cuentas y trabajadores sintéticos. Validar
+alta individual, búsqueda, lote, reintento, permisos y descarga del titular.
+
+El 6 de noviembre se aplicó esta migración en la base local de trabajo, lote 40,
+después de generar el respaldo privado en
+`storage/app/private/system-recovery/20261106-112021-usuarios/`.
+El recorrido se verificó con fixtures sintéticos, 72 pruebas PHP y el build
+en Chrome a 390 y 1440 px. Para publicar en cPanel, incluir esta migración,
+el código y el build generado en el procedimiento de despliegue del ambiente.

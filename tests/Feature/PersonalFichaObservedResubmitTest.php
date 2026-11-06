@@ -10,6 +10,7 @@ use App\Models\Usuario;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -28,6 +29,214 @@ class PersonalFichaObservedResubmitTest extends TestCase
         Carbon::setTestNow();
 
         parent::tearDown();
+    }
+
+    public function test_expired_submitted_regularization_link_rejects_draft_data_and_file(): void
+    {
+        Carbon::setTestNow('2026-11-04 12:00:01');
+        Storage::fake('local');
+        [$link, $ficha, $token] = $this->publicLinkFixture(approved: true);
+
+        $this->get(route('ficha-colaborador.show', $token))
+            ->assertOk()
+            ->assertDontSee('0000111122223333')
+            ->assertDontSee('signature-fixture');
+        $this->postJson(route('ficha-colaborador.datos-borrador', $token), [
+            'fields' => ['correo' => 'manipulado@test.local'],
+            'firma_base64' => 'firma-manipulada',
+        ])->assertForbidden();
+        $this->postJson(route('ficha-colaborador.archivo-borrador', $token), [
+            'tipo' => 'huella',
+            'archivo' => UploadedFile::fake()->image('huella-manipulada.png'),
+        ])->assertForbidden();
+
+        $this->assertSame($ficha->datos_json, $ficha->fresh()->datos_json);
+        $this->assertSame($ficha->firma_base64, $ficha->fresh()->firma_base64);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+        $this->assertSame(PersonalFicha::ESTADO_APROBADO, $ficha->fresh()->estado);
+    }
+
+    public function test_revocation_between_resolution_and_write_prevents_public_save(): void
+    {
+        Carbon::setTestNow('2026-11-04 11:59:59');
+        Storage::fake('local');
+        [$link, $ficha, $token] = $this->publicLinkFixture();
+        $service = app(PersonalFichaService::class);
+        $resolved = $service->resolveToken($token);
+        $this->assertSame('edit', $resolved['mode']);
+
+        $link->forceFill(['estado' => PersonalFichaLink::ESTADO_INHABILITADO, 'disabled_at' => now()])->save();
+
+        $writes = [
+            fn () => $service->storePublicDraftData($resolved['link'], ['correo' => 'manipulado@test.local'], [], 'firma-manipulada'),
+            fn () => $service->storePublicDraftArchivo($resolved['link'], 'huella', UploadedFile::fake()->image('huella.png')),
+            fn () => $service->submitFromWorker($resolved['link'], $ficha->datos_json, [], 'firma-manipulada', null),
+        ];
+        foreach ($writes as $write) {
+            try {
+                $write();
+                $this->fail('Un enlace revocado aceptó una escritura.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('ficha', $exception->errors());
+            }
+        }
+
+        $this->assertSame($ficha->datos_json, $ficha->fresh()->datos_json);
+        $this->assertSame($ficha->firma_base64, $ficha->fresh()->firma_base64);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_public_edit_window_includes_expiration_instant_only(): void
+    {
+        Carbon::setTestNow('2026-11-04 11:59:59');
+        [$link, $ficha, $token] = $this->publicLinkFixture();
+        $service = app(PersonalFichaService::class);
+        $this->assertSame('edit', $service->resolveToken($token)['mode']);
+
+        Carbon::setTestNow('2026-11-04 12:00:00');
+        $this->assertSame('edit', $service->resolveToken($token)['mode']);
+        $service->storePublicDraftData($link, ['correo' => 'limite@test.local']);
+
+        Carbon::setTestNow('2026-11-04 12:00:01');
+        try {
+            $service->storePublicDraftData($link, ['correo' => 'vencido@test.local']);
+            $this->fail('El borrador aceptó una escritura después de vencer.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('ficha', $exception->errors());
+        }
+
+        $this->assertSame('expired', $service->resolveToken($token)['mode']);
+        $this->assertSame('limite@test.local', $ficha->fresh()->datos_json['correo']);
+    }
+
+    public function test_consumed_public_link_shows_only_a_receipt(): void
+    {
+        Carbon::setTestNow('2026-11-04 11:59:59');
+        [$link, $ficha, $token] = $this->publicLinkFixture(approved: true);
+        $link->forceFill(['estado' => PersonalFichaLink::ESTADO_ENVIADO, 'submitted_at' => now(), 'read_until' => now()->addDay()])->save();
+
+        $this->get(route('ficha-colaborador.show', $token))->assertOk()
+            ->assertSee('Ficha enviada')
+            ->assertDontSee('0000111122223333')
+            ->assertDontSee('signature-fixture');
+        $this->postJson(route('ficha-colaborador.datos-borrador', $token), [
+            'fields' => ['correo' => 'manipulado@test.local'],
+        ])->assertForbidden();
+        $this->assertSame($ficha->datos_json, $ficha->fresh()->datos_json);
+    }
+
+    public function test_public_draft_validation_does_not_flash_sensitive_input_on_form_posts(): void
+    {
+        Carbon::setTestNow('2026-11-04 11:59:59');
+        [, $ficha, $token] = $this->publicLinkFixture();
+
+        $this->post(route('ficha-colaborador.datos-borrador', $token), [
+            'fields' => ['numero_cuenta' => '0000111122223333'],
+            'firma_base64' => ['firma-malformada'],
+        ])->assertUnprocessable()->assertSessionMissing('_old_input');
+
+        $this->assertSame($ficha->firma_base64, $ficha->fresh()->firma_base64);
+    }
+
+    private function publicLinkFixture(bool $approved = false): array
+    {
+        $fields = $this->fichaData([
+            'numero_documento' => '70010404',
+            'banco' => 'BCP',
+            'numero_cuenta' => '0000111122223333',
+        ]);
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => $fields['numero_documento'],
+            'nombre_completo' => 'FICHA PRUEBA VIGENCIA',
+            'puesto' => $fields['puesto'],
+            'contrato' => 'FIJO',
+            'qr_code' => 'QR-' . Str::random(12),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+        ]);
+        $ficha = PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => $approved ? PersonalFicha::ESTADO_APROBADO : PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $fields['numero_documento'],
+            'datos_json' => $fields,
+            'firma_base64' => 'data:image/png;base64,signature-fixture',
+            'submitted_at' => $approved ? now()->subDay() : null,
+        ]);
+        $token = Str::random(80);
+        $link = PersonalFichaLink::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $ficha->id,
+            'token_hash' => hash('sha256', $token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => '2026-11-04 12:00:00',
+        ]);
+
+        return [$link, $ficha, $token];
+    }
+
+    public function test_public_ficha_can_be_submitted_without_optional_foreign_birthplace(): void
+    {
+        $data = $this->fichaData([
+            'numero_documento' => '70010091',
+            'pais_nacimiento' => 'Otro',
+            'pais_nacimiento_otro' => 'Chile',
+            'lugar_nacimiento_extranjero' => '',
+        ]);
+        $personal = Personal::query()->create([
+            'id' => (string) Str::uuid(),
+            'dni' => $data['numero_documento'],
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $data['numero_documento'],
+            'nombre_completo' => 'TRABAJADOR NACIMIENTO OPCIONAL',
+            'puesto' => $data['puesto'],
+            'qr_code' => 'TEST-' . Str::uuid(),
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+        ]);
+        $ficha = PersonalFicha::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_id' => $personal->id,
+            'estado' => PersonalFicha::ESTADO_PENDIENTE,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $personal->dni,
+            'datos_json' => $data,
+            'huella_path' => 'synthetic/huella.jpg',
+        ]);
+        $token = 'optional-foreign-birthplace-token';
+        PersonalFichaLink::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $ficha->id,
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => encrypt($token),
+            'estado' => PersonalFichaLink::ESTADO_ACTIVO,
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $html = $this->get(route('ficha-colaborador.show', ['token' => $token]))->assertOk()->getContent();
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $document->loadHTML($html);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        $xpath = new \DOMXPath($document);
+        $input = $xpath->query('//input[@name="fields[lugar_nacimiento_extranjero]"]');
+        $this->assertSame(1, $input->length);
+        $this->assertFalse($input->item(0)->hasAttribute('required'));
+
+        $this->post(route('ficha-colaborador.submit', ['token' => $token]), [
+            'fields' => $data,
+            'firma_base64' => 'data:image/png;base64,signature',
+            'declaraciones' => collect(PersonalFichaCatalog::declarationCheckboxes())
+                ->mapWithKeys(fn ($_label, string $key): array => [$key => '1'])->all(),
+        ])->assertRedirect(route('ficha-colaborador.show', ['token' => $token]))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(PersonalFicha::ESTADO_ENVIADA, $ficha->fresh()->estado);
+        $this->assertSame('', $ficha->fresh()->datos_json['lugar_nacimiento_extranjero']);
     }
 
     public function test_observed_resubmit_replaces_previous_ficha_data(): void
@@ -700,7 +909,9 @@ class PersonalFichaObservedResubmitTest extends TestCase
         DB::table('roles')->insert([
             'id' => $roleId,
             'nombre' => 'RRHH_FIRMA_HUELLA_' . Str::upper(Str::random(6)),
-            'permisos' => json_encode([]),
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'personal' => ['editar', 'actualizar', 'ver_datos_sensibles'],
+            ])),
             'estado' => 'ACTIVO',
             'created_at' => now(),
             'updated_at' => now(),
@@ -780,7 +991,6 @@ class PersonalFichaObservedResubmitTest extends TestCase
         app(PersonalFichaService::class)->updateManual($personal, $data, [
             'estado' => PersonalFicha::ESTADO_ENVIADA,
             'es_supervisor' => false,
-            'minas' => [],
             'familiares' => [],
             'documentos' => [],
             'firma_base64' => 'data:image/png;base64,new-internal',
@@ -797,7 +1007,7 @@ class PersonalFichaObservedResubmitTest extends TestCase
         $this->assertFalse((bool) $huella->uploaded_by_public);
         $this->assertSame($actor->id, $huella->uploaded_by_usuario_id);
         Storage::disk('local')->assertExists($ficha->huella_path);
-        Storage::disk('local')->assertMissing($oldHuellaPath);
+        Storage::disk('local')->assertExists($oldHuellaPath);
     }
 
     public function test_active_temporary_link_without_manual_marker_is_immediately_usable(): void

@@ -455,7 +455,7 @@ class PersonalService
 
             $personal = Personal::query()->create($data);
 
-            $this->syncMineRelations($personal, $payload['minas'] ?? []);
+            $this->createInitialMineRelations($personal, $payload['minas'] ?? []);
 
             return $personal->load('minas');
         });
@@ -463,6 +463,8 @@ class PersonalService
 
     public function update(Personal $personal, array $payload): Personal
     {
+        $this->assertNoMineUpdate($payload);
+
         return DB::transaction(function () use ($personal, $payload): Personal {
             $phoneRaw = PersonalNormalizer::combinePhones(
                 PersonalNormalizer::text($payload['telefono_1'] ?? ''),
@@ -537,13 +539,20 @@ class PersonalService
             $personal->fill($data);
             $personal->save();
 
-            $this->syncMineRelations($personal, $payload['minas'] ?? []);
-
             return $personal->load('minas');
         });
     }
 
-    public function syncMineRelations(Personal $personal, array $mineItems): void
+    public function assertNoMineUpdate(array $payload): void
+    {
+        if (array_key_exists('minas', $payload) || array_key_exists('mina_estado', $payload)) {
+            throw ValidationException::withMessages([
+                'minas' => 'Gestiona las asignaciones desde Habilitación minera.',
+            ]);
+        }
+    }
+
+    private function createInitialMineRelations(Personal $personal, array $mineItems): void
     {
         $allowedStates = ['HABILITADO', 'EN_PROCESO', 'NO_HABILITADO'];
         $desired = [];
@@ -571,29 +580,7 @@ class PersonalService
             $desired[$mineId] = $status;
         }
 
-        if (count($desired) === 0) {
-            PersonalMina::query()->where('personal_id', $personal->id)->delete();
-
-            return;
-        }
-
-        PersonalMina::query()
-            ->where('personal_id', $personal->id)
-            ->whereNotIn('mina_id', array_keys($desired))
-            ->delete();
-
         foreach ($desired as $mineId => $state) {
-            $relation = PersonalMina::query()
-                ->where('personal_id', $personal->id)
-                ->where('mina_id', $mineId)
-                ->first();
-
-            if ($relation) {
-                $relation->estado = $state;
-                $relation->save();
-                continue;
-            }
-
             PersonalMina::query()->create([
                 'id' => (string) Str::uuid(),
                 'personal_id' => $personal->id,
@@ -823,14 +810,15 @@ class PersonalService
 
     public function deleteCompletely(Personal $personal): void
     {
-        $blockers = $this->deletionBlockers($personal);
-        if (!empty($blockers)) {
-            throw ValidationException::withMessages([
-                'personal' => 'No se puede eliminar porque tiene registros vinculados en: ' . implode(', ', $blockers) . '.',
-            ]);
-        }
-
         DB::transaction(function () use ($personal): void {
+            $personal = Personal::query()->lockForUpdate()->findOrFail($personal->id);
+            $blockers = $this->deletionBlockers($personal);
+            if ($blockers !== []) {
+                throw ValidationException::withMessages([
+                    'personal' => 'No se puede eliminar porque tiene registros vinculados en: ' . implode(', ', $blockers) . '.',
+                ]);
+            }
+
             $personal->loadMissing(['fichas.archivos', 'fichas.familiares', 'fichas.link', 'bloqueos', 'relacionesMina']);
 
             foreach ($personal->fichas as $ficha) {
@@ -1101,6 +1089,7 @@ class PersonalService
             ['table' => 'evaluacion_desempenos', 'column' => 'trabajador_id', 'label' => 'evaluaciones de desempeno'],
             ['table' => 'evaluacion_supervisors', 'column' => 'evaluado_id', 'label' => 'evaluaciones de supervisor'],
             ['table' => 'evaluacion_supervisores', 'column' => 'evaluado_id', 'label' => 'evaluaciones de supervisor'],
+            ['table' => 'personal_ingreso_links', 'column' => 'personal_id', 'label' => 'solicitudes de actualización'],
         ];
 
         return collect($checks)

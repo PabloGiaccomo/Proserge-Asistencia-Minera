@@ -4,21 +4,84 @@ namespace Tests\Feature;
 
 use App\Models\Personal;
 use App\Models\PersonalIngreso;
+use App\Models\PersonalIngresoArchivo;
+use App\Models\PersonalPuesto;
 use App\Models\Usuario;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalIngresoService;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
+use App\Modules\Personal\Support\PersonalIngresoPurpose;
 use App\Support\Rbac\PermissionCatalog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class PersonalIngresoPublicFlowTest extends TestCase
 {
     use DatabaseTransactions;
+
+    #[DataProvider('optionalForeignBirthplaceValues')]
+    public function test_public_ingreso_accepts_optional_foreign_birthplace(?string $value, bool $omit = false): void
+    {
+        Storage::fake('local');
+        PersonalPuesto::query()->firstOrCreate(
+            ['nombre' => 'OPERARIO NACIMIENTO OPCIONAL'],
+            ['id' => (string) Str::uuid(), 'activo' => true],
+        );
+        $data = $this->fichaData([
+            'numero_documento' => '70010092',
+            'puesto' => 'OPERARIO NACIMIENTO OPCIONAL',
+            'pais_nacimiento' => 'Otro',
+            'pais_nacimiento_otro' => 'Chile',
+            'lugar_nacimiento_extranjero' => $value,
+            'domicilio_direccion' => 'Direccion de prueba',
+            'banco' => 'BCP',
+            'numero_cuenta' => '1234567890123',
+            'grado_instruccion' => 'Secundaria completa',
+        ]);
+        if ($omit) {
+            unset($data['lugar_nacimiento_extranjero']);
+        }
+
+        $this->withSession(['personal_ingreso_public_key_date' => now()->toDateString()])
+            ->post(route('personal.ingresos.public.submit'), [
+                'fields' => $data,
+                'firma_base64' => 'data:image/png;base64,' . base64_encode('firma'),
+                'huella' => UploadedFile::fake()->image('huella.jpg', 120, 120),
+                'declaraciones' => collect(PersonalFichaCatalog::declarationCheckboxes())
+                    ->mapWithKeys(fn ($_label, string $key): array => [$key => '1'])->all(),
+            ])->assertRedirect(route('personal.ingresos.public.show'))
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success');
+
+        $ingreso = PersonalIngreso::query()->where('numero_documento', $data['numero_documento'])->firstOrFail();
+        $this->assertSame($value ?? '', $ingreso->datos_json['lugar_nacimiento_extranjero']);
+        $this->assertSame('Chile', $ingreso->datos_json['pais_nacimiento_otro']);
+    }
+
+    public static function optionalForeignBirthplaceValues(): array
+    {
+        return [
+            'empty' => [''],
+            'null' => [null],
+            'omitted' => ['', true],
+            'provided' => ['Ciudad / Region'],
+        ];
+    }
+
+    public function test_optional_foreign_birthplace_still_rejects_oversized_text(): void
+    {
+        $this->withSession(['personal_ingreso_public_key_date' => now()->toDateString()])
+            ->post(route('personal.ingresos.public.submit'), [
+                'fields' => ['lugar_nacimiento_extranjero' => str_repeat('a', 192)],
+            ])->assertSessionHasErrors('fields.lugar_nacimiento_extranjero');
+    }
 
     public function test_public_ingreso_lands_in_inbox_before_personal_and_accepts_without_falta_contrato(): void
     {
@@ -193,6 +256,237 @@ class PersonalIngresoPublicFlowTest extends TestCase
             'submission_uuid' => $submissionUuid,
             'estado' => PersonalIngreso::ESTADO_RECIBIDA,
         ]);
+    }
+
+    public function test_public_ingreso_rejects_reusing_an_update_submission_uuid(): void
+    {
+        Storage::fake('local');
+        $worker = $this->createPersonal('70010081');
+        $uuid = (string) Str::uuid();
+        $update = PersonalIngreso::query()->create([
+            'id' => (string) Str::uuid(),
+            'submission_uuid' => $uuid,
+            'proposito' => PersonalIngresoPurpose::ACTUALIZACION,
+            'estado' => PersonalIngreso::ESTADO_RECIBIDA,
+            'tipo_documento' => 'DNI',
+            'numero_documento' => $worker->dni,
+            'personal_existente_id' => $worker->id,
+        ]);
+        $before = $update->fresh()->getRawOriginal();
+        try {
+            app(PersonalIngresoService::class)->storeSubmission(
+                $this->fichaData(['numero_documento' => '70010082']),
+                [],
+                'data:image/png;base64,reintento',
+                UploadedFile::fake()->image('huella-intrusion.jpg', 120, 120),
+                ['cv_documentado' => UploadedFile::fake()->createWithContent('intrusion.pdf', 'Documento intrusión')],
+                $uuid,
+            );
+            $this->fail('Una actualización no puede recibir el envío de un alta.');
+        } catch (HttpExceptionInterface $exception) {
+            $this->assertSame(409, $exception->getStatusCode());
+        }
+
+        $this->assertSame($before, $update->fresh()->getRawOriginal());
+        $this->assertDatabaseMissing('personal_ingreso_archivos', ['personal_ingreso_id' => $update->id]);
+        $this->assertDatabaseMissing('personal_archivo_versiones', ['owner_id' => $update->id]);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    #[DataProvider('processedIngresoStates')]
+    public function test_public_ingreso_retry_preserves_processed_data_and_all_file_bytes(string $state): void
+    {
+        Storage::fake('local');
+        $uuid = (string) Str::uuid();
+        $service = app(PersonalIngresoService::class);
+        $first = $service->storeSubmission(
+            $this->fichaData(['numero_documento' => '70010083']),
+            [],
+            'data:image/png;base64,original',
+            UploadedFile::fake()->image('huella-original.jpg', 120, 120),
+            ['cv_documentado' => UploadedFile::fake()->createWithContent('original.pdf', 'Documento original')],
+            $uuid,
+        );
+        $first->forceFill(['estado' => $state, 'reviewed_at' => now()])->save();
+        $before = $first->getRawOriginal();
+        $files = $first->archivos()->orderBy('id')->get()->toArray();
+        $bytes = collect(Storage::disk('local')->allFiles())->mapWithKeys(
+            fn (string $path): array => [$path => Storage::disk('local')->get($path)],
+        )->all();
+
+        $retry = $service->storeSubmission(
+            $this->fichaData(['numero_documento' => '70010084', 'correo' => 'reintento@test.local']),
+            [['nombres_apellidos' => 'Familiar reemplazo']],
+            'data:image/png;base64,reintento',
+            UploadedFile::fake()->image('huella-reintento.jpg', 120, 120),
+            ['cv_documentado' => UploadedFile::fake()->createWithContent('reintento.pdf', 'Documento reemplazo')],
+            $uuid,
+        );
+
+        $this->assertSame($first->id, $retry->id);
+        $this->assertSame($before, $retry->getRawOriginal());
+        $this->assertSame($files, $retry->archivos()->orderBy('id')->get()->toArray());
+        $this->assertDatabaseMissing('personal_archivo_versiones', ['owner_id' => $first->id]);
+        $this->assertSame(array_keys($bytes), Storage::disk('local')->allFiles());
+        foreach ($bytes as $path => $content) {
+            $this->assertSame($content, Storage::disk('local')->get($path));
+        }
+    }
+
+    public static function processedIngresoStates(): array
+    {
+        return [[PersonalIngreso::ESTADO_ACEPTADA], [PersonalIngreso::ESTADO_CONTRATO_NO_FIRMADO]];
+    }
+
+    public function test_public_retry_rechecks_processing_before_replacing_files(): void
+    {
+        Storage::fake('local');
+        $uuid = (string) Str::uuid();
+        $service = app(PersonalIngresoService::class);
+        $first = $service->storeSubmission(
+            $this->fichaData(['numero_documento' => '70010085']),
+            [],
+            'data:image/png;base64,original',
+            UploadedFile::fake()->image('huella-original.jpg', 120, 120),
+            [],
+            $uuid,
+        );
+        $path = $first->huella_path;
+        $retrieved = 0;
+        PersonalIngreso::retrieved(function (PersonalIngreso $ingreso) use ($first, &$retrieved): void {
+            if ($ingreso->id === $first->id && ++$retrieved === 2) {
+                DB::table('personal_ingresos')->where('id', $first->id)->update(['estado' => PersonalIngreso::ESTADO_ACEPTADA]);
+            }
+        });
+        try {
+            $retry = $service->storeSubmission(
+                $this->fichaData(['numero_documento' => '70010085']),
+                [],
+                'data:image/png;base64,original',
+                UploadedFile::fake()->image('huella-reintento.jpg', 120, 120),
+                ['cv_documentado' => UploadedFile::fake()->createWithContent('reintento.pdf', 'Documento tardío')],
+                $uuid,
+            );
+        } finally {
+            PersonalIngreso::flushEventListeners();
+        }
+
+        $this->assertSame(PersonalIngreso::ESTADO_ACEPTADA, $retry->estado);
+        $this->assertSame($path, $retry->huella_path);
+        $this->assertSame([$path], Storage::disk('local')->allFiles());
+        $this->assertDatabaseMissing('personal_archivo_versiones', ['owner_id' => $first->id]);
+    }
+
+    public function test_required_fingerprint_failure_rolls_back_the_entire_new_submission(): void
+    {
+        Storage::fake('local');
+        $uuid = (string) Str::uuid();
+        PersonalIngresoArchivo::creating(fn () => throw new \RuntimeException('Fallo sintético de referencia'));
+        try {
+            app(PersonalIngresoService::class)->storeSubmission(
+                $this->fichaData(['numero_documento' => '70010086']),
+                [],
+                'data:image/png;base64,original',
+                UploadedFile::fake()->image('huella.jpg', 120, 120),
+                [],
+                $uuid,
+            );
+            $this->fail('El envío debe reportar el fallo de huella.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('huella', $exception->errors());
+        } finally {
+            PersonalIngresoArchivo::flushEventListeners();
+        }
+
+        $this->assertDatabaseMissing('personal_ingresos', ['submission_uuid' => $uuid]);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_required_fingerprint_failure_preserves_the_previous_retry_data(): void
+    {
+        Storage::fake('local');
+        $uuid = (string) Str::uuid();
+        $service = app(PersonalIngresoService::class);
+        $first = $service->storeSubmission(
+            $this->fichaData(['numero_documento' => '70010087']),
+            [],
+            'data:image/png;base64,original',
+            UploadedFile::fake()->image('huella-original.jpg', 120, 120),
+            [],
+            $uuid,
+        );
+        $before = $first->fresh()->getRawOriginal();
+        PersonalIngresoArchivo::creating(fn () => throw new \RuntimeException('Fallo sintético de referencia'));
+        try {
+            $service->storeSubmission(
+                $this->fichaData(['numero_documento' => '70010087', 'correo' => 'reintento@test.local']),
+                [],
+                'data:image/png;base64,reintento',
+                UploadedFile::fake()->image('huella-reintento.jpg', 120, 120),
+                [],
+                $uuid,
+            );
+            $this->fail('El envío debe reportar el fallo de huella.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('huella', $exception->errors());
+        } finally {
+            PersonalIngresoArchivo::flushEventListeners();
+        }
+
+        $this->assertSame($before, $first->fresh()->getRawOriginal());
+        $this->assertSame([$first->huella_path], Storage::disk('local')->allFiles());
+        $this->assertDatabaseMissing('personal_archivo_versiones', ['owner_id' => $first->id]);
+    }
+
+    public function test_submission_keeps_the_payload_transaction_open_while_storing_fingerprint(): void
+    {
+        Storage::fake('local');
+        $initialLevel = DB::transactionLevel();
+        $storageLevel = null;
+        $file = UploadedFile::fake()->image('huella.jpg', 120, 120);
+        $upload = \Mockery::mock($file)->makePartial();
+        $upload->shouldReceive('storeAs')->once()->andReturnUsing(
+            function (string $directory, string $filename, string $disk) use ($file, &$storageLevel): string {
+                $storageLevel = DB::transactionLevel();
+
+                return $file->storeAs($directory, $filename, $disk);
+            },
+        );
+
+        app(PersonalIngresoService::class)->storeSubmission(
+            $this->fichaData(['numero_documento' => '70010088']),
+            [],
+            'data:image/png;base64,original',
+            $upload,
+        );
+        // The delivery transaction must still enclose the file replacement transaction.
+        $this->assertSame($initialLevel + 2, $storageLevel);
+    }
+
+    public function test_optional_document_failure_keeps_submission_and_reports_warning(): void
+    {
+        Storage::fake('local');
+        PersonalIngresoArchivo::creating(function (PersonalIngresoArchivo $archivo): void {
+            if ($archivo->tipo === 'cv_documentado') {
+                throw new \RuntimeException('Fallo sintético de documento opcional');
+            }
+        });
+        try {
+            $ingreso = app(PersonalIngresoService::class)->storeSubmission(
+                $this->fichaData(['numero_documento' => '70010089']),
+                [],
+                'data:image/png;base64,original',
+                UploadedFile::fake()->image('huella.jpg', 120, 120),
+                ['cv_documentado' => UploadedFile::fake()->createWithContent('cv.pdf', 'Documento opcional')],
+            );
+        } finally {
+            PersonalIngresoArchivo::flushEventListeners();
+        }
+
+        $this->assertSame(PersonalIngreso::ESTADO_RECIBIDA, $ingreso->estado);
+        $this->assertStringContainsString('cv_documentado', $ingreso->observaciones_revision);
+        $this->assertSame('huella', $ingreso->archivos->sole()->tipo);
+        $this->assertSame([$ingreso->huella_path], Storage::disk('local')->allFiles());
     }
 
     public function test_public_ingreso_with_existing_document_updates_existing_without_duplicate(): void

@@ -528,6 +528,8 @@
                     'nombre' => $e->nombre_snapshot,
                     'categoria_operativa' => $e->examen?->categoria_operativa,
                     'nota' => $e->nota_obtenida,
+                    'requiere_nota' => (bool) $e->requiere_nota_snapshot,
+                    'nota_minima' => $e->nota_minima_snapshot,
                     'convalidation_context' => $e->contexto_convalidacion_json,
                     'estado' => $e->estado,
                     'can_convalidate' => $a->estadoHabilitacionActual() === \App\Models\PersonalMina::ESTADO_EN_PROCESO
@@ -4011,6 +4013,7 @@ function openWorkerExams(assignmentId, workerName, mineName, focusExamId) {
     }
 
     modalBody.innerHTML = html;
+    window.initializeMiningAttemptForms?.(modalBody);
     document.getElementById('modal-worker-exams').showModal();
 
     if (focusExamId) {
@@ -4133,4 +4136,5 @@ function initMineExamDashboard() {
 }
 initMineExamDashboard();
 </script>
+@include('personal.habilitacion-minera._attempt-recovery-script')
 @endpush

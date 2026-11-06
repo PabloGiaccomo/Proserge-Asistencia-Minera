@@ -4,13 +4,18 @@ namespace Tests\Feature;
 
 use App\Models\Personal;
 use App\Models\PersonalBloqueo;
+use App\Models\PersonalBloqueoEvento;
 use App\Models\Usuario;
 use App\Modules\Bienestar\Controllers\BienestarPageController;
+use App\Modules\Bienestar\Services\BienestarBloqueoService;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use Carbon\Carbon;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -50,11 +55,12 @@ class BienestarBloqueosTest extends TestCase
             $table->timestamps();
         });
         (require database_path('migrations/2026_04_24_000400_create_personal_bloqueos_table.php'))->up();
+        (require database_path('migrations/2026_11_04_001100_create_personal_bloqueo_eventos.php'))->up();
         $this->actor = Usuario::query()->create(['id' => (string) Str::uuid(), 'email' => 'actor@example.test']);
         session(['user' => ['id' => $this->actor->id, 'permissions' => ['bienestar' => ['ver' => true, 'crear' => true]]]]);
         $notifications = $this->mock(OperationalNotificationService::class);
         $notifications->shouldReceive('bienestarBloqueoRegistrado')->zeroOrMoreTimes();
-        $this->controller = new BienestarPageController($notifications);
+        $this->controller = new BienestarPageController($notifications, new BienestarBloqueoService());
     }
 
     protected function tearDown(): void
@@ -146,6 +152,123 @@ class BienestarBloqueosTest extends TestCase
             $this->assertSame(403, $error->getStatusCode());
         }
         $this->assertSame(0, PersonalBloqueo::count());
+    }
+
+    public function test_editar_exige_motivo_de_decision_y_conserva_el_bloqueo_si_falta(): void
+    {
+        $block = $this->block($this->worker('FALTA_CONTRATO'));
+        session(['user.permissions' => ['bienestar' => ['editar' => true]]]);
+        $request = Request::create('/', 'PUT', [
+            'tipo' => 'vacaciones', 'motivo' => 'Motivo cambiado',
+            'fecha_inicio' => '2026-08-31', 'fecha_fin' => '2026-09-02',
+        ]);
+
+        try {
+            $this->controller->updateBloqueo($request, $block->id);
+            $this->fail('Editar un bloqueo exige explicar la decisión.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('motivo_decision', $error->errors());
+        }
+        $this->assertSame('Prueba aislada', $block->fresh()->motivo);
+    }
+
+    public function test_edicion_y_anulacion_registran_actor_y_decision_cifrados_y_sin_duplicados(): void
+    {
+        $worker = $this->worker('FALTA_CONTRATO');
+        $block = $this->block($worker, ['tipo' => 'descanso_medico', 'detalle' => 'Detalle médico previo']);
+        $actor = $this->decisionActor(['ver', 'editar', 'anular']);
+        $this->mock(OperationalNotificationService::class)->shouldReceive('bienestarBloqueoAnulado')->once();
+        $controller = app(BienestarPageController::class);
+        $edit = Request::create('/', 'PUT', [
+            'tipo' => 'descanso_medico', 'motivo' => 'Prueba aislada', 'detalle' => 'Detalle médico corregido',
+            'fecha_inicio' => '2026-08-31', 'fecha_fin' => '2026-09-04',
+            'motivo_decision' => 'Corrección del plazo', 'mes' => '2026-09',
+        ]);
+        $edit->setUserResolver(fn () => $actor);
+
+        $this->assertSame(
+            route('bienestar.show', ['id' => $worker->id, 'mes' => '2026-09']),
+            $controller->updateBloqueo($edit, $block->id)->getTargetUrl(),
+        );
+        $updated = PersonalBloqueoEvento::query()->sole();
+        $this->assertSame(PersonalBloqueoEvento::EDITADO, $updated->tipo);
+        $this->assertSame($actor->id, $updated->actor_id);
+        $this->assertSame($this->actor->id, $block->fresh()->bloqueado_por_id);
+        $this->assertSame('Prueba aislada', $updated->antes['motivo']);
+        $this->assertSame('Detalle médico previo', $updated->antes['detalle']);
+        $this->assertSame('Detalle médico corregido', $updated->despues['detalle']);
+        $this->assertSame('Corrección del plazo', $updated->motivo_decision);
+        $raw = DB::table('personal_bloqueo_eventos')->where('id', $updated->id)->first();
+        $this->assertStringNotContainsString('Detalle médico', $raw->antes.$raw->despues);
+        $this->assertStringNotContainsString('Corrección', $raw->motivo_decision);
+        $this->assertArrayNotHasKey('antes', $updated->toArray());
+
+        $annul = Request::create('/', 'POST', ['motivo_decision' => 'Documento rectificado', 'mes' => '2026-09']);
+        $annul->setUserResolver(fn () => $actor);
+        $controller->anularBloqueo($annul, $block->id);
+        $controller->anularBloqueo($annul, $block->id);
+        $this->assertSame(2, PersonalBloqueoEvento::query()->count());
+        $event = PersonalBloqueoEvento::query()->where('tipo', PersonalBloqueoEvento::ANULADO)->sole();
+        $this->assertSame('ACTIVO', $event->antes['estado']);
+        $this->assertSame('ANULADO', $event->despues['estado']);
+        $this->assertSame('Prueba aislada', $block->fresh()->motivo);
+        $this->assertSame('FALTA_CONTRATO', $worker->fresh()->estado);
+        request()->query->set('mes', '2026-09');
+        $page = $controller->show($worker->id)->getData();
+        $this->assertCount(2, $page['history']);
+        $this->assertSame('2026-09', $page['month']);
+        session(['user.permissions' => ['bienestar' => ['ver' => true]]]);
+        $this->assertCount(0, $controller->show($worker->id)->getData()['history']);
+    }
+
+    public function test_anulacion_sin_motivo_o_permiso_no_cambia_el_bloqueo(): void
+    {
+        $block = $this->block($this->worker('ACTIVO'));
+        $actor = $this->decisionActor(['anular']);
+        $request = Request::create('/', 'POST');
+        $request->setUserResolver(fn () => $actor);
+        try {
+            $this->controller->anularBloqueo($request, $block->id);
+            $this->fail('Anular un bloqueo exige explicar la decisión.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('motivo_decision', $error->errors());
+        }
+
+        try {
+            app(BienestarBloqueoService::class)->annul($block, $this->decisionActor(['ver']), 'Sin permiso de anular');
+            $this->fail('Ver Bienestar no autoriza a anular bloqueos.');
+        } catch (AuthorizationException) {
+            $this->assertSame('ACTIVO', $block->fresh()->estado);
+            $this->assertSame(0, PersonalBloqueoEvento::query()->count());
+        }
+    }
+
+    public function test_fallo_del_evento_revierte_la_anulacion(): void
+    {
+        $block = $this->block($this->worker('ACTIVO'));
+        $actor = $this->decisionActor(['anular']);
+        Event::listen('eloquent.creating: '.PersonalBloqueoEvento::class, function (): void {
+            throw new \RuntimeException('Fallo de auditoría simulado');
+        });
+        try {
+            app(BienestarBloqueoService::class)->annul($block, $actor, 'Prueba');
+            $this->fail('El fallo de auditoría debe abortar la anulación.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Fallo de auditoría simulado', $error->getMessage());
+        }
+        $this->assertSame('ACTIVO', $block->fresh()->estado);
+        $this->assertSame(0, PersonalBloqueoEvento::query()->count());
+    }
+
+    private function decisionActor(array $actions): Usuario
+    {
+        $permissions = ['bienestar' => array_fill_keys($actions, true)];
+        session(['user.permissions' => $permissions]);
+        $actor = Usuario::query()->create(['id' => (string) Str::uuid(), 'email' => 'decision@example.test']);
+        $actor->setRelation('rol', (object) ['nombre' => 'BIENESTAR_TEST', 'estado' => 'ACTIVO', 'permisos' => $permissions]);
+        $actor->setRelation('rolesAdicionales', new Collection());
+
+        return $actor;
     }
 
     private function worker(string $estado): Personal

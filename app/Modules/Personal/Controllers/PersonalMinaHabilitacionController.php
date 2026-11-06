@@ -241,7 +241,14 @@ class PersonalMinaHabilitacionController extends WebPageController
             ? $scheduledControlService->paginate($scheduledControlFilters, $scheduledControlFilters->limit)
             : null;
 
+        $recovery = $request->session()->get('mining_attempt_form');
+        $canRecover = is_array($recovery) && $selectedWorker
+            && ($recovery['actor_id'] ?? null) === $this->requireAuthenticatedUser()->id
+            && ($recovery['worker_id'] ?? null) === $selectedWorker->id
+            && $this->canMiningPermission(['registrar', 'programar']);
+
         return view('personal.habilitacion-minera.index', [
+            'miningAttemptRecovery' => $canRecover ? $request->session()->pull('mining_attempt_form') : null,
             'filters' => $filters,
             'assignments' => $assignments,
             'requirements' => $requirements,
@@ -732,7 +739,9 @@ class PersonalMinaHabilitacionController extends WebPageController
         $workerExam = PersonalMinaExamen::query()->find($workerExamId);
         abort_if(!$workerExam, 404);
 
-        $validated = $request->validate([
+        $this->assertMiningPermission(strtoupper(trim((string) $request->input('resultado'))) === 'PENDIENTE' ? 'programar' : 'registrar');
+        try {
+            $validated = $request->validate([
             'fecha_programacion' => ['nullable', 'date'],
             'fecha_realizacion' => ['nullable', 'date'],
             'fecha_vencimiento' => ['nullable', 'date'],
@@ -742,15 +751,9 @@ class PersonalMinaHabilitacionController extends WebPageController
             'observacion' => ['nullable', 'string', 'max:5000'],
         ]);
 
-        $this->assertMiningPermission($this->isSchedulingAttempt($validated) ? 'programar' : 'registrar');
-
-        try {
             $this->service->registerAttempt($workerExam, $validated, $request->file('archivo'), $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
-            return redirect()
-                ->route('personal.habilitacion-minera.index', $request->query())
-                ->withInput()
-                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo registrar el intento.');
+            return $this->recoverAttempt($request, $workerExam, $exception, null);
         }
 
         return redirect()
@@ -771,7 +774,8 @@ class PersonalMinaHabilitacionController extends WebPageController
             ]);
         }
 
-        $validated = $request->validate([
+        try {
+            $validated = $request->validate([
             'fecha_realizacion' => ['required', 'date'],
             'fecha_vencimiento' => ['nullable', 'date'],
             'resultado' => ['required', 'string', 'max:40'],
@@ -780,18 +784,34 @@ class PersonalMinaHabilitacionController extends WebPageController
             'observacion' => ['nullable', 'string', 'max:5000'],
         ]);
 
-        try {
             $this->service->completeScheduledAttempt($attempt, $validated, $request->file('archivo'), $this->requireAuthenticatedUser());
         } catch (ValidationException $exception) {
-            return redirect()
-                ->route('personal.habilitacion-minera.index', $request->query())
-                ->withInput()
-                ->with('error', collect($exception->errors())->flatten()->first() ?: 'No se pudo registrar el resultado programado.');
+            return $this->recoverAttempt($request, $attempt->examenTrabajador, $exception, $attempt->id);
         }
 
         return redirect()
             ->route('personal.habilitacion-minera.index', $request->query())
             ->with('success', 'Resultado del examen programado registrado correctamente.');
+    }
+
+    private function recoverAttempt(Request $request, PersonalMinaExamen $exam, ValidationException $exception, ?string $attemptId): RedirectResponse
+    {
+        $assignment = $exam->asignacion;
+        $fields = collect($request->only([
+            'fecha_programacion', 'fecha_realizacion', 'fecha_vencimiento', 'resultado', 'nota', 'observacion',
+        ]))->map(fn ($value) => is_scalar($value) ? mb_substr((string) $value, 0, 5000) : '')->all();
+
+        return redirect()->route('personal.habilitacion-minera.index', array_replace($request->query(), [
+            'vista' => 'worker', 'worker_id' => $assignment->personal_id,
+        ]))->withErrors($exception->errors())
+            ->with('error', collect($exception->errors())->flatten()->first())
+            ->with('mining_attempt_form', [
+                'actor_id' => $this->requireAuthenticatedUser()->id,
+                'worker_id' => $assignment->personal_id, 'assignment_id' => $assignment->id,
+                'exam_id' => $exam->id, 'attempt_id' => $attemptId,
+                'action' => $attemptId ? 'scheduled' : (($fields['resultado'] ?? '') === 'PENDIENTE' ? 'schedule' : 'performed'),
+                'fields' => $fields, 'errors' => $exception->errors(), 'had_file' => $request->hasFile('archivo'),
+            ]);
     }
 
     public function notApplicable(Request $request, string $workerExamId): RedirectResponse

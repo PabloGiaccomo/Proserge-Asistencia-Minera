@@ -5,6 +5,8 @@ namespace App\Modules\Seguridad\Services;
 use App\Models\NotificationRolePreference;
 use App\Models\NotificationType;
 use App\Models\Rol;
+use App\Models\RolCambioEvento;
+use App\Models\Usuario;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -109,19 +111,38 @@ class RoleManagementService
         });
     }
 
-    public function updateWithNotificationPreferences(Rol $rol, array $payload, array $typeIds, array $enabledMap): Rol
+    public function updateWithNotificationPreferences(Rol $rol, array $payload, array $typeIds, array $enabledMap, ?Usuario $actor = null): Rol
     {
         $this->ensureBaseRoles();
 
-        return DB::transaction(function () use ($rol, $payload, $typeIds, $enabledMap): Rol {
+        return DB::transaction(function () use ($rol, $payload, $typeIds, $enabledMap, $actor): Rol {
             $lockedRol = Rol::query()->lockForUpdate()->findOrFail($rol->getKey());
             $this->adminProtection->assertRoleUpdateAllowed($lockedRol, $payload);
+            $before = $this->roleAuditSnapshot($lockedRol);
             $updatedRol = $this->persistRolePayload($lockedRol, $payload);
 
             $this->syncNotificationRolePreferenceRows($updatedRol, $typeIds, $enabledMap);
+            $after = $this->roleAuditSnapshot($updatedRol);
+            if ($actor && $before !== $after) {
+                RolCambioEvento::query()->create([
+                    'id' => (string) Str::uuid(), 'rol_id' => $rol->id, 'actor_usuario_id' => $actor->id,
+                    'antes_json' => $before, 'despues_json' => $after,
+                    'permisos_cambiados' => $before['permisos'] !== $after['permisos'],
+                ]);
+            }
 
             return $this->decorate($updatedRol->fresh(['usuarios']));
         });
+    }
+
+    private function roleAuditSnapshot(Rol $rol): array
+    {
+        return [
+            'nombre' => $rol->nombre, 'estado' => $rol->estado, 'descripcion' => $rol->descripcion,
+            'permisos' => PermissionMatrix::normalize($rol->permisos ?? []),
+            'notificaciones' => $this->notificationRolePreferences($rol)->sortKeys()
+                ->map(fn ($row) => (bool) $row->is_enabled)->all(),
+        ];
     }
 
     public function duplicate(Rol $rol): Rol
@@ -243,18 +264,12 @@ class RoleManagementService
             ->map(fn ($id) => (string) $id)
             ->flip();
 
-        $enabledIds = collect(array_keys($enabledMap))
-            ->map(fn ($id) => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values();
-
         foreach ($ids as $typeId) {
             if (!$existing->has($typeId)) {
                 continue;
             }
 
-            $isEnabled = $enabledIds->contains($typeId);
+            $isEnabled = filter_var($enabledMap[$typeId] ?? false, FILTER_VALIDATE_BOOL);
 
             NotificationRolePreference::query()->updateOrCreate(
                 [

@@ -13,6 +13,11 @@
         : '-';
     $selectedPlan = $item['selected_plan'] ?? null;
     $selectedPlanId = (string) ($item['selected_plan_id'] ?? ($selectedPlan['id'] ?? ''));
+    $planUrl = route('rq-mina.plan', [
+        'id' => $item['id'],
+        'plan_id' => $selectedPlanId,
+        'lista' => (array) request()->query('lista', []),
+    ]);
 @endphp
 
 @section('content')
@@ -24,7 +29,7 @@
             <p class="page-subtitle">{{ $item['lugar'] ?? '-' }} | {{ $semanaLabel }}</p>
         </div>
         <div class="page-actions">
-            <a href="{{ route('rq-mina.plan', ['id' => $item['id'], 'plan_id' => $selectedPlanId]) }}" class="btn btn-outline">Volver</a>
+            <a href="{{ $planUrl }}" class="btn btn-outline">Volver al plan operativo</a>
         </div>
     </div>
 </div>
@@ -54,17 +59,10 @@
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Archivo Excel</h3>
+        <h3 class="card-title">Importación de Excel no disponible</h3>
     </div>
     <div class="card-body">
-        <div class="rq-import-drop">
-            <label class="form-label" for="plan_operativo_excel">Plan operativo</label>
-            <input id="plan_operativo_excel" class="rq-import-file" type="file" accept=".xlsx,.xls,.csv" disabled>
-        </div>
-        <div class="rq-import-actions">
-            <a href="{{ route('rq-mina.plan', ['id' => $item['id'], 'plan_id' => $selectedPlanId]) }}" class="btn btn-outline">Cancelar</a>
-            <button type="button" class="btn btn-primary" disabled>Importar</button>
-        </div>
+        <p>Registra las actividades y solicitudes de transporte desde el plan operativo.</p>
     </div>
 </div>
 @endsection

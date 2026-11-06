@@ -23,7 +23,7 @@ class RQMinaListUiTest extends TestCase
         $rqId = $this->createRqMina($minaId, $userId, 'BORRADOR');
         $this->addDetalle($rqId, 'Mecanico', 4, 1, 5);
         $this->addTransporte($rqId, 'Bus 40', 1);
-        $this->addPlan($rqId, $userId);
+        $this->addPlan($rqId, $userId, 2);
 
         $response = $this->withSession($this->sessionFor($userId))->get('/rq-mina?q=BOROO');
 
@@ -36,11 +36,21 @@ class RQMinaListUiTest extends TestCase
         $response->assertSee('5 persona(s)');
         $response->assertSee('Transporte');
         $response->assertSee('Bus 40');
-        $response->assertSee('Mas');
+        $response->assertSee('1 solicitud de transporte');
+        $response->assertSee('2 unidades solicitadas');
+        $response->assertSee('Acciones');
         $response->assertSee('Buscar: BOROO');
-        $response->assertSee('class="js-rq-send-form"', false);
-        $response->assertSee('Enviar RQ a RR.HH.');
-        $response->assertDontSee("confirm('¿Enviar este RQ?')", false);
+        $response->assertSee(route('rq-mina.show', ['id' => $rqId, 'lista' => ['q' => 'BOROO']]));
+        $response->assertSee('Abrir parada');
+        $response->assertDontSee(route('rq-mina.enviar', $rqId));
+        $response->assertDontSee('id="rqSendConfirm"', false);
+        $response->assertDontSee('id="modalRQ"', false);
+
+        $this->withSession($this->sessionFor($userId))
+            ->get(route('rq-mina.show', ['id' => $rqId, 'lista' => ['q' => 'BOROO', 'per_page' => 20, 'otro' => 'descartar']]))
+            ->assertOk()
+            ->assertSee(route('rq-mina.index', ['q' => 'BOROO', 'per_page' => 20]))
+            ->assertDontSee('lista%5Botro%5D');
     }
 
     public function test_listado_rq_mina_muestra_advertencias_y_respeta_acciones_por_permiso(): void
@@ -58,11 +68,12 @@ class RQMinaListUiTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Sin plan operativo');
-        $response->assertSee('Transporte no planificado');
-        $response->assertSee('Ver');
-        $response->assertDontSee('Abrir plan');
-        $response->assertDontSee('>Editar</a>', false);
-        $response->assertDontSee('>Copiar</a>', false);
+        $response->assertSee('Sin solicitudes de transporte');
+        $response->assertSee('Pedido registrado en RR.HH.');
+        $response->assertSee('Abrir parada');
+        $response->assertDontSee(route('rq-mina.plan', $rqId));
+        $response->assertDontSee(route('rq-mina.edit', $rqId));
+        $response->assertDontSee(route('rq-mina.create', ['copy_from' => $rqId]));
         $response->assertDontSee('>Eliminar</button>', false);
         $response->assertDontSee('>Enviar</button>', false);
     }
@@ -170,7 +181,7 @@ class RQMinaListUiTest extends TestCase
         ]);
     }
 
-    private function addPlan(string $rqId, string $userId): void
+    private function addPlan(string $rqId, string $userId, int $transportUnits): void
     {
         $planId = (string) Str::uuid();
         $groupId = (string) Str::uuid();
@@ -211,6 +222,18 @@ class RQMinaListUiTest extends TestCase
             'sector' => 'Sector UI',
             'area' => 'Area UI',
             'ait_trabajo' => 'Trabajo UI',
+            'orden' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rq_mina_actividad_transportes')->insert([
+            'id' => (string) Str::uuid(),
+            'grupo_id' => $groupId,
+            'rq_mina_plan_id' => $planId,
+            'unidad_carga' => 'Bus',
+            'tipo_transporte' => 'PERSONAL',
+            'cantidad_unidades_requeridas' => $transportUnits,
             'orden' => 1,
             'created_at' => now(),
             'updated_at' => now(),

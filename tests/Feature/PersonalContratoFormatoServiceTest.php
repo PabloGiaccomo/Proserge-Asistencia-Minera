@@ -126,7 +126,7 @@ class PersonalContratoFormatoServiceTest extends TestCase
 
         $session = $this->sessionWithPersonalPermissions(['subir_contrato_firmado']);
         $personalId = $this->createWorker('FALTA_CONTRATO');
-        $fechaInicio = now()->toDateString();
+        $fechaInicio = now(config('app.display_timezone', 'America/Lima'))->toDateString();
         $fechaFin = now()->addMonths(6)->toDateString();
 
         DB::table('personal_contrato_datos')->insert([

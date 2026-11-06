@@ -15,6 +15,8 @@ use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Personal\Services\PersonalService;
 use App\Modules\RQMina\Services\RQMinaPlanService;
 use App\Modules\RQMina\Services\RQMinaService;
+use App\Modules\RQMina\Support\RQMinaAtencionRrhhException;
+use App\Modules\RQMina\Support\RQMinaDeletionConflictException;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
@@ -100,7 +102,7 @@ class RQMinaPageController extends WebPageController
         return view('rq-mina.index', compact('data'));
     }
 
-    public function show(Request $request, string $id): View
+    public function show(Request $request, string $id): View|RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
         $rqMina = $this->service->findForUser($usuario, $id);
@@ -112,6 +114,9 @@ class RQMinaPageController extends WebPageController
         $item = $this->toViewItem($rqMina);
         $item['personal_parada'] = $this->getPersonalParadaForRQMina($id);
         $item['cambios_pedido'] = $this->getCambiosPedidoForRQMina($id);
+        $item['puede_actualizar'] = $this->service->canUpdate($usuario, $rqMina);
+        $item['puede_registrar_rrhh'] = $this->service->puedeIniciarAtencionRrhh($usuario, $rqMina)
+            && $rqMina->detalle->contains(fn ($row): bool => $this->service->esCargoDePersonal((string) $row->puesto) && (int) $row->cantidad > 0);
 
         return view('rq-mina.show', compact('item'));
     }
@@ -143,11 +148,12 @@ class RQMinaPageController extends WebPageController
         }
 
         $formMode = 'create';
-        $formAction = route('rq-mina.store');
+        $lista = $this->filtrosDeRegreso($request);
+        $formAction = route('rq-mina.store', ['lista' => $lista]);
         $formMethod = 'POST';
         $submitLabel = 'Guardar Parada';
 
-        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel', 'lista'));
     }
 
     public function buscarPersonal(Request $request): JsonResponse
@@ -268,7 +274,7 @@ class RQMinaPageController extends WebPageController
         return response()->json(['ok' => true, 'deleted' => $deleted > 0]);
     }
 
-    public function edit(Request $request, string $id): View
+    public function edit(Request $request, string $id): View|RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
         $rqMina = $this->service->findForUser($usuario, $id);
@@ -277,14 +283,20 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
+        if (!$this->service->canUpdate($usuario, $rqMina)) {
+            return redirect()->route('rq-mina.show', ['id' => $id, 'lista' => $this->filtrosDeRegreso($request)])
+                ->with('error', 'Puedes consultar esta parada. La actualización corresponde a una persona autorizada.');
+        }
+
         $lugares = $this->service->getLugarOptions($usuario)->all();
         $copyData = $this->toViewItem($rqMina);
         $formMode = 'edit';
-        $formAction = route('rq-mina.update', $id);
+        $lista = $this->filtrosDeRegreso($request);
+        $formAction = route('rq-mina.update', ['id' => $id, 'lista' => $lista]);
         $formMethod = 'PUT';
         $submitLabel = 'Guardar Cambios';
 
-        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel'));
+        return view('rq-mina.create', compact('lugares', 'copyData', 'formMode', 'formAction', 'formMethod', 'submitLabel', 'lista'));
     }
 
     public function plan(Request $request, string $id): View|RedirectResponse
@@ -308,7 +320,16 @@ class RQMinaPageController extends WebPageController
         $item['plan_inicial_id'] = $this->defaultPlanId($rqMina);
         $item['selected_plan'] = $this->planService->planToArray($selectedPlan);
         $item['selected_plan_id'] = (string) $selectedPlan->id;
+        $item['semana_plan'] = $this->planService->buildSemanaReferencia($selectedPlan->fecha_inicio, $selectedPlan->fecha_fin);
         $item['plan_operativo'] = $this->planOperativoToArray($this->groupsForSelectedPlan($rqMina, $selectedPlan));
+        $item['puede_iniciar_rrhh'] = $this->service->puedeIniciarAtencionRrhh($usuario, $rqMina);
+        $item['puede_actualizar'] = $this->service->canUpdate($usuario, $rqMina);
+        $item['plan_revision'] = $this->service->revisionPlan($rqMina, (string) $selectedPlan->id);
+        if ($rqMina->estado === 'BORRADOR') {
+            $item['detalle'] = array_values(array_filter($item['detalle'], fn (array $row): bool =>
+                $this->service->esCargoDePersonal((string) ($row['puesto'] ?? ''))
+            ));
+        }
 
         return view('rq-mina.plan', compact('item'));
     }
@@ -346,11 +367,60 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
+        $programaCompacto = $request->input('plan_editor_complete') === 'json';
+        if ($request->boolean('plan_editor_submission') && !$programaCompacto && !$request->boolean('plan_editor_complete')) {
+            return back()->with('error', 'El sistema recibió solo una parte del plan. No se guardaron cambios.');
+        }
+
+        if ($programaCompacto || $request->has('plan_operativo_json')) {
+            $programa = $request->input('plan_operativo_json');
+            $grupos = is_string($programa) && str_starts_with(ltrim($programa), '[')
+                ? json_decode($programa, true)
+                : null;
+            $estructura = Validator::make(['grupos' => $grupos], [
+                'grupos' => ['present', 'array', 'list'],
+                'grupos.*' => ['array'],
+                'grupos.*.actividades' => ['present', 'array', 'list'],
+                'grupos.*.actividades.*' => ['array'],
+                'grupos.*.actividades.*.turnos' => ['present', 'array', 'list'],
+                'grupos.*.actividades.*.turnos.*' => ['array'],
+                'grupos.*.transportes' => ['present', 'array', 'list'],
+                'grupos.*.transportes.*' => ['array'],
+            ]);
+            if ($estructura->fails()) {
+                return back()->with('error', 'No se pudo leer el programa del plan. Vuelve a guardar.');
+            }
+
+            $request->merge(['plan_operativo' => $grupos, 'plan_editor_complete' => '1']);
+            $request->offsetUnset('plan_operativo_json');
+        }
+
+        if ($request->boolean('plan_editor_submission')) {
+            $error = $this->validarFilasDePersonal($request);
+            if ($error !== null) {
+                return back()->with('error', $error)->withInput();
+            }
+        }
+
         $planOperativo = $this->normalizePlanOperativoFromRequest($request);
         $detalle = $this->normalizeDetalleFromRequest($request);
+        if ($rqMina->estado === 'BORRADOR') {
+            $detalle = array_values(array_filter($detalle, fn (array $row): bool =>
+                $this->service->esCargoDePersonal($row['puesto'])
+            ));
+        }
+        $revision = $request->string('plan_revision')->trim()->toString();
         try {
-            $updated = $this->service->updatePlanOperativo($usuario, $rqMina, $planOperativo, $detalle, $request->input('plan_id'));
-        } catch (\InvalidArgumentException $exception) {
+            $updated = $this->service->updatePlanOperativo(
+                $usuario,
+                $rqMina,
+                $planOperativo,
+                $detalle,
+                $request->input('plan_id'),
+                iniciarAtencionRrhh: true,
+                revisionEsperada: $revision !== '' ? $revision : null,
+            );
+        } catch (\InvalidArgumentException|RQMinaAtencionRrhhException $exception) {
             return back()->with('error', $exception->getMessage())->withInput();
         }
 
@@ -358,17 +428,31 @@ class RQMinaPageController extends WebPageController
             return back()->with('error', 'No tienes permiso para actualizar el plan operativo.')->withInput();
         }
 
+        $message = 'Pedido de personal y plan operativo guardados en el sistema.';
+        if ($updated->estado === 'ENVIADO' && $updated->rqProserge()->exists()) {
+            $message = 'Plan guardado. El pedido de personal está registrado en RQ Proserge.';
+            if ($updated->wasChanged('estado')) {
+                $this->notifyRrhh($usuario, $updated);
+            }
+        } elseif ($detalle !== []) {
+            $message = 'Plan y pedido guardados. El pedido queda en preparación hasta que lo guarde una persona autorizada para iniciar la atención de RR. HH.';
+        }
+
         $selectedPlanId = trim((string) $request->input('plan_id', ''));
 
         return redirect()
-            ->route('rq-mina.plan', ['id' => $id, 'plan_id' => $selectedPlanId ?: null])
-            ->with('success', 'Pedido de personal y plan operativo semanal actualizados correctamente.')
-            ->with('clear_rq_mina_plan_draft', $id);
+            ->route('rq-mina.plan', ['id' => $id, 'plan_id' => $selectedPlanId ?: null, 'lista' => $this->filtrosDeRegreso($request)])
+            ->with('success', $message)
+            ->with('rq_mina_saved_draft_id', Str::limit((string) $request->string('draft_id'), 80, ''));
     }
 
     public function store(Request $request): RedirectResponse
     {
         $usuario = $this->requireAuthenticatedUser();
+        $error = $this->validarFilasDePersonal($request);
+        if ($error !== null) {
+            return back()->with('error', $error)->withInput();
+        }
         $payload = $this->buildPayloadFromWebForm($request, $usuario);
 
         Log::info('rqmina.store_payload_received', [
@@ -401,7 +485,11 @@ class RQMinaPageController extends WebPageController
             return back()->withErrors($payload['errors'])->withInput();
         }
 
-        $rqMina = $this->service->create($usuario, $payload['data']);
+        try {
+            $rqMina = $this->service->create($usuario, $payload['data'], iniciarAtencionRrhh: true);
+        } catch (\InvalidArgumentException|RQMinaAtencionRrhhException $exception) {
+            return back()->with('error', $exception->getMessage())->withInput();
+        }
 
         if (!$rqMina) {
             Log::warning('rqmina.store_create_failed', [
@@ -412,9 +500,20 @@ class RQMinaPageController extends WebPageController
             return back()->with('error', 'No tienes acceso al lugar seleccionado o el destino no es valido.')->withInput();
         }
 
-        return redirect()
-            ->route('rq-mina.plan', $rqMina->id)
-            ->with('success', 'Parada registrada. Ahora agrega las areas y el plan operativo semanal.');
+        $message = 'Parada registrada. Ahora agrega las áreas y el plan operativo.';
+        if ($rqMina->estado === 'ENVIADO') {
+            $this->notifyRrhh($usuario, $rqMina);
+            $message = 'Parada guardada. RR. HH. ya puede atender el pedido de personal.';
+        }
+
+        $permissions = session('user.permissions', []);
+        $lista = $this->filtrosDeRegreso($request);
+        if (!PermissionMatrix::allowsDirect($permissions, 'rq_mina', 'ver')) {
+            return redirect()->route('rq-mina.create', ['lista' => $lista])->with('success', $message);
+        }
+        $route = PermissionMatrix::allowsDirect($permissions, 'rq_mina', 'editar') ? 'rq-mina.plan' : 'rq-mina.show';
+
+        return redirect()->route($route, ['id' => $rqMina->id, 'lista' => $lista])->with('success', $message);
     }
 
     public function update(Request $request, string $id): RedirectResponse
@@ -454,13 +553,18 @@ class RQMinaPageController extends WebPageController
             return back()->withErrors($payload['errors'])->withInput();
         }
 
-        $updated = $this->service->updateGeneral($usuario, $rqMina, $payload['data']);
+        try {
+            $updated = $this->service->updateGeneral($usuario, $rqMina, $payload['data']);
+        } catch (\InvalidArgumentException $exception) {
+            return back()->withErrors(['fecha_fin' => $exception->getMessage()])->withInput();
+        }
 
         if (!$updated) {
             return back()->with('error', 'No tienes permiso para actualizar este RQ.')->withInput();
         }
 
-        return redirect()->route('rq-mina.show', $id)->with('success', 'Parada actualizada correctamente');
+        return redirect()->route('rq-mina.show', ['id' => $id, 'lista' => $this->filtrosDeRegreso($request)])
+            ->with('success', 'Cambios de la parada guardados en el sistema.');
     }
 
     public function destroy(Request $request, string $id): RedirectResponse
@@ -474,6 +578,8 @@ class RQMinaPageController extends WebPageController
 
         try {
             $deleted = $this->service->delete($usuario, $rqMina);
+        } catch (RQMinaDeletionConflictException $exception) {
+            return redirect()->route('rq-mina.index')->with('error', $exception->getMessage());
         } catch (\Throwable $exception) {
             Log::error('rqmina.delete_failed', [
                 'rq_mina_id' => (string) $rqMina->id,
@@ -506,7 +612,11 @@ class RQMinaPageController extends WebPageController
             return redirect()->route('rq-mina.index')->with('error', 'RQ no encontrado.');
         }
 
-        $sent = $this->service->send($usuario, $rqMina);
+        try {
+            $sent = $this->service->send($usuario, $rqMina);
+        } catch (RQMinaAtencionRrhhException $exception) {
+            return redirect()->route('rq-mina.index')->with('error', $exception->getMessage());
+        }
 
         if (!$sent) {
             Log::warning('rqmina.send_failed', [
@@ -517,7 +627,7 @@ class RQMinaPageController extends WebPageController
 
             return redirect()
                 ->route('rq-mina.index')
-                ->with('error', 'Solo se puede enviar un RQ en estado borrador y con permisos de edición.');
+                ->with('error', 'Para registrar el pedido en RR. HH. necesitas un borrador con cargos válidos y permiso de envío.');
         }
 
         Log::info('rqmina.send_state_changed', [
@@ -528,6 +638,14 @@ class RQMinaPageController extends WebPageController
             'enviado_at' => optional($sent->enviado_at)->toIso8601String(),
         ]);
 
+        $this->notifyRrhh($usuario, $sent);
+
+        return redirect()->route('rq-mina.show', ['id' => $id, 'lista' => $this->filtrosDeRegreso($request)])
+            ->with('success', 'Pedido registrado en RR. HH.');
+    }
+
+    private function notifyRrhh(Usuario $usuario, RQMina $sent): void
+    {
         $mineName = (string) ($sent->destino_nombre ?: ($sent->mina?->nombre ?? 'lugar no definido'));
         $areaName = (string) ($sent->area ?? 'sin área');
         $fechaInicio = $sent->fecha_inicio ? \Carbon\Carbon::parse($sent->fecha_inicio)->format('d/m/Y') : 'sin fecha';
@@ -538,7 +656,7 @@ class RQMinaPageController extends WebPageController
             'mine_id' => (string) $sent->mina_id,
             'entity_type' => 'rq_mina',
             'entity_id' => (string) $sent->id,
-            'title' => 'RQ Mina enviado',
+            'title' => 'Nuevo pedido de personal',
             'permission_module' => 'rq_proserge',
             'permission_action' => 'asignar',
             'require_permission' => true,
@@ -596,12 +714,41 @@ class RQMinaPageController extends WebPageController
                 'error_trace' => $exception->getTraceAsString(),
             ]);
 
-            return redirect()
-                ->route('rq-mina.index')
-                ->with('error', 'El RQ fue enviado, pero ocurrió un error al generar la notificación. Revisa logs.');
+        }
+    }
+
+    private function filtrosDeRegreso(Request $request): array
+    {
+        return array_filter(\Illuminate\Support\Arr::only((array) $request->query('lista', []), [
+            'q', 'mina_id', 'estado', 'created_by_usuario_id', 'fecha_inicio_desde', 'fecha_inicio_hasta',
+            'fecha_fin_desde', 'fecha_fin_hasta', 'page', 'per_page',
+        ]), static fn (mixed $value): bool => is_scalar($value) && $value !== '');
+    }
+
+    private function validarFilasDePersonal(Request $request): ?string
+    {
+        $rows = $request->input('detalle', []);
+        if (!is_array($rows)) {
+            return 'Revisa los cargos del pedido de personal.';
         }
 
-        return redirect()->route('rq-mina.index')->with('success', 'RQ enviado correctamente.');
+        foreach (array_values($rows) as $index => $row) {
+            if (!is_array($row)) {
+                return 'Revisa los cargos del pedido de personal.';
+            }
+
+            $puesto = $row['puesto'] ?? '';
+            $cantidad = $row['cantidad'] ?? '';
+            if (is_string($puesto) && trim($puesto) === '' && $cantidad === '') {
+                continue;
+            }
+
+            if (!is_string($puesto) || trim($puesto) === '' || filter_var($cantidad, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                return 'Completa el cargo y una cantidad mayor a cero en la fila '.($index + 1).' del pedido de personal.';
+            }
+        }
+
+        return null;
     }
 
     private function getPersonalParadaForRQMina(string $rqMinaId): array
@@ -609,6 +756,7 @@ class RQMinaPageController extends WebPageController
         return RQProsergeDetalle::query()
             ->with(['personal:id,nombre_completo,puesto', 'rqProserge:id,rq_mina_id'])
             ->whereHas('rqProserge', fn ($query) => $query->where('rq_mina_id', $rqMinaId))
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
             ->get()
             ->map(fn (RQProsergeDetalle $detalle): array => [
                 'nombre' => $detalle->personal?->nombre_completo ?? '-',
@@ -727,9 +875,6 @@ class RQMinaPageController extends WebPageController
         $planOperativo = $this->normalizePlanOperativoFromRequest($request);
 
         $normalizedDetalle = $this->normalizeDetalleFromRequest($request);
-        if (empty($normalizedDetalle) && !empty($planOperativo)) {
-            $normalizedDetalle = $this->buildDetalleFromPlanOperativo($planOperativo);
-        }
         $cantidadPuestos = count($normalizedDetalle);
         $cantidadTotal = array_sum(array_map(static fn (array $line): int => (int) $line['cantidad'], $normalizedDetalle));
 
@@ -775,11 +920,18 @@ class RQMinaPageController extends WebPageController
         if (empty($rqData['area'])) {
             $errors['area'] = 'El área es requerida';
         }
-        if (empty($rqData['fecha_inicio'])) {
-            $errors['fecha_inicio'] = 'La fecha de inicio es requerida';
-        }
-        if (empty($rqData['fecha_fin'])) {
-            $errors['fecha_fin'] = 'La fecha fin es requerida';
+        $dateErrors = Validator::make($rqData, [
+            'fecha_inicio' => ['bail', 'required', 'date_format:Y-m-d'],
+            'fecha_fin' => ['bail', 'required', 'date_format:Y-m-d', 'after_or_equal:fecha_inicio'],
+        ], [
+            'fecha_inicio.required' => 'Ingresa la fecha de inicio.',
+            'fecha_inicio.date_format' => 'Ingresa una fecha de inicio válida.',
+            'fecha_fin.required' => 'Ingresa la fecha de fin.',
+            'fecha_fin.date_format' => 'Ingresa una fecha de fin válida.',
+            'fecha_fin.after_or_equal' => 'La fecha de fin debe ser igual o posterior a la fecha de inicio.',
+        ])->errors();
+        foreach ($dateErrors->keys() as $field) {
+            $errors[$field] = $dateErrors->first($field);
         }
         if ($supervisorId !== '' && !Personal::query()->where('id', $supervisorId)->where('es_supervisor', true)->exists()) {
             $errors['supervisor_id'] = 'Selecciona un supervisor válido.';
@@ -1227,31 +1379,6 @@ class RQMinaPageController extends WebPageController
         }
 
         return $normalized;
-    }
-
-    private function buildDetalleFromPlanOperativo(array $planOperativo): array
-    {
-        return collect($planOperativo)
-            ->map(function (array $group): ?array {
-                $count = count($group['actividades'] ?? []);
-                if ($count <= 0) {
-                    return null;
-                }
-
-                $label = trim(implode(' / ', array_filter([
-                    $group['area_operativa'] ?? '',
-                    $group['modulo'] ?? '',
-                    $group['nombre'] ?? '',
-                ])));
-
-                return [
-                    'puesto' => $label !== '' ? 'Plan operativo - ' . $label : 'Plan operativo',
-                    'cantidad' => $count,
-                ];
-            })
-            ->filter()
-            ->values()
-            ->all();
     }
 
     private function compactPersonal(mixed $personal): ?array

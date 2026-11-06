@@ -71,6 +71,9 @@
                 </p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+                @if(\App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'personal', 'subir_contrato_firmado'))
+                    <a href="{{ route('personal.contratos.firmados.index') }}" class="btn btn-primary btn-sm">Cargar varios contratos firmados</a>
+                @endif
                 <a href="{{ route('personal.index') }}" class="btn btn-outline btn-sm">Personal</a>
             </div>
         </div>

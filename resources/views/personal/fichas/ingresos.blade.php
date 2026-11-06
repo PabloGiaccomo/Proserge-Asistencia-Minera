@@ -8,6 +8,7 @@
     $canEditIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'editar');
     $canUpdateIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'actualizar');
     $canDeleteIngresos = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal', 'eliminar');
+    $canReviewBatch = \App\Support\Rbac\PermissionMatrix::allowsDirect($ingresoPermissions, 'personal_ingresos', 'aprobar');
 @endphp
 
 <div class="module-page ingresos-page">
@@ -24,6 +25,28 @@
     @endif
     @if(session('error'))
         <div class="alert alert-danger">{{ session('error') }}</div>
+    @endif
+
+    @if(!empty($recentBatches))
+        <section class="ingresos-card">
+            <div class="ingresos-card-header">
+                <div>
+                    <h2 class="ingresos-card-title">Mis revisiones recientes</h2>
+                    <p class="page-subtitle">Retoma una revisión o comprueba qué fichas se aceptaron.</p>
+                </div>
+            </div>
+            <div class="ingresos-body">
+                @foreach($recentBatches as $batch)
+                    <p>
+                        <a href="{{ route('personal.ingresos.lotes.show', ['lote' => $batch['id'], 'estado' => $estadoFilter, 'q' => $search]) }}">
+                            Revisión del {{ $batch['fecha'] }}
+                        </a>
+                        · {{ $batch['aceptadas'] }} de {{ $batch['total'] }} aceptadas
+                        @if($batch['vencido']) · Plazo de revisión terminado @endif
+                    </p>
+                @endforeach
+            </div>
+        </section>
     @endif
 
     <section class="ingresos-card">
@@ -60,6 +83,9 @@
                 <h2 class="ingresos-card-title">Bandeja de fichas recibidas</h2>
                 <p class="page-subtitle">{{ $rowsTotal }} ficha(s) en la bandeja.</p>
             </div>
+            @if($canReviewBatch)
+                <button class="btn btn-primary" id="review-ingreso-batch" type="button" disabled>Revisar seleccionadas</button>
+            @endif
         </div>
         <div class="ingresos-body">
             <form method="GET" action="{{ route('personal.fichas.temporales') }}" class="ingresos-filters">
@@ -100,11 +126,24 @@
                             $name = trim(collect([$data['apellido_paterno'] ?? '', $data['apellido_materno'] ?? '', $data['nombres'] ?? ''])->filter()->implode(' '));
                             $statusClass = $ingresosService->statusClass((string) $ingreso->estado);
                             $existing = $ingreso->personalExistente ?: $ingreso->personalCreado;
+                            $isUpdate = $ingreso->proposito === \App\Modules\Personal\Support\PersonalIngresoPurpose::ACTUALIZACION;
+                            if ($isUpdate) {
+                                $name = $existing?->nombre_completo ?? '';
+                            }
                             $locked = in_array($ingreso->estado, ['ACEPTADA', 'CONTRATO_NO_FIRMADO'], true);
                         @endphp
                         <tr>
                             <td>
+                                @if($canReviewBatch && in_array($ingreso->estado, ['FICHA_RECIBIDA', 'FALTA_REVISION'], true))
+                                    <label class="ingresos-batch-select">
+                                        <input type="checkbox" data-ingreso-batch="{{ $ingreso->id }}" data-nombre="{{ $ingreso->personalExistente?->nombre_completo ?: $name }}" data-proposito="{{ $ingreso->proposito ?? 'ALTA' }}">
+                                        Seleccionar
+                                    </label>
+                                @endif
                                 <strong>{{ $name !== '' ? $name : 'Sin nombre' }}</strong>
+                                @if($isUpdate)
+                                    <span class="ingresos-existing">Actualización</span>
+                                @endif
                                 @if($existing)
                                     <span class="ingresos-existing">Trabajador existente</span>
                                 @endif
@@ -115,10 +154,28 @@
                                 {{ $data['correo'] ?? '-' }}<br>
                                 <span class="page-subtitle">{{ $data['telefono'] ?? '-' }}</span>
                             </td>
-                            <td><span class="ingresos-status {{ $statusClass }}">{{ $ingresosService->statusLabel((string) $ingreso->estado) }}</span></td>
+                            <td>
+                                <span class="ingresos-status {{ $statusClass }}">
+                                    @if($isUpdate)
+                                        {{ match ($ingreso->estado) {
+                                            'ACEPTADA' => 'Actualización aceptada',
+                                            'OBSERVADO' => 'Actualización observada',
+                                            default => 'Actualización recibida',
+                                        } }}
+                                    @else
+                                        {{ $ingresosService->statusLabel((string) $ingreso->estado) }}
+                                    @endif
+                                </span>
+                                @if($isUpdate && $ingreso->estado === 'FICHA_RECIBIDA' && ($ingreso->completitud_json['complete'] ?? false))
+                                    <div class="page-subtitle">Completa para revisión</div>
+                                @endif
+                            </td>
                             <td>{{ optional($ingreso->submitted_at)->format('d/m/Y H:i') ?: '-' }}</td>
                             <td>
                                 <div class="ingresos-actions">
+                                    @if($isUpdate)
+                                        <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.actualizacion.show', $ingreso->id) }}">Revisar actualización</a>
+                                    @else
                                     <a class="btn btn-outline btn-sm" href="{{ route('personal.ingresos.show', $ingreso->id) }}">Ver ficha</a>
                                     @if(!$locked)
                                         @if($canEditIngresos)
@@ -148,6 +205,7 @@
                                     @elseif($existing)
                                         <a class="btn btn-outline btn-sm" href="{{ route('personal.edit', $existing->id) }}">Ver en Personal</a>
                                     @endif
+                                    @endif
                                 </div>
                             </td>
                         </tr>
@@ -161,6 +219,10 @@
         </div>
     </section>
 </div>
+
+@if($canReviewBatch)
+    @include('personal.fichas.partials.ingresos-batch-review')
+@endif
 
 <dialog class="ingreso-delete-dialog" id="deleteIngresoDialog">
     <div class="ingreso-delete-body">

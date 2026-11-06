@@ -6,15 +6,18 @@ use App\Http\Controllers\WebPageController;
 use App\Models\Mina;
 use App\Models\Oficina;
 use App\Models\PersonalFicha;
+use App\Models\PersonalIngresoLink;
 use App\Models\PersonalPuesto;
 use App\Models\Taller;
 use App\Modules\Personal\Resources\PersonalIndexResource;
 use App\Modules\Personal\Resources\PersonalResource;
 use App\Modules\Personal\Services\ExportPersonalService;
+use App\Modules\Personal\Services\PersonalAdministrativeLocationService;
 use App\Modules\Personal\Services\PersonalFichaService;
 use App\Modules\Personal\Services\PersonalAntiguoService;
 use App\Modules\Personal\Services\PersonalContratoService;
 use App\Modules\Personal\Services\PersonalService;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalExportConfig;
 use App\Modules\Personal\Support\PersonalNormalizer;
@@ -23,7 +26,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Throwable;
 use Illuminate\Validation\ValidationException;
@@ -37,79 +39,14 @@ class PersonalPageController extends WebPageController
         private readonly PersonalFichaService $fichaService,
         private readonly PersonalAntiguoService $personalAntiguoService,
         private readonly PersonalContratoService $contratoService,
+        private readonly PersonalAdministrativeLocationService $administrativeLocations,
     ) {
     }
 
     public function home(): View
     {
-        $permissions = session('user.permissions', []);
-        $dashboards = collect([
-            [
-                'module' => 'personal',
-                'title' => 'Personal',
-                'description' => 'Ficha laboral, estados, situacion y seguimiento de trabajadores.',
-                'tone' => '#19D3C5',
-            ],
-            [
-                'module' => 'mi_asistencia',
-                'title' => 'Mi Asistencia',
-                'description' => 'Resumen personal de asistencia, turnos y marcaciones.',
-                'tone' => '#4F8CFF',
-            ],
-            [
-                'module' => 'man_power',
-                'title' => 'Man Power',
-                'description' => 'Vista operativa de grupos, cobertura y distribucion por parada.',
-                'tone' => '#10B981',
-            ],
-            [
-                'module' => 'rq_mina',
-                'title' => 'RQ Mina',
-                'description' => 'Seguimiento de requerimientos, fechas y necesidades por mina.',
-                'tone' => '#F59E0B',
-            ],
-            [
-                'module' => 'rq_proserge',
-                'title' => 'RQ Proserge',
-                'description' => 'Asignaciones internas y paradas gestionadas desde Proserge.',
-                'tone' => '#8B5CF6',
-            ],
-            [
-                'module' => 'bienestar',
-                'title' => 'Bienestar',
-                'description' => 'Vacaciones, descansos medicos y bloqueos activos del personal.',
-                'tone' => '#EC4899',
-            ],
-            [
-                'module' => 'evaluaciones',
-                'title' => 'Evaluaciones',
-                'description' => 'Panel de seguimiento para evaluaciones de supervisor y desempeno.',
-                'tone' => '#06B6D4',
-            ],
-            [
-                'module' => 'asistencias',
-                'title' => 'Asistencias',
-                'description' => 'Operacion de asistencia por grupo, supervisor, parada y mina.',
-                'tone' => '#0F766E',
-            ],
-            [
-                'module' => 'faltas',
-                'title' => 'Faltas',
-                'description' => 'Control de incidencias y seguimiento de correcciones pendientes.',
-                'tone' => '#DC2626',
-            ],
-            [
-                'module' => 'catalogos',
-                'title' => 'Catalogos',
-                'description' => 'Estado general de minas, talleres, oficinas y configuraciones base.',
-                'tone' => '#64748B',
-            ],
-        ])->filter(fn (array $dashboard): bool => PermissionMatrix::allows($permissions, $dashboard['module'], 'dashboards'))
-            ->values()
-            ->all();
-
         return view('personal.home', [
-            'dashboards' => $dashboards,
+            'dashboards' => \App\Modules\Dashboard\Support\HomeDashboardCatalog::visible(session('user.permissions', [])),
         ]);
     }
 
@@ -440,46 +377,25 @@ class PersonalPageController extends WebPageController
         $ficha = $personal->fichaColaborador;
         $ficha?->loadMissing(['familiares', 'archivos']);
 
-        $catalogs = $this->getLocationCatalogs();
-        $knownLocations = collect([
-            ...$catalogs['catalogMinas'],
-            ...$catalogs['catalogOficinas'],
-            ...$catalogs['catalogTalleres'],
-        ]);
-
-        $missingLocations = collect($trabajador['minas'] ?? [])
-            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
-            ->reject(fn (string $name) => $knownLocations->contains($name));
-
-        foreach ($missingLocations as $name) {
-            $lower = mb_strtolower($name);
-
-            if (str_contains($lower, 'oficina')) {
-                $catalogs['catalogOficinas'][] = $name;
-                continue;
-            }
-
-            if (str_contains($lower, 'taller')) {
-                $catalogs['catalogTalleres'][] = $name;
-                continue;
-            }
-
-            $catalogs['catalogMinas'][] = $name;
-        }
-
-        $catalogs['catalogMinas'] = array_values(array_unique($catalogs['catalogMinas']));
-        $catalogs['catalogOficinas'] = array_values(array_unique($catalogs['catalogOficinas']));
-        $catalogs['catalogTalleres'] = array_values(array_unique($catalogs['catalogTalleres']));
+        $catalogs = $this->administrativeLocations->catalogs();
 
         $regularizationSummary = $this->fichaService->regularizationSummary($ficha);
         $missingRequiredDocuments = $this->fichaService->missingRequiredDocumentKeys($ficha);
+        $canViewSensitiveFichaData = PersonalFichaAccess::canSensitive($this->requireAuthenticatedUser());
+        $initialFields = $this->initialFichaFieldsForEdit($trabajador, $ficha);
+        $sections = PersonalFichaCatalog::sections();
 
         return view('personal.edit', array_merge($catalogs, [
             'trabajador' => $trabajador,
             'ficha' => $ficha,
-            'sections' => PersonalFichaCatalog::sections(),
-            'initialFields' => $this->initialFichaFieldsForEdit($trabajador, $ficha),
-            'huellaDataUrl' => $this->fichaService->imageDataUrl($ficha?->huella_path),
+            'sections' => $canViewSensitiveFichaData ? $sections : array_filter($sections, fn (array $section) => !PersonalFichaAccess::isSensitiveSection($section)),
+            'initialFields' => $canViewSensitiveFichaData ? $initialFields : PersonalFichaAccess::redact($initialFields),
+            'canViewSensitiveFichaData' => $canViewSensitiveFichaData,
+            'activeUpdateLinks' => PersonalIngresoLink::query()->where('personal_id', $id)
+                ->whereNull('revoked_at')->whereNull('submitted_at')->where('expires_at', '>=', now())
+                ->orderByDesc('created_at')->get(['id', 'expires_at']),
+            'firmaBase64' => $canViewSensitiveFichaData ? $ficha?->firma_base64 : null,
+            'huellaDataUrl' => $canViewSensitiveFichaData ? $this->fichaService->imageDataUrl($ficha?->huella_path) : null,
             'missingRequiredDocuments' => $missingRequiredDocuments,
             'missingRequiredFichaFields' => $regularizationSummary['missing_fields'],
             'regularizationSummary' => $regularizationSummary,
@@ -580,6 +496,7 @@ class PersonalPageController extends WebPageController
     public function update(Request $request, string $id): RedirectResponse
     {
         $this->assertPersonalPermission(['editar', 'actualizar', 'editar_ficha']);
+        $this->service->assertNoMineUpdate($request->only(['minas', 'mina_estado']));
 
         $personal = $this->service->find($id);
         abort_if(!$personal, 404);
@@ -597,11 +514,12 @@ class PersonalPageController extends WebPageController
                 [
                     'estado' => $validated['estado'] ?? $personal->estado ?? 'PENDIENTE_COMPLETAR_FICHA',
                     'es_supervisor' => $validated['es_supervisor'] ?? false,
-                    'minas' => $this->buildMinePayload($validated),
                     'familiares' => $validated['familiares'] ?? [],
-                    'documentos' => $request->file('documentos', []),
-                    'firma_base64' => $validated['firma_base64'] ?? null,
-                    'huella' => $request->file('huella'),
+                    'documentos' => $validated['documentos'] ?? [],
+                    ...array_intersect_key($validated, array_flip(['firma_base64', 'huella'])),
+                    ...(($validated['ubicaciones_internas_enviadas'] ?? false)
+                        ? ['ubicaciones_internas' => $validated['ubicaciones_internas'] ?? []]
+                        : []),
                 ],
                 $this->requireAuthenticatedUser(),
             );
@@ -626,8 +544,6 @@ class PersonalPageController extends WebPageController
             'activo' => ['required', 'boolean'],
             'fecha_ingreso' => ['nullable', 'date'],
             'ocupacion' => ['nullable', 'string', 'max:120'],
-            'minas' => ['nullable', 'array'],
-            'mina_estado' => ['nullable', 'array'],
         ]);
 
         $this->service->update($personal, $this->buildPayloadFromWeb($validated, [
@@ -847,7 +763,6 @@ class PersonalPageController extends WebPageController
             'estado' => (bool) $validated['activo'] ? 'ACTIVO' : 'INACTIVO',
             'fecha_ingreso' => array_key_exists('fecha_ingreso', $validated) ? $validated['fecha_ingreso'] : ($existing['fecha_ingreso'] ?? null),
             'ocupacion' => array_key_exists('ocupacion', $validated) ? $validated['ocupacion'] : ($existing['ocupacion'] ?? null),
-            'minas' => $this->buildMinePayload($validated),
         ];
     }
 
@@ -929,6 +844,10 @@ class PersonalPageController extends WebPageController
     private function editFichaRules(): array
     {
         $rules = $this->manualCreateRules();
+        unset($rules['minas'], $rules['mina_estado']);
+        $rules['ubicaciones_internas_enviadas'] = ['sometimes', 'boolean'];
+        $rules['ubicaciones_internas'] = ['sometimes', 'array'];
+        $rules['ubicaciones_internas.*'] = ['required', 'string', 'max:191'];
         $rules['fields.puesto'] = ['required', 'string', 'max:191', Rule::exists('personal_puestos', 'nombre')];
         $rules['estado'] = ['required', 'in:ACTIVO,FALTA_CONTRATO,NO_FIRMO_CONTRATO,INACTIVO,CESADO,PENDIENTE_COMPLETAR_FICHA,FICHA_ENVIADA,LINK_VENCIDO,APROBADO,OBSERVADO,RECHAZADO'];
 
@@ -946,66 +865,6 @@ class PersonalPageController extends WebPageController
             ->orderBy('nombre')
             ->pluck('nombre')
             ->filter(fn ($name) => is_string($name) && trim($name) !== '')
-            ->values()
-            ->all();
-    }
-
-    private function buildMinePayload(array $validated): array
-    {
-        $stateMap = $validated['mina_estado'] ?? [];
-        $normalizedStateMap = collect($stateMap)
-            ->mapWithKeys(function ($state, $name): array {
-                return [PersonalNormalizer::normalizeKey((string) $name) => $state];
-            })
-            ->all();
-
-        $knownMines = Mina::query()->get(['id', 'nombre', 'unidad_minera']);
-
-        $selectedMines = collect($validated['minas'] ?? [])
-            ->map(fn ($name) => trim((string) $name))
-            ->filter(fn (string $name) => $name !== '')
-            ->unique(fn (string $name) => PersonalNormalizer::normalizeKey($name))
-            ->values();
-
-        $findMine = function (string $mineName) use ($knownMines): ?Mina {
-            $needle = PersonalNormalizer::normalizeKey($mineName);
-
-            return $knownMines->first(function (Mina $mine) use ($needle): bool {
-                return in_array($needle, [
-                    PersonalNormalizer::normalizeKey((string) $mine->id),
-                    PersonalNormalizer::normalizeKey((string) $mine->nombre),
-                    PersonalNormalizer::normalizeKey((string) $mine->unidad_minera),
-                ], true);
-            });
-        };
-
-        return collect($selectedMines)
-            ->map(function (string $mineName) use ($stateMap, $normalizedStateMap, $knownMines, $findMine): ?array {
-                $match = $findMine($mineName);
-
-                if (!$match) {
-                    $match = Mina::query()->create([
-                        'id' => (string) Str::uuid(),
-                        'nombre' => $mineName,
-                        'unidad_minera' => $mineName,
-                        'ubicacion' => 'Por definir',
-                        'estado' => 'ACTIVO',
-                    ]);
-
-                    $knownMines->push($match);
-                }
-
-                $normalizedKey = PersonalNormalizer::normalizeKey($mineName);
-                $state = $stateMap[$mineName]
-                    ?? ($normalizedStateMap[$normalizedKey] ?? 'habilitado');
-
-                return [
-                    'mina_id' => $match?->id,
-                    'mina_nombre' => $mineName,
-                    'estado' => $state,
-                ];
-            })
-            ->filter()
             ->values()
             ->all();
     }

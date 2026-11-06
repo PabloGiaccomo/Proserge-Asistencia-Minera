@@ -7,6 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EvaluacionDesempeno extends Model
 {
+    public function scopeIncluidasEnPromedio(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->where('evaluacion_desempeno.estado_revision', 'VALIDA');
+    }
+
     protected $table = 'evaluacion_desempeno';
 
     public $incrementing = false;

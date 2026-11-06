@@ -18,6 +18,44 @@ class ParadaHerramientaServiceTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_guardar_solicitud_no_fabrica_atencion_ni_reemplaza_evidencia_vigente(): void
+    {
+        [$actor, $rq] = $this->createToolsContext('OPERACIONES SOLICITUD', [
+            'herramientas' => ['ver' => true, 'actualizar' => true, 'registrar' => false],
+        ]);
+        $service = app(ParadaHerramientaService::class);
+        $payload = ['grupos' => [[
+            'nombre' => 'Grupo de prueba',
+            'base' => [[
+                'descripcion' => 'Llave sintética', 'cantidad_solicitada' => 5,
+                'cantidad_entregada' => 99, 'cantidad_recibida' => 99,
+                'recepcion_estado' => 'COMPLETO', 'recepcion_registrada_por_usuario_id' => $actor->id,
+            ]],
+        ]]];
+
+        $saved = $service->saveLista($actor, $rq, $payload);
+        self::assertTrue($saved['ok']);
+        $group = $saved['lista']->grupos->first();
+        $item = $group->items->first();
+        self::assertSame(0, $item->cantidad_entregada);
+        self::assertSame(0, $item->cantidad_recibida);
+        self::assertSame('PENDIENTE', $item->recepcion_estado);
+        self::assertNull($item->recepcion_registrada_por_usuario_id);
+
+        $item->forceFill(['cantidad_entregada' => 2, 'pedido_llego_at' => now()->toDateString()])->save();
+        $payload['grupos'][0]['id'] = $group->id;
+        $payload['grupos'][0]['base'][0]['id'] = $item->id;
+        $payload['grupos'][0]['base'][0]['observaciones'] = 'Cambio de solicitud';
+        self::assertTrue($service->saveLista($actor, $rq, $payload)['ok']);
+        self::assertSame(2, $item->fresh()->cantidad_entregada);
+        self::assertSame('Cambio de solicitud', $item->fresh()->observaciones);
+
+        unset($payload['grupos'][0]['base'][0]['id']);
+        $payload['grupos'][0]['base'][0]['descripcion'] = 'Otra herramienta';
+        self::assertFalse($service->saveLista($actor, $rq, $payload)['ok']);
+        self::assertSame(2, $item->fresh()->cantidad_entregada);
+    }
+
     public function test_guarda_y_envia_lista_de_herramientas_por_grupo(): void
     {
         $rolId = (string) Str::uuid();

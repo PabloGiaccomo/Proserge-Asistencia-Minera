@@ -12,19 +12,29 @@
     $transport = $dashboard['transport']['resumen'] ?? [];
     $coverage = $dashboard['coverage']['global'] ?? [];
     $query = request()->query();
+    $dashboardRoute = ($standaloneDashboard ?? false) ? 'inicio.dashboard.rq_mina.parada' : 'rq-mina.dashboard';
+    $lista = ($standaloneDashboard ?? false) ? [] : array_filter(\Illuminate\Support\Arr::only((array) request()->query('lista', []), [
+        'q', 'mina_id', 'estado', 'created_by_usuario_id', 'fecha_inicio_desde', 'fecha_inicio_hasta',
+        'fecha_fin_desde', 'fecha_fin_hasta', 'page', 'per_page',
+    ]), static fn ($value): bool => is_scalar($value) && $value !== '');
+    $dashboardParams = ['rqMina' => $rq['id'] ?? '', 'lista' => $lista];
 @endphp
 
 <div class="parada-dashboard">
     <header class="pd-header">
         <div>
-            <p class="pd-eyebrow">RQ Mina / Dashboard KPI</p>
+            <p class="pd-eyebrow">RQ Mina / Indicadores de parada</p>
             <h1>{{ $rq['destino_nombre'] ?? 'Parada' }}</h1>
             <p>{{ $rq['area'] ?? '-' }} · {{ $rq['fecha_inicio'] ?? '-' }} al {{ $rq['fecha_fin'] ?? '-' }}</p>
         </div>
         <div class="pd-actions">
-            <a href="{{ route('rq-mina.show', $rq['id'] ?? '') }}" class="btn btn-outline">Volver</a>
-            <a href="{{ route('rq-mina.dashboard.print', array_merge(['rqMina' => $rq['id'] ?? ''], $query)) }}" class="btn btn-outline" target="_blank">Imprimir</a>
+            @if($standaloneDashboard ?? false)
+                <a href="{{ route('inicio.dashboard.rq_mina') }}" class="btn btn-outline">Volver al resumen</a>
+            @else
+            <a href="{{ route('rq-mina.show', ['id' => $rq['id'] ?? '', 'lista' => $lista]) }}" class="btn btn-outline">Volver a la parada</a>
+            <a href="{{ route('rq-mina.dashboard.print', array_merge(['rqMina' => $rq['id'] ?? ''], $query)) }}" class="btn btn-outline" target="_blank" rel="noopener">Imprimir</a>
             <a href="{{ route('rq-mina.dashboard.export', array_merge(['rqMina' => $rq['id'] ?? ''], $query)) }}" class="btn btn-primary">Exportar Excel</a>
+            @endif
         </div>
     </header>
 
@@ -33,7 +43,10 @@
     @endif
 
     <section class="pd-card pd-filter-card">
-        <form method="GET" action="{{ route('rq-mina.dashboard', $rq['id'] ?? '') }}" class="pd-filters">
+        <form method="GET" action="{{ route($dashboardRoute, $rq['id'] ?? '') }}" class="pd-filters">
+            @foreach($lista as $filtro => $valor)
+                <input type="hidden" name="lista[{{ $filtro }}]" value="{{ $valor }}">
+            @endforeach
             <label>
                 <span>Plan</span>
                 <select name="plan_id">
@@ -57,16 +70,20 @@
             </label>
             <div class="pd-filter-actions">
                 <button class="btn btn-primary" type="submit">Filtrar</button>
-                <a href="{{ route('rq-mina.dashboard', $rq['id'] ?? '') }}" class="btn btn-outline">Limpiar</a>
+                <a href="{{ route($dashboardRoute, $dashboardParams) }}" class="btn btn-outline">Limpiar</a>
             </div>
         </form>
-        <form method="POST" action="{{ route('rq-mina.dashboard.recalculate', $rq['id'] ?? '') }}" class="pd-recalc-form">
+        @unless($standaloneDashboard ?? false)
+        @allowed('rq_mina', 'actualizar')
+        <form method="POST" action="{{ route('rq-mina.dashboard.recalculate', $dashboardParams) }}" class="pd-recalc-form">
             @csrf
             <input type="hidden" name="plan_id" value="{{ $filters['plan_id'] ?? '' }}">
             <input type="hidden" name="fecha" value="{{ $filters['fecha'] ?? '' }}">
             <input type="hidden" name="turno" value="{{ $filters['turno'] ?? '' }}">
             <button class="btn btn-outline" type="submit">Recalcular ejecucion</button>
         </form>
+        @endallowed
+        @endunless
     </section>
 
     <section class="pd-kpi-grid">
@@ -157,7 +174,13 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="10" class="pd-empty">No hay resumen de ejecucion para los filtros seleccionados. Usa Recalcular ejecucion si ya existe Man Power y asistencia.</td></tr>
+                        <tr><td colspan="10" class="pd-empty">No hay resumen de ejecucion para los filtros seleccionados.
+                            @if($standaloneDashboard ?? false)
+                                Solicita al responsable revisar el resumen en RQ Mina si ya existe Man Power y asistencia.
+                            @else
+                                Usa Recalcular ejecucion si ya existe Man Power y asistencia.
+                            @endif
+                        </td></tr>
                     @endforelse
                 </tbody>
             </table>

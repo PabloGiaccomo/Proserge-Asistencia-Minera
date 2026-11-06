@@ -45,7 +45,7 @@ Los estados iniciales son:
 
 El tramo por defecto es `IDA`. Tambien existen `RETORNO` y `TRASLADO_INTERNO`.
 
-Un pasajero no puede tener dos servicios activos del mismo tramo. Para ida y retorno se deben usar tramos distintos.
+Una persona puede tener un solo servicio activo por fecha, turno y tramo, aunque figure en varios grupos de Man Power. Para ida y retorno se usan tramos distintos.
 
 ## Capacidad y ocupacion
 
@@ -68,7 +68,25 @@ Se permite guardar `BORRADOR` sin capacidad. Para confirmar se requiere:
 
 La placa y el conductor no pueden duplicarse en otro servicio activo de la misma fecha, turno y tramo.
 
-El conductor puede ser un trabajador del sistema. Se guarda snapshot del nombre para conservar historial si el dato cambia.
+El conductor puede ser un trabajador del sistema. La pantalla muestra nombre y selector de personal activo vinculado a la mina de la parada. Al registrar o cambiar un conductor desde API, el operador necesita acceso a una mina a la que esté vinculado el trabajador. Se conserva el nombre guardado de conductores históricos en ediciones de otros campos.
+
+## Operación y permisos
+
+La planificación conserva la parada, el plan, la fecha y el turno al guardar y al corregir datos. Un servicio nuevo se guarda en `BORRADOR`. En `Editar servicio` se puede completar placa, conductor, capacidad y alcance. La fila muestra los datos que faltan para confirmar. Cuando se pierde la respuesta, el formulario conserva lo escrito y ofrece consultar el listado en otra pestaña antes de reenviar.
+
+| Acción | Permiso directo en Transportes |
+|---|---|
+| Consultar | `ver` |
+| Crear o copiar | `crear` |
+| Editar o reemplazar alcances | `editar` o `actualizar` |
+| Agregar pasajeros | `entregar` o `actualizar` |
+| Retirar pasajeros | `recepcionar` o `actualizar` |
+| Cambiar estado | `actualizar`, `entregar` o `recepcionar` |
+| Reubicar pasajeros (API) | Retirar en origen y agregar en destino |
+
+`transportes,administrar` permite estas acciones dentro del alcance del usuario. Los roles activos `ADMIN`, `GERENTE` y `SUPERADMIN` tienen alcance de mina sin restricción según `MinaScopeAccess`. Se comprueba la mina del servicio y la del destino cuando corresponda. Los servicios finalizados o cancelados y los planes archivados se consultan en el listado. El cambio de estado usa su propia acción.
+
+El reemplazo de alcances valida el lote completo antes de sustituir filas. Al agregar o reubicar pasajeros se bloquea el servicio antes de comprobar el cupo. La reubicación comprueba ambos servicios, fecha, turno, tramo, alcance y cupo antes de retirar al pasajero del origen. El retiro, la asignación de destino y los eventos se guardan en una sola transacción.
 
 ## Copia
 
@@ -161,7 +179,7 @@ Cada cambio de Logistica queda en `rq_mina_actividad_transporte_eventos` con est
 
 Cada grupo diario puede vincularse a uno o varios servicios mediante alcances. Desde Man Power se puede abrir la planificacion del contexto.
 
-Los pasajeros se toman de integrantes activos del grupo. Retirar un integrante de Man Power retira logicamente sus pasajeros activos con motivo `INTEGRANTE_RETIRADO_DE_MAN_POWER`.
+Los pasajeros se toman de integrantes activos del grupo. Retirar un integrante de Man Power retira lógicamente sus pasajeros activos con motivo `INTEGRANTE_RETIRADO_DE_MAN_POWER`. El retiro interno usa el permiso de Man Power de la operación y registra su evento de Transporte en la misma transacción. La distribución se conserva si está ligada a historial de pasajeros.
 
 ## Relacion con Asistencia
 
@@ -194,6 +212,8 @@ Por plan, fecha y turno:
 - unidades de carga requeridas y asignadas.
 
 ## Limitaciones pendientes
+
+- La comprobación de placa y conductor cubre conflictos ya registrados. Las altas simultáneas de servicios distintos requieren una garantía adicional para esas dos comprobaciones.
 
 - No se implemento dashboard final de KPI.
 - No se implemento GPS ni rutas geograficas.

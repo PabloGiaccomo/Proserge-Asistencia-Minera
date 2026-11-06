@@ -2,10 +2,12 @@
 
 namespace App\Modules\Evaluaciones\Policies;
 
+use App\Models\EvaluacionSupervisor;
 use App\Models\Usuario;
 use App\Models\UsuarioMinaScope;
 use App\Models\Personal;
 use App\Support\Rbac\PermissionMatrix;
+use Illuminate\Database\Eloquent\Builder;
 
 class EvaluacionesPolicy
 {
@@ -65,6 +67,46 @@ class EvaluacionesPolicy
     public function canViewOthers(Usuario $usuario): bool
     {
         return PermissionMatrix::userCanDirect($usuario, 'evaluaciones', 'ver_todas_evaluaciones');
+    }
+
+    public function restrictDashboardRows(Builder $query, Usuario $usuario, string $type): Builder
+    {
+        if (!$this->canViewType($usuario, $type)) {
+            return $query->whereRaw('1 = 0');
+        }
+        if ($type === 'desempeno') {
+            $query->incluidasEnPromedio();
+        }
+
+        if ($type === 'supervisores') {
+            $query->where('estado', '<>', EvaluacionSupervisor::PENDING_REGULARIZATION);
+        }
+
+        $canViewOthers = $this->canViewOthers($usuario);
+        if ($type !== 'residentes' && !$this->isPrivileged($usuario)) {
+            $mineIds = $usuario->scopesMina()->pluck('mina_id');
+            $query->where(function (Builder $scope) use ($mineIds, $type, $usuario, $canViewOthers): void {
+                $scope->where(function (Builder $mine) use ($mineIds): void {
+                    $mine->where(fn (Builder $destination) => $destination->whereNull('destino_tipo')->orWhere('destino_tipo', 'MINA'))
+                        ->where(fn (Builder $allowed) => $allowed->whereIn('destino_id', $mineIds)->orWhereIn('mina_id', $mineIds));
+                })->orWhere(fn (Builder $other) => $other->whereNotNull('destino_tipo')->where('destino_tipo', '<>', 'MINA'));
+
+                if ($type === 'desempeno') {
+                    $scope->orWhere(fn (Builder $own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $usuario->id));
+                }
+                if ($canViewOthers) {
+                    $marker = $type === 'desempeno' ? 'origen' : 'calculo_version';
+                    $history = $type === 'supervisores' ? ['HISTORICA', 'REGULARIZADA'] : ['HISTORICA'];
+                    $scope->orWhere(fn (Builder $legacy) => $legacy->whereIn($marker, $history)->whereNull('mina_id'));
+                }
+            });
+        }
+
+        if (!$canViewOthers) {
+            $type === 'desempeno' ? $query->where('evaluado_por_usuario_id', $usuario->id) : $this->ownedBy($query, $usuario);
+        }
+
+        return $query;
     }
 
     public function canEvaluateOthers(Usuario $usuario): bool

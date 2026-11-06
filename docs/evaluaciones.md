@@ -8,6 +8,16 @@ salvo las evaluaciones directas propias registradas fuera del scope del actor.
 No concede permisos nuevos ni cambia evaluaciones.
 
 - Filtros por fecha exacta o rango inclusivo, mina y cargo actual de Personal.
+- Busqueda por nombre, apellidos, DNI o numero de documento de la persona
+  evaluada. Las palabras pueden escribirse en cualquier orden. Se aplica en
+  servidor sobre la misma consulta autorizada de todos los indicadores y
+  detalles; no amplia permisos, autoria ni alcance por mina.
+- Nombre/documento y rango se aplican con `Buscar evaluaciones` (o Enter).
+  Los selectores actualizan al cambiar; `Mas filtros` agrupa fecha exacta y
+  origen. `Restablecer` vuelve al periodo predeterminado sin recargar la pagina.
+- Filtros, indicadores y graficos se adaptan a escritorio y movil. Sin resultados
+  se muestra una sola indicacion para revisar la busqueda y el periodo, sin
+  repetir graficos vacios.
 - Selector de tipo: Todas, Diaria, Supervisores o Residentes. Solo ofrece tipos
   autorizados y filtra consultas, indicadores, promedios y graficas en conjunto.
 - Indicadores: evaluaciones, personas unicas y promedio separado por tipo.
@@ -23,6 +33,13 @@ No concede permisos nuevos ni cambia evaluaciones.
 - No se interpreta un promedio combinado como rendimiento comparable.
 - Filtros via fragmento HTML autenticado, con cancelacion de peticiones previas
   y manejo de validacion; no recargan el documento completo.
+- CSS y JavaScript del dashboard viven en `resources/css/modules/evaluations-dashboard.css`
+  y `resources/js/modules/evaluations-dashboard.js`, importados por las entradas
+  de Vite. Ya no se requieren archivos sueltos `public/css/evaluations-dashboard.css`
+  ni `public/js/evaluations-dashboard.js`. Ver [despliegue por WinSCP](FTP_EVALUACIONES_DASHBOARD.md).
+- `tests/Browser/evaluation-dashboard-build.cjs` comprueba los enlaces emitidos
+  por Blade contra el build real, busqueda, fechas, error y estado vacio en
+  320/390/768/1440 px. Usa datos ficticios y no requiere acceso a produccion.
 - Pruebas visuales: tests/Browser/evaluation-dashboard.cjs, con datos ficticios.
 
 ## Tipos y permisos
@@ -288,3 +305,17 @@ confirmados, cerrar el flag y aplicar un procedimiento auditado de correccion
 o restauracion desde backup; no borrar tablas ni repetir una importacion ciega.
 Mantener archivos/reportes privados hasta verificar los conteos y cerrar la
 auditoria de la carga; su eliminacion posterior debe acordarse operativamente.
+
+## Revisión por corrección de asistencia
+
+Si la asistencia vinculada a una evaluación diaria pasa a AUSENTE, la evaluación
+queda `PENDIENTE_REVISION` y se excluye de promedios, comparaciones y dashboards.
+Se conserva su nota. Una marca posterior elegible conserva la revisión pendiente.
+El evaluador original usa **Revisiones de asistencia** para ratificar después
+de corregir y cerrar la asistencia o excluir la evaluación con un motivo.
+La decisión queda auditada y recalcula el promedio del trabajador.
+
+La migración `2026_11_04_000900_add_revision_to_evaluaciones_de_asistencia.php`
+agrega el estado y los eventos. Los registros existentes comienzan en VALIDA.
+El cambio opera sobre nuevas correcciones de asistencia. La revisión retroactiva
+de desajustes históricos requiere un ensayo separado.

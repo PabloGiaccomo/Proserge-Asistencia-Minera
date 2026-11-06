@@ -14,8 +14,9 @@ use App\Models\UsuarioMinaScope;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Seguridad\Services\AdminProtectionService;
 use App\Modules\Seguridad\Services\RoleManagementService;
-use App\Modules\Seguridad\Support\UsuarioEmailSuggestion;
+use App\Modules\Seguridad\Services\UsuarioTrabajadorSearchService;
 use App\Support\Rbac\PermissionMatrix;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,46 +87,51 @@ class UsuarioPageController extends Controller
         ]);
     }
 
-    public function create(Request $request): View
+    public function create(Request $request, UsuarioTrabajadorSearchService $searchService): View
     {
-        $search = trim((string) $request->query('search', ''));
-        $trabajadorId = trim((string) $request->query('trabajador_id', ''));
+        $this->assertDirectPermission('usuarios', 'crear');
 
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:191'],
+            'trabajador_id' => ['nullable', 'string', 'max:36'],
+        ]);
+        $search = trim($filters['search'] ?? '');
+        $trabajadorId = trim($filters['trabajador_id'] ?? '');
+        $canAssignRoles = PermissionMatrix::allowsDirect(session('user.permissions', []), 'usuarios', 'asignar');
         $roles = $this->roleService->active();
-        $roleBuckets = $this->roleBuckets($roles);
-
-        $trabajadores = collect();
-        if ($search !== '') {
-            $needle = '%' . mb_strtolower($search) . '%';
-
-            $trabajadores = Personal::query()
-                ->with('usuario:id,personal_id')
-                ->where(function ($query) use ($needle): void {
-                    $query->whereRaw('LOWER(nombre_completo) LIKE ?', [$needle])
-                        ->orWhereRaw('LOWER(dni) LIKE ?', [$needle])
-                        ->orWhereRaw('LOWER(puesto) LIKE ?', [$needle]);
-                })
-                ->orderBy('nombre_completo')
-                ->limit(20)
-                ->get(['id', 'dni', 'nombre_completo', 'puesto', 'correo', 'estado']);
-        }
 
         $trabajadorSeleccionado = null;
+        $emailSugerido = null;
         if ($trabajadorId !== '') {
             $trabajadorSeleccionado = Personal::query()
-                ->with(['usuario.rol:id,nombre', 'usuario.rolesAdicionales:id,nombre', 'fichaColaborador'])
-                ->find($trabajadorId, ['id', 'dni', 'nombre_completo', 'puesto', 'correo', 'estado']);
+                ->with('usuario:id,personal_id')
+                ->find($trabajadorId, ['id', 'dni', 'nombre_completo', 'puesto']);
+            if ($canAssignRoles && $trabajadorSeleccionado && ! $trabajadorSeleccionado->usuario) {
+                $emailSugerido = $searchService->rowsForIds([$trabajadorId])[0]['correo_sugerido'] ?? null;
+            }
         }
 
         return view('seguridad.usuarios.create', [
             'roles' => $roles,
-            'roleBuckets' => $roleBuckets,
-            'trabajadores' => $trabajadores,
+            'roleBuckets' => $this->roleBuckets($roles),
+            'trabajadores' => $searchService->search($search, $canAssignRoles),
             'trabajadorSeleccionado' => $trabajadorSeleccionado,
-            'emailSugerido' => UsuarioEmailSuggestion::fromFicha($trabajadorSeleccionado?->fichaColaborador?->datos_json ?? []),
+            'emailSugerido' => $emailSugerido,
             'search' => $search,
             'hasEstadoColumn' => $this->hasEstadoColumn(),
         ]);
+    }
+
+    public function buscarTrabajadores(Request $request, UsuarioTrabajadorSearchService $searchService): JsonResponse
+    {
+        $this->assertDirectPermission('usuarios', 'crear');
+
+        $filters = $request->validate(['search' => ['nullable', 'string', 'max:191']]);
+        $canAssignRoles = PermissionMatrix::allowsDirect(session('user.permissions', []), 'usuarios', 'asignar');
+
+        return response()->json([
+            'trabajadores' => $searchService->search($filters['search'] ?? '', $canAssignRoles),
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function store(Request $request): RedirectResponse
@@ -352,6 +358,8 @@ class UsuarioPageController extends Controller
             'notification_type_ids' => ['nullable', 'array'],
             'notification_type_ids.*' => ['string', 'size:36', 'exists:notification_types,id'],
             'preferences' => ['nullable', 'array'],
+            'preferences.*' => ['array:in_app_enabled,minimum_priority'],
+            'preferences.*.in_app_enabled' => ['sometimes', 'boolean'],
             'preferences.*.minimum_priority' => ['nullable', 'string', Rule::in(['low', 'medium', 'high', 'critical'])],
         ]);
 
@@ -360,7 +368,7 @@ class UsuarioPageController extends Controller
             ->filter()
             ->unique()
             ->values();
-        $preferences = $request->input('preferences', []);
+        $preferences = $validated['preferences'] ?? [];
         $notificationsAllowed = (string) ($validated['notifications_allowed'] ?? '1') === '1';
 
         DB::transaction(function () use ($usuario, $typeIds, $preferences, $notificationsAllowed): void {
@@ -375,7 +383,6 @@ class UsuarioPageController extends Controller
                         'id' => $settingId,
                         'in_app_enabled' => $notificationsAllowed,
                         'email_enabled' => false,
-                        'muted_until' => null,
                         'updated_by_usuario_id' => session('user.id') ?: session('user_id'),
                     ],
                 );
@@ -396,8 +403,7 @@ class UsuarioPageController extends Controller
                         'id' => $preferenceId,
                         'in_app_enabled' => (bool) data_get($preferences, $typeId . '.in_app_enabled', false),
                         'email_enabled' => false,
-                        'minimum_priority' => (string) data_get($preferences, $typeId . '.minimum_priority', 'low'),
-                        'mute_until' => null,
+                        'minimum_priority' => (string) (data_get($preferences, $typeId . '.minimum_priority') ?? 'low'),
                     ]
                 );
             }

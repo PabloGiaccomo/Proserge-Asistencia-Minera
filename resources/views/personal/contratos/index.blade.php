@@ -83,6 +83,9 @@
                 <p class="page-subtitle">{{ $personal->nombre_completo }} - {{ $personal->tipo_documento ?: 'DNI' }} {{ $personal->numero_documento ?: $personal->dni }}</p>
             </div>
             <div class="page-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+                @if($canUploadSignedContractFile)
+                    <a href="{{ route('personal.contratos.firmados.index') }}" class="btn btn-outline btn-sm">Cargar varios contratos firmados</a>
+                @endif
                 @if($canPrepareContracts)
                     <a href="{{ route('personal.antiguo.regularize', $personal->id) }}" class="btn btn-outline btn-sm">Regularizar contratos</a>
                 @endif
@@ -265,6 +268,9 @@
                                         <span class="contract-status {{ $estadoClass($contrato->estado) }}">{{ ucfirst(strtolower($contrato->estado)) }}</span>
                                         @if($contrato->hasSignedFile())
                                             <div class="text-muted">Firmado: {{ optional($contrato->signed_at)->format('d/m/Y H:i') }}</div>
+                                            @if($estadoContrato === 'PREPARACION' && $contrato->fecha_inicio?->isFuture())
+                                                <div class="text-muted">Pendiente de activar desde {{ $inicio }}</div>
+                                            @endif
                                         @endif
                                         @if($contrato->archivo_pendiente_regularizacion)
                                             <div class="text-muted">Sin archivo firmado / por regularizar</div>
@@ -308,6 +314,13 @@
                                                         <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
                                                     </svg>
                                                 </button>
+                                            @endif
+                                            @if($canUploadSignedContractFile && $contratoService->canActivatePreparedSignedContract($contrato))
+                                                <form method="POST" action="{{ route('personal.contratos.activate-signed', [$personal->id, $contrato->id]) }}">
+                                                    @csrf
+                                                    <input type="hidden" name="revision" value="{{ $contratoService->signedTermsRevision($contrato) }}">
+                                                    <button type="submit" class="btn btn-primary btn-xs">Activar contrato firmado</button>
+                                                </form>
                                             @endif
                                             @if($canUploadSignedContract)
                                                 <button

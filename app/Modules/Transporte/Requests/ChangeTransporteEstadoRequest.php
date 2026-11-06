@@ -3,14 +3,10 @@
 namespace App\Modules\Transporte\Requests;
 
 use App\Models\TransporteServicio;
-use Illuminate\Foundation\Http\FormRequest;
-
-class ChangeTransporteEstadoRequest extends FormRequest
+class ChangeTransporteEstadoRequest extends TransporteFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    protected const ACTION = 'cambiar_estado';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_STATE_FORBIDDEN';
 
     public function rules(): array
     {

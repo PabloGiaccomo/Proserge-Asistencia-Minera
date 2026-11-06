@@ -2,10 +2,10 @@
 
 namespace App\Modules\Seguridad\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\WebPageController;
 use App\Models\Rol;
-use App\Models\Usuario;
-use App\Modules\Notificaciones\Services\NotificationService;
+use App\Models\RolCambioEvento;
+use App\Modules\Seguridad\Services\RoleChangeNotificationService;
 use App\Modules\Seguridad\Services\RoleManagementService;
 use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
@@ -16,11 +16,11 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
-class RolPageController extends Controller
+class RolPageController extends WebPageController
 {
     public function __construct(
         private readonly RoleManagementService $service,
-        private readonly NotificationService $notificationService,
+        private readonly RoleChangeNotificationService $roleNotifications,
     )
     {
     }
@@ -95,7 +95,7 @@ class RolPageController extends Controller
         $this->assertAnyDirectPermission('roles', ['editar', 'actualizar']);
 
         $rol = Rol::query()->findOrFail($id);
-        $beforePermissions = PermissionMatrix::normalize($rol->permisos ?? []);
+        $actor = $this->requireAuthenticatedUser();
         $validated = $this->validatePayload($request, $rol);
 
         $currentEstado = strtoupper((string) $rol->estado);
@@ -108,33 +108,14 @@ class RolPageController extends Controller
             $rol,
             $validated,
             $request->input('notification_type_ids', []),
-            $request->input('notificaciones', [])
+            $request->input('notificaciones', []),
+            $actor,
         );
 
-        $this->notificationService->emit('rol_modificado', [
-            'actor_user_id' => session('user.id'),
-            'entity_type' => 'rol',
-            'entity_id' => $rol->id,
-            'title' => 'Rol actualizado',
-            'message' => sprintf('El rol %s fue actualizado.', $rol->nombre),
-            'target_user_ids' => $this->securityAudience('roles', ['administrar']),
-            'priority' => 'critical',
-            'category' => 'seguridad',
-            'dedupe_key' => 'rol_modificado:' . $rol->id . ':' . now()->format('YmdHi'),
-        ]);
-
-        if (json_encode($beforePermissions) !== json_encode($rol->permisos ?? [])) {
-            $this->notificationService->emit('permisos_modificados', [
-                'actor_user_id' => session('user.id'),
-                'entity_type' => 'rol',
-                'entity_id' => $rol->id,
-                'title' => 'Permisos de rol modificados',
-                'message' => sprintf('Se modificaron permisos del rol %s.', $rol->nombre),
-                'target_user_ids' => $this->securityAudience('roles', ['administrar']),
-                'priority' => 'critical',
-                'category' => 'seguridad',
-                'dedupe_key' => 'permisos_modificados:' . $rol->id . ':' . now()->format('YmdHi'),
-            ]);
+        $pending = RolCambioEvento::query()->where('rol_id', $rol->id)->where('actor_usuario_id', $actor->id)
+            ->where('notificaciones_estado', 'PENDIENTE')->orderBy('created_at')->limit(10)->get();
+        foreach ($pending as $event) {
+            $this->roleNotifications->deliver($event->id);
         }
 
         return redirect()->route('seguridad.roles.edit', $rol->id)->with('success', 'Permisos guardados correctamente.');
@@ -185,6 +166,7 @@ class RolPageController extends Controller
             $rules['notification_type_ids'] = ['nullable', 'array'];
             $rules['notification_type_ids.*'] = ['string', 'size:36', 'exists:notification_types,id'];
             $rules['notificaciones'] = ['nullable', 'array'];
+            $rules['notificaciones.*'] = ['boolean'];
         }
 
         $validated = $request->validate($rules);
@@ -220,23 +202,6 @@ class RolPageController extends Controller
             'notificationTypes' => $this->service->notificationTypes(),
             'notificationRolePreferences' => $this->service->notificationRolePreferences($rol),
         ];
-    }
-
-    private function securityAudience(string $module, array $actions): array
-    {
-        $query = Usuario::query()
-            ->with(['rol:id,nombre,permisos', 'rolesAdicionales:id,nombre,permisos'])
-            ->when(
-                Schema::hasTable('usuarios') && Schema::hasColumn('usuarios', 'estado'),
-                fn ($query) => $query->where('estado', 'ACTIVO')
-            );
-
-        return $query->get()
-            ->filter(fn (Usuario $usuario) => PermissionMatrix::userCanDirectAny($usuario, $module, $actions))
-            ->pluck('id')
-            ->map(fn ($id) => (string) $id)
-            ->values()
-            ->all();
     }
 
     private function validationMessage(ValidationException $exception): string

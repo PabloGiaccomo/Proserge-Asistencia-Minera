@@ -24,6 +24,19 @@ class FaltasService
             return null;
         }
 
+        return $this->scopedRows($usuario, $filters);
+    }
+
+    public function listForDashboard(Usuario $usuario, array $filters): Collection
+    {
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'faltas', 'dashboards'), 403);
+
+        return $this->scopedRows($usuario, $filters);
+    }
+
+    private function scopedRows(Usuario $usuario, array $filters): Collection
+    {
+
         $query = Falta::query()
             ->leftJoin('asistencia_encabezado as ae', 'ae.id', '=', 'faltas.asistencia_encabezado_id')
             ->leftJoin('personal as p', 'p.id', '=', 'faltas.trabajador_id')

@@ -1,4 +1,5 @@
 import './bootstrap';
+import './modules/evaluations-dashboard';
 import { createPersonalLiveResults } from './modules/personal-live-results';
 import { findExportDniMatches } from './modules/personal-export-selection';
 
@@ -7,12 +8,16 @@ window.findExportDniMatches = findExportDniMatches;
 import { initSignaturePads } from './modules/signature-pad';
 import { initEppOperations } from './modules/epp-operation';
 import { initEppDeliveryBatches } from './modules/epp-delivery-batch';
+import { initUsuarioWorkerSearch } from './modules/usuario-worker-search';
+import { initUsuarioAltaLote } from './modules/usuario-alta-lote';
 
 window.initProsergeSignaturePads = initSignaturePads;
 document.addEventListener('DOMContentLoaded', () => {
     initSignaturePads();
     initEppOperations();
     initEppDeliveryBatches();
+    initUsuarioWorkerSearch();
+    initUsuarioAltaLote();
 });
 import './modules/mining-convalidation';
 import './modules/mining-catalog-organization';

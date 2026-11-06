@@ -3,18 +3,175 @@
 namespace Tests\Feature;
 
 use App\Models\PersonalFicha;
+use App\Models\PersonalFichaArchivo;
 use App\Models\PersonalIngreso;
+use App\Models\PersonalPuesto;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Support\Rbac\PermissionCatalog;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PersonalFichaSensitiveDataPermissionTest extends TestCase
 {
     use DatabaseTransactions;
+
+    public function test_personal_resource_hides_bank_and_pension_until_actor_has_sensitive_permission(): void
+    {
+        $ficha = PersonalFicha::findOrFail($this->createFicha());
+        $session = $this->sessionForPermissions(['personal' => ['ver']]);
+        $actor = \App\Models\Usuario::query()->findOrFail($session['user_id']);
+        $request = \Illuminate\Http\Request::create('/api/v1/personal/'.$ficha->personal_id);
+        $request->setUserResolver(fn () => $actor);
+        $worker = $ficha->personal->load('fichaColaborador');
+        $resource = new \App\Modules\Personal\Resources\PersonalResource($worker);
+        $data = $resource->toArray($request);
+        self::assertArrayNotHasKey('numero_cuenta', $data['reactivacion_datos']);
+        self::assertArrayNotHasKey('costo_hora', $data['reactivacion_datos']);
+        self::assertStringNotContainsString('BANCO SENSIBLE PRUEBA', json_encode($data));
+        $actor->rol->forceFill(['permisos' => PermissionCatalog::matrixFromSelections(['personal' => ['ver', 'ver_datos_sensibles']])])->save();
+        self::assertSame('001122334455', $resource->toArray($request)['reactivacion_datos']['numero_cuenta']);
+    }
+
+    public function test_general_editor_does_not_include_sensitive_values_in_the_response(): void
+    {
+        $ficha = PersonalFicha::findOrFail($this->createFicha(overrides: [
+            'sistema_pensionario' => 'Sistema Privado de Pensiones',
+            'cuspp' => 'CUSPP-FICHA-PRUEBA',
+            'quinta_otros_empleadores_json' => '[{"empresa":"EMPLEADOR-FICHA-PRUEBA","monto":"934562.55"}]',
+        ]));
+        Storage::fake('local');
+        $path = 'tests/ficha-sensitive/fingerprint.png';
+        Storage::disk('local')->put($path, 'synthetic fingerprint bytes');
+        $ficha->forceFill(['huella_path' => $path])->save();
+
+        $response = $this->withSession($this->sessionForPermissions(['personal' => ['editar', 'actualizar']]))
+            ->get(route('personal.edit', $ficha->personal_id))->assertOk();
+
+        foreach (['001122334455', '01122200020049472278', 'CUSPP-FICHA-PRUEBA', '17000',
+            'EMPLEADOR-FICHA-PRUEBA', 'data:image/png;base64,signature', $path,
+            base64_encode('synthetic fingerprint bytes')] as $value) {
+            $response->assertDontSee($value, false);
+        }
+    }
+
+    public function test_general_editor_preserves_omitted_sensitive_fields(): void
+    {
+        $ficha = PersonalFicha::findOrFail($this->createFicha());
+        $fields = $this->editableFields($ficha->datos_json);
+
+        $this->withSession($this->sessionForPermissions(['personal' => ['editar', 'actualizar']]))
+            ->put(route('personal.update', $ficha->personal_id), [
+                'estado' => $ficha->estado,
+                'fields' => [...$fields, 'correo' => 'nuevo@test.local'],
+            ])->assertRedirect(route('personal.show', $ficha->personal_id));
+
+        $fresh = $ficha->fresh();
+        $this->assertSame('nuevo@test.local', $fresh->datos_json['correo']);
+        $this->assertSame('001122334455', $fresh->datos_json['numero_cuenta']);
+        $this->assertSame('01122200020049472278', $fresh->datos_json['cci']);
+        $this->assertSame('ONP', $fresh->datos_json['sistema_pensionario']);
+        $this->assertSame($ficha->firma_base64, $fresh->firma_base64);
+    }
+
+    public function test_general_editor_rejects_sensitive_changes_after_permission_is_revoked(): void
+    {
+        $ficha = PersonalFicha::findOrFail($this->createFicha(overrides: ['banco' => 'BCP', 'banco_otro' => '']));
+        $fields = $this->editableFields($ficha->datos_json);
+        Storage::fake('local');
+        $session = $this->sessionForPermissions(['personal' => ['editar', 'actualizar', 'ver_datos_sensibles']]);
+        $this->withSession($session)->get(route('personal.edit', $ficha->personal_id))->assertSee('001122334455');
+
+        $roleId = DB::table('usuarios')->where('id', $session['user_id'])->value('rol_id');
+        DB::table('roles')->where('id', $roleId)->update([
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections(['personal' => ['editar', 'actualizar']])),
+        ]);
+
+        $url = route('personal.update', $ficha->personal_id);
+        $payload = ['estado' => $ficha->estado, 'fields' => [...$fields, 'correo' => 'nuevo@test.local']];
+        $this->put($url, [...$payload, 'fields' => [...$fields, 'numero_cuenta' => null]])->assertForbidden();
+        $this->put($url, [...$payload, 'fields' => [...$fields, 'cuspp' => 'NUEVO-CUSPP']])->assertForbidden();
+        $this->put($url, [...$payload, 'firma_base64' => null])->assertForbidden();
+        $this->put($url, [...$payload, 'firma_base64' => 'data:image/png;base64,replacement'])->assertForbidden();
+        $this->put($url, [...$payload, 'huella' => UploadedFile::fake()->image('replacement.png')])->assertForbidden();
+
+        $this->assertSame($ficha->datos_json, $ficha->fresh()->datos_json);
+        $this->assertSame($ficha->firma_base64, $ficha->fresh()->firma_base64);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_ingreso_editor_without_sensitive_permission_cannot_replace_fingerprint(): void
+    {
+        $ingreso = PersonalIngreso::findOrFail($this->createIngreso());
+        Storage::fake('local');
+        $this->withSession($this->sessionForPermissions(['personal_ingresos' => ['ver', 'editar', 'actualizar']]))
+            ->put(route('personal.ingresos.update', $ingreso->id), [
+                'fields' => $this->editableFields($ingreso->datos_json),
+                'huella' => UploadedFile::fake()->image('replacement.png'),
+            ])->assertForbidden();
+
+        $this->assertSame($ingreso->datos_json, $ingreso->fresh()->datos_json);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_document_download_permission_alone_cannot_download_a_fingerprint(): void
+    {
+        Storage::fake('local');
+        $path = 'tests/ficha-sensitive/fingerprint.png';
+        Storage::disk('local')->put($path, 'synthetic fingerprint bytes');
+        $archivo = PersonalFichaArchivo::query()->create([
+            'id' => (string) Str::uuid(),
+            'personal_ficha_id' => $this->createFicha(),
+            'tipo' => 'huella',
+            'nombre_original' => 'fingerprint.png',
+            'path' => $path,
+        ]);
+        $url = route('personal.fichas.archivos.download', $archivo->id);
+
+        $this->withSession($this->sessionForPermissions(['personal' => ['descargar_documentos']]))
+            ->get($url)->assertForbidden();
+        $this->withSession($this->sessionForPermissions(['personal' => ['descargar_documentos', 'ver_datos_sensibles']]))
+            ->get($url)->assertDownload('fingerprint.png');
+    }
+
+    public function test_legacy_ficha_exports_enforce_sensitive_permission(): void
+    {
+        Storage::fake('local');
+        $this->createFicha(overrides: ['banco' => 'BCP', 'banco_otro' => '']);
+        $this->withSession($this->sessionForPermissions(['personal' => ['exportar']]));
+        $this->postJson(route('personal.fichas.export.pdf.start'))->assertForbidden();
+        $this->postJson(route('personal.fichas.export.pdf.process', Str::uuid()))->assertForbidden();
+        $this->get(route('personal.fichas.export.pdf.download', Str::uuid()))->assertForbidden();
+
+        $response = $this->post(route('personal.fichas.export.excel'), [
+            'ficha_columns' => ['trabajador', 'numero_cuenta', 'remuneracion'],
+        ])->assertOk();
+        $sheet = tempnam(sys_get_temp_dir(), 'ficha-test-');
+        try {
+            file_put_contents($sheet, $response->streamedContent());
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($sheet);
+            $this->assertSame(['Trabajador'], $spreadsheet->getActiveSheet()->toArray()[0]);
+        } finally {
+            unlink($sheet);
+        }
+    }
+
+    private function editableFields(array $data): array
+    {
+        PersonalPuesto::query()->firstOrCreate(
+            ['nombre' => $data['puesto']],
+            ['id' => (string) Str::uuid(), 'activo' => true],
+        );
+
+        return array_intersect_key($data, array_flip([
+            'tipo_documento', 'numero_documento', 'nombres', 'apellido_paterno', 'apellido_materno',
+            'telefono', 'correo', 'puesto', 'contrato',
+        ]));
+    }
 
     public function test_update_permission_does_not_allow_sensitive_ficha_data(): void
     {

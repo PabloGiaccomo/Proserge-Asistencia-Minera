@@ -224,13 +224,140 @@ class MiAsistenciaWebTest extends TestCase
         $actions = PermissionCatalog::availableModuleActions();
 
         $this->assertContains('ver_todas_asistencias', $actions['mi_asistencia']);
-        $this->assertSame('Ver y registrar todas las asistencias', PermissionCatalog::actionLabel('ver_todas_asistencias'));
+        $this->assertSame('Ver todas las asistencias', PermissionCatalog::actionLabel('ver_todas_asistencias'));
     }
 
-    public function test_usuario_global_registra_grupo_sin_responsable_con_su_identidad(): void
+    public function test_lector_de_todas_las_asistencias_no_puede_marcar_ni_cerrar_un_grupo_ajeno(): void
+    {
+        [$group, , $detail] = $this->horarioScenario();
+        $mine = DB::table('grupo_trabajo')->where('id', $group)->value('destino_id');
+        $role = $this->createRole(['mi_asistencia' => ['ver', 'ver_todas_asistencias']]);
+        $reader = $this->createUser($role, null);
+        $this->assignMineScope($reader, $mine);
+        $this->withSession($this->sessionFor($reader));
+
+        $this->get(route('mi-asistencia.show', $group))->assertOk()->assertViewHas('canRegister', false)->assertViewHas('canClose', false);
+        $this->travelTo(CarbonImmutable::parse('2026-08-19 07:00:01', 'America/Lima'));
+        $this->postMark($group, $reader, $detail, ['estado' => 'PRESENTE'])->assertForbidden();
+        $this->postJson(route('mi-asistencia.marcar-todos', $group))->assertForbidden();
+        $this->postJson(route('mi-asistencia.cerrar', $group))->assertForbidden();
+        $this->postJson(route('mi-asistencia.marcar-mobile', $group), [
+            'grupo_trabajo_detalle_id' => $detail,
+            'estado' => 'PRESENTE',
+        ])->assertForbidden();
+        $this->assertDatabaseMissing('asistencia_encabezado', ['grupo_trabajo_id' => $group]);
+        $this->assertDatabaseCount('faltas', 0);
+    }
+
+    public function test_movil_selecciona_el_grupo_unico_y_marca_el_detalle_propio_con_hora_del_servidor(): void
+    {
+        [$group, $user, $otherDetail] = $this->horarioScenario();
+        $ownDetail = $this->ownDetail($group, $user);
+        $this->withSession($this->sessionFor($user));
+
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19', 'turno' => 'DIA']))
+            ->assertOk()->assertViewHas('grupo.detalle_propio_id', $ownDetail)
+            ->assertSee('data-detail-id="'.$ownDetail.'"', false);
+        $this->postJson(route('mi-asistencia.marcar-mobile', $group), [
+            'grupo_trabajo_detalle_id' => $otherDetail,
+            'estado' => 'PRESENTE',
+        ])->assertForbidden();
+        $this->travelTo(CarbonImmutable::parse('2026-08-19 07:01:00', 'America/Lima'));
+        $this->postJson(route('mi-asistencia.marcar-mobile', $group), [
+            'grupo_trabajo_detalle_id' => $ownDetail,
+            'estado' => 'PRESENTE',
+        ])->assertOk()->assertJsonPath('estado', 'TARDANZA')->assertJsonPath('hora_marcado', '07:01:00');
+        $this->getJson(route('mi-asistencia.estado', ['id' => $group, 'propio' => 1]))
+            ->assertOk()->assertJsonPath('propio.id', $ownDetail)
+            ->assertJsonPath('propio.estado', 'TARDANZA')->assertJsonMissingPath('integrantes');
+    }
+
+    public function test_movil_requiere_elegir_grupo_y_revalida_fecha_turno_y_acceso(): void
+    {
+        [$group, $user] = $this->horarioScenario();
+        $original = DB::table('grupo_trabajo')->where('id', $group)->first();
+        $other = $this->createGroup($original->rq_mina_id, $original->destino_id, $user, $original->supervisor_id, 'SERVICIO NOCHE', 'NOCHE');
+        $this->withSession($this->sessionFor($user));
+
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-18']))
+            ->assertOk()->assertSee('No hay grupos');
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19']))
+            ->assertOk()->assertSee('Elige un grupo')->assertDontSee('id="mobMarkBtn"', false);
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19', 'turno' => 'NOCHE']))
+            ->assertOk()->assertViewHas('grupo.id', $other);
+        $this->get(route('mi-asistencia.show', ['id' => $other, 'turno' => 'NOCHE', 'volver_movil' => 1]))
+            ->assertOk()->assertViewHas('returnUrl', route('mi-asistencia.mobile', [
+                'fecha' => '2026-08-19',
+                'turno' => 'NOCHE',
+                'grupo_id' => $other,
+            ]));
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19', 'grupo_id' => $group]))
+            ->assertOk()->assertViewHas('grupo.id', $group);
+
+        DB::table('grupo_trabajo')->where('id', $other)->update(['supervisor_id' => null]);
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19', 'grupo_id' => $other]))
+            ->assertOk()->assertSee('El grupo seleccionado ya no está disponible')->assertDontSee('SERVICIO NOCHE');
+        $this->getJson(route('mi-asistencia.mobile', ['fecha' => 'ayer', 'turno' => 'TARDE', 'grupo_id' => 'abc']))
+            ->assertUnprocessable()->assertJsonValidationErrors(['fecha', 'turno', 'grupo_id']);
+    }
+
+    public function test_movil_conserva_consulta_si_el_grupo_esta_cerrado_cancelado_o_sin_detalle_propio(): void
+    {
+        [$group, $user] = $this->horarioScenario();
+        $detail = $this->ownDetail($group, $user);
+        $this->withSession($this->sessionFor($user));
+        $page = route('mi-asistencia.mobile', ['fecha' => '2026-08-19', 'grupo_id' => $group]);
+
+        DB::table('grupo_trabajo_detalle')->where('id', $detail)->update(['estado_distribucion' => 'RETIRADO']);
+        $this->get($page)->assertOk()->assertSee('No figuras como integrante activo')->assertDontSee('id="mobMarkBtn"', false);
+        DB::table('grupo_trabajo_detalle')->where('id', $detail)->update(['estado_distribucion' => 'ASIGNADO']);
+        $this->postJson(route('mi-asistencia.cerrar', $group))->assertOk();
+        $this->get($page)->assertOk()->assertSee('Asistencia cerrada')->assertDontSee('id="mobMarkBtn"', false);
+        $this->postJson(route('mi-asistencia.marcar-mobile', $group), [
+            'grupo_trabajo_detalle_id' => $detail,
+            'estado' => 'PRESENTE',
+        ])->assertConflict();
+        DB::table('grupo_trabajo')->where('id', $group)->update(['estado' => 'CANCELADO']);
+        $this->get($page)->assertOk()->assertSee('Grupo cancelado')->assertDontSee('id="mobMarkBtn"', false);
+    }
+
+    public function test_cuenta_sin_vinculo_consulta_un_grupo_sin_responsable_pero_no_puede_registrar(): void
+    {
+        $role = $this->createRole([
+            'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+            'asistencias' => ['registrar'],
+        ]);
+        $user = $this->createUser($role, null);
+        $mine = $this->createMine();
+        $rq = $this->createRqMina($mine, $user);
+        $this->assignMineScope($user, $mine);
+        $group = $this->createGroup($rq, $mine, $user, null, 'GRUPO SIN RESPONSABLE');
+        $detail = $this->addMember($group, $this->createPersonal('INTEGRANTE DE PRUEBA'));
+        $this->withSession($this->sessionFor($user));
+
+        $this->get(route('mi-asistencia.mobile', ['fecha' => '2026-08-19']))
+            ->assertOk()->assertSee('vincule tu cuenta con un trabajador')->assertDontSee('id="mobMarkBtn"', false);
+        $this->get(route('mi-asistencia.show', $group))
+            ->assertOk()->assertViewHas('canRegister', false)->assertSee('Solicita la asignación de un responsable');
+        $this->postMark($group, $user, $detail, ['estado' => 'PRESENTE'])->assertUnprocessable();
+        $this->postJson(route('mi-asistencia.marcar-mobile', $group), [
+            'grupo_trabajo_detalle_id' => $detail,
+            'estado' => 'PRESENTE',
+        ])->assertForbidden();
+        $this->assertDatabaseMissing('asistencia_encabezado', ['grupo_trabajo_id' => $group]);
+    }
+
+    private function ownDetail(string $group, string $user): string
+    {
+        return DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $group)
+            ->where('personal_id', DB::table('usuarios')->where('id', $user)->value('personal_id'))->value('id');
+    }
+
+    public function test_permiso_registrar_marca_grupo_sin_responsable_con_su_identidad_y_no_cierra(): void
     {
         $roleId = $this->createRole([
             'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+            'asistencias' => ['registrar'],
         ]);
         $personalId = $this->createPersonal('USUARIO ASISTENCIA GLOBAL');
         $workerId = $this->createPersonal('TRABAJADOR SIN RESPONSABLE');
@@ -259,12 +386,14 @@ class MiAsistenciaWebTest extends TestCase
             'id' => $groupId,
             'supervisor_id' => null,
         ]);
+        $this->postJson(route('mi-asistencia.cerrar', $groupId))->assertForbidden();
     }
 
-    public function test_usuario_global_cierra_grupo_sin_responsable_y_registra_falta_con_su_identidad(): void
+    public function test_permiso_cerrar_registra_falta_con_su_identidad_pero_no_marca(): void
     {
         $roleId = $this->createRole([
             'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+            'asistencias' => ['cerrar'],
         ]);
         $personalId = $this->createPersonal('USUARIO CIERRE GLOBAL');
         $workerId = $this->createPersonal('TRABAJADOR AUSENTE SIN RESPONSABLE');
@@ -273,7 +402,9 @@ class MiAsistenciaWebTest extends TestCase
         $rqMinaId = $this->createRqMina($minaId, $userId);
         $this->assignMineScope($userId, $minaId);
         $groupId = $this->createGroup($rqMinaId, $minaId, $userId, null, 'CIERRE SIN RESPONSABLE');
-        $this->addMember($groupId, $workerId);
+        $detailId = $this->addMember($groupId, $workerId);
+
+        $this->postMark($groupId, $userId, $detailId, ['estado' => 'PRESENTE'])->assertForbidden();
 
         $this->withSession([...$this->sessionFor($userId), '_token' => 'mi-asistencia-csrf'])
             ->withHeader('X-CSRF-TOKEN', 'mi-asistencia-csrf')
@@ -369,7 +500,7 @@ class MiAsistenciaWebTest extends TestCase
         return $id;
     }
 
-    private function createUser(string $roleId, string $personalId): string
+    private function createUser(string $roleId, ?string $personalId): string
     {
         $id = (string) Str::uuid();
         DB::table('usuarios')->insert([

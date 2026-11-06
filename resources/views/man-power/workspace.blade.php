@@ -6,10 +6,11 @@
     use App\Support\Rbac\PermissionMatrix;
 
     $permissions = session('user.permissions', []);
-    $canCreate = PermissionMatrix::allowsDirect($permissions, 'man_power', 'crear');
-    $canAssign = PermissionMatrix::allowsDirect($permissions, 'man_power', 'asignar');
-    $canUpdate = PermissionMatrix::allowsDirect($permissions, 'man_power', 'actualizar');
-    $canDuplicate = PermissionMatrix::allowsDirect($permissions, 'man_power', 'duplicar');
+    $workspaceRoute = ($standaloneDashboard ?? false) ? 'inicio.dashboard.man_power' : 'man-power.grupos';
+    $canCreate = !($standaloneDashboard ?? false) && PermissionMatrix::allowsDirect($permissions, 'man_power', 'crear');
+    $canAssign = !($standaloneDashboard ?? false) && PermissionMatrix::allowsDirect($permissions, 'man_power', 'asignar');
+    $canUpdate = !($standaloneDashboard ?? false) && PermissionMatrix::allowsDirect($permissions, 'man_power', 'actualizar');
+    $canDuplicate = !($standaloneDashboard ?? false) && PermissionMatrix::allowsDirect($permissions, 'man_power', 'duplicar');
     $contextsByTurn = $contextsByTurn ?? [];
     $day = $contextsByTurn['DIA'] ?? $context ?? [];
     $night = $contextsByTurn['NOCHE'] ?? $context ?? [];
@@ -87,7 +88,7 @@
 <div class="mpw-page" id="manPowerWorkspace">
     <header class="mpw-page-head">
         <div>
-            <a class="mpw-back" href="{{ route('man-power.index', ['fecha' => $fecha]) }}">Volver a paradas</a>
+            @allowed('man_power', 'ver')<a class="mpw-back" href="{{ route('man-power.index', ['fecha' => $fecha]) }}">Volver a paradas</a>@endallowed
             <h1>{{ $parada['destino_nombre'] ?? $parada['mina_nombre'] ?? 'Man Power' }}</h1>
             @if($isPeriodSummary)
                 <p>{{ $parada['mina_nombre'] ?? 'Sin mina' }} - {{ $parada['area'] ?? 'Sin area' }} - Periodo {{ \Illuminate\Support\Carbon::parse($periodStart)->format('d/m/Y') }} al {{ \Illuminate\Support\Carbon::parse($periodEnd)->format('d/m/Y') }}</p>
@@ -108,8 +109,18 @@
     @endif
 
     <section class="mpw-toolbar">
-        <form method="GET" action="{{ route('man-power.grupos') }}" class="mpw-context-form" id="mpwContextForm">
-            <input type="hidden" name="rq_mina_id" value="{{ $selectedRqMinaId }}">
+        <form method="GET" action="{{ route($workspaceRoute) }}" class="mpw-context-form" id="mpwContextForm">
+            @if($standaloneDashboard ?? false)
+                <label><span>Parada</span><select name="rq_mina_id" data-auto-submit>
+                    @forelse($paradas as $item)
+                        <option value="{{ $item['rq_mina_id'] }}" @selected($selectedRqMinaId === $item['rq_mina_id'])>{{ $item['mina_nombre'] ?? $item['destino_nombre'] ?? 'Parada' }} · {{ $item['area'] ?? '' }}</option>
+                    @empty
+                        <option value="">Sin paradas dentro de tu alcance</option>
+                    @endforelse
+                </select></label>
+            @else
+                <input type="hidden" name="rq_mina_id" value="{{ $selectedRqMinaId }}">
+            @endif
             <input type="hidden" name="vista" value="{{ $activeView }}">
             <input type="hidden" name="dashboard_modo" value="{{ $dashboardMode }}">
             <label>
@@ -131,19 +142,19 @@
                     @endforelse
                 </select>
             </label>
-            @if($isPeriodSummary)
+            @if($isPeriodSummary && !($standaloneDashboard ?? false))
                 <input name="fecha" type="hidden" value="{{ $fecha }}">
             @else
                 <label>
                     <span>Dia de trabajo</span>
-                    <input name="fecha" type="date" value="{{ $fecha }}" @if($dateMin) min="{{ $dateMin }}" @endif @if($dateMax) max="{{ $dateMax }}" @endif data-auto-submit>
+                    <input name="fecha" type="date" value="{{ $fecha }}" @if($dateMin && !($standaloneDashboard ?? false)) min="{{ $dateMin }}" @endif @if($dateMax && !($standaloneDashboard ?? false)) max="{{ $dateMax }}" @endif data-auto-submit>
                 </label>
             @endif
         </form>
 
         <nav class="mpw-tabs" aria-label="Vistas de Man Power">
-            @foreach(['dashboard' => 'Dashboard', 'seleccion' => 'Seleccion', 'grupos' => 'Grupos'] as $viewKey => $viewLabel)
-                <a href="{{ route('man-power.grupos', array_merge($baseQuery, ['vista' => $viewKey])) }}" class="{{ $activeView === $viewKey ? 'is-active' : '' }}" @if($activeView === $viewKey) aria-current="page" @endif>{{ $viewLabel }}</a>
+            @foreach((($standaloneDashboard ?? false) ? ['dashboard' => 'Dashboard'] : ['dashboard' => 'Dashboard', 'seleccion' => 'Seleccion', 'grupos' => 'Grupos']) as $viewKey => $viewLabel)
+                <a href="{{ route($workspaceRoute, array_merge($baseQuery, ['vista' => $viewKey])) }}" class="{{ $activeView === $viewKey ? 'is-active' : '' }}" @if($activeView === $viewKey) aria-current="page" @endif>{{ $viewLabel }}</a>
             @endforeach
         </nav>
     </section>
@@ -158,7 +169,7 @@
             </div>
             <nav aria-label="Formas de visualizar el dashboard">
                 @foreach($dashboardModes as $modeKey => $mode)
-                    <a href="{{ route('man-power.grupos', array_merge($baseQuery, ['vista' => 'dashboard', 'dashboard_modo' => $modeKey])) }}"
+                    <a href="{{ route($workspaceRoute, array_merge($baseQuery, ['vista' => 'dashboard', 'dashboard_modo' => $modeKey])) }}"
                        class="{{ $dashboardMode === $modeKey ? 'is-active' : '' }}"
                        @if($dashboardMode === $modeKey) aria-current="page" @endif>
                         <strong>{{ $mode['label'] }}</strong>
@@ -253,7 +264,7 @@
                             <div><dt>Disponibles</dt><dd>{{ $turnSummary['total_disponible'] ?? 0 }}</dd></div>
                             <div><dt>Variacion</dt><dd>{{ $required === 0 ? '-' : (($difference > 0 ? '+' : '').$difference) }}</dd></div>
                         </dl>
-                        <a href="{{ route('man-power.grupos', array_merge($baseQuery, ['vista' => 'seleccion', 'turno' => $turnKey])) }}">Organizar turno</a>
+                        @unless($standaloneDashboard ?? false)<a href="{{ route($workspaceRoute, array_merge($baseQuery, ['vista' => 'seleccion', 'turno' => $turnKey])) }}">Organizar turno</a>@endunless
                     </article>
                 @endforeach
             </div>
@@ -521,6 +532,7 @@
                                             <div class="mpw-slot-empty">Arrastra aqui el personal de {{ strtolower($turnLabel) }}.</div>
                                         @endforelse
                                     </div>
+                                    <footer><a class="btn btn-sm btn-outline" href="{{ route('man-power.grupo-detalle', $group['id']) }}#historial-integrantes">Ver historial</a></footer>
                                 </article>
                             @empty
                                 <div class="mpw-no-group">
@@ -559,6 +571,7 @@
                         </div>
                         <footer>
                             <a href="{{ route('man-power.grupo-detalle', $group['id']) }}">Ver detalle</a>
+                            <a href="{{ route('man-power.grupo-detalle', $group['id']) }}#historial-integrantes">Ver historial</a>
                         </footer>
                     </article>
                 @empty
@@ -569,6 +582,7 @@
     @endif
 </div>
 
+@unless($standaloneDashboard ?? false)
 <div class="mpw-modal is-hidden" id="mpwCopyDayModal" aria-hidden="true">
     <div class="mpw-modal-panel mpw-copy-day-modal" role="dialog" aria-modal="true" aria-labelledby="mpwCopyDayTitle">
         <header>
@@ -583,7 +597,7 @@
             <input type="hidden" name="rq_mina_actividad_destino_id" value="{{ $selectedActivityId }}">
             <input type="hidden" name="fecha_origen" value="" data-paste-source-date>
             <input type="hidden" name="fecha_destino" value="{{ $fecha }}">
-            <input type="hidden" name="copiar_integrantes" value="1">
+            <input type="hidden" name="copiar_integrantes" value="{{ $canAssign ? '1' : '0' }}">
             <input type="hidden" name="sobrescribir_destino" value="1">
             <div class="mpw-copy-day-content">
                 <div class="mpw-copy-day-source"><span>Copiado desde</span><strong data-paste-source-label>-</strong><small data-paste-source-activity>SAIT de origen</small></div>
@@ -608,7 +622,7 @@
             <input type="hidden" name="rq_mina_actividad_id" value="{{ $selectedActivityId }}">
             <input type="hidden" name="fecha_origen" value="{{ $fecha }}">
             <input type="hidden" name="alcance" value="" data-copy-range-scope>
-            <input type="hidden" name="copiar_integrantes" value="1">
+            <input type="hidden" name="copiar_integrantes" value="{{ $canAssign ? '1' : '0' }}">
             <input type="hidden" name="sobrescribir_destino" value="1">
             <div class="mpw-copy-range-content">
                 <div class="mpw-copy-day-source"><span>Grupo base</span><strong>{{ \Illuminate\Support\Carbon::parse($fecha)->format('d/m/Y') }}</strong><small>{{ $selectedActivityLabel }}</small></div>
@@ -668,6 +682,7 @@
         </form>
     </div>
 </div>
+@endunless
 <div class="mpw-toast-stack" id="mpwToastStack" aria-live="polite"></div>
 @endsection
 

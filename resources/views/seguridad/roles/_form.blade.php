@@ -73,7 +73,7 @@
             <div data-permission-manager>
                 <div class="permission-toolbar">
                     <div class="permission-toolbar-search">
-                        <label class="form-label" for="permission-module-search">Buscar modulo</label>
+                        <label class="form-label" for="permission-module-search">Buscar módulo o acción</label>
                         <input id="permission-module-search" type="search" class="form-control" placeholder="Modulo o accion" data-permission-search>
                     </div>
                     <div class="permission-toolbar-actions">
@@ -89,16 +89,32 @@
                             $viewAction = in_array('ver', $availableActions, true) ? 'ver' : null;
                             $extraActions = array_values(array_filter($availableActions, static fn (string $action): bool => $action !== 'ver'));
                             $searchText = strtolower($module . ' ' . $label . ' ' . implode(' ', array_map(static fn (string $action): string => \App\Support\Rbac\PermissionCatalog::actionLabel($action), $availableActions)));
+                            if ($module === 'epps') {
+                                $searchText .= ' logistica registrar entrega registrar devolucion firma';
+                            }
                         @endphp
-                        <section class="permission-screen-card" data-permission-card data-search-text="{{ $searchText }}">
+                        <section id="permission-module-{{ $module }}" class="permission-screen-card" data-permission-card data-search-text="{{ $searchText }}">
                             <div class="permission-screen-head">
                                 <div>
-                                    <h3 class="permission-screen-title">{{ $label }}</h3>
+                                    <h3 class="permission-screen-title" tabindex="-1">{{ $label }}</h3>
                                     <div class="permission-screen-key">{{ $module }}</div>
                                 </div>
                                 <span class="permission-screen-count">{{ count($availableActions) }} accion{{ count($availableActions) === 1 ? '' : 'es' }}</span>
                             </div>
                             <div class="permission-action-list">
+                                @if($module === 'logistica')
+                                    <div class="permission-action-empty">
+                                        Para habilitar <strong>Registrar entrega</strong> y <strong>Registrar devolución</strong>, configura los permisos de EPPs.
+                                        <a href="#permission-module-epps" data-permission-target="epps">Ir a permisos de entregas y devoluciones</a>.
+                                    </div>
+                                @elseif($module === 'epps')
+                                    <div class="permission-action-empty">
+                                        <strong>Entregas y devoluciones en Logística.</strong>
+                                        Para buscar trabajadores y registrar, marca <strong>Ver módulo</strong> y <strong>Registrar entrega y devolución</strong>.
+                                        Para finalizar con firma, marca <strong>Confirmar entrega firmada</strong> y/o <strong>Confirmar devolución firmada</strong> según la tarea del operador.
+                                        El acceso a la pantalla se configura en <strong>Logística → Ver entregas y cambios de EPP</strong>.
+                                    </div>
+                                @endif
                                 @if($viewAction)
                                     <label class="permission-action-toggle is-module-view">
                                         <input type="checkbox" name="permisos[{{ $module }}][{{ $viewAction }}]" value="1" data-view-toggle {{ old("permisos.$module.$viewAction", $permissions[$module][$viewAction] ?? false) ? 'checked' : '' }}>
@@ -110,7 +126,7 @@
                                 @forelse($extraActions as $action)
                                     <label class="permission-action-toggle">
                                         <input type="checkbox" name="permisos[{{ $module }}][{{ $action }}]" value="1" data-action-toggle {{ old("permisos.$module.$action", $permissions[$module][$action] ?? false) ? 'checked' : '' }}>
-                                        <span>{{ \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</span>
+                                        <span>{{ $module === 'epps' && $action === 'registrar' ? 'Registrar entrega y devolución' : \App\Support\Rbac\PermissionCatalog::actionLabel($action) }}</span>
                                     </label>
                                 @empty
                                     <div class="permission-action-empty">Sin acciones adicionales.</div>
@@ -241,12 +257,15 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     if (searchInput) {
+        const normalizeSearch = function (value) {
+            return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        };
         searchInput.addEventListener('input', function () {
-            const term = searchInput.value.trim().toLowerCase();
+            const term = normalizeSearch(searchInput.value);
             let visibleCount = 0;
 
             cards.forEach(function (card) {
-                const matches = term === '' || (card.dataset.searchText || '').includes(term);
+                const matches = term === '' || normalizeSearch(card.dataset.searchText || '').includes(term);
                 card.classList.toggle('is-hidden', !matches);
                 if (matches) {
                     visibleCount++;
@@ -256,6 +275,20 @@ document.addEventListener('DOMContentLoaded', function () {
             if (emptyState) {
                 emptyState.hidden = visibleCount > 0;
             }
+        });
+
+        manager.querySelectorAll('[data-permission-target]').forEach(function (link) {
+            link.addEventListener('click', function (event) {
+                const target = document.getElementById('permission-module-' + link.dataset.permissionTarget);
+                if (!target) {
+                    return;
+                }
+                event.preventDefault();
+                searchInput.value = link.dataset.permissionTarget;
+                searchInput.dispatchEvent(new Event('input'));
+                target.querySelector('.permission-screen-title').focus({ preventScroll: true });
+                target.scrollIntoView({ block: 'start' });
+            });
         });
     }
 

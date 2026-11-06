@@ -55,6 +55,17 @@ class RQProsergeService
             $query->where('rq_mina_id', $filters['rq_mina_id']);
         }
 
+        if (!empty($filters['fecha_desde']) || !empty($filters['fecha_hasta'])) {
+            $query->whereHas('rqMina', function ($parada) use ($filters): void {
+                if (!empty($filters['fecha_desde'])) {
+                    $parada->whereDate('fecha_fin', '>=', $filters['fecha_desde']);
+                }
+                if (!empty($filters['fecha_hasta'])) {
+                    $parada->whereDate('fecha_inicio', '<=', $filters['fecha_hasta']);
+                }
+            });
+        }
+
         if (!$this->policy->hasUnrestrictedMinaAccess($usuario)) {
             $minaIds = $usuario->scopesMina()->pluck('mina_id');
             $query->whereIn('mina_id', $minaIds);

@@ -659,13 +659,20 @@ class PersonalContratoService
             ]);
         }
 
-        $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
-
         return DB::transaction(function () use ($personal, $contract, $payload, $user, $fechaInicio, $fechaFin, $motivo): PersonalContrato {
-            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->findOrFail($personal->id);
+            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->lockForUpdate()->findOrFail($personal->id);
             $contract = PersonalContrato::query()
                 ->where('personal_id', $personal->id)
+                ->lockForUpdate()
                 ->findOrFail($contract->id);
+            if ($contract->estado === PersonalContrato::ESTADO_ANULADO) {
+                throw ValidationException::withMessages(['contrato' => 'No se puede corregir un contrato anulado.']);
+            }
+            if ($contract->estado === PersonalContrato::ESTADO_PREPARACION && $contract->hasSignedFile()
+                && ($fechaInicio !== $contract->fecha_inicio?->toDateString() || $fechaFin !== $contract->fecha_fin?->toDateString())) {
+                throw ValidationException::withMessages(['contrato' => 'El PDF firmado corresponde al periodo registrado. Para cambiarlo, anula la preparación y registra el contrato correcto.']);
+            }
+            $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
             $before = $this->contractAuditPayload($contract);
 
             $contract->forceFill([
@@ -847,6 +854,14 @@ class PersonalContratoService
                 ->with(['fichaColaborador', 'minas', 'contratoDatos'])
                 ->lockForUpdate()
                 ->findOrFail($personal->id);
+
+            $signedPreparation = PersonalContrato::query()->where('personal_id', $personal->id)
+                ->where('estado', PersonalContrato::ESTADO_PREPARACION)
+                ->whereNotNull('signed_at')->whereNotNull('signed_contract_path')->where('signed_contract_path', '<>', '')
+                ->exists();
+            if ($signedPreparation) {
+                throw ValidationException::withMessages(['contrato' => 'Ya existe un contrato firmado pendiente de activar. Revisa ese contrato antes de preparar otro ingreso.']);
+            }
 
             $datos = app(PersonalContratoDatoService::class)->ensureForPersonal($personal, [
                 'fecha_inicio_contrato' => $fechaInicio,
@@ -1097,7 +1112,7 @@ class PersonalContratoService
         });
     }
 
-    public function uploadSignedFileForContract(Personal $personal, PersonalContrato $contract, UploadedFile $file, Usuario $user): PersonalContrato
+    public function uploadSignedFileForContract(Personal $personal, PersonalContrato $contract, UploadedFile $file, Usuario $user, bool $allowUnsignedCurrent = false): PersonalContrato
     {
         if ((string) $contract->personal_id !== (string) $personal->id) {
             throw ValidationException::withMessages([
@@ -1105,98 +1120,168 @@ class PersonalContratoService
             ]);
         }
 
-        if (strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_ANULADO) {
-            throw ValidationException::withMessages([
-                'contrato' => 'No se puede cargar PDF en un contrato anulado.',
-            ]);
+        $expectedStart = $contract->fecha_inicio?->toDateString();
+        $expectedEnd = $contract->fecha_fin?->toDateString();
+        $expectedTerms = $this->signedTermsRevision($contract);
+        $path = null;
+
+        try {
+            $signed = DB::transaction(function () use ($personal, $contract, $file, $user, $allowUnsignedCurrent, $expectedStart, $expectedEnd, $expectedTerms, &$path): PersonalContrato {
+                $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->lockForUpdate()->findOrFail($personal->id);
+                $contract = PersonalContrato::query()->where('personal_id', $personal->id)->lockForUpdate()->findOrFail($contract->id);
+                $wasPreparation = strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_PREPARACION;
+                $unsignedCurrent = $allowUnsignedCurrent && $contract->estado === PersonalContrato::ESTADO_ACTIVO && !$contract->hasSignedFile();
+                if (!$this->canUploadSignedFileForContract($contract) && !$unsignedCurrent) {
+                    throw ValidationException::withMessages([
+                        'contrato' => 'El contrato ya esta registrado en el historial y no puede modificarse.',
+                    ]);
+                }
+                $fechaInicio = $contract->fecha_inicio?->toDateString();
+                $fechaFin = $contract->fecha_fin?->toDateString();
+                if ($fechaInicio !== $expectedStart || $fechaFin !== $expectedEnd
+                    || !hash_equals($expectedTerms, $this->signedTermsRevision($contract))) {
+                    throw ValidationException::withMessages([
+                        'contrato' => 'El periodo del contrato cambió. Vuelve a revisar el contrato antes de adjuntar el PDF.',
+                    ]);
+                }
+                if ($fechaInicio) {
+                    $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $contract->id);
+                }
+
+                $today = Carbon::today(config('app.display_timezone', 'America/Lima'))->toDateString();
+                if ($fechaFin !== null && $fechaFin < $today) {
+                    throw ValidationException::withMessages(['contrato' => 'Este periodo ya terminó. Usa la regularización de contratos históricos.']);
+                }
+
+                $path = $file->storeAs(
+                    'personal_contratos/' . $personal->id,
+                    'contrato_firmado_' . $this->contractFileSlug($contract) . '_' . Str::uuid() . '.pdf',
+                    'local',
+                );
+                if (!$path) {
+                    throw ValidationException::withMessages(['contrato' => 'No se pudo guardar el PDF firmado. Intenta otra vez.']);
+                }
+
+                $data = [
+                    'signed_at' => now(),
+                    'signed_by_usuario_id' => $user->id,
+                    'signed_contract_path' => $path,
+                    'signed_contract_original_name' => $file->getClientOriginalName(),
+                    'signed_contract_mime' => $file->getMimeType(),
+                    'signed_contract_size' => $file->getSize(),
+                    'archivo_pendiente_regularizacion' => false,
+                    'personal_ficha_id' => $personal->fichaColaborador?->id ?: $contract->personal_ficha_id,
+                ];
+
+                $contract->forceFill($data)->save();
+
+                if ($fechaInicio === null || $fechaInicio <= $today) {
+                    $this->applySignedContractToPersonal($personal, $contract, $user, $wasPreparation);
+                }
+
+                return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
+            });
+        } catch (\Throwable $exception) {
+            if (is_string($path)) {
+                Storage::disk('local')->delete($path);
+            }
+
+            throw $exception;
         }
 
-        if (!$this->canUploadSignedFileForContract($contract)) {
-            throw ValidationException::withMessages([
-                'contrato' => 'El contrato ya esta registrado en el historial y no puede modificarse.',
-            ]);
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit(fn () => $this->operationalNotifications->contratoFirmado($personal, $signed, $user));
+        } else {
+            $this->operationalNotifications->contratoFirmado($personal, $signed, $user);
         }
-
-        $path = $file->storeAs(
-            'personal_contratos/' . $personal->id,
-            'contrato_firmado_' . $this->contractFileSlug($contract) . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.pdf',
-            'local',
-        );
-
-        $signed = DB::transaction(function () use ($personal, $contract, $file, $user, $path): PersonalContrato {
-            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->findOrFail($personal->id);
-            $contract = PersonalContrato::query()
-                ->where('personal_id', $personal->id)
-                ->findOrFail($contract->id);
-            $wasPreparation = strtoupper((string) $contract->estado) === PersonalContrato::ESTADO_PREPARACION;
-            $isEditableContract = $contract->isEditable();
-            $fechaInicio = optional($contract->fecha_inicio)->toDateString();
-            if ($fechaInicio) {
-                $this->assertContractPeriodAvailable($personal, $fechaInicio, optional($contract->fecha_fin)->toDateString(), $contract->id);
-            }
-
-            $data = [
-                'signed_at' => now(),
-                'signed_by_usuario_id' => $user->id,
-                'signed_contract_path' => $path,
-                'signed_contract_original_name' => $file->getClientOriginalName(),
-                'signed_contract_mime' => $file->getMimeType(),
-                'signed_contract_size' => $file->getSize(),
-                'archivo_pendiente_regularizacion' => false,
-                'personal_ficha_id' => $personal->fichaColaborador?->id ?: $contract->personal_ficha_id,
-            ];
-
-            if ($wasPreparation) {
-                $data['estado'] = PersonalContrato::ESTADO_ACTIVO;
-                $data['activado_at'] = now();
-                $data['activado_by_usuario_id'] = $user->id;
-            }
-
-            $contract->forceFill($data)->save();
-
-            if ($isEditableContract) {
-                $contractDataService = app(PersonalContratoDatoService::class);
-                $datos = $contractDataService->ensureForPersonal($personal, [
-                    'fecha_inicio_contrato' => optional($contract->fecha_inicio)->toDateString(),
-                    'fecha_fin_contrato' => optional($contract->fecha_fin)->toDateString(),
-                    'puesto' => $contract->puesto ?: $personal->puesto,
-                    'sueldo_num' => $contract->remuneracion,
-                    'sueldo_hora_paradas' => $contract->costo_hora,
-                ], $user);
-
-                $datos->forceFill([
-                    'fecha_inicio_contrato' => optional($contract->fecha_inicio)->toDateString() ?: $datos->fecha_inicio_contrato,
-                    'fecha_fin_contrato' => optional($contract->fecha_fin)->toDateString(),
-                    'puesto' => $contract->puesto ?: $datos->puesto,
-                    'sueldo_num' => $contract->remuneracion ?: $datos->sueldo_num,
-                    'sueldo_hora_paradas' => $contract->costo_hora ?: $datos->sueldo_hora_paradas,
-                    'fecha_firma' => optional($contract->signed_at)->toDateString(),
-                    'signed_at' => $contract->signed_at,
-                    'signed_contract_path' => $contract->signed_contract_path,
-                    'signed_contract_original_name' => $contract->signed_contract_original_name,
-                    'signed_contract_mime' => $contract->signed_contract_mime,
-                    'signed_contract_size' => $contract->signed_contract_size,
-                    'updated_by_usuario_id' => $user->id,
-                ])->save();
-            }
-
-            if ($wasPreparation && strtoupper((string) $contract->tipo_movimiento) === PersonalContrato::MOVIMIENTO_RENOVACION) {
-                $this->closeRenewedOriginContract($personal, $contract, $user);
-            }
-
-            if ($wasPreparation && strtoupper((string) $personal->estado) === PersonalContratoDatoService::PENDING_STATE) {
-                $personal->forceFill(['estado' => 'ACTIVO'])->save();
-            }
-
-            $personal = $this->reconcilePersonalStateFromContracts($personal, $user);
-            $this->markPersonalPendingSignedContract($personal, false);
-
-            return $contract->fresh(['activadoPor.personal', 'cerradoPor.personal', 'firmadoPor.personal', 'anuladoPor.personal']);
-        });
-
-        $this->operationalNotifications->contratoFirmado($personal, $signed, $user);
 
         return $signed;
+    }
+
+    public function canActivatePreparedSignedContract(PersonalContrato $contract): bool
+    {
+        $today = Carbon::today(config('app.display_timezone', 'America/Lima'))->toDateString();
+        $inicio = $contract->fecha_inicio?->toDateString();
+        $fin = $contract->fecha_fin?->toDateString();
+
+        return $contract->estado === PersonalContrato::ESTADO_PREPARACION && $contract->hasSignedFile()
+            && $inicio !== null && $inicio <= $today && ($fin === null || $fin >= $today);
+    }
+
+    public function signedTermsRevision(PersonalContrato $contract): string
+    {
+        return hash_hmac('sha256', json_encode($contract->only([
+            'id', 'personal_id', 'fecha_inicio', 'fecha_fin', 'tipo_contrato', 'puesto', 'area', 'mina',
+            'remuneracion', 'costo_hora', 'es_supervisor', 'origen_contrato_id', 'tipo_movimiento',
+            'personal_ficha_id', 'snapshot_inicial_json', 'signed_at', 'signed_contract_path',
+        ]), JSON_THROW_ON_ERROR), (string) config('app.key'));
+    }
+
+    public function activatePreparedSignedContract(Personal $personal, PersonalContrato $contract, Usuario $actor, ?string $expectedRevision = null): PersonalContrato
+    {
+        $expectedRevision ??= $this->signedTermsRevision($contract);
+
+        return DB::transaction(function () use ($personal, $contract, $actor, $expectedRevision): PersonalContrato {
+            $personal = Personal::query()->with(['fichaColaborador', 'minas', 'contratoDatos'])->lockForUpdate()->findOrFail($personal->id);
+            $locked = PersonalContrato::query()->where('personal_id', $personal->id)->lockForUpdate()->findOrFail($contract->id);
+            if (!hash_equals($expectedRevision, $this->signedTermsRevision($locked))) {
+                throw ValidationException::withMessages(['contrato' => 'El contrato o el PDF cambió. Vuelve a revisarlo.']);
+            }
+            if ($locked->estado === PersonalContrato::ESTADO_ACTIVO && $locked->hasSignedFile()) {
+                return $locked;
+            }
+            if (!$this->canActivatePreparedSignedContract($locked) || !Storage::disk('local')->exists($locked->signed_contract_path)) {
+                throw ValidationException::withMessages([
+                    'contrato' => 'El contrato debe estar firmado y dentro de su periodo para activarse.',
+                ]);
+            }
+            $this->assertContractPeriodAvailable($personal, $locked->fecha_inicio->toDateString(), $locked->fecha_fin?->toDateString(), $locked->id);
+            $this->applySignedContractToPersonal($personal, $locked, $actor, true);
+
+            return $locked->fresh();
+        });
+    }
+
+    private function applySignedContractToPersonal(Personal $personal, PersonalContrato $contract, Usuario $user, bool $activate): void
+    {
+        if ($activate) {
+            $contract->forceFill([
+                'estado' => PersonalContrato::ESTADO_ACTIVO,
+                'activado_at' => now(),
+                'activado_by_usuario_id' => $user->id,
+            ])->save();
+        }
+
+        $datos = app(PersonalContratoDatoService::class)->ensureForPersonal($personal, [
+            'fecha_inicio_contrato' => $contract->fecha_inicio?->toDateString(),
+            'fecha_fin_contrato' => $contract->fecha_fin?->toDateString(),
+            'puesto' => $contract->puesto ?: $personal->puesto,
+            'sueldo_num' => $contract->remuneracion,
+            'sueldo_hora_paradas' => $contract->costo_hora,
+        ], $user);
+        $datos->forceFill([
+            'fecha_inicio_contrato' => $contract->fecha_inicio?->toDateString() ?: $datos->fecha_inicio_contrato,
+            'fecha_fin_contrato' => $contract->fecha_fin?->toDateString(),
+            'puesto' => $contract->puesto ?: $datos->puesto,
+            'sueldo_num' => $contract->remuneracion ?: $datos->sueldo_num,
+            'sueldo_hora_paradas' => $contract->costo_hora ?: $datos->sueldo_hora_paradas,
+            'fecha_firma' => $contract->signed_at?->toDateString(),
+            'signed_at' => $contract->signed_at,
+            'signed_contract_path' => $contract->signed_contract_path,
+            'signed_contract_original_name' => $contract->signed_contract_original_name,
+            'signed_contract_mime' => $contract->signed_contract_mime,
+            'signed_contract_size' => $contract->signed_contract_size,
+            'updated_by_usuario_id' => $user->id,
+        ])->save();
+
+        if ($activate && $contract->tipo_movimiento === PersonalContrato::MOVIMIENTO_RENOVACION) {
+            $this->closeRenewedOriginContract($personal, $contract, $user);
+        }
+        if ($activate && strtoupper((string) $personal->estado) === PersonalContratoDatoService::PENDING_STATE) {
+            $personal->forceFill(['estado' => 'ACTIVO'])->save();
+        }
+        $personal = $this->reconcilePersonalStateFromContracts($personal, $user);
+        $this->markPersonalPendingSignedContract($personal, false);
     }
 
     public function canUploadSignedFileForContract(PersonalContrato $contract): bool
@@ -1526,14 +1611,44 @@ class PersonalContratoService
         $existingEquivalent = $this->findEquivalentContract($personal, $fechaInicio, $fechaFin, $isCurrent);
         $this->assertContractPeriodAvailable($personal, $fechaInicio, $fechaFin, $existingEquivalent?->id);
 
-        $storedFile = $signedFile ? $this->storeLegacySignedFile($personal, $signedFile) : null;
-        $legacyFile = !$storedFile ? $this->legacySignedFileFromContractData($datos) : null;
-        $signedData = $storedFile ?: $legacyFile;
-        if (!$signedData && $existingEquivalent?->hasSignedFile()) {
-            $signedData = $this->signedFileFromContract($existingEquivalent);
+        $signedData = $existingEquivalent ? $this->signedFileFromContract($existingEquivalent) : null;
+        if ($signedFile && $signedData) {
+            throw ValidationException::withMessages([
+                'contrato_pdf' => 'Este periodo ya tiene un contrato firmado. Conserva el archivo registrado.',
+            ]);
         }
+
+        if ($signedFile) {
+            $signedData = $this->storeLegacySignedFile($personal, $signedFile);
+            $signedData['signed_at'] = Carbon::parse($fechaInicio)->startOfDay();
+        } elseif (!$signedData && ($legacyFile = $this->legacySignedFileFromContractData($datos))) {
+            $legacyMatchesPeriod = $datos->fecha_inicio_contrato?->toDateString() === $fechaInicio
+                && $datos->fecha_fin_contrato?->toDateString() === $fechaFin;
+            $linkedToAnotherPeriod = PersonalContrato::query()
+                ->where('personal_id', $personal->id)
+                ->where('signed_contract_path', $legacyFile['path'])
+                ->where(function ($query) use ($fechaInicio, $fechaFin): void {
+                    $query->where('fecha_inicio', '<>', $fechaInicio)
+                        ->orWhere(function ($query) use ($fechaFin): void {
+                            if ($fechaFin === null) {
+                                $query->whereNotNull('fecha_fin');
+                            } else {
+                                $query->whereNull('fecha_fin')->orWhere('fecha_fin', '<>', $fechaFin);
+                            }
+                        });
+                })->exists();
+
+            if (!$legacyMatchesPeriod || $linkedToAnotherPeriod) {
+                throw ValidationException::withMessages([
+                    'contrato_pdf' => 'El PDF registrado corresponde a otro periodo. Adjunta el firmado de este periodo o prepara la renovación o el reingreso desde Contratos.',
+                ]);
+            }
+
+            $signedData = $legacyFile;
+        }
+
         if ($signedData) {
-            $signedData['signed_at'] = Carbon::parse($fechaFirma)->startOfDay();
+            $fechaFirma = Carbon::parse($signedData['signed_at'])->toDateString();
         }
         $hasSignedFile = $signedData !== null;
         $warning = null;
@@ -1591,7 +1706,7 @@ class PersonalContratoService
             if ($signedData) {
                 $update = array_merge($update, [
                     'signed_at' => $signedData['signed_at'] ?? now(),
-                    'signed_by_usuario_id' => $user->id,
+                    'signed_by_usuario_id' => $contract->signed_by_usuario_id ?: $user->id,
                     'signed_contract_path' => $signedData['path'],
                     'signed_contract_original_name' => $signedData['original_name'],
                     'signed_contract_mime' => $signedData['mime'],

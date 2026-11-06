@@ -2,14 +2,10 @@
 
 namespace App\Modules\Transporte\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
-
-class RetireTransportePasajeroRequest extends FormRequest
+class RetireTransportePasajeroRequest extends TransporteFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    protected const ACTION = 'retirar_pasajero';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN';
 
     public function rules(): array
     {

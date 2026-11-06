@@ -8,7 +8,6 @@
     $firmaActual = (string) old('firma_base64', $firmaBase64 ?? '');
     $huellaArchivo = $archivos->firstWhere('tipo', 'huella');
     $canViewSensitiveFichaData = (bool) ($canViewSensitiveFichaData ?? true);
-    $sensitiveFichaSections = ['Datos bancarios', 'Sistema pensionario'];
     $downloadRoute = fn ($archivo) => isset($ingreso) && $archivo
         ? route('personal.ingresos.archivos.download', [$ingreso->id, $archivo->id])
         : '#';
@@ -199,12 +198,12 @@
     @endif
 
     @foreach($sections as $section)
-        @if(!$canViewSensitiveFichaData && in_array($section['title'] ?? '', $sensitiveFichaSections, true))
+        @php
+            $isSensitiveFichaSection = \App\Modules\Personal\Support\PersonalFichaAccess::isSensitiveSection($section);
+        @endphp
+        @if(!$canViewSensitiveFichaData && $isSensitiveFichaSection)
             @continue
         @endif
-        @php
-            $isSensitiveFichaSection = in_array($section['title'] ?? '', $sensitiveFichaSections, true);
-        @endphp
         <section class="ficha-section">
             <div class="ficha-section-header">
                 <h2 class="ficha-section-title">{{ $section['title'] }}</h2>
@@ -252,7 +251,7 @@
                         $isConditionallyRequired = match ($key) {
                             'estado_civil_otro' => $fieldValue('estado_civil') === 'Otro',
                             'nacionalidad_otra' => $fieldValue('nacionalidad') === 'Otra',
-                            'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual === 'Otro',
+                            'pais_nacimiento_otro' => $paisNacimientoActual === 'Otro',
                             'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual !== 'Otro',
                             'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual === 'Extranjero',
                             'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual !== 'Extranjero',
@@ -515,6 +514,7 @@
         </div>
     </section>
 
+    @if($canViewSensitiveFichaData)
     <section class="ficha-section">
         <div class="ficha-section-header">
             <h2 class="ficha-section-title">Declaraciones finales</h2>
@@ -538,6 +538,7 @@
         </div>
     </section>
 
+    @endif
     @if($canViewSensitiveFichaData)
         <section class="ficha-section">
             <div class="ficha-section-header">

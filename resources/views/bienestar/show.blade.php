@@ -112,13 +112,25 @@
                                     <td>
                                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
                                             @if($canEditWellbeingBlocks)
-                                                <a href="{{ route('bienestar.bloqueos.edit', $bloqueo->id) }}" class="btn btn-outline btn-xs">Editar</a>
+                                                <a href="{{ route('bienestar.bloqueos.edit', ['bloqueoId' => $bloqueo->id, 'mes' => $month]) }}" class="btn btn-outline btn-xs">Editar</a>
                                             @endif
                                             @if($canDeleteWellbeingBlocks)
-                                            <form method="POST" action="{{ route('bienestar.bloqueos.anular', $bloqueo->id) }}" onsubmit="return confirm('¿Anular este bloqueo?');" style="display:inline;">
-                                                @csrf
-                                                <button type="submit" class="btn btn-danger btn-xs">Anular</button>
-                                            </form>
+                                                <details @if(old('bloqueo_form') === $bloqueo->id) open @endif>
+                                                    <summary class="btn btn-danger btn-xs">Anular</summary>
+                                                    <form method="POST" action="{{ route('bienestar.bloqueos.anular', $bloqueo->id) }}" style="display:grid; gap:8px; margin-top:8px;">
+                                                        @csrf
+                                                        <input type="hidden" name="mes" value="{{ $month }}">
+                                                        <input type="hidden" name="bloqueo_form" value="{{ $bloqueo->id }}">
+                                                        <label for="motivo-decision-{{ $bloqueo->id }}">Motivo de la anulación</label>
+                                                        <textarea class="form-control" name="motivo_decision" id="motivo-decision-{{ $bloqueo->id }}" rows="2" maxlength="1000" required>{{ old('bloqueo_form') === $bloqueo->id ? old('motivo_decision') : '' }}</textarea>
+                                                        @if(old('bloqueo_form') === $bloqueo->id)
+                                                            @error('motivo_decision')
+                                                                <p class="text-danger" role="alert">{{ $message }}</p>
+                                                            @enderror
+                                                        @endif
+                                                        <button type="submit" class="btn btn-danger btn-xs">Confirmar anulación</button>
+                                                    </form>
+                                                </details>
                                             @endif
                                         </div>
                                     </td>
@@ -130,6 +142,20 @@
             @endif
         </div>
     </div>
+    @if(($canEditWellbeingBlocks || $canDeleteWellbeingBlocks) && $history->isNotEmpty())
+        <section class="card" aria-labelledby="bienestar-historial-title">
+            <div class="card-header"><h2 class="card-title" id="bienestar-historial-title">Historial reciente de decisiones</h2></div>
+            <div class="card-body">
+                @foreach($history as $event)
+                    <article style="overflow-wrap:anywhere; margin-bottom:12px;">
+                        <strong>{{ $event->tipo === 'ANULADO' ? 'Anulación de bloqueo' : 'Edición de bloqueo' }}</strong>
+                        <span class="text-muted">· {{ $event->ocurrido_at->format('d/m/Y H:i') }} · {{ $event->actor?->personal?->nombre_completo ?? $event->actor?->email ?? $event->actor_id }}</span>
+                        <p style="margin:4px 0 0;">{{ $event->motivo_decision }}</p>
+                    </article>
+                @endforeach
+            </div>
+        </section>
+    @endif
     @endif
 </div>
 @endsection

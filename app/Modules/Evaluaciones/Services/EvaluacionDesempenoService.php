@@ -125,27 +125,40 @@ class EvaluacionDesempenoService
 
     public function createDaily(Usuario $usuario, array $payload): array
     {
-        $detail = AsistenciaDetalle::query()
-            ->with(['asistencia.grupoTrabajo', 'trabajador'])
+        $context = AsistenciaDetalle::query()
+            ->with('asistencia:id,grupo_trabajo_id')
             ->find($payload['asistencia_detalle_id']);
-
-        $availability = $this->dailyAvailability($usuario, $detail);
-        if (! $availability['ok']) {
-            return $availability;
+        if (! $context?->asistencia) {
+            return $this->businessError('EVAL_ATTENDANCE_NOT_FOUND', 'No se encontro la asistencia seleccionada.');
         }
 
-        $attendance = $detail->asistencia;
-
         try {
-            $item = DB::transaction(function () use ($usuario, $payload, $detail, $attendance): ?EvaluacionDesempeno {
-                Personal::query()->whereKey($detail->trabajador_id)->lockForUpdate()->firstOrFail();
+            return DB::transaction(function () use ($usuario, $payload, $context): array {
+                $groupId = $context->asistencia->grupo_trabajo_id;
+                $group = $groupId ? GrupoTrabajo::query()->whereKey($groupId)->lockForUpdate()->first() : null;
+                $attendance = AsistenciaEncabezado::query()->whereKey($context->asistencia_id)->lockForUpdate()->first();
+                $detail = $attendance ? AsistenciaDetalle::query()->where('asistencia_id', $attendance->id)
+                    ->whereKey($context->id)->lockForUpdate()->first() : null;
+
+                if (! $detail || ! $attendance || $attendance->grupo_trabajo_id !== $groupId || ($groupId && ! $group)) {
+                    return $this->businessError('EVAL_ATTENDANCE_NOT_FOUND', 'La asistencia cambio. Vuelve a consultar el registro.');
+                }
+
+                $worker = Personal::query()->whereKey($detail->trabajador_id)->lockForUpdate()->first();
+                $actor = $usuario->fresh();
+                if (! $actor || $actor->estado !== 'ACTIVO') {
+                    return $this->forbidden();
+                }
+                $detail->setRelation('trabajador', $worker);
+                $detail->setRelation('asistencia', $attendance);
+                $attendance->setRelation('grupoTrabajo', $group);
                 $exists = EvaluacionDesempeno::query()
                     ->where('asistencia_detalle_id', $detail->id)
                     ->lockForUpdate()
                     ->exists();
-
-                if ($exists) {
-                    return null;
+                $availability = $this->dailyAvailability($actor, $detail, alreadyEvaluated: $exists);
+                if (! $availability['ok']) {
+                    return $availability;
                 }
 
                 $date = Carbon::parse($attendance->fecha);
@@ -165,7 +178,7 @@ class EvaluacionDesempenoService
                     'seguridad_trabajo' => $payload['seguridad_trabajo'],
                     'total' => $this->calculateTotal($payload),
                     'observaciones' => $payload['observaciones'] ?? null,
-                    'supervisor_id' => $usuario->personal_id,
+                    'supervisor_id' => $actor->personal_id,
                     'trabajador_id' => $detail->trabajador_id,
                     'tuvo_incidencia' => $hasIncident,
                     'descripcion_incidencia' => $hasIncident ? ($payload['descripcion_incidencia'] ?? null) : null,
@@ -173,14 +186,14 @@ class EvaluacionDesempenoService
                     'asistencia_encabezado_id' => $attendance->id,
                     'destino_tipo' => $attendance->destino_tipo,
                     'destino_id' => $attendance->destino_id,
-                    'evaluado_por_usuario_id' => $usuario->id,
+                    'evaluado_por_usuario_id' => $actor->id,
                     'origen' => 'ASISTENCIA',
                 ]);
 
                 $this->promedios->refreshForTrabajador($detail->trabajador_id);
 
-                return $created;
-            });
+                return ['ok' => true, 'item' => $created];
+            }, 3);
         } catch (QueryException $exception) {
             if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
                 return $this->businessError('EVAL_DUPLICATED', 'Esta asistencia ya cuenta con una evaluacion para el trabajador.');
@@ -188,12 +201,6 @@ class EvaluacionDesempenoService
 
             throw $exception;
         }
-
-        if (! $item) {
-            return $this->businessError('EVAL_DUPLICATED', 'Esta asistencia ya cuenta con una evaluacion para el trabajador.');
-        }
-
-        return ['ok' => true, 'item' => $item];
     }
 
     public function createDirect(Usuario $usuario, array $payload): array
@@ -318,32 +325,54 @@ class EvaluacionDesempenoService
 
     public function update(Usuario $usuario, EvaluacionDesempeno $item, array $payload): array
     {
-        if (! PermissionMatrix::userCanDirectAny($usuario, 'evaluaciones', ['editar', 'actualizar'])
-            || ! $this->policy->canAccessDestino($usuario, $item->destino_tipo, $item->destino_id)
-        ) {
-            return $this->forbidden();
-        }
+        $sourceDetail = $item->asistenciaDetalle;
+        $sourceHeader = $sourceDetail?->asistencia;
 
-        if ($item->import_lote_id && $item->origen === 'HISTORICA') {
-            return $this->businessError('EVAL_HIST_READ_ONLY', 'Esta evaluacion conserva la nota historica. Su correccion requiere revision administrativa.');
-        }
+        return DB::transaction(function () use ($usuario, $item, $payload, $sourceDetail, $sourceHeader): array {
+            if ($sourceHeader?->grupo_trabajo_id) {
+                GrupoTrabajo::query()->whereKey($sourceHeader->grupo_trabajo_id)->lockForUpdate()->firstOrFail();
+            }
+            $header = $sourceHeader ? AsistenciaEncabezado::query()->whereKey($sourceHeader->id)->lockForUpdate()->first() : null;
+            $detail = $sourceDetail ? AsistenciaDetalle::query()->whereKey($sourceDetail->id)->lockForUpdate()->first() : null;
+            Personal::query()->whereKey($item->trabajador_id)->lockForUpdate()->firstOrFail();
+            $evaluation = EvaluacionDesempeno::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $actor = $usuario->fresh();
 
-        $item->fill([
-            'desempeno_trabajo' => $payload['desempeno_trabajo'],
-            'orden_limpieza' => $payload['orden_limpieza'],
-            'compromiso' => $payload['compromiso'],
-            'respuesta_emocional' => $payload['respuesta_emocional'],
-            'seguridad_trabajo' => $payload['seguridad_trabajo'],
-            'total' => $this->calculateTotal($payload),
-            'observaciones' => $payload['observaciones'] ?? null,
-            'tuvo_incidencia' => (bool) ($payload['tuvo_incidencia'] ?? false),
-            'descripcion_incidencia' => $payload['descripcion_incidencia'] ?? null,
-        ]);
-        $item->save();
+            if (! $actor || $actor->estado !== 'ACTIVO'
+                || ! PermissionMatrix::userCanDirectAny($actor, 'evaluaciones', ['editar', 'actualizar'])
+                || ! $this->policy->canAccessDestino($actor, $evaluation->destino_tipo, $evaluation->destino_id)) {
+                return $this->forbidden();
+            }
 
-        $this->promedios->refreshForTrabajador($item->trabajador_id);
+            if ($evaluation->estado_revision !== 'VALIDA') {
+                return $this->businessError('EVAL_REVISION_REQUIRED', 'Esta evaluación requiere una decisión de su evaluador en Revisiones de asistencia.');
+            }
+            if ($evaluation->asistencia_detalle_id !== $item->asistencia_detalle_id || $evaluation->trabajador_id !== $item->trabajador_id
+                || ($detail && $detail->asistencia_id !== $sourceDetail->asistencia_id)
+                || ($header && $header->grupo_trabajo_id !== $sourceHeader->grupo_trabajo_id)) {
+                return $this->businessError('EVAL_ATTENDANCE_NOT_FOUND', 'La asistencia cambio. Vuelve a consultar el registro.');
+            }
+            if ($evaluation->import_lote_id && $evaluation->origen === 'HISTORICA') {
+                return $this->businessError('EVAL_HIST_READ_ONLY', 'Esta evaluacion conserva la nota historica. Su correccion requiere revision administrativa.');
+            }
 
-        return ['ok' => true, 'item' => $item->fresh()];
+            $evaluation->fill([
+                'desempeno_trabajo' => $payload['desempeno_trabajo'],
+                'orden_limpieza' => $payload['orden_limpieza'],
+                'compromiso' => $payload['compromiso'],
+                'respuesta_emocional' => $payload['respuesta_emocional'],
+                'seguridad_trabajo' => $payload['seguridad_trabajo'],
+                'total' => $this->calculateTotal($payload),
+                'observaciones' => $payload['observaciones'] ?? null,
+                'tuvo_incidencia' => (bool) ($payload['tuvo_incidencia'] ?? false),
+                'descripcion_incidencia' => $payload['descripcion_incidencia'] ?? null,
+            ]);
+            $evaluation->save();
+
+            $this->promedios->refreshForTrabajador($evaluation->trabajador_id);
+
+            return ['ok' => true, 'item' => $evaluation->fresh()];
+        }, 3);
     }
 
     public function createSupervisor(Usuario $usuario, array $payload): array

@@ -14,6 +14,9 @@
                 <p class="page-subtitle">Selecciona primero un trabajador existente del módulo Personal.</p>
             </div>
             <div class="page-actions">
+                @if($canAssignRoles)
+                    <a href="{{ route('usuarios.lotes.create') }}" class="btn btn-outline">Crear varios</a>
+                @endif
                 <a href="{{ route('usuarios.index') }}" class="btn btn-outline">Volver</a>
             </div>
         </div>
@@ -36,48 +39,11 @@
                 <span class="card-title">1. Buscar trabajador en Personal</span>
             </div>
             <div class="card-body">
-                <form method="GET" action="{{ route('usuarios.create') }}">
-                    <div class="form-group">
-                        <label class="form-label">Buscar por nombre, DNI o puesto</label>
-                        <input type="text" name="search" class="form-control" value="{{ $search }}" placeholder="Ej. Juan, 72345678, Supervisor">
-                    </div>
-                    <div class="form-actions" style="justify-content: flex-start; margin-top: 0;">
-                        <button type="submit" class="btn btn-primary">Buscar trabajador</button>
-                    </div>
-                </form>
-
-                @if($search !== '')
-                    <div style="margin-top: 20px;">
-                        @if($trabajadores->isEmpty())
-                            <div class="empty-state" style="padding: 24px 0;">
-                                <h3 class="empty-title">Sin resultados</h3>
-                                <p class="empty-description">No existe un trabajador en Personal con ese criterio de búsqueda.</p>
-                            </div>
-                        @else
-                            <div style="display: grid; gap: 12px;">
-                                @foreach($trabajadores as $trabajador)
-                                    <div class="card" style="border: 1px solid #e5e7eb; box-shadow: none;">
-                                        <div class="card-body" style="padding: 16px; display: flex; justify-content: space-between; gap: 16px; align-items: center;">
-                                            <div>
-                                                <strong>{{ $trabajador->nombre_completo }}</strong><br>
-                                                <span style="color: var(--color-text-secondary); font-size: 13px;">
-                                                    DNI: {{ $trabajador->dni }} | {{ $trabajador->puesto ?: 'Sin puesto' }}
-                                                </span>
-                                            </div>
-                                            <div>
-                                                @if($trabajador->usuario)
-                                                    <span class="badge badge-danger">Ya tiene usuario</span>
-                                                @else
-                                                    <a href="{{ route('usuarios.create', ['search' => $search, 'trabajador_id' => $trabajador->id]) }}" class="btn btn-sm btn-primary">Seleccionar</a>
-                                                @endif
-                                            </div>
-                                        </div>
-                                    </div>
-                                @endforeach
-                            </div>
-                        @endif
-                    </div>
-                @endif
+                @include('seguridad.usuarios.partials.buscador-trabajador', [
+                    'search' => $search,
+                    'trabajadores' => $trabajadores,
+                    'modo' => 'individual',
+                ])
             </div>
         </div>
 

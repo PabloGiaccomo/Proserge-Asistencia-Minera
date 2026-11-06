@@ -101,6 +101,11 @@ class GrupoTrabajo extends Model
         return $this->hasMany(GrupoTrabajoDetalle::class, 'grupo_trabajo_id');
     }
 
+    public function movimientos(): HasMany
+    {
+        return $this->hasMany(GrupoTrabajoDetalleMovimiento::class, 'grupo_trabajo_id')->latest('id');
+    }
+
     public function asistencia(): HasOne
     {
         return $this->hasOne(AsistenciaEncabezado::class, 'grupo_trabajo_id');

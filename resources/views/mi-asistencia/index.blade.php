@@ -14,7 +14,8 @@
         <div>
             <p class="mia-eyebrow">Control operativo</p>
             <h1>Mi Asistencia</h1>
-            <p>{{ $canViewAll ? 'Consulta y gestiona las asistencias dentro de tu alcance.' : 'Registra la asistencia de los grupos donde eres responsable.' }}</p>
+            <p>{{ $canViewAll ? 'Consulta las asistencias dentro de tu alcance.' : 'Registra la asistencia de los grupos donde eres responsable.' }}</p>
+            <a class="mia-btn mia-btn-secondary" href="{{ route('mi-asistencia.mobile', ['fecha' => $fecha, 'turno' => $turno]) }}">Abrir Mi Marca</a>
         </div>
         <span class="mia-scope-badge {{ $canViewAll ? 'is-global' : 'is-own' }}">
             {{ $canViewAll ? 'Todas las asistencias' : 'Solo mis grupos' }}
@@ -103,7 +104,7 @@
                     <span class="mia-status is-{{ $grupo['responsable_pendiente'] ? 'pendiente' : strtolower($grupo['estado_asistencia']) }}">
                         {{ $grupo['responsable_pendiente'] ? ($grupo['puede_registrar'] ? 'Se registrara con tu cuenta' : 'Sin responsable asignado') : ($grupo['estado_asistencia'] === 'CERRADO' ? 'Asistencia cerrada' : ($grupo['pendientes'] > 0 ? 'Pendiente de completar' : 'Registro completo')) }}
                     </span>
-                    <a class="mia-btn mia-btn-primary" href="{{ route('mi-asistencia.show', $grupo['id']) }}">
+                    <a class="mia-btn mia-btn-primary" href="{{ route('mi-asistencia.show', ['id' => $grupo['id'], 'turno' => $turno]) }}">
                         {{ $grupo['estado_asistencia'] === 'CERRADO' ? 'Ver asistencia' : ($grupo['puede_registrar'] ? 'Tomar asistencia' : 'Revisar grupo') }}
                     </a>
                 </div>

@@ -17,7 +17,6 @@ const assert = require('node:assert/strict');
             const manifest = JSON.parse(fs.readFileSync('public/build/manifest.json', 'utf8'));
             await page.addStyleTag({ path: 'public/css/proserge-app.css' });
             await page.addStyleTag({ path: 'public/build/' + manifest['resources/css/app.css'].file });
-            await page.addStyleTag({ path: 'public/css/evaluations-dashboard.css' });
             await page.addStyleTag({ content: '*{transition:none!important;animation:none!important}' });
             const script = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].find(match => match[1].includes('data-historical-submit'));
             assert.ok(script);

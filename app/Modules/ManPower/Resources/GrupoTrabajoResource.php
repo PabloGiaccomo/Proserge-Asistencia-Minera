@@ -84,6 +84,22 @@ class GrupoTrabajoResource extends JsonResource
                 'nombre_completo' => $this->supervisor?->nombre_completo,
                 'puesto' => $this->supervisor?->puesto,
             ]),
+            'movimientos' => $this->whenLoaded('movimientos', fn (): array => $this->movimientos->map(fn ($item): array => [
+                'grupo_trabajo_detalle_id' => $item->grupo_trabajo_detalle_id,
+                'personal_id' => $item->personal_id,
+                'trabajador' => $item->personal?->nombre_completo,
+                'actor_id' => $item->actor_id,
+                'actor' => $item->actor?->personal?->nombre_completo ?? $item->actor?->email,
+                'grupo_destino_id' => $item->grupo_destino_id,
+                'asignacion_anterior_id' => $item->asignacion_anterior_id,
+                'asignacion_nueva_id' => $item->asignacion_nueva_id,
+                'tipo' => $item->tipo,
+                'origen' => $item->origen,
+                'estado_anterior' => $item->estado_anterior,
+                'estado_nuevo' => $item->estado_nuevo,
+                'motivo' => $item->motivo,
+                'ocurrido_at' => $item->ocurrido_at?->toDateTimeString(),
+            ])->all()),
             'personal' => $this->whenLoaded('detalle', function (): array {
                 return $this->detalle->map(function ($item): array {
                     $actividadPrincipal = $item->actividadesPrincipales?->firstWhere('es_principal', true);

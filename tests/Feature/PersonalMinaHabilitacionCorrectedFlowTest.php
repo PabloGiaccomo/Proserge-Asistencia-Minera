@@ -32,6 +32,31 @@ class PersonalMinaHabilitacionCorrectedFlowTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_curso_rechazado_recupera_formulario_y_nota_sin_crear_otro_intento(): void
+    {
+        $actor = Usuario::query()->findOrFail($this->createMiningOperator());
+        $service = app(PersonalMinaHabilitacionService::class);
+        $assignment = $this->assignmentWithExam($service, $actor, $this->createExam('CURSO RECUPERACION', [
+            'requiere_nota' => true, 'nota_minima' => 14, 'categoria_operativa' => 'CURSO',
+        ]));
+        $exam = $assignment->examenes->firstOrFail();
+        $fields = [
+            'fecha_realizacion' => today()->subDay()->toDateString(), 'resultado' => 'APROBADO',
+            'nota' => '', 'observacion' => 'Observación sintética de recuperación',
+        ];
+        $response = $this->withSession($this->sessionFor($actor->id))
+            ->post(route('personal.habilitacion-minera.exam-attempts.store', $exam->id), $fields);
+        $response->assertRedirect()->assertSessionHasErrors('nota')
+            ->assertSessionHas('mining_attempt_form.exam_id', $exam->id)
+            ->assertSessionHas('mining_attempt_form.worker_id', $assignment->personal_id)
+            ->assertSessionHas('mining_attempt_form.fields.observacion', $fields['observacion']);
+        $this->assertDatabaseMissing('personal_mina_examen_intentos', ['personal_mina_examen_id' => $exam->id]);
+        $this->get($response->headers->get('Location'))->assertOk()
+            ->assertViewHas('miningAttemptRecovery', fn ($recovery) => $recovery['fields']['observacion'] === $fields['observacion']);
+        $this->post(route('personal.habilitacion-minera.exam-attempts.store', $exam->id), [...$fields, 'nota' => 'quince'])
+            ->assertSessionHasErrors('nota')->assertSessionHas('mining_attempt_form.exam_id', $exam->id);
+    }
+
     public function test_reparacion_legacy_inequivoca_convierte_11_de_12_en_habilitado_con_auditoria(): void
     {
         Carbon::setTestNow('2026-10-10 09:00:00');

@@ -966,6 +966,50 @@ class EvaluacionesWebTest extends TestCase
         ], array_column($supervisorData['details']['charts'], 'title'));
     }
 
+    public function test_dashboard_busca_persona_por_palabras_y_documento_sin_ampliar_acceso(): void
+    {
+        [$id] = $this->createUser(['evaluaciones' => ['ver_supervisores', 'dashboards']]);
+        $mine = (string) Str::uuid();
+        $outside = (string) Str::uuid();
+        foreach ([$mine, $outside] as $mineId) {
+            DB::table('minas')->insert(['id' => $mineId, 'nombre' => 'MINA BUSQUEDA', 'unidad_minera' => 'UM', 'estado' => 'ACTIVO']);
+        }
+        $this->assignScope($id, $mine);
+        $worker = $this->createPersonal('ANA MARIA PRUEBA BUSQUEDA', true);
+        $other = $this->createPersonal('OTRA PERSONA', true);
+        $document = DB::table('personal')->where('id', $worker)->value('dni');
+        foreach ([[$worker, $mine, $id, 80], [$other, $mine, $id, 40], [$worker, $outside, $id, 10], [$worker, $mine, null, 20]] as [$person, $destination, $owner, $score]) {
+            DB::table('evaluacion_supervisor')->insert([
+                'id' => (string) Str::uuid(), 'evaluado_id' => $person, 'evaluador_id' => null,
+                'fecha' => '2026-09-10', 'mina_id' => $destination, 'resultado_final' => $score,
+                'created_by_usuario_id' => $owner,
+            ]);
+        }
+        $actor = \App\Models\Usuario::findOrFail($id);
+        $service = app(\App\Modules\Evaluaciones\Services\EvaluacionesDashboardService::class);
+        $filters = ['desde' => '2026-09-01', 'hasta' => '2026-09-30', 'mina' => '', 'cargo' => '', 'evaluacion_tipo' => 'supervisores'];
+        foreach (['BUSQUEDA ANA', $document] as $search) {
+            $data = $service->build($actor, [...$filters, 'q' => $search]);
+            $this->assertSame(1, $data['total']);
+            $this->assertSame(1, $data['people']);
+            $this->assertEquals(80, $data['summary'][0]['average']);
+            $this->assertSame(1, $data['months'][0]['count']);
+            $this->assertSame(1, $data['byMine'][0]['count']);
+            $this->assertSame(1, $data['byCargo'][0]['count']);
+            $this->assertSame(1, $data['details']['total']);
+            $this->assertSame(3, $data['activeFilterCount']);
+        }
+        $this->assertSame(0, $service->build($actor, [...$filters, 'q' => '%_'])['total']);
+        $this->assertSame(0, $service->build($actor, [...$filters, 'q' => 'NO COINCIDE'])['total']);
+        $this->assertSame(2, $service->build($actor, [...$filters, 'q' => '  '])['total']);
+        $this->withSession($this->sessionFor($id))->withHeader('X-Evaluation-Dashboard', '1')
+            ->get(route('evaluaciones.index', ['tipo' => 'dashboard', ...$filters, 'q' => 'BUSQUEDA ANA']))
+            ->assertOk()->assertSee('value="BUSQUEDA ANA"', false)->assertSee('80 / 100');
+        $this->withSession($this->sessionFor($id))
+            ->getJson(route('evaluaciones.index', ['tipo' => 'dashboard', 'q' => str_repeat('a', 192)]))
+            ->assertUnprocessable()->assertJsonValidationErrors('q');
+    }
+
     private function createUser(array $permissions, ?string $roleName = null, string $position = 'ENCARGADO DE ASISTENCIA'): array
     {
         $roleId = (string) Str::uuid();

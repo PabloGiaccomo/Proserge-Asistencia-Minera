@@ -6,7 +6,7 @@
     $sizeMissingCounts = collect($missingSizeWorkers ?? []);
 @endphp
 
-<form class="lgtx-filters" method="GET" action="{{ url('/logistica') }}" data-logistics-dashboard-filters>
+<form class="lgtx-filters" method="GET" action="{{ ($standaloneDashboard ?? false) ? route('inicio.dashboard.logistica') : url('/logistica') }}" data-logistics-dashboard-filters>
     <input type="hidden" name="tab" value="dashboard">
 
     <label>
@@ -90,7 +90,7 @@
 
     <div class="lgtx-filter-actions">
         <button type="submit">Actualizar</button>
-        <a href="{{ url('/logistica?tab=dashboard') }}">Limpiar</a>
+        <a href="{{ ($standaloneDashboard ?? false) ? route('inicio.dashboard.logistica') : url('/logistica?tab=dashboard') }}">Limpiar</a>
     </div>
 </form>
 

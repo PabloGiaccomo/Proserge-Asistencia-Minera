@@ -29,11 +29,11 @@ class PublicQuickGuideViewTest extends TestCase
         $this->assertSame(4, $xpath->query('//div[@class="public-guide-step"]')->length);
     }
 
-    private function renderIngresoHtml(bool $authorized = true): string
+    private function renderIngresoHtml(bool $authorized = true, array $overrides = []): string
     {
         return view('ficha-public.ingreso', [
             'authorized' => $authorized,
-            'data' => PersonalFichaCatalog::emptyData(),
+            'data' => array_replace(PersonalFichaCatalog::emptyData(), $overrides),
             'sections' => PersonalFichaCatalog::sections(),
             'familiares' => [
                 [
@@ -65,6 +65,23 @@ class PublicQuickGuideViewTest extends TestCase
         }
 
         return new DOMXPath($document);
+    }
+
+    public function test_foreign_birthplace_stays_in_form_but_is_optional_for_other_country(): void
+    {
+        $xpath = $this->getXpath($this->renderIngresoHtml(true, [
+            'pais_nacimiento' => 'Otro',
+            'pais_nacimiento_otro' => 'Chile',
+            'lugar_nacimiento_extranjero' => 'Ciudad / Region',
+        ]));
+        $input = $xpath->query('//input[@name="fields[lugar_nacimiento_extranjero]"]');
+
+        $this->assertSame(1, $input->length);
+        $this->assertFalse($input->item(0)->hasAttribute('required'));
+        $this->assertFalse($input->item(0)->hasAttribute('disabled'));
+        $this->assertSame('Ciudad / Region', $input->item(0)->getAttribute('value'));
+        $this->assertSame(0, $xpath->query('//div[@data-ficha-field="lugar_nacimiento_extranjero"]//span[contains(@class, "ficha-required")]')->length);
+        $this->assertSame(1, $xpath->query('//input[@name="fields[pais_nacimiento_otro]"][@required]')->length);
     }
 
     public function test_teclados_numericos_y_telefonicos_en_campos_principales(): void

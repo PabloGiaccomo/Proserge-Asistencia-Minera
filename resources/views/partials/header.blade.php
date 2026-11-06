@@ -131,8 +131,12 @@
     const markAllReadUrl = '{{ route("notificaciones.mark-all-read") }}';
     const csrfToken = '{{ csrf_token() }}';
     const debugEnabled = @json((bool) config('app.debug'));
-    const canUpdateNotifications = @json($canNotificacionesActualizar);
+    let canUpdateNotifications = @json($canNotificacionesActualizar);
     let lastCount = Number({{ $headerUnreadCount ?? 0 }});
+    let pollTimer = null;
+    let pollInFlight = false;
+    let accessStopped = false;
+    let permissionEpoch = 0;
 
     if (!pollUrl || pollUrl === '') return;
 
@@ -216,16 +220,16 @@
     }
 
     function updateMarkAllReadAction(unreadCount) {
-        if (!canUpdateNotifications) {
-            return;
-        }
-
         var actionsContainer = document.querySelector('.header-notif-panel-actions');
         if (!actionsContainer) {
             return;
         }
 
         var form = actionsContainer.querySelector('form');
+        if (!canUpdateNotifications) {
+            if (form) form.remove();
+            return;
+        }
         if (!form && markAllReadUrl) {
             form = document.createElement('form');
             form.method = 'POST';
@@ -240,6 +244,20 @@
         }
 
         form.style.display = unreadCount > 0 ? '' : 'none';
+    }
+
+    function stopNotificationAccess() {
+        accessStopped = true;
+        permissionEpoch++;
+        canUpdateNotifications = false;
+        clearInterval(pollTimer);
+        var closeButton = document.getElementById('headerNotifClose');
+        if (closeButton) closeButton.click();
+        document.body.classList.remove('notif-panel-open');
+        ['headerNotifMenu', 'headerNotifPanel', 'headerNotifBackdrop'].forEach(function(id) {
+            var element = document.getElementById(id);
+            if (element) element.remove();
+        });
     }
 
     function renderPostAction(url, label) {
@@ -302,7 +320,7 @@
     }
 
     function submitNotificationForm(form) {
-        if (!form || !form.action) {
+        if (!form || !form.action || accessStopped || !canUpdateNotifications) {
             return Promise.resolve();
         }
 
@@ -321,11 +339,19 @@
             },
             body: formData,
         }).then(function(response) {
+            if (response.status === 401) {
+                stopNotificationAccess();
+            } else if (response.status === 403) {
+                permissionEpoch++;
+                canUpdateNotifications = false;
+                document.querySelectorAll('.header-notif-panel form').forEach(function(action) { action.remove(); });
+                poll();
+            }
             if (!response.ok) {
                 return response.json()
                     .catch(function() { return { error: 'No se pudo actualizar la notificacion.' }; })
                     .then(function(data) {
-                        throw new Error(data.error || 'No se pudo actualizar la notificacion.');
+                        throw new Error(data.message || data.error || 'No se pudo actualizar la notificacion.');
                     });
             }
 
@@ -333,7 +359,10 @@
                 return { ok: true };
             });
         }).then(function() {
-            poll();
+            if (!accessStopped) {
+                permissionEpoch++;
+                return poll();
+            }
         }).catch(function(error) {
             alert(error && error.message ? error.message : 'No se pudo actualizar la notificacion.');
         });
@@ -350,9 +379,12 @@
     });
 
     function poll() {
+        if (accessStopped || pollInFlight) return Promise.resolve();
+        pollInFlight = true;
+        var requestEpoch = permissionEpoch;
         debugLog('poll.request', { url: pollUrl, at: new Date().toISOString() });
 
-        fetch(pollUrl + '?_t=' + Date.now(), {
+        return fetch(pollUrl + '?_t=' + Date.now(), {
             method: 'GET',
             cache: 'no-store',
             headers: {
@@ -362,6 +394,9 @@
             credentials: 'same-origin'
         })
         .then(function(r) {
+            if (r.status === 401 || r.status === 403) {
+                stopNotificationAccess();
+            }
             if (!r.ok) {
                 throw new Error('HTTP ' + r.status);
             }
@@ -374,6 +409,7 @@
             return r.json();
         })
         .then(function(data) {
+            if (accessStopped || requestEpoch !== permissionEpoch) return;
             debugLog('poll.response', data);
 
             if (data && data.ok === false) {
@@ -386,6 +422,7 @@
             }
 
             lastCount = unreadCount;
+            canUpdateNotifications = data.can_update === true;
 
             var badge = ensureBadgeElement();
             if (badge) {
@@ -401,11 +438,14 @@
         })
         .catch(function(error) {
             debugLog('poll.error', { message: error && error.message ? error.message : String(error) });
+        }).finally(function() {
+            pollInFlight = false;
+            if (!accessStopped && requestEpoch !== permissionEpoch) poll();
         });
     }
 
+    pollTimer = setInterval(poll, 5000);
     poll();
-    setInterval(poll, 5000);
 })();
 </script>
 @endif

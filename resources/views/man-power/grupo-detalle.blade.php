@@ -9,6 +9,11 @@
     $canAssignManPower = PermissionMatrix::allowsDirect($permissions, 'man_power', 'asignar');
     $canRegisterAttendance = PermissionMatrix::allowsDirect($permissions, 'asistencias', 'registrar');
     $detalles = collect($grupo['detalle'] ?? $grupo['personal'] ?? []);
+    $movimientos = $grupo['movimientos'] ?? [];
+    $tiposMovimiento = [
+        'ASIGNACION' => 'Asignación', 'REASIGNACION' => 'Cambio de asignación', 'REINGRESO' => 'Reingreso',
+        'RETIRO' => 'Retiro', 'REUBICACION' => 'Salida por reubicación', 'INGRESO_REUBICADO' => 'Ingreso por reubicación',
+    ];
     $supervisor = $grupo['supervisor']['nombre_completo'] ?? $grupo['supervisor']['nombre'] ?? '-';
     $title = $grupo['nombre_snapshot'] ?? $grupo['servicio'] ?? 'Grupo de trabajo';
 @endphp
@@ -82,7 +87,7 @@
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Integrantes</span>
-                    <span class="detail-value">{{ $detalles->where('estado_distribucion', 'ASIGNADO')->count() ?: $detalles->count() }}</span>
+                    <span class="detail-value">{{ $detalles->filter(fn (array $detalle): bool => ($detalle['estado_distribucion'] ?? 'ASIGNADO') === 'ASIGNADO')->count() }}</span>
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">Supervisor operativo</span>
@@ -162,6 +167,34 @@
         @endif
     </div>
 </div>
+
+<section class="card" id="historial-integrantes" aria-labelledby="historial-integrantes-titulo">
+    <div class="card-header"><h2 class="card-title" id="historial-integrantes-titulo">Historial de integrantes</h2></div>
+    <div class="card-body">
+        @if($movimientos)
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr><th>Trabajador</th><th>Movimiento</th><th>Fecha</th><th>Registrado por</th><th>Motivo</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach($movimientos as $movimiento)
+                            <tr>
+                                <td>{{ $movimiento['personal']['nombre_completo'] ?? 'Trabajador no disponible' }}</td>
+                                <td>{{ $tiposMovimiento[$movimiento['tipo']] ?? $movimiento['tipo'] }}{{ $movimiento['origen'] === 'LEGADO' ? ' (histórico)' : '' }}</td>
+                                <td>{{ $movimiento['ocurrido_at'] ? \Illuminate\Support\Carbon::parse($movimiento['ocurrido_at'])->format('d/m/Y H:i') : 'Sin fecha registrada' }}</td>
+                                <td>{{ $movimiento['actor']['personal']['nombre_completo'] ?? $movimiento['actor']['email'] ?? 'Sin cuenta registrada' }}</td>
+                                <td>{{ $movimiento['motivo'] ?? '—' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <p class="text-muted">Aún no hay movimientos registrados para este grupo.</p>
+        @endif
+    </div>
+</section>
 @else
 <div class="card">
     <div class="card-body">

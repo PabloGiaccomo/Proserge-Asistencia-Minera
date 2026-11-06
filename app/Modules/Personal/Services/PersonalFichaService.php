@@ -12,6 +12,7 @@ use App\Models\PersonalFichaLink;
 use App\Models\Usuario;
 use App\Modules\Notificaciones\Services\NotificationService;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use App\Modules\Personal\Support\PersonalNormalizer;
 use Carbon\Carbon;
@@ -38,6 +39,8 @@ class PersonalFichaService
         private readonly PersonalService $personalService,
         private readonly PersonalContratoDatoService $contratoDatoService,
         private readonly OperationalNotificationService $operationalNotifications,
+        private readonly PersonalAdministrativeLocationService $administrativeLocations,
+        private readonly PersonalArchivoVersionService $fileVersions,
     )
     {
     }
@@ -266,6 +269,8 @@ class PersonalFichaService
 
     public function updateManual(Personal $personal, array $fields, array $attributes, Usuario $user): array
     {
+        $this->personalService->assertNoMineUpdate($attributes);
+
         $data = $this->normalizeFichaData($fields);
         $documentType = PersonalNormalizer::documentType($data['tipo_documento'] ?? 'DNI', $data['numero_documento'] ?? '');
         $documentNumber = PersonalNormalizer::documentNumber($data['numero_documento'] ?? '');
@@ -283,17 +288,30 @@ class PersonalFichaService
             ]);
         }
 
-        $documentPaths = $this->storeFichaDocuments($personal->fichaColaborador?->id, $attributes['documentos'] ?? []);
+        return DB::transaction(function () use ($personal, $fields, $attributes, $user, $documentType, $documentNumber): array {
+            $personal = Personal::query()->lockForUpdate()->findOrFail($personal->id);
+            $ficha = $personal->fichaColaborador()->with('link')->lockForUpdate()->first();
+            $current = array_replace($ficha?->datos_detectados_json ?? [], $ficha?->datos_json ?? []);
+            $signatureBase64 = trim((string) ($attributes['firma_base64'] ?? ''));
+            PersonalFichaAccess::assertSensitiveChangesAllowed(
+                $user,
+                $current,
+                $fields,
+                array_key_exists('firma_base64', $attributes) && $signatureBase64 !== (string) $ficha?->firma_base64,
+                isset($attributes['documentos']['huella'])
+                    || (array_key_exists('huella', $attributes) && ($attributes['huella'] !== null || filled($ficha?->huella_path))),
+            );
 
-        return DB::transaction(function () use ($personal, $data, $attributes, $user, $documentType, $documentNumber, $documentPaths): array {
+            $data = $this->normalizeFichaData(array_replace(PersonalFichaAccess::onlySensitive($current), $fields));
+            $data = PersonalFichaAccess::preserveOmitted($data, $current, $fields);
+            if (array_key_exists('ubicaciones_internas', $attributes)) {
+                $this->administrativeLocations->sync($personal, $attributes['ubicaciones_internas'], $user);
+            }
+            $documentPaths = $this->storeFichaDocuments($ficha?->id, $attributes['documentos'] ?? []);
             $updatedPersonal = $this->personalService->update($personal, [
                 ...$this->personalPayloadFromFicha($data, $attributes['estado'] ?? ((string) $personal->estado ?: PersonalFicha::ESTADO_PENDIENTE)),
                 'es_supervisor' => filter_var($attributes['es_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'minas' => $attributes['minas'] ?? [],
             ]);
-
-            $ficha = $personal->fichaColaborador()->with('link')->first();
-            $signatureBase64 = trim((string) ($attributes['firma_base64'] ?? ''));
 
             if ($ficha) {
                 $fichaPayload = [
@@ -301,7 +319,10 @@ class PersonalFichaService
                     'numero_documento' => $documentNumber,
                     'macro_tipo_contrato' => PersonalNormalizer::contractLabel($data['contrato'] ?? null),
                     'datos_json' => $data,
-                    'datos_detectados_json' => $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $data),
+                    'datos_detectados_json' => array_replace(
+                        $this->mergeNonEmptyFichaData($ficha->datos_detectados_json ?? [], $data),
+                        PersonalFichaAccess::onlySensitive($data),
+                    ),
                 ];
 
                 if ($signatureBase64 !== '') {
@@ -376,10 +397,10 @@ class PersonalFichaService
 
     public function updateDocuments(Personal $personal, array $documentos, Usuario $user): PersonalFicha
     {
-        $documentPaths = $this->storeFichaDocuments($personal->fichaColaborador?->id, $documentos);
-
-        return DB::transaction(function () use ($personal, $documentPaths, $user): PersonalFicha {
-            $ficha = $personal->fichaColaborador()->first();
+        return DB::transaction(function () use ($personal, $documentos, $user): PersonalFicha {
+            $personal = Personal::query()->lockForUpdate()->findOrFail($personal->id);
+            $ficha = $personal->fichaColaborador()->lockForUpdate()->first();
+            $documentPaths = $this->storeFichaDocuments($ficha?->id, $documentos);
 
             if (!$ficha) {
                 $data = $this->seedFichaDataFromPersonal($personal);
@@ -669,7 +690,6 @@ class PersonalFichaService
         $token = $this->normalizeFichaLinkToken($token) ?? $token;
         $hash = hash('sha256', $token);
         $link = PersonalFichaLink::query()
-            ->with(['ficha.personal', 'ficha.familiares'])
             ->where('token_hash', $hash)
             ->first();
 
@@ -678,106 +698,123 @@ class PersonalFichaService
         }
 
         $link->forceFill(['last_accessed_at' => now()])->save();
-        $ficha = $link->ficha;
-
-        if (!$ficha) {
-            return ['mode' => 'invalid', 'link' => $link, 'ficha' => null];
-        }
-
         if ($link->disabled_at || $link->estado === PersonalFichaLink::ESTADO_INHABILITADO) {
-            return ['mode' => 'disabled', 'link' => $link, 'ficha' => $ficha];
+            return ['mode' => 'disabled', 'link' => null, 'ficha' => null];
         }
 
-        if (!$ficha->submitted_at && now()->greaterThan($link->expires_at)) {
-            $this->markLinkExpired($link);
+        if ($link->estado === PersonalFichaLink::ESTADO_ENVIADO) {
+            $mode = $link->read_until && now()->lessThanOrEqualTo($link->read_until) ? 'readonly' : 'disabled';
+
+            return ['mode' => $mode, 'link' => null, 'ficha' => null];
+        }
+
+        if (!$this->isPublicLinkEditable($link)) {
+            if ($link->estado === PersonalFichaLink::ESTADO_ACTIVO && $link->expires_at && now()->greaterThan($link->expires_at)) {
+                $this->markLinkExpired($link);
+            }
 
             return ['mode' => 'expired', 'link' => null, 'ficha' => null];
         }
 
-        if ($ficha->submitted_at && $link->estado !== PersonalFichaLink::ESTADO_ACTIVO) {
-            if ($link->read_until && now()->lessThanOrEqualTo($link->read_until)) {
-                return ['mode' => 'readonly', 'link' => $link, 'ficha' => $ficha];
-            }
+        $ficha = $link->ficha()->with(['personal', 'familiares'])->first();
 
-            $link->forceFill([
-                'estado' => PersonalFichaLink::ESTADO_INHABILITADO,
-                'disabled_at' => $link->disabled_at ?: now(),
-            ])->save();
+        return $ficha
+            ? ['mode' => 'edit', 'link' => $link, 'ficha' => $ficha]
+            : ['mode' => 'invalid', 'link' => null, 'ficha' => null];
+    }
 
-            return ['mode' => 'disabled', 'link' => $link->fresh(), 'ficha' => $ficha];
+    private function isPublicLinkEditable(PersonalFichaLink $link): bool
+    {
+        return $link->estado === PersonalFichaLink::ESTADO_ACTIVO
+            && !$link->disabled_at
+            && !$link->submitted_at
+            && $link->expires_at !== null
+            && now()->lessThanOrEqualTo($link->expires_at);
+    }
+
+    private function assertPublicLinkEditable(?PersonalFichaLink $link): void
+    {
+        if (!$link || !$this->isPublicLinkEditable($link)) {
+            throw ValidationException::withMessages(['ficha' => 'Este link ya no permite modificaciones.']);
+        }
+    }
+
+    private function lockPublicFichaLink(PersonalFichaLink $link): array
+    {
+        $personalId = $link->ficha()->value('personal_id');
+        $personal = Personal::query()->lockForUpdate()->find($personalId);
+        $ficha = $link->ficha()->lockForUpdate()->first();
+        $current = PersonalFichaLink::query()
+            ->where('personal_ficha_id', $link->personal_ficha_id)
+            ->where('token_hash', $link->token_hash)
+            ->lockForUpdate()
+            ->find($link->id);
+
+        if (!$ficha || !$personal || $ficha->personal_id !== $personal->id) {
+            return [null, null];
         }
 
-        return ['mode' => 'edit', 'link' => $link, 'ficha' => $ficha];
+        return [$current, $ficha->setRelation('personal', $personal)];
     }
 
     public function submitFromWorker(PersonalFichaLink $link, array $fields, array $familiares, string $firmaBase64, ?UploadedFile $huella, array $documentos = []): PersonalFicha
     {
-        $ficha = $link->ficha()->with('personal')->firstOrFail();
-        $wasApproved = $ficha->estado === PersonalFicha::ESTADO_APROBADO;
-        $previousPersonalState = strtoupper((string) ($ficha->personal?->estado ?? ''));
+        return DB::transaction(function () use ($link, $fields, $familiares, $firmaBase64, $huella, $documentos): PersonalFicha {
+            [$link, $ficha] = $this->lockPublicFichaLink($link);
+            $this->assertPublicLinkEditable($link);
+            $wasApproved = $ficha->estado === PersonalFicha::ESTADO_APROBADO;
+            $previousPersonalState = strtoupper((string) ($ficha->personal?->estado ?? ''));
 
-        if ($ficha->submitted_at || now()->greaterThan($link->expires_at)) {
-            $isRegularizationLink = $link->estado === PersonalFichaLink::ESTADO_ACTIVO && !$link->disabled_at && now()->lessThanOrEqualTo($link->expires_at);
+            $data = $this->normalizeFichaData([
+                ...$fields,
+                'tipo_documento' => $ficha->tipo_documento,
+                'numero_documento' => $ficha->numero_documento,
+            ]);
 
-            if (!$isRegularizationLink) {
+            $missingRequired = $this->missingRequiredFieldKeysFromData($data);
+            if (!empty($missingRequired)) {
+                Log::warning('Ficha publica con campos obligatorios faltantes.', [
+                    'ficha_id' => $ficha->id,
+                    'personal_id' => $ficha->personal_id,
+                    'missing_required' => $missingRequired,
+                ]);
+
                 throw ValidationException::withMessages([
-                    'ficha' => 'Este link ya no permite modificaciones.',
+                    'ficha' => 'Faltan completar campos obligatorios antes de enviar la ficha. Revisa y vuelve a intentar.',
                 ]);
             }
-        }
 
-        $data = $this->normalizeFichaData([
-            ...$fields,
-            'tipo_documento' => $ficha->tipo_documento,
-            'numero_documento' => $ficha->numero_documento,
-        ]);
-
-        $missingRequired = $this->missingRequiredFieldKeysFromData($data);
-        if (!empty($missingRequired)) {
-            Log::warning('Ficha publica con campos obligatorios faltantes.', [
-                'ficha_id' => $ficha->id,
-                'personal_id' => $ficha->personal_id,
-                'missing_required' => $missingRequired,
-            ]);
-
-            throw ValidationException::withMessages([
-                'ficha' => 'Faltan completar campos obligatorios antes de enviar la ficha. Revisa y vuelve a intentar.',
-            ]);
-        }
-
-        $huellaPath = $ficha->huella_path;
-        if ($huella instanceof UploadedFile) {
-            $huellaPath = $huella->storeAs(
-                'personal_fichas/' . $ficha->id,
-                'huella_' . now()->format('Ymd_His') . '.' . strtolower($huella->getClientOriginalExtension() ?: 'jpg'),
-                'local',
-            );
-        }
-
-        $documentPaths = [];
-        foreach ($documentos as $tipo => $documento) {
-            if (!$documento instanceof UploadedFile) {
-                continue;
+            $huellaPath = $ficha->huella_path;
+            if ($huella instanceof UploadedFile) {
+                $huellaPath = $this->fileVersions->store($huella,
+                    'personal_fichas/' . $ficha->id,
+                    'huella_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($huella->getClientOriginalExtension() ?: 'jpg'),
+                    'local',
+                );
             }
 
-            $safeTipo = $this->safeFichaArchivoTipo((string) $tipo);
-            $documentPaths[$safeTipo] = [
-                'file' => $documento,
-                'path' => $documento->storeAs(
-                    'personal_fichas/' . $ficha->id . '/documentos',
-                    $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
-                    'local',
-                ),
-            ];
-        }
+            $documentPaths = [];
+            foreach ($documentos as $tipo => $documento) {
+                if (!$documento instanceof UploadedFile) {
+                    continue;
+                }
 
-        return DB::transaction(function () use ($ficha, $link, $data, $familiares, $firmaBase64, $huella, $huellaPath, $documentPaths, $wasApproved, $previousPersonalState): PersonalFicha {
+                $safeTipo = $this->safeFichaArchivoTipo((string) $tipo);
+                $documentPaths[$safeTipo] = [
+                    'file' => $documento,
+                    'path' => $this->fileVersions->store($documento,
+                        'personal_fichas/' . $ficha->id . '/documentos',
+                        $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
+                        'local',
+                    ),
+                ];
+            }
+
             $ficha->forceFill([
                 'estado' => $wasApproved ? PersonalFicha::ESTADO_APROBADO : PersonalFicha::ESTADO_ENVIADA,
                 'datos_json' => $data,
                 'datos_detectados_json' => $data,
                 'firma_base64' => $firmaBase64,
-                'huella_path' => $huellaPath,
                 'submitted_at' => now(),
             ])->save();
 
@@ -832,18 +869,15 @@ class PersonalFichaService
 
     public function storePublicDraftArchivo(PersonalFichaLink $link, string $tipo, UploadedFile $archivo): PersonalFichaArchivo
     {
-        $ficha = $link->ficha()->firstOrFail();
-        $safeTipo = $this->safeFichaArchivoTipo($tipo);
-        $directory = $safeTipo === 'huella'
-            ? 'personal_fichas/' . $ficha->id
-            : 'personal_fichas/' . $ficha->id . '/documentos';
-        $filename = $safeTipo . '_borrador_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($archivo->getClientOriginalExtension() ?: 'bin');
-        $path = $archivo->storeAs($directory, $filename, 'local');
-
-        return DB::transaction(function () use ($ficha, $safeTipo, $archivo, $path): PersonalFichaArchivo {
-            if ($safeTipo === 'huella') {
-                $ficha->forceFill(['huella_path' => $path])->save();
-            }
+        return DB::transaction(function () use ($link, $tipo, $archivo): PersonalFichaArchivo {
+            [$link, $ficha] = $this->lockPublicFichaLink($link);
+            $this->assertPublicLinkEditable($link);
+            $safeTipo = $this->safeFichaArchivoTipo($tipo);
+            $directory = $safeTipo === 'huella'
+                ? 'personal_fichas/' . $ficha->id
+                : 'personal_fichas/' . $ficha->id . '/documentos';
+            $filename = $safeTipo . '_borrador_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($archivo->getClientOriginalExtension() ?: 'bin');
+            $path = $this->fileVersions->store($archivo, $directory, $filename, 'local');
 
             return $this->replaceFichaArchivo(
                 $ficha,
@@ -857,16 +891,17 @@ class PersonalFichaService
 
     public function storePublicDraftData(PersonalFichaLink $link, array $fields, array $familiares = [], ?string $firmaBase64 = null): PersonalFicha
     {
-        $ficha = $link->ficha()->with(['personal', 'familiares'])->firstOrFail();
-        $existingData = is_array($ficha->datos_json) ? $ficha->datos_json : [];
+        return DB::transaction(function () use ($link, $fields, $familiares, $firmaBase64): PersonalFicha {
+            [$link, $ficha] = $this->lockPublicFichaLink($link);
+            $this->assertPublicLinkEditable($link);
+            $existingData = is_array($ficha->datos_json) ? $ficha->datos_json : [];
 
-        $data = $this->normalizeFichaData(array_replace($existingData, [
-            ...$fields,
-            'tipo_documento' => $ficha->tipo_documento,
-            'numero_documento' => $ficha->numero_documento,
-        ]));
+            $data = $this->normalizeFichaData(array_replace($existingData, [
+                ...$fields,
+                'tipo_documento' => $ficha->tipo_documento,
+                'numero_documento' => $ficha->numero_documento,
+            ]));
 
-        return DB::transaction(function () use ($ficha, $data, $familiares, $firmaBase64): PersonalFicha {
             $payload = [
                 'datos_json' => $data,
             ];
@@ -1877,7 +1912,7 @@ class PersonalFichaService
         }
 
         if (($data['pais_nacimiento'] ?? null) === 'Otro') {
-            $requiredKeys = $requiredKeys->merge(['pais_nacimiento_otro', 'lugar_nacimiento_extranjero']);
+            $requiredKeys->push('pais_nacimiento_otro');
         } else {
             $requiredKeys = $requiredKeys->merge(['departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento']);
         }
@@ -1931,7 +1966,7 @@ class PersonalFichaService
         }
 
         if (($data['pais_nacimiento'] ?? null) === 'Otro') {
-            $requiredKeys = $requiredKeys->merge(['pais_nacimiento_otro', 'lugar_nacimiento_extranjero']);
+            $requiredKeys->push('pais_nacimiento_otro');
         } else {
             $requiredKeys = $requiredKeys->merge(['departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento']);
         }
@@ -2213,6 +2248,8 @@ class PersonalFichaService
 
     private function storeFichaDocuments(?string $fichaId, array $documentos): array
     {
+        $documentos = array_intersect_key($documentos, PersonalFichaCatalog::documentRequirements());
+
         if ($fichaId === null || $fichaId === '') {
             return collect($documentos)
                 ->filter(fn ($documento) => $documento instanceof UploadedFile)
@@ -2236,7 +2273,7 @@ class PersonalFichaService
             $safeTipo = $this->safeFichaArchivoTipo((string) $tipo);
             $documentPaths[$safeTipo] = [
                 'file' => $documento,
-                'path' => $documento->storeAs(
+                'path' => $this->fileVersions->store($documento,
                     'personal_fichas/' . $fichaId . '/documentos',
                     $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
                     'local',
@@ -2253,13 +2290,11 @@ class PersonalFichaService
             return;
         }
 
-        $path = $huella->storeAs(
+        $path = $this->fileVersions->store($huella,
             'personal_fichas/' . $ficha->id,
             'huella_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($huella->getClientOriginalExtension() ?: 'jpg'),
             'local',
         );
-
-        $ficha->forceFill(['huella_path' => $path])->save();
 
         $this->replaceFichaArchivo(
             $ficha,
@@ -2280,7 +2315,7 @@ class PersonalFichaService
 
             if ($path === null) {
                 $safeTipo = $this->safeFichaArchivoTipo((string) $tipo);
-                $path = $documento->storeAs(
+                $path = $this->fileVersions->store($documento,
                     'personal_fichas/' . $ficha->id . '/documentos',
                     $safeTipo . '_' . now()->format('Ymd_His') . '_' . Str::random(6) . '.' . strtolower($documento->getClientOriginalExtension() ?: 'bin'),
                     'local',
@@ -2497,16 +2532,9 @@ class PersonalFichaService
         bool $uploadedByPublic,
         ?Usuario $user = null,
     ): PersonalFichaArchivo {
-        $existingFiles = PersonalFichaArchivo::query()
-            ->where('personal_ficha_id', $ficha->id)
-            ->where('tipo', $tipo)
-            ->get();
-
-        foreach ($existingFiles as $existing) {
-            if ($existing->path && Storage::disk('local')->exists($existing->path)) {
-                Storage::disk('local')->delete($existing->path);
-            }
-            $existing->delete();
+        $this->fileVersions->archiveCurrent($ficha, $tipo, $user?->id, $uploadedByPublic ? 'ENLACE' : 'RRHH');
+        if ($tipo === 'huella') {
+            $ficha->forceFill(['huella_path' => $path])->save();
         }
 
         $archivo = PersonalFichaArchivo::query()->create([
@@ -2550,7 +2578,13 @@ class PersonalFichaService
     private function markLinkExpired(PersonalFichaLink $link): void
     {
         DB::transaction(function () use ($link): void {
-            $ficha = $link->ficha()->with('personal')->first();
+            [$link, $ficha] = $this->lockPublicFichaLink($link);
+            if (!$link || $link->estado !== PersonalFichaLink::ESTADO_ACTIVO
+                || $link->disabled_at || $link->submitted_at
+                || !$link->expires_at || now()->lessThanOrEqualTo($link->expires_at)) {
+                return;
+            }
+
             if ($ficha && !$ficha->submitted_at) {
                 $personal = $ficha->personal;
                 if ($personal && in_array(strtoupper((string) $personal->estado), [PersonalFicha::ESTADO_PENDIENTE, PersonalFicha::ESTADO_LINK_VENCIDO], true)) {
@@ -2657,7 +2691,6 @@ class PersonalFichaService
             'fecha_ingreso' => $data['fecha_ingreso'] ?: null,
             'estado' => $estado,
             'es_supervisor' => PersonalNormalizer::isSupervisorOccupation($data['ocupacion'] ?? null),
-            'minas' => [],
         ];
     }
 

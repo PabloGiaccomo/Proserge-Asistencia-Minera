@@ -2,14 +2,10 @@
 
 namespace App\Modules\Transporte\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
-
-class CopyTransporteServicioRequest extends FormRequest
+class CopyTransporteServicioRequest extends TransporteFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    protected const ACTION = 'copiar';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_COPY_FORBIDDEN';
 
     public function rules(): array
     {

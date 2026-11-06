@@ -4,6 +4,7 @@ namespace App\Modules\Personal\Services;
 
 use App\Models\PersonalFicha;
 use App\Modules\Personal\Resources\PersonalResource;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
@@ -27,7 +28,7 @@ class PersonalFichaExportService
     ) {
     }
 
-    public function availableColumns(): array
+    public function availableColumns(bool $includeSensitive = true): array
     {
         $columns = [
             'estado_ficha' => 'Estado de ficha',
@@ -42,10 +43,10 @@ class PersonalFichaExportService
             $columns[$key] = (string) ($field['label'] ?? $key);
         }
 
-        return $columns;
+        return $includeSensitive ? $columns : PersonalFichaAccess::redact($columns);
     }
 
-    public function recommendedColumns(): array
+    public function recommendedColumns(bool $includeSensitive = true): array
     {
         $recommended = [
             'estado_ficha',
@@ -58,7 +59,9 @@ class PersonalFichaExportService
             $recommended[] = $key;
         }
 
-        return array_values(array_unique(array_filter($recommended, fn (string $key): bool => array_key_exists($key, $this->availableColumns()))));
+        $available = $this->availableColumns($includeSensitive);
+
+        return array_values(array_unique(array_filter($recommended, fn (string $key): bool => array_key_exists($key, $available))));
     }
 
     public function preview(array $input): array
@@ -76,9 +79,9 @@ class PersonalFichaExportService
         ];
     }
 
-    public function downloadExcel(array $input, ?string $filename = null): StreamedResponse
+    public function downloadExcel(array $input, ?string $filename = null, bool $includeSensitive = true): StreamedResponse
     {
-        $columns = $this->selectedColumns($input['ficha_columns'] ?? null);
+        $columns = $this->selectedColumns($input['ficha_columns'] ?? null, $includeSensitive);
         $limit = $this->sanitizeExcelLimit($input['ficha_limit'] ?? null);
         $records = $this->buildFichaQuery($input)
             ->when($limit !== null, fn ($query) => $query->limit($limit))
@@ -185,17 +188,18 @@ class PersonalFichaExportService
         return Storage::disk('local')->path((string) $meta['zip_path']);
     }
 
-    private function selectedColumns(mixed $columns): array
+    private function selectedColumns(mixed $columns, bool $includeSensitive = true): array
     {
-        $available = $this->availableColumns();
-        $requested = is_array($columns) ? $columns : $this->recommendedColumns();
+        $available = $this->availableColumns($includeSensitive);
+        $recommended = $this->recommendedColumns($includeSensitive);
+        $requested = is_array($columns) ? $columns : $recommended;
         $selected = collect($requested)
             ->map(fn ($value) => (string) $value)
             ->filter(fn (string $value): bool => array_key_exists($value, $available))
             ->values()
             ->all();
 
-        return count($selected) > 0 ? $selected : $this->recommendedColumns();
+        return count($selected) > 0 ? $selected : $recommended;
     }
 
     private function sanitizeExcelLimit(mixed $value): ?int

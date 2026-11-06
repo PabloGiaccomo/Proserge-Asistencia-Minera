@@ -3,14 +3,10 @@
 namespace App\Modules\Transporte\Requests;
 
 use App\Models\TransporteServicio;
-use Illuminate\Foundation\Http\FormRequest;
-
-class StoreTransporteServicioRequest extends FormRequest
+class StoreTransporteServicioRequest extends TransporteFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    protected const ACTION = 'crear';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_CREATE_FORBIDDEN';
 
     public function rules(): array
     {
@@ -24,7 +20,7 @@ class StoreTransporteServicioRequest extends FormRequest
             'transportista' => ['nullable', 'string', 'max:191'],
             'tipo_vehiculo' => ['nullable', 'string', 'max:120'],
             'placa' => ['nullable', 'string', 'max:50'],
-            'conductor_personal_id' => ['nullable', 'string', 'size:36', 'exists:personal,id'],
+            'conductor_personal_id' => ['nullable', 'uuid'],
             'capacidad' => ['nullable', 'integer', 'min:0'],
             'hora_salida' => ['nullable', 'date_format:H:i'],
             'hora_retorno' => ['nullable', 'date_format:H:i'],

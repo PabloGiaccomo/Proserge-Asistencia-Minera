@@ -33,13 +33,7 @@ class AsistenciaPolicy
             return true;
         }
 
-        if ($this->canViewAllAttendances($usuario)) {
-            $minaId = (string) optional($grupo->rqMina)->mina_id;
-
-            return $minaId !== '' && $this->canAccessMina($usuario, $minaId);
-        }
-
-        if (!$this->manage($usuario)) {
+        if (!$this->canViewAllAttendances($usuario) && !$this->manage($usuario)) {
             return false;
         }
 
@@ -61,10 +55,6 @@ class AsistenciaPolicy
             return true;
         }
 
-        if ($this->canViewAllAttendances($usuario)) {
-            return $this->manageGrupo($usuario, $grupo);
-        }
-
         return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'registrar')
             && $this->manageGrupo($usuario, $grupo);
     }
@@ -76,12 +66,15 @@ class AsistenciaPolicy
             return true;
         }
 
-        if ($this->canViewAllAttendances($usuario)) {
-            return $this->manageGrupo($usuario, $grupo);
-        }
-
         return PermissionMatrix::userCanDirect($usuario, 'asistencias', 'cerrar')
             && $this->manageGrupo($usuario, $grupo);
+    }
+
+    public function canIdentifyAttendanceResponsible(Usuario $usuario, GrupoTrabajo $grupo): bool
+    {
+        return filled($usuario->personal_id)
+            || filled($grupo->supervisor_id)
+            || filled($grupo->asistencia?->supervisor_id);
     }
 
     public function isResponsibleFor(Usuario $usuario, GrupoTrabajo $grupo): bool

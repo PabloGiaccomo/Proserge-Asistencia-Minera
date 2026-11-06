@@ -11,12 +11,15 @@ class PromedioDesempenoService
 {
     public function refreshForTrabajador(string $trabajadorId): void
     {
-        $agg = EvaluacionDesempeno::query()
+        $agg = EvaluacionDesempeno::query()->incluidasEnPromedio()
             ->where('trabajador_id', $trabajadorId)
             ->selectRaw('COUNT(*) as total, AVG(total) as promedio, MAX(fecha) as ultima')
+            ->lockForUpdate()
             ->first();
 
         if (!$agg || (int) $agg->total === 0) {
+            PromedioDesempeno::query()->where('trabajador_id', $trabajadorId)->delete();
+
             return;
         }
 
@@ -43,7 +46,7 @@ class PromedioDesempenoService
 
     public function list(array $filters): array
     {
-        $query = EvaluacionDesempeno::query();
+        $query = EvaluacionDesempeno::query()->incluidasEnPromedio();
 
         if (!empty($filters['destino_tipo'])) {
             $query->where('destino_tipo', strtoupper((string) $filters['destino_tipo']));
@@ -82,7 +85,7 @@ class PromedioDesempenoService
 
     public function comparacion(array $filters): array
     {
-        $query = EvaluacionDesempeno::query();
+        $query = EvaluacionDesempeno::query()->incluidasEnPromedio();
 
         if (!empty($filters['fecha_desde'])) {
             $query->whereDate('fecha', '>=', $filters['fecha_desde']);

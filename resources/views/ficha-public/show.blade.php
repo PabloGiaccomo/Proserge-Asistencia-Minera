@@ -169,6 +169,8 @@
                 <p class="ficha-card-subtitle">
                     @if($ficha)
                         {{ $ficha->tipo_documento }} {{ $ficha->numero_documento }}
+                    @elseif($mode === 'readonly')
+                        Comprobante de envío
                     @else
                         Link no disponible
                     @endif
@@ -217,6 +219,12 @@
                 <div class="ficha-alert ficha-alert-danger">
                     Este link no esta habilitado. Solicita a RRHH un nuevo enlace si necesitas completar la ficha.
                 </div>
+            </div>
+        </div>
+    @elseif($mode === 'readonly')
+        <div class="ficha-card">
+            <div class="ficha-card-body">
+                Tu ficha fue enviada. RR. HH. revisará la información.
             </div>
         </div>
     @else
@@ -301,7 +309,7 @@
                                         $isConditionallyRequired = match ($key) {
                                             'estado_civil_otro' => $currentFieldValue('estado_civil') === 'Otro',
                                             'nacionalidad_otra' => $currentFieldValue('nacionalidad') === 'Otra',
-                                            'pais_nacimiento_otro', 'lugar_nacimiento_extranjero' => $paisNacimientoActual === 'Otro',
+                                            'pais_nacimiento_otro' => $paisNacimientoActual === 'Otro',
                                             'departamento_nacimiento', 'provincia_nacimiento', 'distrito_nacimiento' => $paisNacimientoActual !== 'Otro',
                                             'domicilio_pais_otro', 'domicilio_extranjero' => $domicilioPaisActual === 'Extranjero',
                                             'domicilio_departamento', 'domicilio_provincia', 'domicilio_distrito', 'domicilio_direccion' => $domicilioPaisActual !== 'Extranjero',
@@ -603,7 +611,7 @@
 @endsection
 
 @push('scripts')
-@if(in_array($mode, ['edit', 'readonly'], true))
+@if($mode === 'edit')
 @php
     $draftRevisionKey = implode(':', [
         $ficha?->estado ?? '',

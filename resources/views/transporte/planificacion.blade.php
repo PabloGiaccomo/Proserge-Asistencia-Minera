@@ -3,12 +3,9 @@
 @section('title', 'Transporte operativo - Proserge')
 
 @php
-    use App\Models\TransporteServicio;
     use App\Support\Rbac\PermissionMatrix;
 
     $permissions = session('user.permissions', []);
-    $canCreate = PermissionMatrix::allowsDirect($permissions, 'transportes', 'crear');
-    $canUpdate = PermissionMatrix::allowsDirectAny($permissions, 'transportes', ['editar', 'actualizar', 'entregar', 'recepcionar']);
     $selected = $selected ?? [];
     $summary = $resumen ?? [];
     $selectedRq = $selected['rq_mina_id'] ?? '';
@@ -17,10 +14,28 @@
     $selectedTurno = $selected['turno'] ?? 'A';
     $paradas = collect($paradas ?? []);
     $plans = collect($plans ?? []);
+    $lista = $lista ?? [];
+    $canReturnToPlan = $selectedRq !== '' && $selectedPlan !== ''
+        && ($rq_mina['id'] ?? null) === $selectedRq
+        && ($plan['id'] ?? null) === $selectedPlan
+        && request()->query('rq_mina_id') === $selectedRq
+        && request()->query('rq_mina_plan_id') === $selectedPlan
+        && PermissionMatrix::allowsDirect($permissions, 'rq_mina', 'ver')
+        && PermissionMatrix::allowsDirect($permissions, 'rq_mina', 'editar');
     $requirements = collect($requerimientos ?? []);
     $services = collect($servicios ?? []);
     $groups = collect($grupos_man_power ?? []);
-    $pendingPassengers = collect($pasajeros_pendientes ?? []);
+    $availableDetails = $groups->flatMap(fn (array $group) => $group['integrantes'] ?? []);
+    $transportedByLeg = $services->groupBy('tramo')->map(
+        fn ($legServices) => $legServices->flatMap(fn (array $service) => $service['pasajeros'] ?? [])
+            ->where('estado', 'ASIGNADO')->pluck('personal_id')->unique()
+    );
+    $drivers = collect($conductores ?? []);
+    $formContext = [...$selected, 'lista' => $lista];
+    $missingLabels = [
+        'placa' => 'Placa', 'conductor' => 'Conductor', 'capacidad' => 'Capacidad',
+        'alcance' => 'Alcance', 'sobreocupacion' => 'Resolver la sobreocupación',
+    ];
 @endphp
 
 @push('styles')
@@ -43,7 +58,7 @@
     .tr-input:focus, .tr-select:focus, .tr-textarea:focus { outline:none; border-color:#18c7b5; box-shadow:0 0 0 3px rgba(24,199,181,.14); }
     .tr-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
     .tr-btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; border-radius:12px; border:1px solid #cddbef; padding:10px 14px; color:#071b3a; background:#fff; font-weight:800; text-decoration:none; cursor:pointer; }
-    .tr-btn-primary { border-color:#18c7b5; background:#18c7b5; color:#fff; box-shadow:0 8px 18px rgba(24,199,181,.22); }
+    .tr-btn-primary { border-color:#087568; background:#087568; color:#fff; }
     .tr-btn-soft { background:#eefdfa; border-color:#8ee8dd; color:#007f76; }
     .tr-btn-danger { color:#b42318; border-color:#ffc9c4; background:#fff7f6; }
     .tr-summary { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:12px; }
@@ -60,32 +75,53 @@
     .tr-muted { color:#657792; font-size:13px; }
     .tr-mini-form { display:grid; gap:8px; min-width:220px; }
     .tr-empty { padding:22px; color:#657792; text-align:center; }
+    .tr-table-wrap, .tr-field { min-width:0; }
+    .tr-shell .tr-card { scroll-margin-top:88px; }
+    .tr-form-notes { grid-column:1/-1; }
+    .tr-form-actions { margin-top:14px; }
+    .tr-form-error { margin:0 0 12px; padding:10px; border:1px solid #dc8c88; border-radius:8px; color:#8e231e; background:#fff7f6; }
+    .tr-form-error[data-success] { border-color:#85c4a4; color:#145635; background:#effaf3; }
+    .tr-form-error:focus, .tr-btn:focus-visible { outline:2px solid #1d4f91; outline-offset:2px; }
+    .tr-btn:disabled { opacity:.7; cursor:wait; }
+    .tr-gaps { margin:0; padding-left:18px; }
     @media (max-width:1100px) {
         .tr-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
         .tr-filter-grid, .tr-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     @media (max-width:720px) {
         .tr-head, .tr-card-head { flex-direction:column; }
-        .tr-summary, .tr-filter-grid, .tr-grid { grid-template-columns:1fr; }
+        .tr-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .tr-filter-grid, .tr-grid { grid-template-columns:minmax(0,1fr); }
+        .tr-services-table { min-width:0; display:block; }
+        .tr-services-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+        .tr-services-table tbody, .tr-services-table tr, .tr-services-table td { display:block; }
+        .tr-services-table tr { padding:10px 16px; border-top:1px solid #d8e4f2; }
+        .tr-services-table td { padding:6px 0; border:0; overflow-wrap:anywhere; }
+        .tr-mini-form { min-width:0; }
     }
 </style>
 @endpush
 
 @section('content')
-<div class="tr-shell">
+<div class="tr-shell" data-transport-planning data-return-path="{{ route('transporte.planificacion', absolute: false) }}">
     <div class="tr-head">
         <div>
             <h1 class="tr-title">Transporte operativo</h1>
             <p class="tr-subtitle">Planificacion de unidades, pasajeros y brechas por parada, plan, fecha y turno.</p>
         </div>
-        <a class="tr-btn" href="{{ route('logistica.index', ['tab' => 'servicios']) }}">Volver a Logistica</a>
+        <div class="tr-actions">
+            @if($canReturnToPlan)
+                <a class="tr-btn tr-btn-soft" href="{{ route('rq-mina.plan', ['id' => $selectedRq, 'plan_id' => $selectedPlan, 'lista' => $lista]) }}">Volver al plan de la parada</a>
+            @endif
+            <a class="tr-btn" href="{{ route('logistica.index', ['tab' => 'servicios']) }}">Volver a Logística</a>
+        </div>
     </div>
 
     @if(session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
     @endif
-    @if(session('error'))
-        <div class="alert alert-danger">{{ session('error') }}</div>
+    @if(session('error') && !old('form_key'))
+        <div class="alert alert-danger" role="alert">{{ session('error') }}</div>
     @endif
 
     <section class="tr-card">
@@ -97,6 +133,11 @@
         </div>
         <div class="tr-card-body">
             <form method="GET" action="{{ route('transporte.planificacion') }}" class="tr-filter-grid">
+                @foreach($lista as $key => $value)
+                    @if(is_scalar($value))
+                        <input type="hidden" name="lista[{{ $key }}]" value="{{ $value }}">
+                    @endif
+                @endforeach
                 <label class="tr-field">
                     <span>Parada</span>
                     <select class="tr-select" name="rq_mina_id">
@@ -111,8 +152,8 @@
                     <span>Plan</span>
                     <select class="tr-select" name="rq_mina_plan_id">
                         <option value="">Plan disponible</option>
-                        @foreach($plans as $plan)
-                            <option value="{{ $plan['id'] }}" @selected($selectedPlan === $plan['id'])>{{ $plan['codigo'] }} - {{ $plan['nombre'] }}</option>
+                        @foreach($plans as $planOption)
+                            <option value="{{ $planOption['id'] }}" @selected($selectedPlan === $planOption['id'])>{{ $planOption['codigo'] }} - {{ $planOption['nombre'] }}</option>
                         @endforeach
                     </select>
                 </label>
@@ -152,39 +193,30 @@
         @endforeach
     </section>
 
-    @if($canCreate && $selectedRq !== '')
-        <section class="tr-card">
+    @if(!empty($editService))
+        <section class="tr-card" id="transporte-editar" aria-labelledby="transporte-editar-title">
             <div class="tr-card-head">
                 <div>
-                    <h2 class="tr-card-title">Nuevo servicio</h2>
-                    <p class="tr-card-subtitle">Crea la unidad concreta para esta fecha y turno. Se guarda en BORRADOR si faltan placa, conductor o capacidad.</p>
+                    <h2 class="tr-card-title" id="transporte-editar-title">Editar servicio</h2>
+                    <p class="tr-card-subtitle">{{ $editService['placa'] ?: 'Sin placa' }} · {{ $editService['fecha'] }} · Turno {{ $editService['turno'] }}</p>
                 </div>
             </div>
             <div class="tr-card-body">
-                <form method="POST" action="{{ route('transporte.servicios.store') }}">
-                    @csrf
-                    <input type="hidden" name="rq_mina_id" value="{{ $selectedRq }}">
-                    <input type="hidden" name="rq_mina_plan_id" value="{{ $selectedPlan }}">
-                    <input type="hidden" name="fecha" value="{{ $selectedFecha }}">
-                    <input type="hidden" name="turno" value="{{ $selectedTurno }}">
-                    <div class="tr-grid">
-                        <label class="tr-field"><span>Tipo</span><select class="tr-select" name="tipo"><option value="PERSONAL">Personal</option><option value="CARGA">Carga</option></select></label>
-                        <label class="tr-field"><span>Tramo</span><select class="tr-select" name="tramo"><option value="IDA">Ida</option><option value="RETORNO">Retorno</option><option value="TRASLADO_INTERNO">Traslado interno</option></select></label>
-                        <label class="tr-field"><span>Transportista</span><input class="tr-input" name="transportista" placeholder="Empresa o proveedor"></label>
-                        <label class="tr-field"><span>Vehiculo</span><input class="tr-input" name="tipo_vehiculo" placeholder="Van, bus, camioneta"></label>
-                        <label class="tr-field"><span>Placa</span><input class="tr-input" name="placa" placeholder="ABC-123"></label>
-                        <label class="tr-field"><span>Capacidad</span><input class="tr-input" type="number" min="0" name="capacidad"></label>
-                        <label class="tr-field"><span>Hora salida</span><input class="tr-input" type="time" name="hora_salida"></label>
-                        <label class="tr-field"><span>Hora retorno</span><input class="tr-input" type="time" name="hora_retorno"></label>
-                        <label class="tr-field"><span>Origen</span><input class="tr-input" name="origen"></label>
-                        <label class="tr-field"><span>Destino</span><input class="tr-input" name="destino"></label>
-                        <label class="tr-field"><span>Estado</span><select class="tr-select" name="estado"><option value="BORRADOR">Borrador</option><option value="ASIGNADO">Asignado</option></select></label>
-                        <label class="tr-field"><span>Alcance Man Power</span><select class="tr-select" name="alcances[0][grupo_trabajo_id]"><option value="">Sin grupo</option>@foreach($groups as $group)<option value="{{ $group['id'] }}">{{ $group['servicio'] }} - {{ $group['paradero'] }}</option>@endforeach</select></label>
-                    </div>
-                    <div class="tr-actions" style="margin-top:14px">
-                        <button class="tr-btn tr-btn-primary" type="submit">Crear servicio</button>
-                    </div>
-                </form>
+                @include('transporte.partials.servicio-form', ['formKey' => $editService['id'], 'values' => $editService])
+            </div>
+        </section>
+    @endif
+
+    @if(!empty($can_create))
+        <section class="tr-card" id="transporte-nuevo" aria-labelledby="transporte-nuevo-title">
+            <div class="tr-card-head">
+                <div>
+                    <h2 class="tr-card-title" id="transporte-nuevo-title">Nuevo servicio</h2>
+                    <p class="tr-card-subtitle">La unidad se guarda en borrador para esta fecha y turno. Completa los datos antes de confirmar.</p>
+                </div>
+            </div>
+            <div class="tr-card-body">
+                @include('transporte.partials.servicio-form', ['formKey' => 'nuevo', 'values' => []])
             </div>
         </section>
     @endif
@@ -225,14 +257,14 @@
                             <td>@if($row['legacy'])<span class="tr-badge tr-badge-warn">{{ $row['legacy_label'] }}</span>@else<span class="tr-badge tr-badge-ok">Estructurado</span>@endif</td>
                         </tr>
                     @empty
-                        <tr><td colspan="6" class="tr-empty">No hay requerimientos para el contexto seleccionado.</td></tr>
+                        <tr><td colspan="7" class="tr-empty">No hay requerimientos para el contexto seleccionado.</td></tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
     </section>
 
-    <section class="tr-card">
+    <section class="tr-card" id="transporte-servicios">
         <div class="tr-card-head">
             <div>
                 <h2 class="tr-card-title">Servicios asignados</h2>
@@ -241,14 +273,18 @@
             <span class="tr-badge">{{ $services->count() }} servicios</span>
         </div>
         <div class="tr-table-wrap">
-            <table class="tr-table">
+            <table class="tr-table tr-services-table">
                 <thead><tr><th>Servicio</th><th>Unidad</th><th>Capacidad</th><th>Alcances</th><th>Pasajeros</th><th>Acciones</th></tr></thead>
                 <tbody>
                     @forelse($services as $service)
                         @php
                             $metrics = $service['metricas'] ?? [];
                             $servicePassengers = collect($service['pasajeros'] ?? [])->where('estado', 'ASIGNADO');
-                            $serviceGroupIds = collect($service['alcances'] ?? [])->pluck('grupo_man_power')->filter();
+                            $serviceGroupIds = collect($service['alcances'] ?? [])->pluck('grupo_trabajo_id')->filter();
+                            $serviceCandidates = $availableDetails->whereIn('grupo_trabajo_id', $serviceGroupIds)
+                                ->whereNotIn('personal_id', $transportedByLeg->get($service['tramo'], []))->unique('personal_id');
+                            $capabilities = $service['capabilities'] ?? [];
+                            $missing = $service['faltantes_confirmacion'] ?? [];
                         @endphp
                         <tr>
                             <td><strong>{{ $service['tipo'] }} · {{ $service['tramo'] }}</strong><br><span class="tr-muted">{{ $service['estado'] }} · {{ $service['fecha'] }} · Turno {{ $service['turno'] }}</span></td>
@@ -269,26 +305,50 @@
                                 @endforelse
                             </td>
                             <td>
-                                @if($canUpdate)
+                                @if($missing && !in_array($service['estado'], ['CONFIRMADO', 'FINALIZADO', 'CANCELADO', 'ANULADO'], true) && empty($plan['archivado']))
+                                    <p class="tr-muted"><strong>Falta para confirmar</strong></p>
+                                    <ul class="tr-gaps">
+                                        @foreach($missing as $item)
+                                            <li>{{ $missingLabels[$item] }}</li>
+                                        @endforeach
+                                    </ul>
+                                @endif
+                                @if(!empty($capabilities['editar']) || (!empty($capabilities['confirmar']) && !$missing) || !empty($capabilities['agregar_pasajeros']))
                                     <div class="tr-mini-form">
-                                        <form method="POST" action="{{ route('transporte.servicios.estado', $service['id']) }}">
-                                            @csrf
-                                            <input type="hidden" name="estado" value="CONFIRMADO">
-                                            <button class="tr-btn tr-btn-soft" type="submit">Confirmar</button>
-                                        </form>
-                                        <form method="POST" action="{{ route('transporte.servicios.pasajeros', $service['id']) }}">
-                                            @csrf
-                                            <select class="tr-select" name="grupo_trabajo_detalle_id">
-                                                <option value="">Agregar pasajero</option>
-                                                @foreach($pendingPassengers as $candidate)
-                                                    <option value="{{ $candidate['grupo_trabajo_detalle_id'] }}">{{ $candidate['trabajador'] }} - {{ $candidate['grupo'] }}</option>
-                                                @endforeach
-                                            </select>
-                                            <button class="tr-btn" type="submit">Agregar</button>
-                                        </form>
+                                        @if(!empty($capabilities['editar']))
+                                            <a class="tr-btn" href="{{ route('transporte.planificacion', [...$formContext, 'editar' => $service['id']]) }}#transporte-editar">Editar servicio</a>
+                                        @endif
+                                        @if(!empty($capabilities['confirmar']) && !$missing)
+                                            <form method="POST" action="{{ route('transporte.servicios.estado', $service['id']) }}" data-transport-form>
+                                                @csrf
+                                                @include('transporte.partials.context-fields')
+                                                <input type="hidden" name="estado" value="CONFIRMADO">
+                                                <div class="tr-form-error" data-transport-error role="alert" tabindex="-1" hidden></div>
+                                                <button class="tr-btn tr-btn-soft" type="submit">Confirmar</button>
+                                            </form>
+                                        @endif
+                                        @if(!empty($capabilities['agregar_pasajeros']))
+                                            @if($serviceCandidates->isEmpty())
+                                                <span class="tr-muted">No hay candidatos para agregar en el alcance.</span>
+                                            @else
+                                                <form method="POST" action="{{ route('transporte.servicios.pasajeros', $service['id']) }}" data-transport-form>
+                                                    @csrf
+                                                    @include('transporte.partials.context-fields')
+                                                    <div class="tr-form-error" data-transport-error role="alert" tabindex="-1" hidden></div>
+                                                    <label class="tr-field">
+                                                        <span>Agregar pasajero</span>
+                                                        <select class="tr-select" name="grupo_trabajo_detalle_id" required>
+                                                            <option value="">Seleccionar pasajero</option>
+                                                            @foreach($serviceCandidates as $candidate)
+                                                                <option value="{{ $candidate['grupo_trabajo_detalle_id'] }}">{{ $candidate['trabajador'] }} - {{ $candidate['grupo'] }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                    </label>
+                                                    <button class="tr-btn" type="submit">Agregar pasajero</button>
+                                                </form>
+                                            @endif
+                                        @endif
                                     </div>
-                                @else
-                                    <span class="tr-muted">Sin permiso</span>
                                 @endif
                             </td>
                         </tr>
@@ -300,4 +360,5 @@
         </div>
     </section>
 </div>
+@include('transporte.partials.planning-script')
 @endsection

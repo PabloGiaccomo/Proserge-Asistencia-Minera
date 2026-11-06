@@ -4,19 +4,25 @@ namespace App\Modules\Bienestar\Controllers;
 
 use App\Models\Personal;
 use App\Models\PersonalBloqueo;
+use App\Models\PersonalBloqueoEvento;
 use App\Models\Usuario;
 use App\Http\Controllers\Controller;
+use App\Modules\Bienestar\Services\BienestarBloqueoService;
 use App\Modules\Notificaciones\Services\OperationalNotificationService;
 use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class BienestarPageController extends Controller
 {
-    public function __construct(private readonly OperationalNotificationService $operationalNotifications)
+    public function __construct(
+        private readonly OperationalNotificationService $operationalNotifications,
+        private readonly BienestarBloqueoService $bloqueosService,
+    )
     {
     }
 
@@ -140,10 +146,19 @@ class BienestarPageController extends Controller
             ->get();
 
         $calendar = $this->buildCalendar($monthStart, $bloqueos);
+        $showHistory = !$soloCalendario && PermissionMatrix::allowsDirectAny(
+            session('user.permissions', []), 'bienestar', ['editar', 'actualizar', 'eliminar', 'anular'],
+        );
+        $history = $showHistory
+            ? PersonalBloqueoEvento::query()->with('actor.personal:id,nombre_completo')
+                ->whereHas('bloqueo', fn ($query) => $query->where('personal_id', $trabajador->id))
+                ->latest('ocurrido_at')->latest('id')->limit(30)->get()
+            : collect();
 
         return view('bienestar.show', [
             'trabajador' => $trabajador,
             'bloqueos' => $bloqueos,
+            'history' => $history,
             'calendar' => $calendar,
             'soloCalendario' => $soloCalendario,
             'month' => $monthStart->format('Y-m'),
@@ -294,10 +309,13 @@ class BienestarPageController extends Controller
         $bloqueo = PersonalBloqueo::query()
             ->with(['personal:id,dni,nombre_completo'])
             ->findOrFail($bloqueoId);
+        abort_if($bloqueo->estado === 'ANULADO', 403, 'El bloqueo anulado es de solo consulta.');
+        $month = $this->resolveMonthStart((string) request()->query('mes', $bloqueo->fecha_inicio->format('Y-m')))->format('Y-m');
 
         return view('bienestar.edit-bloqueo', [
             'bloqueo' => $bloqueo,
             'trabajador' => $bloqueo->personal,
+            'month' => $month,
         ]);
     }
 
@@ -314,6 +332,8 @@ class BienestarPageController extends Controller
             'detalle' => ['nullable', 'string'],
             'fecha_inicio' => ['required', 'date'],
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
+            'motivo_decision' => ['required', 'string', 'max:1000'],
+            'mes' => ['nullable', 'date_format:Y-m'],
         ]);
 
         $tipo = trim((string) $payload['tipo']);
@@ -329,35 +349,53 @@ class BienestarPageController extends Controller
             return back()->withErrors(['tipo' => 'Solo se puede registrar gestacion para trabajadoras con sexo femenino en la ficha.'])->withInput();
         }
 
-        $bloqueo->update([
+        $updated = $this->bloqueosService->update($bloqueo, $this->requireActor($request), [
             'tipo' => $tipo,
             'motivo' => $payload['motivo'],
             'detalle' => $payload['detalle'] ?? null,
             'fecha_inicio' => Carbon::parse($payload['fecha_inicio'])->toDateString(),
             'fecha_fin' => Carbon::parse($payload['fecha_fin'])->toDateString(),
-        ]);
+        ], $payload['motivo_decision']);
 
         return redirect()
-            ->route('bienestar.index')
+            ->route('bienestar.show', ['id' => $updated->personal_id, 'mes' => $payload['mes'] ?? $updated->fecha_inicio->format('Y-m')])
             ->with('success', 'Bloqueo actualizado correctamente.');
     }
 
-    public function anularBloqueo(string $bloqueoId)
+    public function anularBloqueo(Request $request, string $bloqueoId)
     {
         $this->assertWellbeingPermission(['eliminar', 'anular']);
 
-        $bloqueo = PersonalBloqueo::query()->with('personal')->findOrFail($bloqueoId);
-
-        $bloqueo->update([
-            'estado' => 'ANULADO',
+        $payload = $request->validate([
+            'motivo_decision' => ['required', 'string', 'max:1000'],
+            'mes' => ['nullable', 'date_format:Y-m'],
         ]);
-        $usuarioId = (string) (session('user.id') ?? session('user_id') ?? '');
-        $usuario = $usuarioId !== '' ? Usuario::query()->find($usuarioId) : null;
-        if ($usuario) {
-            $this->operationalNotifications->bienestarBloqueoAnulado($bloqueo->fresh(['personal']) ?: $bloqueo, $usuario);
+        $actor = $this->requireActor($request);
+        $bloqueo = PersonalBloqueo::query()->findOrFail($bloqueoId);
+        $annulled = $this->bloqueosService->annul($bloqueo, $actor, $payload['motivo_decision']);
+        if ($annulled->wasChanged('estado')) {
+            try {
+                $this->operationalNotifications->bienestarBloqueoAnulado($annulled->load('personal'), $actor);
+            } catch (\Throwable $exception) {
+                Log::warning('bienestar.anulacion_aviso_fallido', [
+                    'bloqueo_id' => $annulled->id,
+                    'actor_id' => $actor->id,
+                    'exception' => $exception::class,
+                ]);
+            }
         }
 
-        return back()->with('success', 'Bloqueo anulado correctamente.');
+        return redirect()
+            ->route('bienestar.show', ['id' => $annulled->personal_id, 'mes' => $payload['mes'] ?? $annulled->fecha_inicio->format('Y-m')])
+            ->with('success', 'Bloqueo anulado correctamente.');
+    }
+
+    private function requireActor(Request $request): Usuario
+    {
+        $actor = $request->user();
+        abort_unless($actor instanceof Usuario, 401);
+
+        return $actor;
     }
 
     private function resolveDate(?string $value, string $default): string
@@ -385,10 +423,14 @@ class BienestarPageController extends Controller
     private function resolveMonthStart(string $monthInput): Carbon
     {
         try {
-            return Carbon::createFromFormat('Y-m', $monthInput)->startOfMonth();
+            $month = Carbon::createFromFormat('!Y-m', $monthInput);
+            if ($month && $month->format('Y-m') === $monthInput) {
+                return $month;
+            }
         } catch (\Throwable) {
-            return Carbon::today()->startOfMonth();
         }
+
+        return Carbon::today()->startOfMonth();
     }
 
     private function isFemalePersonal(Personal $personal): bool

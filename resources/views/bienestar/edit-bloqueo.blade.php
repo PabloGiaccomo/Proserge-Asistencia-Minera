@@ -5,6 +5,7 @@
 @section('content')
 @php
     $canUpdateWellbeing = \App\Support\Rbac\PermissionMatrix::allowsDirectAny(session('user.permissions', []), 'bienestar', ['editar', 'actualizar']);
+    $backToWorker = route('bienestar.show', ['id' => $bloqueo->personal_id, 'mes' => $month]);
 @endphp
 <div class="module-page">
     <div class="page-header">
@@ -13,7 +14,7 @@
                 <h1 class="page-title">Editar bloqueo</h1>
                 <p class="page-subtitle">{{ $trabajador->nombre_completo ?? 'Trabajador' }} - DNI {{ $trabajador->dni ?? '-' }}</p>
             </div>
-            <a href="{{ route('bienestar.index') }}" class="btn btn-outline btn-sm">Volver</a>
+            <a href="{{ $backToWorker }}" class="btn btn-outline btn-sm">Volver</a>
         </div>
     </div>
 
@@ -23,6 +24,7 @@
             <form method="POST" action="{{ route('bienestar.bloqueos.update', $bloqueo->id) }}" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; align-items:end;">
                 @csrf
                 @method('PUT')
+                <input type="hidden" name="mes" value="{{ $month }}">
 
                 @php
                     $known = ['vacaciones', 'descanso_medico', 'gestacion', 'inhabilitado', 'restriccion_temporal'];
@@ -54,18 +56,25 @@
                     <input type="date" name="fecha_fin" class="form-control" value="{{ old('fecha_fin', optional($bloqueo->fecha_fin)->toDateString()) }}" required>
                 </div>
                 <div style="grid-column:1 / -1;">
-                    <label class="filter-label">Motivo</label>
+                    <label class="filter-label">Motivo del bloqueo</label>
                     <input type="text" name="motivo" class="form-control" value="{{ old('motivo', $bloqueo->motivo) }}" required>
                 </div>
                 <div style="grid-column:1 / -1;">
                     <label class="filter-label">Detalle</label>
                     <textarea name="detalle" class="form-control" rows="3">{{ old('detalle', $bloqueo->detalle) }}</textarea>
                 </div>
+                <div style="grid-column:1 / -1;">
+                    <label class="filter-label" for="motivo-decision-edicion">Motivo de la decisión</label>
+                    <textarea name="motivo_decision" id="motivo-decision-edicion" class="form-control" rows="3" maxlength="1000" required>{{ old('motivo_decision') }}</textarea>
+                    @error('motivo_decision')
+                        <p class="text-danger" role="alert">{{ $message }}</p>
+                    @enderror
+                </div>
                 <div style="display:flex; gap:8px;">
                     @if($canUpdateWellbeing)
                         <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
                     @endif
-                    <a href="{{ route('bienestar.index') }}" class="btn btn-outline btn-sm">Cancelar</a>
+                    <a href="{{ $backToWorker }}" class="btn btn-outline btn-sm">Cancelar</a>
                 </div>
             </form>
         </div>

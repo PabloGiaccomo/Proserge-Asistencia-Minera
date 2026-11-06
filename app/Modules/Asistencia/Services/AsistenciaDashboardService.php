@@ -21,7 +21,7 @@ class AsistenciaDashboardService
 
     public function build(Usuario $usuario, array $filters): array
     {
-        if (!$this->policy->manage($usuario)) {
+        if (!$this->policy->manage($usuario) && !PermissionMatrix::userCanDirect($usuario, 'asistencias', 'dashboards')) {
             return $this->emptyDashboard($filters);
         }
 

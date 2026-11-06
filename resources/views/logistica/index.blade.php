@@ -125,6 +125,7 @@
     $toolPreviewRows = $asCollection($toolsRows ?? []);
     $servicePreviewRows = $asCollection($serviceRows ?? []);
     $identityRows = $asCollection($identityRows ?? []);
+    $identityCatalogRows = $asCollection($identityCatalogRows ?? $identityRows);
     $costRows = $asCollection($costRows ?? []);
     $sizeRows = $asCollection($sizeSummary ?? []);
     $mineRows = $asCollection($mineSummary ?? []);
@@ -823,7 +824,7 @@
                                                                 <textarea name="comentario_cambio" rows="2" placeholder="Detalle de coordinación, proveedor o datos pendientes">{{ data_get($row, 'comentario_cambio') }}</textarea>
                                                             </label>
                                                         </div>
-                                                        <input type="hidden" name="recepcion_estado" value="{{ data_get($row, 'recepcion_estado') ?: 'PENDIENTE' }}">
+                                                        <input type="hidden" name="panel" value="atencion">
                                                         <div class="lgt-service-form-actions">
                                                             <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="completar-{{ $loop->index }}">Cancelar</button>
                                                             <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar atención</button>
@@ -906,10 +907,11 @@
                                                             @endforeach
 
                                                             {{-- Documentos dinámicos existentes --}}
-                                                            @foreach($existingDocs as $docIndex => $doc)
+                                                            @foreach($existingDocs as $doc)
                                                                 <div class="lgt-file-info">
                                                                     <span class="lgt-file-info-label">{{ $doc['nombre'] ?? 'Documento' }}</span>
-                                                                    <a class="lgt-service-doc-link" target="_blank" href="{{ route('logistica.transportes.documento', ['id' => $row['id'], 'slot' => 'adicional-' . $docIndex]) }}">✓ Descargar</a>
+                                                                    <a class="lgt-service-doc-link" target="_blank" rel="noopener" href="{{ route('logistica.transportes.documento', ['id' => $row['id'], 'slot' => $doc['slot']]) }}">✓ Descargar</a>
+                                                                    <label><input type="checkbox" name="documentos_retirar[]" value="{{ $doc['slot'] }}"> Retirar de los documentos vigentes</label>
                                                                 </div>
                                                             @endforeach
 
@@ -967,8 +969,7 @@
                                                                 + Agregar otro documento
                                                             </button>
                                                         </div>
-                                                        <input type="hidden" name="estado_logistico" value="{{ data_get($row, 'estado') ?: 'REQUERIDO' }}">
-                                                        <input type="hidden" name="recepcion_estado" value="{{ data_get($row, 'recepcion_estado') ?: 'PENDIENTE' }}">
+                                                        <input type="hidden" name="panel" value="entrega">
                                                         <div class="lgt-service-form-actions">
                                                             <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="entrega-{{ $loop->index }}">Cancelar</button>
                                                             <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar entrega</button>
@@ -1004,7 +1005,6 @@
                                                             </label>
                                                         </div>
                                                         <input type="hidden" name="panel" value="recepcion">
-                                                        <input type="hidden" name="estado_logistico" value="{{ data_get($row, 'estado') ?: 'REQUERIDO' }}">
                                                         <div class="lgt-service-form-actions">
                                                             <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="recepcion-{{ $loop->index }}">Cancelar</button>
                                                             <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar recepción</button>
@@ -1058,7 +1058,7 @@
                                                                 <textarea name="incidencia_operativa" rows="2" placeholder="Malogro, reemplazo, retraso, retiro o devolución">{{ data_get($row, 'incidencia_operativa') }}</textarea>
                                                             </label>
                                                         </div>
-                                                        <input type="hidden" name="recepcion_estado" value="{{ data_get($row, 'recepcion_estado') ?: 'PENDIENTE' }}">
+                                                        <input type="hidden" name="panel" value="cambio">
                                                         <div class="lgt-service-form-actions">
                                                             <button type="button" class="lgt-service-btn lgt-service-btn-ghost" data-toggle-panel="cambio-{{ $loop->index }}">Cancelar</button>
                                                             <button type="submit" class="lgt-service-btn lgt-service-btn-primary">Guardar cambios</button>
@@ -1439,6 +1439,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!in_array($identCategoria, ['EPP', 'HERRAMIENTA', 'CONSUMIBLE'], true)) {
                     $identCategoria = 'EPP';
                 }
+                $identSearch = $filters['ident_q'] ?? '';
+                $identMatchingIds = $identityRows->pluck('id')->flip();
+                $identCategoryLabel = ['EPP' => 'EPP', 'HERRAMIENTA' => 'Herramientas', 'CONSUMIBLE' => 'Consumibles'][$identCategoria];
+                $identClearUrl = route('logistica.index', ['tab' => 'identificacion', 'ident_categoria' => $identCategoria]);
                 $canConfigureEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', $identCategoria === 'EPP' ? 'gestionar_inventario' : 'configurar');
                 $canEditEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', $identCategoria === 'EPP' ? 'gestionar_inventario' : 'editar');
                 $canDeleteEpps = \App\Support\Rbac\PermissionMatrix::allowsDirect($permissions, 'epps', 'eliminar');
@@ -1495,10 +1499,35 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
 
                 <div class="lgt-card-body">
-                    @if($identityRows->isEmpty())
-                        <div class="lgt-empty">No hay ítems registrados en el catálogo.</div>
-                    @else
-                        <div class="epp-table-wrap">
+                    <form method="GET" action="{{ route('logistica.index') }}" class="lgt-ident-search" role="search" aria-label="Buscar en identificación de ítems" data-ident-search-form data-ident-category-label="{{ $identCategoryLabel }}">
+                        <input type="hidden" name="tab" value="identificacion">
+                        <input type="hidden" name="ident_categoria" value="{{ $identCategoria }}">
+                        <div class="lgt-ident-search-field">
+                            <label for="ident-item-search">Buscar ítem</label>
+                            <input id="ident-item-search" type="search" name="ident_q" class="form-control" value="{{ $identSearch }}" placeholder="Nombre o código del ítem" maxlength="200" aria-describedby="ident-search-summary">
+                        </div>
+                        <button type="submit" class="epp-btn epp-btn-primary">Buscar</button>
+                        <a href="{{ $identClearUrl }}" class="epp-btn epp-btn-light" data-ident-search-clear>Limpiar</a>
+                    </form>
+                    <p id="ident-search-summary" class="lgt-ident-search-summary" role="status" aria-live="polite">
+                        <strong data-ident-count>{{ $identityRows->count() }} {{ $identityRows->count() === 1 ? 'ítem encontrado' : 'ítems encontrados' }}</strong> en {{ $identCategoryLabel }}.
+                        Los resultados se actualizan mientras escribes por nombre o código.
+                    </p>
+                    <div class="lgt-empty" data-ident-empty @if($identityRows->isNotEmpty()) hidden @endif>
+                        <span data-ident-empty-text>
+                            @if($identSearch !== '')
+                                No hay ítems que coincidan con <strong>«{{ $identSearch }}»</strong> en esta categoría.
+                                Revisa otra categoría o limpia la búsqueda.
+                            @else
+                                No hay ítems registrados en el catálogo de {{ $identCategoryLabel }}.
+                            @endif
+                        </span>
+                        @if($canConfigureEpps)
+                            Si el ítem falta en el catálogo, usa «Agregar item».
+                        @endif
+                    </div>
+                    @if($identityCatalogRows->isNotEmpty())
+                        <div class="epp-table-wrap" data-ident-table @if($identityRows->isEmpty()) hidden @endif>
                             <table class="epp-table">
                                 <thead>
                                     <tr>
@@ -1516,7 +1545,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($identityRows as $row)
+                                    @foreach($identityCatalogRows as $row)
                                         @php
                                             $itemId = $resolve($row, ['id']);
                                             $itemNombre = $resolve($row, ['nombre', 'item']);
@@ -1543,7 +1572,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                             $itemEditOtros = $editingThis && is_array(old('otros_atributos')) ? old('otros_atributos') : $itemOtros;
                                             $itemEditRequiereOtros = !empty($itemEditOtros);
                                         @endphp
-                                        <tr>
+                                        <tr data-ident-row data-ident-search="{{ $itemNombre . ' ' . $itemCodigo }}" @if(!$identMatchingIds->has((string) $itemId)) hidden @endif>
                                             <td><strong>{{ $itemNombre }}</strong></td>
                                             <td><code>{{ $itemCodigo }}</code></td>
 
@@ -2171,10 +2200,41 @@ document.addEventListener('DOMContentLoaded', function() {
             })();
             </script>
 
+            @push('scripts')
+                @include('logistica.partials.item-search-script')
+            @endpush
+
             @push('styles')
             <style>
             body.epp-modal-open {
                 overflow: hidden;
+            }
+            .lgt-ident-search {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-end;
+                gap: 10px;
+                margin: 18px 20px 0;
+            }
+            [data-ident-row][hidden],
+            [data-ident-table][hidden],
+            [data-ident-empty][hidden] {
+                display: none !important;
+            }
+            .lgt-ident-search-field {
+                flex: 1 1 320px;
+                min-width: 0;
+                display: grid;
+                gap: 6px;
+            }
+            .lgt-ident-search-field label {
+                font-size: var(--text-sm);
+                font-weight: 600;
+            }
+            .lgt-ident-search-summary {
+                margin: 10px 20px 0;
+                color: var(--color-text-secondary);
+                font-size: var(--text-sm);
             }
             .lgt-ident-category-tabs {
                 display: inline-flex;

@@ -5,6 +5,7 @@ namespace App\Modules\Transporte\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\TransporteServicio;
 use App\Models\Usuario;
+use App\Modules\Transporte\Policies\TransportePolicy;
 use App\Modules\Transporte\Requests\ChangeTransporteEstadoRequest;
 use App\Modules\Transporte\Requests\CopyTransporteServicioRequest;
 use App\Modules\Transporte\Requests\RetireTransportePasajeroRequest;
@@ -19,7 +20,10 @@ use Illuminate\Http\Request;
 
 class TransporteController extends Controller
 {
-    public function __construct(private readonly TransportePlanningService $service)
+    public function __construct(
+        private readonly TransportePlanningService $service,
+        private readonly TransportePolicy $policy,
+    )
     {
     }
 
@@ -27,6 +31,9 @@ class TransporteController extends Controller
     {
         /** @var Usuario $usuario */
         $usuario = $request->user();
+        if (!$this->policy->grants($usuario, 'ver')) {
+            return ApiResponse::error('No autorizado', 'TRANSPORTE_VIEW_FORBIDDEN', status: 403);
+        }
 
         $filters = $request->validate([
             'rq_mina_id' => ['nullable', 'string', 'size:36'],
@@ -74,13 +81,9 @@ class TransporteController extends Controller
 
         /** @var Usuario $usuario */
         $usuario = $request->user();
-        $this->service->syncAlcances($usuario, $model, $request->validated('alcances'));
+        $result = $this->service->syncAlcances($usuario, $model, $request->validated('alcances'));
 
-        return ApiResponse::success(
-            data: $this->service->serializeServicio($model),
-            message: 'Alcances actualizados',
-            code: 'TRANSPORTE_SCOPES_OK',
-        );
+        return $this->apiResult($result, 'TRANSPORTE_SCOPES_OK', 'Alcances actualizados');
     }
 
     public function pasajeros(StoreTransportePasajeroRequest $request, string $servicio)
@@ -128,7 +131,7 @@ class TransporteController extends Controller
 
     public function copiar(CopyTransporteServicioRequest $request, string $servicio)
     {
-        $model = TransporteServicio::query()->with('alcances')->find($servicio);
+        $model = TransporteServicio::query()->find($servicio);
         if (!$model) {
             return ApiResponse::error('Servicio no encontrado', 'TRANSPORTE_NOT_FOUND', status: 404);
         }

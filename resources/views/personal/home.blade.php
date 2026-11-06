@@ -29,7 +29,7 @@
             @else
                 <div class="home-dashboard-grid">
                     @foreach($dashboards as $dashboard)
-                        <div class="home-dashboard-card">
+                        <a class="home-dashboard-card" href="{{ $dashboard['url'] }}" aria-label="Abrir dashboard de {{ $dashboard['title'] }}">
                             <div class="home-dashboard-accent" style="background: {{ $dashboard['tone'] }};"></div>
                             <div class="home-dashboard-body">
                                 <div class="home-dashboard-header">
@@ -38,10 +38,10 @@
                                 </div>
                                 <p class="home-dashboard-text">{{ $dashboard['description'] }}</p>
                                 <div class="home-dashboard-foot">
-                                    <span class="home-dashboard-note">Visible en Inicio por permiso de dashboard</span>
+                                    <span class="home-dashboard-note">Abrir dashboard &rarr;</span>
                                 </div>
                             </div>
-                        </div>
+                        </a>
                     @endforeach
                 </div>
             @endif
@@ -54,7 +54,7 @@
                 <span class="info-card-title">Navegacion</span>
             </div>
             <div class="info-card-body">
-                <p class="info-text">Los accesos rapidos del inicio fueron retirados. Ahora el movimiento entre modulos se hace desde el sidebar, segun los permisos activos del rol.</p>
+                <p class="info-text">Selecciona una tarjeta para consultar su dashboard. Usa Volver a Inicio para regresar o el menu lateral para abrir los modulos que tienes habilitados.</p>
             </div>
         </div>
 

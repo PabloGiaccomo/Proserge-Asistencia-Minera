@@ -4,10 +4,10 @@ namespace App\Modules\Auth\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Usuario;
+use App\Modules\Auth\Services\LoginAttemptLimiter;
 use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -22,18 +22,15 @@ class LoginPageController extends Controller
         return view('auth.login');
     }
 
-    public function login(Request $request)
+    public function login(Request $request, LoginAttemptLimiter $attempts)
     {
         $payload = $request->validate([
             'email' => 'required|email',
-            'password' => 'required',
+            'password' => 'required|string',
         ]);
 
-        $throttleKey = Str::lower((string) $payload['email']) . '|' . $request->ip();
-
-        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
-
+        $seconds = $attempts->retryAfter($payload['email'], $request->ip());
+        if ($seconds > 0) {
             return back()
                 ->with('error', 'Demasiados intentos. Intenta de nuevo en ' . max($seconds, 1) . ' segundos.')
                 ->withInput($request->except('password'));
@@ -50,7 +47,7 @@ class LoginPageController extends Controller
                 : 'ACTIVO';
 
             if ($estado !== 'ACTIVO') {
-                RateLimiter::hit($throttleKey, 300);
+                $attempts->failed($payload['email'], $request->ip());
 
                 return back()
                     ->with('error', 'Tu usuario se encuentra inactivo.')
@@ -79,12 +76,12 @@ class LoginPageController extends Controller
             ]);
 
             $request->session()->regenerate();
-            RateLimiter::clear($throttleKey);
+            $attempts->succeeded($payload['email'], $request->ip());
 
             return redirect()->route('inicio')->with('success', 'Bienvenido');
         }
 
-        RateLimiter::hit($throttleKey, 300);
+        $attempts->failed($payload['email'], $request->ip());
 
         return back()->with('error', 'Credenciales incorrectas.')->withInput($request->except('password'));
     }

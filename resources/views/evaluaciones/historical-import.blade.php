@@ -1,8 +1,5 @@
 @extends('layouts.app')
 @section('title', 'Carga historica de supervisores - Proserge')
-@push('styles')
-<link rel="stylesheet" href="{{ asset('css/evaluations-dashboard.css') }}?v={{ filemtime(public_path('css/evaluations-dashboard.css')) }}">
-@endpush
 @section('content')
 <div class="evaluations-page">
     <a href="{{ route('evaluaciones.index') }}">Volver a evaluaciones</a>

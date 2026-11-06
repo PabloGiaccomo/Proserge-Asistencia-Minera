@@ -46,7 +46,7 @@ const fs = require('node:fs');
                 if (route.request().resourceType() === 'document') {
                     return route.fulfill({ contentType: 'text/html', body: header });
                 }
-                return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, count: 1, items: [{
+                return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, count: 1, can_update: mode === 'notification-write', items: [{
                     id: 'synthetic', title: 'Notificacion sintetica', status: 'UNREAD', mark_read_url: '/synthetic/read', archive_url: '/synthetic/archive', action_url: '/synthetic/open',
                 }] }) });
             });

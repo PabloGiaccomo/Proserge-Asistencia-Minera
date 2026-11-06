@@ -12,6 +12,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class PersonalAntiguoRegularizationTest extends TestCase
@@ -249,7 +250,44 @@ class PersonalAntiguoRegularizationTest extends TestCase
             'personal_id' => $personal->id,
             'estado' => 'ACTIVO',
             'signed_contract_original_name' => 'contrato-previo.pdf',
+            'signed_at' => '2026-03-01 08:00:00',
         ]);
+    }
+
+    public function test_firmado_de_otro_periodo_no_puede_activar_una_regularizacion(): void
+    {
+        Storage::fake('local');
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));
+        $personal = $this->createExistingPersonal('CESADO', [
+            'fecha_cese' => '2025-12-31',
+            'motivo_cese' => 'Fin del periodo anterior',
+        ]);
+        $this->insertContract($personal, 'CERRADO', '2025-01-01', '2025-12-31', true);
+        $this->insertContractData($personal, '2025-01-01', '2025-12-31', true);
+        $legacyPath = $personal->contratoDatos->signed_contract_path;
+
+        try {
+            app(PersonalAntiguoService::class)->regularizeExisting($personal, [
+                'origen_registro' => 'ANTIGUO',
+                'sincronizar_contrato' => true,
+                'estado_contrato' => 'VIGENTE',
+                'fecha_inicio' => '2026-02-01',
+                'fecha_fin' => '2026-12-31',
+            ], null, $actor);
+            self::fail('Debe pedir un PDF del periodo nuevo antes de aplicar la regularización.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('contrato_pdf', $exception->errors());
+        }
+
+        $this->assertDatabaseHas('personal', [
+            'id' => $personal->id, 'estado' => 'CESADO', 'fecha_cese' => '2025-12-31',
+        ]);
+        $this->assertDatabaseHas('personal_contrato_datos', [
+            'personal_id' => $personal->id, 'fecha_inicio_contrato' => '2025-01-01',
+            'fecha_fin_contrato' => '2025-12-31', 'signed_contract_path' => $legacyPath,
+        ]);
+        self::assertSame(1, $personal->contratosLaborales()->count());
+        Storage::disk('local')->assertExists($legacyPath);
     }
 
     public function test_rutas_de_regularizacion_respetan_permiso_actualizar(): void

@@ -28,7 +28,7 @@
         </div>
     </header>
 
-    <form method="GET" action="{{ route('faltas.index') }}" class="ops-filter-band" aria-label="Filtros de faltas">
+    <form method="GET" action="{{ (($standaloneDashboard ?? false) ? route('inicio.dashboard.faltas') : route('faltas.index')) }}" class="ops-filter-band" aria-label="Filtros de faltas">
         <div class="ops-field search-field">
             <label for="absence-search">Buscar trabajador</label>
             <div class="ops-input-with-icon">
@@ -55,7 +55,7 @@
             </select>
         </div>
         <div class="ops-filter-actions">
-            <a class="ops-icon-btn" href="{{ route('faltas.index') }}" title="Limpiar filtros" aria-label="Limpiar filtros"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/></svg></a>
+            <a class="ops-icon-btn" href="{{ (($standaloneDashboard ?? false) ? route('inicio.dashboard.faltas') : route('faltas.index')) }}" title="Limpiar filtros" aria-label="Limpiar filtros"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/></svg></a>
             <button class="ops-btn primary" type="submit"><svg viewBox="0 0 24 24"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z"/></svg>Aplicar</button>
         </div>
     </form>
@@ -100,6 +100,7 @@
         </section>
     </div>
 
+    @if(!($standaloneDashboard ?? false) || \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'faltas', 'ver'))
     <section class="ops-panel ops-table-panel">
         <div class="ops-panel-head table-head">
             <div><h2>Detalle de faltas</h2><p>Mostrando {{ $pagination['from'] }}-{{ $pagination['to'] }} de {{ $pagination['total'] }} registros.</p></div>
@@ -145,5 +146,6 @@
             </nav>
         @endif
     </section>
+    @endif
 </div>
 @endsection

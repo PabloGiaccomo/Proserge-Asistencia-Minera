@@ -68,6 +68,10 @@ class ParadaDashboardController extends WebPageController
                 'plan_id' => $planId,
                 'fecha' => $request->input('fecha'),
                 'turno' => $request->input('turno'),
+                'lista' => array_filter(\Illuminate\Support\Arr::only((array) $request->query('lista', []), [
+                    'q', 'mina_id', 'estado', 'created_by_usuario_id', 'fecha_inicio_desde', 'fecha_inicio_hasta',
+                    'fecha_fin_desde', 'fecha_fin_hasta', 'page', 'per_page',
+                ]), static fn (mixed $value): bool => is_scalar($value) && $value !== ''),
             ]))
             ->with('success', 'Dashboard recalculado: '.(int) ($result['filas_actualizadas'] ?? 0).' fila(s) actualizada(s).');
     }

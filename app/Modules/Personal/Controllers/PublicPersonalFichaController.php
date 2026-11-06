@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class PublicPersonalFichaController extends Controller
 {
@@ -55,37 +56,44 @@ class PublicPersonalFichaController extends Controller
                 ->with('error', 'Este link ya no permite modificaciones.');
         }
 
-        $ficha = $resolved['ficha']->loadMissing(['archivos', 'familiares']);
-        $this->mergeStoredDraftIntoRequest($request, $ficha);
+        try {
+            $ficha = $resolved['ficha']->loadMissing(['archivos', 'familiares']);
+            $this->mergeStoredDraftIntoRequest($request, $ficha);
 
-        $request->merge([
-            'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
-        ]);
+            $request->merge([
+                'familiares' => $this->sanitizeFamiliares($request->input('familiares', [])),
+            ]);
 
-        $validated = $request->validate($this->rules($ficha), $this->messages());
-        $fields = $validated['fields'];
-        $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
-        $fields['tipo_documento'] = $ficha->tipo_documento;
-        $fields['numero_documento'] = $ficha->numero_documento;
+            $validated = $request->validate($this->rules($ficha), $this->messages());
+            $fields = $validated['fields'];
+            $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
+            $fields['tipo_documento'] = $ficha->tipo_documento;
+            $fields['numero_documento'] = $ficha->numero_documento;
 
-        $submitted = $this->fichaService->submitFromWorker(
-            $resolved['link'],
-            $fields,
-            $validated['familiares'],
-            $validated['firma_base64'],
-            $request->file('huella'),
-            $request->file('documentos', []),
-        );
+            $submitted = $this->fichaService->submitFromWorker(
+                $resolved['link'],
+                $fields,
+                $validated['familiares'],
+                $validated['firma_base64'],
+                $request->file('huella'),
+                $request->file('documentos', []),
+            );
+        } catch (ValidationException $exception) {
+            return redirect()
+                ->route('ficha-colaborador.show', ['token' => $token])
+                ->withErrors($exception->errors());
+        }
 
         $this->fichaService->notifyFichaSubmitted($submitted);
 
         return redirect()
             ->route('ficha-colaborador.show', ['token' => $token])
-            ->with('success', 'Ficha enviada correctamente. RRHH revisara tu informacion. El link queda en solo lectura durante 24 horas.');
+            ->with('success', 'Ficha enviada correctamente. RRHH revisará tu información. El comprobante estará disponible durante 24 horas.');
     }
 
     public function storeDraftArchivo(Request $request, string $token): JsonResponse
     {
+        $request->headers->set('Accept', 'application/json');
         $resolved = $this->fichaService->resolveToken($token);
 
         if (($resolved['mode'] ?? '') !== 'edit' || !($resolved['link'] instanceof PersonalFichaLink)) {
@@ -114,11 +122,17 @@ class PublicPersonalFichaController extends Controller
             'archivo.max' => 'El archivo supera el tamano permitido.',
         ]);
 
-        $archivo = $this->fichaService->storePublicDraftArchivo(
-            $resolved['link'],
-            $validated['tipo'],
-            $request->file('archivo'),
-        );
+        try {
+            $archivo = $this->fichaService->storePublicDraftArchivo(
+                $resolved['link'],
+                $validated['tipo'],
+                $request->file('archivo'),
+            );
+        } catch (ValidationException $exception) {
+            abort_if(isset($exception->errors()['ficha']), 403, 'Este link ya no permite guardar archivos.');
+
+            throw $exception;
+        }
 
         return response()->json([
             'message' => 'Archivo guardado como borrador.',
@@ -130,6 +144,7 @@ class PublicPersonalFichaController extends Controller
 
     public function storeDraftData(Request $request, string $token): JsonResponse
     {
+        $request->headers->set('Accept', 'application/json');
         $resolved = $this->fichaService->resolveToken($token);
 
         if (($resolved['mode'] ?? '') !== 'edit' || !($resolved['link'] instanceof PersonalFichaLink)) {
@@ -178,12 +193,18 @@ class PublicPersonalFichaController extends Controller
             );
         }
 
-        $draft = $this->fichaService->storePublicDraftData(
-            $resolved['link'],
-            $fields,
-            $validated['familiares'] ?? [],
-            $validated['firma_base64'] ?? null,
-        );
+        try {
+            $draft = $this->fichaService->storePublicDraftData(
+                $resolved['link'],
+                $fields,
+                $validated['familiares'] ?? [],
+                $validated['firma_base64'] ?? null,
+            );
+        } catch (ValidationException $exception) {
+            abort_if(isset($exception->errors()['ficha']), 403, 'Este link ya no permite guardar datos.');
+
+            throw $exception;
+        }
 
         return response()->json([
             'message' => 'Datos guardados como borrador.',
@@ -249,7 +270,6 @@ class PublicPersonalFichaController extends Controller
         $rules['fields.estado_civil_otro'] = ['required_if:fields.estado_civil,Otro', 'nullable', 'string', 'max:120'];
         $rules['fields.nacionalidad_otra'] = ['required_if:fields.nacionalidad,Otra', 'nullable', 'string', 'max:120'];
         $rules['fields.pais_nacimiento_otro'] = ['required_if:fields.pais_nacimiento,Otro', 'nullable', 'string', 'max:120'];
-        $rules['fields.lugar_nacimiento_extranjero'] = ['required_if:fields.pais_nacimiento,Otro', 'nullable', 'string', 'max:191'];
         $rules['fields.domicilio_pais_otro'] = ['required_if:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:120'];
         $rules['fields.domicilio_direccion'] = ['required_unless:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:2000'];
         $rules['fields.domicilio_extranjero'] = ['required_if:fields.domicilio_tipo,Extranjero', 'nullable', 'string', 'max:2000'];

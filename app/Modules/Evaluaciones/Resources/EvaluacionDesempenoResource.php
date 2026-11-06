@@ -24,6 +24,8 @@ class EvaluacionDesempenoResource extends JsonResource
             'respuesta_emocional' => $this->respuesta_emocional,
             'seguridad_trabajo' => $this->seguridad_trabajo,
             'total' => $this->total,
+            'estado_revision' => $this->estado_revision,
+            'revision_asistencia' => (int) $this->revision_asistencia,
             'observaciones' => $this->observaciones,
             'tuvo_incidencia' => (bool) $this->tuvo_incidencia,
             'descripcion_incidencia' => $this->descripcion_incidencia,

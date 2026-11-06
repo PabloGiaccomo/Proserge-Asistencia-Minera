@@ -31,6 +31,34 @@ class PersonalContratoRenewalTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_pdf_de_renovacion_futura_conserva_vigente_y_permite_activar_en_su_fecha(): void
+    {
+        Carbon::setTestNow('2026-06-20 12:00:00');
+        Storage::fake('local');
+        $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar', 'subir_contrato_firmado']]));
+        $personal = $this->createPersonal('ACTIVO');
+        $base = $this->insertContract($personal, 'ACTIVO', '2026-01-01', '2026-06-30', true);
+        $service = app(PersonalContratoService::class);
+        $preparation = $service->prepareRenewal($personal, ['fecha_inicio' => '2026-07-01'], $actor);
+
+        $signed = $service->uploadSignedFileForContract($personal, $preparation, UploadedFile::fake()->create('renovacion.pdf', 32, 'application/pdf'), $actor);
+
+        self::assertSame('PREPARACION', $signed->estado);
+        self::assertTrue($signed->hasSignedFile());
+        self::assertSame('ACTIVO', $base->fresh()->estado);
+        self::assertSame('ACTIVO', $personal->fresh()->estado);
+        self::assertFalse($service->canActivatePreparedSignedContract($signed));
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+        $activated = $service->activatePreparedSignedContract($personal, $signed, $actor);
+
+        self::assertSame('ACTIVO', $activated->estado);
+        self::assertSame('CERRADO', $base->fresh()->estado);
+        self::assertSame($signed->signed_contract_path, $activated->signed_contract_path);
+        self::assertSame($signed->signed_at->toDateTimeString(), $activated->signed_at->toDateTimeString());
+        self::assertSame('ACTIVO', $personal->fresh()->estado);
+    }
+
     public function test_renovacion_futura_crea_preparacion_sin_desactivar_ni_cerrar_base(): void
     {
         $actor = Usuario::query()->findOrFail($this->createUser(['personal' => ['actualizar']]));

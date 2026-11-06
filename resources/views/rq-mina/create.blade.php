@@ -4,15 +4,33 @@
 
 @php
 $copyData = $copyData ?? null;
-$selectedSupervisor = $copyData['supervisor'] ?? null;
-$selectedSupervisorPets = $copyData['supervisor_pets'] ?? null;
+$fieldErrors = $errors ?? new \Illuminate\Support\ViewErrorBag;
+$formValue = static function (string $field, mixed $default = ''): string {
+    $value = old($field, $default);
+
+    return is_scalar($value) ? (string) $value : '';
+};
+$supervisorValue = static function (string $field, ?array $selected) use ($fieldErrors, $formValue): ?array {
+    $id = $formValue($field, $selected['id'] ?? '');
+    if ($id === '' || $fieldErrors->has($field)) {
+        return null;
+    }
+
+    return $id === ($selected['id'] ?? null) ? $selected : ['id' => $id, 'nombre' => 'Supervisor de la selección anterior'];
+};
+$selectedSupervisor = $supervisorValue('supervisor_id', $copyData['supervisor'] ?? null);
+$selectedSupervisorPets = $supervisorValue('supervisor_pets_id', $copyData['supervisor_pets'] ?? null);
 $lugares = $lugares ?? [];
-$selectedDestino = (($copyData['destino_tipo'] ?? 'MINA') . '|' . ($copyData['destino_id'] ?? $copyData['mina_id'] ?? ''));
+$selectedDestino = $formValue('destino_id', ($copyData['destino_tipo'] ?? 'MINA') . '|' . ($copyData['destino_id'] ?? $copyData['mina_id'] ?? ''));
 $formMode = $formMode ?? 'create';
 $formAction = $formAction ?? route('rq-mina.store');
 $formMethod = $formMethod ?? 'POST';
 $submitLabel = $submitLabel ?? 'Guardar Parada';
 $isEdit = $formMode === 'edit';
+$lista = $lista ?? [];
+$returnUrl = $isEdit && !empty($copyData['id'])
+    ? route('rq-mina.show', ['id' => $copyData['id'], 'lista' => $lista])
+    : route('rq-mina.index', $lista);
 $rqPermissions = session('user.permissions', []);
 $canSubmitRqMina = $isEdit
     ? \App\Support\Rbac\PermissionMatrix::allowsDirect($rqPermissions, 'rq_mina', 'actualizar')
@@ -27,7 +45,7 @@ $canSubmitRqMina = $isEdit
             <p class="page-subtitle">{{ $isEdit ? 'Editar datos generales de la parada' : 'Registrar lugar, fecha y observaciones de la parada' }}</p>
         </div>
         <div class="page-actions">
-            <a href="{{ url()->previous() !== url()->current() ? url()->previous() : route('rq-mina.index') }}" class="btn btn-outline">Volver</a>
+            <a href="{{ $returnUrl }}" class="btn btn-outline">{{ $isEdit ? 'Volver a la parada' : 'Volver a paradas' }}</a>
         </div>
     </div>
 </div>
@@ -39,6 +57,26 @@ $canSubmitRqMina = $isEdit
         <p style="margin: 6px 0 0; color: #64748b;">{{ $isEdit ? 'Puedes actualizar los datos generales.' : 'Se cargaron los datos generales para registrar una nueva parada.' }}</p>
     </div>
 </div>
+@endif
+
+@if(session('success'))
+    <div class="alert alert-success" role="status">{{ session('success') }}</div>
+@endif
+
+@if(session('error') || $fieldErrors->any())
+    <div class="alert alert-error" role="alert" tabindex="-1" id="rqParadaErrors">
+        @if(session('error'))
+            <p>{{ session('error') }}</p>
+        @endif
+        @if($fieldErrors->any())
+            <strong>Revisa estos datos para guardar la parada.</strong>
+            <ul>
+                @foreach($fieldErrors->all() as $message)
+                    <li>{{ $message }}</li>
+                @endforeach
+            </ul>
+        @endif
+    </div>
 @endif
 
 @include('rq-mina.partials.field-options')
@@ -57,7 +95,7 @@ $canSubmitRqMina = $isEdit
             <div class="card-body">
                 <div class="form-group">
                     <label for="destino_id">Lugar</label>
-                    <select name="destino_id" id="destino_id" class="form-control" required>
+                    <select name="destino_id" id="destino_id" class="form-control" required @if($fieldErrors->has('destino_id')) aria-invalid="true" aria-describedby="rqDestinoError" @endif>
                         <option value="">Seleccionar lugar</option>
                         @foreach($lugares as $lugar)
                             @php $value = ($lugar['tipo'] ?? '') . '|' . ($lugar['id'] ?? ''); @endphp
@@ -66,10 +104,12 @@ $canSubmitRqMina = $isEdit
                             </option>
                         @endforeach
                     </select>
+                    @if($fieldErrors->has('destino_id')) <p id="rqDestinoError">{{ $fieldErrors->first('destino_id') }}</p> @endif
                 </div>
                 <div class="form-group">
                     <label for="area">Nombre de parada</label>
-                    <input type="text" name="area" id="area" class="form-control" value="{{ $copyData['area'] ?? '' }}" placeholder="Ej. Parada Planta Semana 32" data-rq-option-field="rq_mina.parada_nombre" required>
+                    <input type="text" name="area" id="area" class="form-control" value="{{ $formValue('area', $copyData['area'] ?? '') }}" placeholder="Ej. Parada Planta Semana 32" data-rq-option-field="rq_mina.parada_nombre" required @if($fieldErrors->has('area')) aria-invalid="true" aria-describedby="rqAreaError" @endif>
+                    @if($fieldErrors->has('area')) <p id="rqAreaError">{{ $fieldErrors->first('area') }}</p> @endif
                 </div>
             </div>
         </div>
@@ -81,11 +121,13 @@ $canSubmitRqMina = $isEdit
             <div class="card-body">
                 <div class="form-group">
                     <label for="fecha_inicio">Fecha inicio</label>
-                    <input type="date" name="fecha_inicio" id="fecha_inicio" class="form-control" value="{{ $copyData['fecha_inicio'] ?? '' }}" required>
+                    <input type="date" name="fecha_inicio" id="fecha_inicio" class="form-control" value="{{ $formValue('fecha_inicio', $copyData['fecha_inicio'] ?? '') }}" required @if($fieldErrors->has('fecha_inicio')) aria-invalid="true" aria-describedby="rqFechaInicioError" @endif>
+                    @if($fieldErrors->has('fecha_inicio')) <p id="rqFechaInicioError">{{ $fieldErrors->first('fecha_inicio') }}</p> @endif
                 </div>
                 <div class="form-group">
                     <label for="fecha_fin">Fecha fin</label>
-                    <input type="date" name="fecha_fin" id="fecha_fin" class="form-control" value="{{ $copyData['fecha_fin'] ?? '' }}" required>
+                    <input type="date" name="fecha_fin" id="fecha_fin" class="form-control" value="{{ $formValue('fecha_fin', $copyData['fecha_fin'] ?? '') }}" required @if($fieldErrors->has('fecha_fin')) aria-invalid="true" aria-describedby="rqFechaFinError" @endif>
+                    @if($fieldErrors->has('fecha_fin')) <p id="rqFechaFinError">{{ $fieldErrors->first('fecha_fin') }}</p> @endif
                 </div>
                 <div id="rqWeekPreview" style="margin-top:10px; padding:10px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; color:#0f172a; font-weight:700;">
                     Semana: -
@@ -99,7 +141,7 @@ $canSubmitRqMina = $isEdit
             <h3 class="card-title">Observaciones</h3>
         </div>
         <div class="card-body">
-            <textarea name="observaciones" class="form-control" rows="3" placeholder="Observaciones de la parada" data-rq-option-field="rq_mina.parada_observaciones">{{ $copyData['observaciones'] ?? '' }}</textarea>
+            <textarea name="observaciones" aria-label="Observaciones" class="form-control" rows="3" placeholder="Observaciones de la parada" data-rq-option-field="rq_mina.parada_observaciones">{{ $formValue('observaciones', $copyData['observaciones'] ?? '') }}</textarea>
         </div>
     </div>
 
@@ -109,6 +151,7 @@ $canSubmitRqMina = $isEdit
                 'selectorId' => 'rqCreateSupervisorSelector',
                 'selectedSupervisor' => $selectedSupervisor,
                 'title' => 'Supervisor a cargo de herramientas',
+                'errorMessage' => $fieldErrors->first('supervisor_id'),
             ])
             <div style="margin-top: 14px;">
                 @include('rq-mina.partials.supervisor-selector', [
@@ -117,13 +160,14 @@ $canSubmitRqMina = $isEdit
                     'title' => 'Supervisor a cargo de PETS',
                     'fieldName' => 'supervisor_pets_id',
                     'emptyText' => 'Sin supervisor PETS seleccionado.',
+                    'errorMessage' => $fieldErrors->first('supervisor_pets_id'),
                 ])
             </div>
         </div>
     </div>
 
     <div class="form-actions">
-        <a href="{{ route('rq-mina.index') }}" class="btn btn-outline">Cancelar</a>
+        <a href="{{ $returnUrl }}" class="btn btn-outline">Cancelar</a>
         @if($canSubmitRqMina)
             <button type="submit" class="btn btn-primary">{{ $submitLabel }}</button>
         @endif
@@ -181,6 +225,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (input) input.addEventListener('change', updateRqWeekPreview);
     if (endInput) endInput.addEventListener('change', updateRqWeekPreview);
     updateRqWeekPreview();
+    (document.querySelector('.form [aria-invalid="true"]') || document.getElementById('rqParadaErrors'))?.focus();
 });
 </script>
 @endpush

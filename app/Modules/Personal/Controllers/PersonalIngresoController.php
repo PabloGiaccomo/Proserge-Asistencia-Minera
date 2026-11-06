@@ -5,8 +5,10 @@ namespace App\Modules\Personal\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\PersonalPuesto;
 use App\Modules\Personal\Services\PersonalIngresoService;
+use App\Modules\Personal\Services\PersonalIngresoBatchReviewService;
+use App\Modules\Personal\Support\PersonalFichaAccess;
 use App\Modules\Personal\Support\PersonalFichaCatalog;
-use App\Support\Rbac\PermissionMatrix;
+use App\Modules\Personal\Support\PersonalIngresoPurpose;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -31,6 +33,7 @@ class PersonalIngresoController extends WebPageController
         $rows = $this->ingresos->list($filters);
 
         return view('personal.fichas.ingresos', [
+            'recentBatches' => app(PersonalIngresoBatchReviewService::class)->recent($this->requireAuthenticatedUser()),
             'rows' => $rows,
             'rowsTotal' => $rows->count(),
             'dailyKey' => $this->ingresos->todayKey(),
@@ -41,6 +44,7 @@ class PersonalIngresoController extends WebPageController
                 '' => 'Todos',
                 'FICHA_RECIBIDA' => 'Ficha recibida',
                 'FALTA_REVISION' => 'Falta revision',
+                'OBSERVADO' => 'Actualización observada',
                 'ACEPTADA' => 'Agregado a Personal',
                 'CONTRATO_NO_FIRMADO' => 'No firmo contrato',
             ],
@@ -48,16 +52,22 @@ class PersonalIngresoController extends WebPageController
         ]);
     }
 
-    public function show(string $id): View
+    public function show(string $id): View|RedirectResponse
     {
         $ingreso = $this->ingresos->findOrFail($id);
+        if ($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION) {
+            return redirect()->route('personal.ingresos.actualizacion.show', $id);
+        }
 
         return $this->reviewView($ingreso, false);
     }
 
-    public function edit(string $id): View
+    public function edit(string $id): View|RedirectResponse
     {
         $ingreso = $this->ingresos->findOrFail($id);
+        if ($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION) {
+            return redirect()->route('personal.ingresos.actualizacion.show', $id);
+        }
 
         return $this->reviewView($ingreso, true);
     }
@@ -71,17 +81,17 @@ class PersonalIngresoController extends WebPageController
 
         $validated = $request->validate($this->rules(), $this->messages());
         $fields = $validated['fields'];
-        $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
+        if (array_key_exists('declaraciones', $validated)) {
+            $fields['declaraciones_json'] = json_encode(array_keys($validated['declaraciones'] ?? []));
+        }
 
         $this->ingresos->updateIngreso(
             $ingreso,
             $fields,
             $validated['familiares'] ?? [],
-            $validated['firma_base64'] ?? null,
-            $request->file('huella'),
-            $request->file('documentos', []),
+            array_intersect_key($validated, array_flip(['firma_base64', 'huella'])),
+            $validated['documentos'] ?? [],
             $this->requireAuthenticatedUser(),
-            $this->canViewSensitiveFichaData(),
         );
 
         return redirect()
@@ -91,6 +101,8 @@ class PersonalIngresoController extends WebPageController
 
     public function accept(Request $request, string $id): RedirectResponse
     {
+        $ingreso = $this->ingresos->findOrFail($id);
+        abort_if($ingreso->proposito === PersonalIngresoPurpose::ACTUALIZACION, 409, 'Abre la revisión de actualización.');
         $validated = $request->validate([
             'fecha_inicio_contrato' => ['required', 'date'],
             'fecha_fin_contrato' => ['nullable', 'date', 'after_or_equal:fecha_inicio_contrato'],
@@ -106,7 +118,6 @@ class PersonalIngresoController extends WebPageController
 
         $validated['contrato_pdf'] = $request->file('contrato_pdf');
 
-        $ingreso = $this->ingresos->findOrFail($id);
         $personal = $this->ingresos->accept($ingreso, $this->requireAuthenticatedUser(), $validated);
 
         return redirect()
@@ -157,11 +168,12 @@ class PersonalIngresoController extends WebPageController
     private function reviewView($ingreso, bool $editing): View
     {
         $canViewSensitiveFichaData = $this->canViewSensitiveFichaData();
+        $data = $this->ingresos->dataForForm($ingreso);
 
         return view('personal.fichas.ingreso-review', [
             'ingreso' => $ingreso,
             'editing' => $editing,
-            'data' => $this->ingresos->dataForForm($ingreso),
+            'data' => $canViewSensitiveFichaData ? $data : PersonalFichaAccess::redact($data),
             'sections' => PersonalFichaCatalog::sections(),
             'familiares' => $this->ingresos->familyRowsForForm($ingreso),
             'documentRequirements' => PersonalFichaCatalog::documentRequirements(),
@@ -174,10 +186,7 @@ class PersonalIngresoController extends WebPageController
 
     private function canViewSensitiveFichaData(): bool
     {
-        $permissions = session('user.permissions', []);
-
-        return PermissionMatrix::allowsDirect($permissions, 'personal_ingresos', 'ver_datos_sensibles')
-            || PermissionMatrix::allowsDirect($permissions, 'personal', 'ver_datos_sensibles');
+        return PersonalFichaAccess::canSensitive($this->requireAuthenticatedUser());
     }
 
     private function rules(): array

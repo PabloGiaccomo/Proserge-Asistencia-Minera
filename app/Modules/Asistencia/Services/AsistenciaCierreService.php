@@ -16,25 +16,13 @@ class AsistenciaCierreService
 {
     public function cerrar(Usuario $usuario, GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado, array $payload): array
     {
-        $registradorId = $usuario->personal_id ?: $encabezado->supervisor_id ?: $grupo->supervisor_id;
-        if (blank($registradorId)) {
-            return [
-                'ok' => false,
-                'code' => 'ASISTENCIA_REGISTRAR_REQUIRED',
-                'message' => 'Vincula la cuenta con un trabajador antes de cerrar la asistencia.',
-            ];
-        }
-
-        return DB::transaction(function () use ($grupo, $encabezado, $payload, $registradorId): array {
-            $encabezadoBloqueado = AsistenciaEncabezado::query()
-                ->lockForUpdate()
-                ->find($encabezado->getKey());
-
-            if (! $encabezadoBloqueado) {
+        return $this->withLocks($grupo, $encabezado, function (GrupoTrabajo $grupo, AsistenciaEncabezado $encabezadoBloqueado) use ($usuario, $payload): array {
+            $registradorId = $usuario->personal_id ?: $encabezadoBloqueado->supervisor_id ?: $grupo->supervisor_id;
+            if (blank($registradorId)) {
                 return [
                     'ok' => false,
-                    'code' => 'ASISTENCIA_NOT_FOUND',
-                    'message' => 'Asistencia no existe para este grupo',
+                    'code' => 'ASISTENCIA_REGISTRAR_REQUIRED',
+                    'message' => 'Vincula la cuenta con un trabajador antes de cerrar la asistencia.',
                 ];
             }
 
@@ -58,6 +46,7 @@ class AsistenciaCierreService
             $ausentes = AsistenciaDetalle::query()
                 ->where('asistencia_id', $encabezadoBloqueado->id)
                 ->where('estado', 'AUSENTE')
+                ->orderBy('id')
                 ->get(['id', 'trabajador_id']);
 
             foreach ($ausentes as $item) {
@@ -102,19 +91,7 @@ class AsistenciaCierreService
 
     public function reabrir(Usuario $usuario, GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): array
     {
-        return DB::transaction(function () use ($usuario, $grupo, $encabezado): array {
-            $encabezadoBloqueado = AsistenciaEncabezado::query()
-                ->lockForUpdate()
-                ->find($encabezado->getKey());
-
-            if (! $encabezadoBloqueado) {
-                return [
-                    'ok' => false,
-                    'code' => 'ASISTENCIA_NOT_FOUND',
-                    'message' => 'Asistencia no existe para este grupo',
-                ];
-            }
-
+        return $this->withLocks($grupo, $encabezado, function (GrupoTrabajo $grupo, AsistenciaEncabezado $encabezadoBloqueado) use ($usuario): array {
             if ($encabezadoBloqueado->estado !== 'CERRADO') {
                 return [
                     'ok' => false,
@@ -123,6 +100,7 @@ class AsistenciaCierreService
                 ];
             }
 
+            $this->ensureDetalleCompleto($grupo, $encabezadoBloqueado);
             $encabezadoBloqueado->fill(['estado' => 'REGISTRADO']);
             $encabezadoBloqueado->save();
 
@@ -138,18 +116,36 @@ class AsistenciaCierreService
                     'updated_at' => now(),
                 ]);
 
-            $this->ensureDetalleCompleto($grupo, $encabezadoBloqueado);
-
             return ['ok' => true];
         });
     }
 
+    private function withLocks(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado, callable $operation): array
+    {
+        return DB::transaction(function () use ($grupo, $encabezado, $operation): array {
+            $lockedGroup = GrupoTrabajo::query()->lockForUpdate()->find($grupo->getKey());
+            $lockedHeader = $lockedGroup ? AsistenciaEncabezado::query()
+                ->where('grupo_trabajo_id', $lockedGroup->id)
+                ->lockForUpdate()
+                ->find($encabezado->getKey()) : null;
+
+            if (!$lockedHeader) {
+                return ['ok' => false, 'code' => 'ASISTENCIA_NOT_FOUND', 'message' => 'Asistencia no existe para este grupo'];
+            }
+            if ($lockedGroup->estado === GrupoTrabajo::ESTADO_CANCELADO) {
+                return ['ok' => false, 'code' => 'ASISTENCIA_GROUP_CANCELLED', 'message' => 'El grupo está cancelado'];
+            }
+
+            $lockedGroup->setRelation('detalle', $lockedGroup->detalle()->with('personal')->orderBy('id')->lockForUpdate()->get());
+            $lockedHeader->detalle()->orderBy('id')->lockForUpdate()->get(['id']);
+
+            return $operation($lockedGroup, $lockedHeader);
+        }, 3);
+    }
+
     private function ensureDetalleCompleto(GrupoTrabajo $grupo, AsistenciaEncabezado $encabezado): void
     {
-        $integrantes = GrupoTrabajoDetalle::query()
-            ->with(['personal'])
-            ->where('grupo_trabajo_id', $grupo->id)
-            ->get()
+        $integrantes = $grupo->detalle
             ->filter(fn (GrupoTrabajoDetalle $detalle): bool => $detalle->isDistribucionActiva());
 
         foreach ($integrantes as $integrante) {

@@ -42,8 +42,9 @@ class AsistenciaGrupoResource extends JsonResource
                 'metricas' => $this->metricasAsistencia(),
             ],
             'integrantes' => $this->detalle->map(function ($item): array {
-                $marca = $this->asistencia?->detalle?->firstWhere('grupo_trabajo_detalle_id', $item->id)
-                    ?: $this->asistencia?->detalle?->firstWhere('trabajador_id', $item->personal_id);
+                $marcas = $this->asistencia?->detalle;
+                $marca = $marcas?->firstWhere('grupo_trabajo_detalle_id', $item->id)
+                    ?? $marcas?->first(fn ($marca): bool => $marca->isLegacy() && $marca->trabajador_id === $item->personal_id);
                 $actividadPrincipal = $item->actividadesPrincipales?->firstWhere('es_principal', true);
                 $pendiente = $marca?->pendienteDeMarcacion() && $this->asistencia?->estado !== 'CERRADO';
 

@@ -2,12 +2,34 @@
 
 namespace App\Modules\Transporte\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Models\TransporteServicio;
+use App\Modules\Transporte\Policies\TransportePolicy;
+use Illuminate\Support\Str;
 
-class ReubicarTransportePasajeroRequest extends FormRequest
+class ReubicarTransportePasajeroRequest extends TransporteFormRequest
 {
-    public function authorize(): bool
+    protected const ACTION = 'retirar_pasajero';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_PASSENGER_RETIRE_FORBIDDEN';
+
+    public function authorize(TransportePolicy $policy): bool
     {
+        if (!parent::authorize($policy)) {
+            return false;
+        }
+        if (!$policy->grants($this->user(), 'agregar_pasajeros')) {
+            $this->denialCode = 'TRANSPORTE_PASSENGER_FORBIDDEN';
+            return false;
+        }
+
+        $destinationId = $this->input('destino_servicio_id');
+        if (is_string($destinationId) && Str::isUuid($destinationId)) {
+            $destination = TransporteServicio::query()->find($destinationId);
+            if ($destination && !$policy->allows($this->user(), 'agregar_pasajeros', $destination)) {
+                $this->denialCode = 'TRANSPORTE_PASSENGER_FORBIDDEN';
+                return false;
+            }
+        }
+
         return true;
     }
 

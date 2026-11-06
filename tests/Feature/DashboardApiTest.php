@@ -26,6 +26,9 @@ class DashboardApiTest extends TestCase
             'nombre' => 'PLANNER',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
                 'inicio' => ['ver', 'dashboards'],
+                'rq_mina' => ['dashboards'],
+                'rq_proserge' => ['dashboards'],
+                'man_power' => ['dashboards'],
             ])),
             'estado' => 'ACTIVO',
         ]);
@@ -59,6 +62,101 @@ class DashboardApiTest extends TestCase
                     'alertas',
                 ],
             ]);
+    }
+
+    public function test_inicio_solo_no_expone_datos_en_secciones_ni_indicadores_compuestos(): void
+    {
+        $this->setDashboardPermissions(['inicio' => ['ver']]);
+        $user = $this->createUsuario($this->rolePlannerId);
+        $mine = $this->createMina();
+        $this->assignScope($user, $mine);
+        $worker = $this->createPersonal($mine, false);
+        $this->createEvaluation($mine, $worker, $user, 19);
+        $this->createRQMina($mine, $user, 'BORRADOR');
+        $this->withToken($this->createToken($user));
+
+        foreach (['evaluaciones', 'rq-mina', 'rq-proserge', 'man-power', 'asistencia', 'faltas'] as $section) {
+            $this->getJson('/api/v1/dashboard/'.$section)->assertForbidden()->assertJsonPath('code', 'DASHBOARD_FORBIDDEN');
+        }
+        $main = $this->getJson('/api/v1/dashboard/principal')->assertOk();
+        foreach (['evaluaciones', 'rq_mina', 'rq_proserge', 'man_power', 'asistencia', 'faltas'] as $section) {
+            $main->assertJsonPath('data.'.$section, null);
+        }
+        $this->assertNotEmpty($main->json('data.resumen'));
+        $this->assertNotEmpty($main->json('data.alertas'));
+        foreach (array_merge($main->json('data.resumen'), $main->json('data.alertas')) as $metric) {
+            $this->assertNull($metric);
+        }
+    }
+
+    public function test_dashboard_evaluaciones_filtra_tipo_propietario_mina_y_puntaje_valido(): void
+    {
+        $this->setDashboardPermissions(['inicio' => ['ver'], 'evaluaciones' => ['dashboards', 'ver_desempeno']]);
+        $owner = $this->createUsuario($this->rolePlannerId);
+        $other = $this->createUsuario($this->rolePlannerId);
+        $mine = $this->createMina();
+        $outside = $this->createMina();
+        $this->assignScope($owner, $mine);
+        $worker = $this->createPersonal($mine, false);
+        $privateWorker = $this->createPersonal($mine, false);
+        $outsideWorker = $this->createPersonal($outside, false);
+        $this->createEvaluation($mine, $worker, $owner, 12);
+        $this->createEvaluation($mine, $worker, $owner, 99);
+        $this->createEvaluation($mine, $privateWorker, $other, 20);
+        $this->createEvaluation($outside, $outsideWorker, $owner, 18);
+        $this->withToken($this->createToken($owner));
+
+        $this->getJson('/api/v1/dashboard/evaluaciones')->assertOk()
+            ->assertJsonPath('data.evaluaciones_desempeno_total', 2)
+            ->assertJsonPath('data.evaluaciones_supervisor_total', null)
+            ->assertJsonPath('data.evaluaciones_residente_total', null)
+            ->assertJsonPath('data.promedio_general_desempeno', 12)
+            ->assertJsonCount(1, 'data.ranking_top')
+            ->assertJsonPath('data.ranking_top.0.trabajador_id', $worker)
+            ->assertJsonMissing(['trabajador_id' => $privateWorker])
+            ->assertJsonMissing(['trabajador_id' => $outsideWorker]);
+        $this->getJson('/api/v1/dashboard/evaluaciones?mina_id='.$outside)->assertOk()
+            ->assertJsonPath('data.evaluaciones_desempeno_total', 0)->assertJsonCount(0, 'data.ranking_top');
+        $this->getJson('/api/v1/dashboard/resumen')->assertOk()
+            ->assertJsonPath('data.evaluaciones_desempeno_total', 2)->assertJsonPath('data.evaluaciones_supervisor_total', null);
+    }
+
+    public function test_dashboard_evaluaciones_respeta_roles_adicionales_activos_sin_ampliar_propietario(): void
+    {
+        $this->setDashboardPermissions(['inicio' => ['ver'], 'evaluaciones' => ['dashboards', 'ver_desempeno']]);
+        $user = $this->createUsuario($this->rolePlannerId);
+        $other = $this->createUsuario($this->rolePlannerId);
+        $outside = $this->createMina();
+        $worker = $this->createPersonal($outside, false);
+        $this->createEvaluation($outside, $worker, $user, 12);
+        $this->createEvaluation($outside, $worker, $other, 19);
+        $role = DB::table('roles')->where('nombre', 'GERENTE')->value('id') ?? (string) Str::uuid();
+        DB::table('roles')->updateOrInsert(['id' => $role], ['nombre' => 'GERENTE', 'permisos' => json_encode(PermissionCatalog::emptyMatrix()), 'estado' => 'INACTIVO']);
+        DB::table('usuario_roles')->insert(['id' => (string) Str::uuid(), 'usuario_id' => $user, 'rol_id' => $role]);
+        $this->withToken($this->createToken($user));
+
+        $this->getJson('/api/v1/dashboard/evaluaciones')->assertOk()->assertJsonPath('data.evaluaciones_desempeno_total', 0);
+        DB::table('roles')->where('id', $role)->update(['estado' => 'ACTIVO']);
+        $this->getJson('/api/v1/dashboard/evaluaciones')->assertOk()
+            ->assertJsonPath('data.evaluaciones_desempeno_total', 1)->assertJsonPath('data.promedio_general_desempeno', 12);
+    }
+
+    private function setDashboardPermissions(array $permissions): void
+    {
+        DB::table('roles')->where('id', $this->rolePlannerId)->update([
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections($permissions)),
+        ]);
+    }
+
+    private function createEvaluation(string $mine, string $worker, string $owner, int $score): void
+    {
+        DB::table('evaluacion_desempeno')->insert([
+            'id' => (string) Str::uuid(), 'fecha' => '2026-08-19', 'mina_id' => $mine,
+            'destino_tipo' => 'MINA', 'destino_id' => $mine, 'trabajador_id' => $worker,
+            'evaluado_por_usuario_id' => $owner, 'origen' => 'ASISTENCIA', 'total' => $score,
+            'desempeno_trabajo' => 2, 'orden_limpieza' => 2, 'compromiso' => 2,
+            'respuesta_emocional' => 2, 'seguridad_trabajo' => 2,
+        ]);
     }
 
     public function test_dashboard_resumen_applies_date_filters(): void

@@ -35,20 +35,34 @@
             <!-- Mining Access Card -->
             <div class="card mt-6">
                 <div class="card-header">
-                    <span class="card-title">Minas Habilitadas</span>
+                    <span class="card-title">Alcance por mina</span>
                 </div>
                 <div class="card-body">
-                    @if(empty($minasHabilitadas))
-                        <p class="text-sm text-gray-400">Sin minas asignadas</p>
+                    @if($accesoGeneral)
+                        <p>Acceso a todas las minas en los módulos autorizados.</p>
+                    @elseif(empty($minasDeAcceso))
+                        <p>Sin minas asignadas a esta cuenta.</p>
                     @else
                         <div class="flex flex-wrap gap-2">
-                            @foreach($minasHabilitadas as $mina)
+                            @foreach($minasDeAcceso as $mina)
                                 <span class="px-3 py-1 bg-cyan-50 text-cyan-700 rounded-full text-sm font-medium">
                                     {{ $mina }}
                                 </span>
                             @endforeach
                         </div>
                     @endif
+                </div>
+            </div>
+            <div class="card mt-6">
+                <div class="card-header">
+                    <span class="card-title">Habilitación del trabajador</span>
+                </div>
+                <div class="card-body">
+                    @forelse($habilitaciones as $habilitacion)
+                        <p class="mb-2"><strong>{{ $habilitacion['mina'] }}</strong><br>{{ $habilitacion['estado'] }}</p>
+                    @empty
+                        <p>Sin habilitaciones registradas.</p>
+                    @endforelse
                 </div>
             </div>
         </div>
@@ -94,41 +108,8 @@
                             <span class="info-value text-sm">{{ $perfil['id'] }}</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">Tipo de Acceso</span>
-                            <span class="info-value">
-                                @if(($perfil['rol'] ?? '') === 'ADMIN')
-                                    Administrador
-                                @elseif(($perfil['rol'] ?? '') === 'SUPERVISOR')
-                                    Supervisor
-                                @else
-                                    Usuario Regular
-                                @endif
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Scopes de Mina</span>
-                            <span class="info-value">
-                                @if(empty($minasHabilitadas))
-                                    Sin minas asignadas
-                                @else
-                                    {{ count($minasHabilitadas) }} mina(s)
-                                @endif
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Permisos</span>
-                            <span class="info-value">
-                                @switch($perfil['rol'] ?? '')
-                                    @case('ADMIN')
-                                        Acceso total
-                                        @break
-                                    @case('SUPERVISOR')
-                                        Supervisión y gestión
-                                        @break
-                                    @default
-                                        Usuario básico
-                                @endswitch
-                            </span>
+                            <span class="info-label">Rol principal</span>
+                            <span class="info-value">{{ $perfil['rol'] }}</span>
                         </div>
                     </div>
                 </div>
@@ -137,9 +118,14 @@
             <!-- Performance Summary -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Resumen Operativo</span>
+                    <span class="card-title">Evaluaciones diarias</span>
                 </div>
                 <div class="card-body">
+                    @if($evaluacionesResumen === null)
+                        <p>Evaluaciones no disponibles para esta cuenta.</p>
+                    @elseif($evaluacionesResumen['total'] === 0)
+                        <p>Sin evaluaciones disponibles para tu trabajador.</p>
+                    @else
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div class="text-center p-4 bg-gray-50 rounded-xl">
                             <div class="text-2xl font-bold text-gray-900">{{ $evaluacionesResumen['total'] }}</div>
@@ -154,6 +140,7 @@
                             <div class="text-sm text-gray-500">Última Evaluación</div>
                         </div>
                     </div>
+                    @endif
                 </div>
             </div>
         </div>

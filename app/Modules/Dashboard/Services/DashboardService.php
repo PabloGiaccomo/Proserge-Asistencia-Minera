@@ -2,8 +2,14 @@
 
 namespace App\Modules\Dashboard\Services;
 
+use App\Models\AsistenciaDetalle;
+use App\Models\EvaluacionDesempeno;
+use App\Models\EvaluacionResidente;
+use App\Models\EvaluacionSupervisor;
 use App\Models\Usuario;
 use App\Modules\Dashboard\Policies\DashboardPolicy;
+use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
+use App\Modules\RQProserge\Policies\RQProsergePolicy;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -11,9 +17,11 @@ use Illuminate\Support\Facades\Schema;
 
 class DashboardService
 {
-    public function __construct(private readonly DashboardPolicy $policy)
-    {
-    }
+    public function __construct(
+        private readonly DashboardPolicy $policy,
+        private readonly EvaluacionesPolicy $evaluationPolicy,
+        private readonly RQProsergePolicy $rqProsergePolicy,
+    ) {}
 
     public function resumen(Usuario $usuario, array $filters): ?array
     {
@@ -21,25 +29,24 @@ class DashboardService
             return null;
         }
 
+        $rqMina = $this->policy->canViewSection($usuario, 'rqMina') ? $this->rqMinaBase($usuario, $filters) : null;
+
         return [
-            'rq_mina_total' => $this->rqMinaBase($usuario, $filters)->count(),
-            'rq_mina_por_estado' => $this->rqMinaBase($usuario, $filters)
-                ->selectRaw('estado, COUNT(*) as total')
+            'rq_mina_total' => $rqMina?->count(),
+            'rq_mina_por_estado' => $rqMina?->selectRaw('estado, COUNT(*) as total')
                 ->groupBy('estado')
                 ->pluck('total', 'estado'),
-            'rq_proserge_total' => $this->rqProsergeBase($usuario, $filters)->count(),
-            'grupos_total' => $this->grupoBase($usuario, $filters)->count(),
-            'asistencias_cerradas' => $this->asistenciaBase($usuario, $filters)->where('ae.estado', 'CERRADO')->count(),
-            'faltas_activas' => $this->faltaBase($usuario, $filters)->where('f.estado', 'ACTIVA')->count(),
-            'evaluaciones_desempeno_total' => $this->evalDesBase($usuario, $filters)->count(),
-            'evaluaciones_supervisor_total' => $this->evalSupBase($usuario, $filters)->count(),
-            'evaluaciones_residente_total' => $this->evalResBase($usuario, $filters)->count(),
+            'rq_proserge_total' => $this->policy->canViewSection($usuario, 'rqProserge') ? $this->rqProsergeBase($usuario, $filters)->count() : null,
+            'grupos_total' => $this->policy->canViewSection($usuario, 'manPower') ? $this->grupoBase($usuario, $filters)->count() : null,
+            'asistencias_cerradas' => $this->policy->canViewSection($usuario, 'asistencia') ? $this->asistenciaBase($usuario, $filters)->where('ae.estado', 'CERRADO')->count() : null,
+            'faltas_activas' => $this->policy->canViewSection($usuario, 'faltas') ? $this->faltaBase($usuario, $filters)->where('f.estado', 'ACTIVA')->count() : null,
+            ...$this->evaluationCounts($usuario, $filters),
         ];
     }
 
     public function rqMina(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
@@ -79,7 +86,7 @@ class DashboardService
 
     public function rqProserge(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
@@ -121,7 +128,7 @@ class DashboardService
 
     public function manPower(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
@@ -157,7 +164,7 @@ class DashboardService
 
     public function asistencia(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
@@ -190,7 +197,7 @@ class DashboardService
 
     public function faltas(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
@@ -231,40 +238,46 @@ class DashboardService
 
     public function evaluaciones(Usuario $usuario, array $filters): ?array
     {
-        if (!$this->policy->view($usuario)) {
+        if (!$this->policy->canViewSection($usuario, __FUNCTION__)) {
             return null;
         }
 
+        $counts = $this->evaluationCounts($usuario, $filters);
+        if (!$this->evaluationPolicy->canViewType($usuario, 'desempeno')) {
+            return $counts + array_fill_keys(['promedio_general_desempeno', 'promedio_por_trabajador', 'promedio_por_supervisor', 'promedio_por_destino', 'ranking_top'], null);
+        }
+
+        $table = 'evaluacion_desempeno';
+        $scores = $this->evaluationBase($usuario, $filters, 'desempeno')->whereBetween($table.'.total', [0, 20]);
+
         return [
-            'evaluaciones_desempeno_total' => $this->evalDesBase($usuario, $filters)->count(),
-            'evaluaciones_supervisor_total' => $this->evalSupBase($usuario, $filters)->count(),
-            'evaluaciones_residente_total' => $this->evalResBase($usuario, $filters)->count(),
-            'promedio_general_desempeno' => round((float) ($this->evalDesBase($usuario, $filters)->avg('ed.total') ?? 0), 2),
-            'promedio_por_trabajador' => $this->evalDesBase($usuario, $filters)
-                ->selectRaw('ed.trabajador_id, ROUND(AVG(ed.total),2) as promedio_total, COUNT(*) as evaluaciones')
-                ->groupBy('ed.trabajador_id')
+            ...$counts,
+            'promedio_general_desempeno' => round((float) ($scores->avg($table.'.total') ?? 0), 2),
+            'promedio_por_trabajador' => (clone $scores)
+                ->selectRaw("{$table}.trabajador_id, ROUND(AVG({$table}.total),2) as promedio_total, COUNT(*) as evaluaciones")
+                ->groupBy($table.'.trabajador_id')
                 ->orderByDesc('promedio_total')
                 ->get()
                 ->map(fn ($r): array => ['trabajador_id' => $r->trabajador_id, 'promedio_total' => (float) $r->promedio_total, 'evaluaciones' => (int) $r->evaluaciones])
                 ->all(),
-            'promedio_por_supervisor' => $this->evalDesBase($usuario, $filters)
-                ->selectRaw('ed.supervisor_id, ROUND(AVG(ed.total),2) as promedio_total, COUNT(*) as evaluaciones')
-                ->groupBy('ed.supervisor_id')
+            'promedio_por_supervisor' => (clone $scores)
+                ->selectRaw("{$table}.supervisor_id, ROUND(AVG({$table}.total),2) as promedio_total, COUNT(*) as evaluaciones")
+                ->groupBy($table.'.supervisor_id')
                 ->orderByDesc('promedio_total')
                 ->get()
                 ->map(fn ($r): array => ['supervisor_id' => $r->supervisor_id, 'promedio_total' => (float) $r->promedio_total, 'evaluaciones' => (int) $r->evaluaciones])
                 ->all(),
-            'promedio_por_destino' => $this->evalDesBase($usuario, $filters)
-                ->selectRaw('ed.destino_tipo, ROUND(AVG(ed.total),2) as promedio_total, COUNT(*) as evaluaciones')
-                ->groupBy('ed.destino_tipo')
+            'promedio_por_destino' => (clone $scores)
+                ->selectRaw("{$table}.destino_tipo, ROUND(AVG({$table}.total),2) as promedio_total, COUNT(*) as evaluaciones")
+                ->groupBy($table.'.destino_tipo')
                 ->orderByDesc('promedio_total')
                 ->get()
                 ->map(fn ($r): array => ['destino_tipo' => $r->destino_tipo, 'promedio_total' => (float) $r->promedio_total, 'evaluaciones' => (int) $r->evaluaciones])
                 ->all(),
-            'ranking_top' => $this->evalDesBase($usuario, $filters)
-                ->leftJoin('personal as p', 'p.id', '=', 'ed.trabajador_id')
-                ->selectRaw('ed.trabajador_id, p.nombre_completo, ROUND(AVG(ed.total),2) as promedio_total')
-                ->groupBy('ed.trabajador_id', 'p.nombre_completo')
+            'ranking_top' => (clone $scores)
+                ->leftJoin('personal as p', 'p.id', '=', $table.'.trabajador_id')
+                ->selectRaw("{$table}.trabajador_id, p.nombre_completo, ROUND(AVG({$table}.total),2) as promedio_total")
+                ->groupBy($table.'.trabajador_id', 'p.nombre_completo')
                 ->orderByDesc('promedio_total')
                 ->limit(10)
                 ->get()
@@ -279,36 +292,30 @@ class DashboardService
             return null;
         }
 
-        $pendientesEvaluacion = $this->asistenciaDetalleBase($usuario, $filters)
-            ->leftJoin('evaluacion_desempeno as ed', 'ed.asistencia_detalle_id', '=', 'ad.id')
-            ->where('ad.estado', 'PRESENTE')
-            ->whereNull('ed.id')
-            ->count();
+        $canViewRq = $this->policy->canViewSection($usuario, 'rqMina');
+        $canViewAttendance = $this->policy->canViewSection($usuario, 'asistencia');
+        $canViewGroups = $this->policy->canViewSection($usuario, 'manPower');
+        $canViewFaults = $this->policy->canViewSection($usuario, 'faltas');
+        $canViewEvaluation = $this->policy->canViewSection($usuario, 'evaluaciones')
+            && $this->evaluationPolicy->canEvaluateType($usuario, 'desempeno');
 
-        $faltasMultiples = $this->faltaBase($usuario, $filters)
-            ->where('f.estado', 'ACTIVA')
-            ->selectRaw('f.trabajador_id, COUNT(*) as total')
-            ->groupBy('f.trabajador_id')
-            ->havingRaw('COUNT(*) >= 2')
-            ->count();
+        $activeFaults = $canViewFaults ? $this->faltaBase($usuario, $filters)->where('f.estado', 'ACTIVA') : null;
+        $multipleFaults = $activeFaults ? DB::query()->fromSub((clone $activeFaults)->select('f.trabajador_id')
+            ->groupBy('f.trabajador_id')->havingRaw('COUNT(*) >= 2'), 'faltas_multiples')->count() : null;
 
         return [
-            'rq_mina_pendientes_envio' => $this->rqMinaBase($usuario, $filters)->where('estado', 'BORRADOR')->count(),
-            'requerimientos_sin_atencion_completa' => $this->rqMinaBase($usuario, $filters)
+            'rq_mina_pendientes_envio' => $canViewRq ? $this->rqMinaBase($usuario, $filters)->where('estado', 'BORRADOR')->count() : null,
+            'requerimientos_sin_atencion_completa' => $canViewRq ? $this->rqMinaBase($usuario, $filters)
                 ->join('rq_mina_detalle as rmd', 'rmd.rq_mina_id', '=', 'rq_mina.id')
                 ->whereRaw('rmd.cantidad_atendida < ' . $this->rqMinaDetalleSolicitadoValueSql())
                 ->distinct('rq_mina.id')
-                ->count('rq_mina.id'),
-            'grupos_sin_asistencia_cerrada' => $this->grupoBase($usuario, $filters)
-                ->leftJoin('asistencia_encabezado as ae', 'ae.grupo_trabajo_id', '=', 'gt.id')
-                ->where(function ($q): void {
-                    $q->whereNull('ae.id')->orWhere('ae.estado', '!=', 'CERRADO');
-                })
-                ->distinct('gt.id')
-                ->count('gt.id'),
-            'faltas_activas_pendientes' => $this->faltaBase($usuario, $filters)->where('f.estado', 'ACTIVA')->count(),
-            'trabajadores_multiples_faltas_periodo' => $faltasMultiples,
-            'evaluaciones_pendientes' => $pendientesEvaluacion,
+                ->count('rq_mina.id') : null,
+            'grupos_sin_asistencia_cerrada' => $canViewGroups && $canViewAttendance ? $this->grupoBase($usuario, $filters)
+                ->whereNotExists($this->asistenciaBase($usuario, [])->selectRaw('1')->whereColumn('ae.grupo_trabajo_id', 'gt.id')->where('ae.estado', 'CERRADO'))
+                ->count('gt.id') : null,
+            'faltas_activas_pendientes' => $activeFaults?->count(),
+            'trabajadores_multiples_faltas_periodo' => $multipleFaults,
+            'evaluaciones_pendientes' => $canViewEvaluation && $canViewAttendance ? $this->pendingEvaluations($usuario, $filters) : null,
         ];
     }
 
@@ -370,7 +377,7 @@ class DashboardService
             $q->where('rp.estado', strtoupper((string) $filters['estado']));
         }
 
-        if (!$this->policy->isPrivileged($usuario)) {
+        if (!$this->rqProsergePolicy->hasUnrestrictedMinaAccess($usuario)) {
             $q->whereIn('rp.mina_id', $this->scopeMinaIds($usuario));
         }
 
@@ -413,12 +420,7 @@ class DashboardService
         }
 
         if (!$this->policy->isPrivileged($usuario)) {
-            $scope = $this->scopeMinaIds($usuario);
-            $q->where(function ($w) use ($scope): void {
-                $w->where('gt.destino_tipo', '!=', 'MINA')
-                    ->orWhereIn('gt.destino_id', $scope)
-                    ->orWhereIn('rm.mina_id', $scope);
-            });
+            $q->whereIn('rm.mina_id', $this->scopeMinaIds($usuario));
         }
 
         return $q;
@@ -451,12 +453,7 @@ class DashboardService
         }
 
         if (!$this->policy->isPrivileged($usuario)) {
-            $scope = $this->scopeMinaIds($usuario);
-            $q->where(function ($w) use ($scope): void {
-                $w->where('ae.destino_tipo', '!=', 'MINA')
-                    ->orWhereIn('ae.destino_id', $scope)
-                    ->orWhereIn('ae.mina_id', $scope);
-            });
+            $q->whereIn('ae.mina_id', $this->scopeMinaIds($usuario));
         }
 
         return $q;
@@ -464,21 +461,9 @@ class DashboardService
 
     private function asistenciaDetalleBase(Usuario $usuario, array $filters): Builder
     {
-        return DB::table('asistencia_detalle as ad')
-            ->join('asistencia_encabezado as ae', 'ae.id', '=', 'ad.asistencia_id')
-            ->when(!empty($filters['trabajador_id']), fn ($q) => $q->where('ad.trabajador_id', $filters['trabajador_id']))
-            ->tap(fn ($q) => $this->applyDateRange($q, 'ae.fecha', $filters, true))
-            ->when(!empty($filters['destino_tipo']), fn ($q) => $q->where('ae.destino_tipo', strtoupper((string) $filters['destino_tipo'])))
-            ->when(!empty($filters['destino_id']), fn ($q) => $q->where('ae.destino_id', $filters['destino_id']))
-            ->when(!empty($filters['mina_id']), fn ($q) => $q->where('ae.mina_id', $filters['mina_id']))
-            ->when(!$this->policy->isPrivileged($usuario), function ($q) use ($usuario): void {
-                $scope = $this->scopeMinaIds($usuario);
-                $q->where(function ($w) use ($scope): void {
-                    $w->where('ae.destino_tipo', '!=', 'MINA')
-                        ->orWhereIn('ae.destino_id', $scope)
-                        ->orWhereIn('ae.mina_id', $scope);
-                });
-            });
+        return $this->asistenciaBase($usuario, $filters)
+            ->join('asistencia_detalle as ad', 'ae.id', '=', 'ad.asistencia_id')
+            ->when(!empty($filters['trabajador_id']), fn ($q) => $q->where('ad.trabajador_id', $filters['trabajador_id']));
     }
 
     private function faltaBase(Usuario $usuario, array $filters): Builder
@@ -493,6 +478,9 @@ class DashboardService
 
         if (!empty($filters['destino_id'])) {
             $q->where('f.destino_id', $filters['destino_id']);
+        }
+        if (!empty($filters['mina_id'])) {
+            $q->where('f.destino_tipo', 'MINA')->where('f.destino_id', $filters['mina_id']);
         }
 
         if (!empty($filters['trabajador_id'])) {
@@ -514,106 +502,61 @@ class DashboardService
         return $q;
     }
 
-    private function evalDesBase(Usuario $usuario, array $filters): Builder
+    private function evaluationCounts(Usuario $usuario, array $filters): array
     {
-        $q = DB::table('evaluacion_desempeno as ed');
-
-        $this->applyDateRange($q, 'ed.fecha', $filters, true);
-
-        if (!empty($filters['destino_tipo'])) {
-            $q->where('ed.destino_tipo', strtoupper((string) $filters['destino_tipo']));
+        $counts = [];
+        $canViewEvaluations = $this->policy->canViewSection($usuario, 'evaluaciones');
+        foreach (['desempeno' => 'desempeno', 'supervisores' => 'supervisor', 'residentes' => 'residente'] as $type => $key) {
+            $counts['evaluaciones_'.$key.'_total'] = $canViewEvaluations && $this->evaluationPolicy->canViewType($usuario, $type)
+                ? $this->evaluationBase($usuario, $filters, $type)->count() : null;
         }
 
-        if (!empty($filters['destino_id'])) {
-            $q->where('ed.destino_id', $filters['destino_id']);
-        }
-
-        if (!empty($filters['trabajador_id'])) {
-            $q->where('ed.trabajador_id', $filters['trabajador_id']);
-        }
-
-        if (!empty($filters['supervisor_id'])) {
-            $q->where('ed.supervisor_id', $filters['supervisor_id']);
-        }
-
-        if (!$this->policy->isPrivileged($usuario)) {
-            $scope = $this->scopeMinaIds($usuario);
-            $q->where(function ($w) use ($scope): void {
-                $w->where('ed.destino_tipo', '!=', 'MINA')
-                    ->orWhereIn('ed.destino_id', $scope)
-                    ->orWhereIn('ed.mina_id', $scope);
-            });
-        }
-
-        return $q;
+        return $counts;
     }
 
-    private function evalSupBase(Usuario $usuario, array $filters): Builder
+    private function evaluationBase(Usuario $usuario, array $filters, string $type): Builder
     {
-        $q = DB::table('evaluacion_supervisor as es')
-            ->where('es.estado', '<>', \App\Models\EvaluacionSupervisor::PENDING_REGULARIZATION);
+        [$model, $workerColumn, $supervisorColumn] = match ($type) {
+            'desempeno' => [EvaluacionDesempeno::class, 'trabajador_id', 'supervisor_id'],
+            'supervisores' => [EvaluacionSupervisor::class, 'evaluado_id', 'evaluador_id'],
+            'residentes' => [EvaluacionResidente::class, 'residente_id', 'evaluador_id'],
+        };
+        $query = $this->evaluationPolicy->restrictDashboardRows($model::query(), $usuario, $type)->toBase();
+        $this->applyDateRange($query, $query->from.'.fecha', $filters, true);
 
-        $this->applyDateRange($q, 'es.fecha', $filters, true);
-
-        if (!empty($filters['destino_tipo'])) {
-            $q->where('es.destino_tipo', strtoupper((string) $filters['destino_tipo']));
+        foreach (['destino_tipo' => 'destino_tipo', 'destino_id' => 'destino_id', 'trabajador_id' => $workerColumn, 'supervisor_id' => $supervisorColumn] as $filter => $column) {
+            if (!empty($filters[$filter])) {
+                $query->where($query->from.'.'.$column, $filters[$filter]);
+            }
+        }
+        if (!empty($filters['mina_id'])) {
+            $type === 'residentes' ? $query->whereRaw('1 = 0') : $query->where($query->from.'.mina_id', $filters['mina_id']);
         }
 
-        if (!empty($filters['destino_id'])) {
-            $q->where('es.destino_id', $filters['destino_id']);
-        }
-
-        if (!empty($filters['supervisor_id'])) {
-            $q->where('es.evaluador_id', $filters['supervisor_id']);
-        }
-
-        if (!empty($filters['trabajador_id'])) {
-            $q->where('es.evaluado_id', $filters['trabajador_id']);
-        }
-
-        if (!$this->policy->isPrivileged($usuario)) {
-            $scope = $this->scopeMinaIds($usuario);
-            $q->where(function ($w) use ($scope): void {
-                $w->where('es.destino_tipo', '!=', 'MINA')
-                    ->orWhereIn('es.destino_id', $scope)
-                    ->orWhereIn('es.mina_id', $scope);
-            });
-        }
-
-        return $q;
+        return $query;
     }
 
-    private function evalResBase(Usuario $usuario, array $filters): Builder
+    private function pendingEvaluations(Usuario $usuario, array $filters): int
     {
-        $q = DB::table('evaluacion_residente as er');
-
-        $this->applyDateRange($q, 'er.fecha', $filters, true);
-
-        if (!empty($filters['destino_tipo'])) {
-            $q->where('er.destino_tipo', strtoupper((string) $filters['destino_tipo']));
+        if (!$usuario->personal_id) {
+            return 0;
         }
 
-        if (!empty($filters['destino_id'])) {
-            $q->where('er.destino_id', $filters['destino_id']);
-        }
-
-        if (!empty($filters['supervisor_id'])) {
-            $q->where('er.evaluador_id', $filters['supervisor_id']);
-        }
-
-        if (!empty($filters['trabajador_id'])) {
-            $q->where('er.residente_id', $filters['trabajador_id']);
-        }
-
-        if (!$this->policy->isPrivileged($usuario)) {
-            $scope = $this->scopeMinaIds($usuario);
-            $q->where(function ($w) use ($scope): void {
-                $w->where('er.destino_tipo', '!=', 'MINA')
-                    ->orWhereIn('er.destino_id', $scope);
+        $query = $this->asistenciaDetalleBase($usuario, $filters)
+            ->leftJoin('evaluacion_desempeno as ed', 'ed.asistencia_detalle_id', '=', 'ad.id')
+            ->where('ae.estado', 'CERRADO')
+            ->whereIn('ad.estado', AsistenciaDetalle::ESTADOS_REAL)
+            ->where('ad.trabajador_id', '<>', $usuario->personal_id)
+            ->whereNull('ed.id');
+        if (!$this->evaluationPolicy->canEvaluateOthers($usuario)) {
+            $query->where(function (Builder $owner) use ($usuario): void {
+                $owner->where('ae.supervisor_id', $usuario->personal_id)
+                    ->orWhereExists(fn (Builder $marked) => $marked->selectRaw('1')->from('asistencia_detalle as marked')
+                        ->whereColumn('marked.asistencia_id', 'ae.id')->where('marked.marcado_por_id', $usuario->id));
             });
         }
 
-        return $q;
+        return $query->count();
     }
 
     private function applyDateRange(Builder $query, string $column, array $filters, bool $isDateColumn = false): void

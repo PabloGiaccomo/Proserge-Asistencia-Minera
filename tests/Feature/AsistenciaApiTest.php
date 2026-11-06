@@ -31,6 +31,7 @@ class AsistenciaApiTest extends TestCase
             'nombre' => 'PLANNER',
             'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
                 'asistencias' => ['ver', 'actualizar', 'registrar', 'cerrar', 'reabrir'],
+                'faltas' => ['ver', 'corregir'],
                 'man_power' => ['ver', 'editar', 'asignar'],
             ])),
             'estado' => 'ACTIVO',
@@ -51,6 +52,164 @@ class AsistenciaApiTest extends TestCase
         ]);
 
         $response->assertStatus(404)->assertJsonPath('code', 'ASISTENCIA_GRUPO_NOT_FOUND');
+    }
+
+    public function test_cambiar_asistencia_evaluada_a_ausente_exige_revision_del_evaluador(): void
+    {
+        [$mine, $group, $supervisor, $worker] = $this->crearEscenarioGrupo(true);
+        $user = $this->crearUsuario();
+        $this->asignarScope($user, $mine);
+        DB::table('roles')->where('id', $this->rolPlannerId)->update(['permisos' => json_encode(
+            PermissionCatalog::matrixFromSelections([
+                'asistencias' => ['ver', 'registrar', 'actualizar', 'cerrar', 'reabrir'],
+                'evaluaciones' => ['ver_desempeno', 'evaluar_desempeno'],
+            ])
+        )]);
+        $this->withToken($this->crearToken($user));
+        $base = '/api/v1/asistencia/grupos/'.$group;
+        $this->postJson($base.'/marcar', ['personal_id' => $worker, 'estado' => 'PRESENTE'])->assertOk();
+        $this->postJson($base.'/cerrar', [])->assertOk();
+        $header = DB::table('asistencia_encabezado')->where('grupo_trabajo_id', $group)->value('id');
+        $detail = DB::table('asistencia_detalle')->where('asistencia_id', $header)->where('trabajador_id', $worker)->value('id');
+        $evaluation = \App\Models\EvaluacionDesempeno::query()->create([
+            'id' => (string) Str::uuid(), 'fecha' => '2026-07-01', 'hora' => '06:29:00', 'mina_id' => $mine,
+            'destino_tipo' => 'MINA', 'destino_id' => $mine, 'trabajador_id' => $worker, 'supervisor_id' => $supervisor,
+            'evaluado_por_usuario_id' => $user, 'asistencia_detalle_id' => $detail, 'origen' => 'ASISTENCIA',
+            'desempeno_trabajo' => 3, 'orden_limpieza' => 3, 'compromiso' => 3,
+            'respuesta_emocional' => 3, 'seguridad_trabajo' => 3, 'total' => 15,
+        ]);
+        $averages = app(\App\Modules\Evaluaciones\Services\PromedioDesempenoService::class);
+        $averages->refreshForTrabajador($worker);
+        $this->postJson($base.'/reabrir')->assertOk();
+        $this->postJson($base.'/marcar', ['personal_id' => $worker, 'estado' => 'AUSENTE'])->assertOk();
+        self::assertSame('PENDIENTE_REVISION', $evaluation->fresh()->estado_revision);
+        self::assertSame(15, $evaluation->fresh()->total);
+        $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $worker]);
+        self::assertSame([], $averages->list(['trabajador_id' => $worker]));
+        $service = app(\App\Modules\Evaluaciones\Services\EvaluacionAsistenciaRevisionService::class);
+        $actor = Usuario::query()->findOrFail($user);
+        $other = $this->crearUsuario();
+        $this->asignarScope($other, $mine);
+        $this->withSession(['auth_token' => 'synthetic', 'user_id' => $other, 'user' => ['id' => $other]])
+            ->postJson(route('evaluaciones.revisiones-asistencia.resolve', $evaluation->id), [
+                'revision' => 1, 'decision' => 'EXCLUIR', 'motivo' => 'Solicitud de otro usuario.',
+            ])->assertForbidden();
+        $this->withSession(['auth_token' => 'synthetic', 'user_id' => $user, 'user' => ['id' => $user]])
+            ->get(route('evaluaciones.revisiones-asistencia'))->assertOk()->assertSee('Pendiente de revisión por su evaluador');
+        $this->postJson(route('evaluaciones.revisiones-asistencia.resolve', $evaluation->id), [
+            'revision' => 1, 'decision' => 'RATIFICAR', 'motivo' => 'Todavía ausente.',
+        ])->assertUnprocessable();
+        $this->postJson($base.'/marcar', ['personal_id' => $worker, 'estado' => 'PRESENTE'])->assertOk();
+        self::assertSame('PENDIENTE_REVISION', $evaluation->fresh()->estado_revision);
+        $this->postJson($base.'/cerrar', [])->assertOk();
+        $revision = (int) $evaluation->fresh()->revision_asistencia;
+        $service->resolve($evaluation->id, $actor, $revision, 'RATIFICAR', 'Asistencia corregida y revisada.');
+        self::assertSame('VALIDA', $evaluation->fresh()->estado_revision);
+        $this->assertDatabaseHas('promedio_desempeno', ['trabajador_id' => $worker, 'cantidad_evaluaciones' => 1]);
+        $service->resolve($evaluation->id, $actor, $revision, 'RATIFICAR', 'Reintento.');
+        self::assertSame(2, DB::table('evaluacion_asistencia_revision_eventos')->where('evaluacion_id', $evaluation->id)->count());
+    }
+
+    public function test_crear_evaluacion_revalida_la_asistencia_que_cambio_antes_del_bloqueo(): void
+    {
+        [$mine, $group, $supervisor, $worker] = $this->crearEscenarioGrupo(true);
+        $user = $this->crearUsuario();
+        DB::table('usuarios')->where('id', $user)->update(['personal_id' => $supervisor]);
+        DB::table('roles')->where('id', $this->rolPlannerId)->update(['permisos' => json_encode(
+            PermissionCatalog::matrixFromSelections([
+                'asistencias' => ['ver', 'registrar', 'cerrar', 'reabrir'],
+                'evaluaciones' => ['ver_desempeno', 'evaluar_desempeno'],
+            ])
+        )]);
+        $this->asignarScope($user, $mine);
+        $this->withToken($this->crearToken($user));
+        $base = '/api/v1/asistencia/grupos/'.$group;
+        $this->postJson($base.'/marcar', ['personal_id' => $worker, 'estado' => 'PRESENTE'])->assertOk();
+        $this->postJson($base.'/cerrar', [])->assertOk();
+
+        $interleaved = false;
+        DB::connection()->beforeExecuting(function (string $sql) use (&$interleaved, $group, $user, $worker): void {
+            if ($interleaved || !str_contains(strtolower($sql), 'for update')
+                || (!str_contains($sql, '`grupo_trabajo`') && !str_contains($sql, '`personal`'))) {
+                return;
+            }
+            $interleaved = true;
+            $service = app(\App\Modules\Asistencia\Services\AsistenciaService::class);
+            $actor = Usuario::findOrFail($user);
+            $model = GrupoTrabajo::findOrFail($group);
+            self::assertTrue($service->reabrir($actor, $model)['ok']);
+            self::assertTrue($service->marcar($actor, $model, ['personal_id' => $worker, 'estado' => 'AUSENTE'])['ok']);
+            self::assertTrue($service->cerrar($actor, $model, [])['ok']);
+        });
+
+        $this->postJson('/api/v1/evaluaciones/desempeno', [
+            'grupo_trabajo_id' => $group, 'trabajador_id' => $worker,
+            'desempeno_trabajo' => 3, 'orden_limpieza' => 3, 'compromiso' => 3,
+            'respuesta_emocional' => 3, 'seguridad_trabajo' => 3,
+        ])->assertUnprocessable()->assertJsonPath('code', 'EVAL_WORKER_NOT_PRESENT');
+        self::assertTrue($interleaved);
+        $this->assertDatabaseMissing('evaluacion_desempeno', ['trabajador_id' => $worker]);
+        $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $worker]);
+    }
+
+    public function test_editar_evaluacion_no_sobrescribe_nota_si_la_asistencia_exige_revision(): void
+    {
+        [$mine, $group, $supervisor, $worker] = $this->crearEscenarioGrupo(true);
+        $user = $this->crearUsuario();
+        DB::table('roles')->where('id', $this->rolPlannerId)->update(['permisos' => json_encode(
+            PermissionCatalog::matrixFromSelections([
+                'asistencias' => ['ver', 'registrar', 'cerrar', 'reabrir'],
+                'evaluaciones' => ['ver_desempeno', 'editar'],
+            ])
+        )]);
+        $this->asignarScope($user, $mine);
+        $this->withToken($this->crearToken($user));
+        $base = '/api/v1/asistencia/grupos/'.$group;
+        $this->postJson($base.'/marcar', ['personal_id' => $worker, 'estado' => 'PRESENTE'])->assertOk();
+        $this->postJson($base.'/cerrar', [])->assertOk();
+        $header = DB::table('asistencia_encabezado')->where('grupo_trabajo_id', $group)->value('id');
+        $detail = DB::table('asistencia_detalle')->where('asistencia_id', $header)->where('trabajador_id', $worker)->value('id');
+        $evaluation = \App\Models\EvaluacionDesempeno::query()->create([
+            'id' => (string) Str::uuid(), 'fecha' => '2026-07-01', 'mina_id' => $mine,
+            'destino_tipo' => 'MINA', 'destino_id' => $mine, 'trabajador_id' => $worker,
+            'supervisor_id' => $supervisor, 'evaluado_por_usuario_id' => $user,
+            'asistencia_detalle_id' => $detail, 'origen' => 'ASISTENCIA',
+            'desempeno_trabajo' => 3, 'orden_limpieza' => 3, 'compromiso' => 3,
+            'respuesta_emocional' => 3, 'seguridad_trabajo' => 3, 'total' => 15,
+        ]);
+
+        foreach ([2, 3] as $score) {
+            $this->putJson('/api/v1/evaluaciones/desempeno/'.$evaluation->id, [
+                'desempeno_trabajo' => $score, 'orden_limpieza' => $score, 'compromiso' => $score,
+                'respuesta_emocional' => $score, 'seguridad_trabajo' => $score,
+            ])->assertOk()->assertJsonPath('data.total', $score * 5);
+        }
+        $this->assertDatabaseHas('promedio_desempeno', ['trabajador_id' => $worker, 'promedio_total' => 15]);
+
+        $interleaved = false;
+        DB::connection()->beforeExecuting(function (string $sql) use (&$interleaved, $group, $user, $worker): void {
+            $firstLock = str_contains(strtolower($sql), 'for update')
+                && (str_contains($sql, '`grupo_trabajo`') || str_contains($sql, '`personal`'));
+            if ($interleaved || (!$firstLock && !str_starts_with($sql, 'update `evaluacion_desempeno`'))) {
+                return;
+            }
+            $interleaved = true;
+            $service = app(\App\Modules\Asistencia\Services\AsistenciaService::class);
+            $actor = Usuario::findOrFail($user);
+            $model = GrupoTrabajo::findOrFail($group);
+            self::assertTrue($service->reabrir($actor, $model)['ok']);
+            self::assertTrue($service->marcar($actor, $model, ['personal_id' => $worker, 'estado' => 'AUSENTE'])['ok']);
+            self::assertTrue($service->cerrar($actor, $model, [])['ok']);
+        });
+
+        $this->putJson('/api/v1/evaluaciones/desempeno/'.$evaluation->id, [
+            'desempeno_trabajo' => 4, 'orden_limpieza' => 4, 'compromiso' => 4,
+            'respuesta_emocional' => 4, 'seguridad_trabajo' => 4,
+        ])->assertUnprocessable()->assertJsonPath('code', 'EVAL_REVISION_REQUIRED');
+        self::assertTrue($interleaved);
+        self::assertSame(15, $evaluation->fresh()->total);
+        self::assertSame('PENDIENTE_REVISION', $evaluation->fresh()->estado_revision);
+        $this->assertDatabaseMissing('promedio_desempeno', ['trabajador_id' => $worker]);
     }
 
     public function test_api_no_permite_presente_fuera_de_horario_con_hora_alterada(): void
@@ -327,6 +486,35 @@ class AsistenciaApiTest extends TestCase
         ]);
     }
 
+    public function test_corregir_falta_actualiza_ejecucion_de_la_actividad(): void
+    {
+        [$mine, $group, , $worker] = $this->crearEscenarioGrupo(true);
+        $user = $this->crearUsuario();
+        $this->asignarScope($user, $mine);
+        $this->withToken($this->crearToken($user));
+        $rq = DB::table('grupo_trabajo')->where('id', $group)->value('rq_mina_id');
+        $activity = $this->crearActividadOperativa($rq, $group);
+        $detail = DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $group)->where('personal_id', $worker)->value('id');
+
+        $this->postJson('/api/v1/asistencia/grupos/'.$group.'/integrantes/'.$detail.'/actividad-principal', ['rq_mina_actividad_id' => $activity])->assertOk();
+        $this->postJson('/api/v1/asistencia/grupos/'.$group.'/cerrar')->assertOk();
+        $falta = DB::table('faltas')->where('trabajador_id', $worker)->value('id');
+        $summary = DB::table('parada_ejecucion_resumen')->where('rq_mina_actividad_id', $activity)->first();
+        $this->assertGreaterThan(0, $summary->ausentes);
+
+        $this->postJson('/api/v1/faltas/'.$falta.'/corregir-asistencia', [
+            'motivo_correccion' => 'Ingreso verificado en campo',
+            'hora_marcado' => '06:28',
+        ])->assertOk()->assertJsonPath('data.estado', 'CORREGIDA');
+        $this->assertDatabaseHas('asistencia_detalle', ['grupo_trabajo_detalle_id' => $detail, 'estado' => 'PRESENTE']);
+        $this->assertDatabaseHas('parada_ejecucion_resumen', [
+            'id' => $summary->id,
+            'presentes' => $summary->presentes + 1,
+            'ausentes' => $summary->ausentes - 1,
+            'brecha_plan_real' => $summary->brecha_plan_real - 1,
+        ]);
+    }
+
     public function test_backfill_y_recalculo_dry_run_funcionan_sin_modificar(): void
     {
         [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
@@ -420,6 +608,28 @@ class AsistenciaApiTest extends TestCase
         $response = $this->withToken($token)->getJson('/api/v1/asistencia/grupos/'.$grupoId);
 
         $response->assertStatus(404)->assertJsonPath('code', 'ASISTENCIA_GRUPO_NOT_FOUND');
+    }
+
+    public function test_ver_todas_las_asistencias_no_autoriza_escritura_api(): void
+    {
+        [$minaId, $grupoId, , $trabajadorId] = $this->crearEscenarioGrupo(true);
+        DB::table('roles')->where('id', $this->rolPlannerId)->update([
+            'permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+                'mi_asistencia' => ['ver', 'ver_todas_asistencias'],
+            ])),
+        ]);
+        $usuarioId = $this->crearUsuario();
+        $this->withToken($this->crearToken($usuarioId));
+        $path = '/api/v1/asistencia/grupos/'.$grupoId;
+
+        $this->getJson($path)->assertNotFound();
+        $this->asignarScope($usuarioId, $minaId);
+        $this->getJson($path)->assertOk();
+        $this->postJson($path.'/marcar', ['personal_id' => $trabajadorId, 'estado' => 'PRESENTE'])->assertForbidden();
+        $this->postJson($path.'/marcar-masivo', ['personal_ids' => [$trabajadorId], 'estado' => 'PRESENTE'])->assertForbidden();
+        $this->postJson($path.'/cerrar', [])->assertForbidden();
+        $this->assertDatabaseMissing('asistencia_encabezado', ['grupo_trabajo_id' => $grupoId]);
+        $this->assertDatabaseCount('faltas', 0);
     }
 
     public function test_reabrir_funciona_si_agregaron_nuevos_despues_del_cierre(): void

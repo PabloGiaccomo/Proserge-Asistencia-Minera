@@ -14,10 +14,12 @@
 @import "./modules/asistencia-supervisor.css";
 @import "./modules/mi-asistencia.css";
 @import "./modules/evaluaciones.css";
+@import "./modules/evaluations-dashboard.css";
 @import "./modules/personal-fichas.css";
 @import "./modules/personal-import.css";
 @import "./modules/personal-regularization.css";
 @import "./modules/mining-dashboard.css";
+@import "./modules/home-dashboards.css";
 
 @theme {
     /* Color primario - Turquesa */

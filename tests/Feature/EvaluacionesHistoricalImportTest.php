@@ -735,9 +735,13 @@ class EvaluacionesHistoricalImportTest extends TestCase
     public function test_normal_edit_does_not_recalculate_imported_scores(): void
     {
         $actor = $this->administrator(['evaluaciones' => ['administrar', 'editar']]);
-        $daily = new EvaluacionDesempeno([
+        $daily = EvaluacionDesempeno::query()->create([
+            'id' => (string) Str::uuid(), 'trabajador_id' => $this->personal('85671238'),
+            'fecha' => '2025-04-30', 'hora' => null, 'mina_id' => null, 'supervisor_id' => null,
+            'desempeno_trabajo' => 3, 'orden_limpieza' => 3, 'compromiso' => 3,
+            'respuesta_emocional' => 3, 'seguridad_trabajo' => 3,
             'origen' => 'HISTORICA', 'import_lote_id' => (string) Str::uuid(), 'total' => 15,
-        ]);
+        ])->fresh();
         $supervisor = new EvaluacionSupervisor([
             'calculo_version' => 'HISTORICA', 'import_lote_id' => (string) Str::uuid(), 'resultado_final' => 61,
         ]);
@@ -745,7 +749,8 @@ class EvaluacionesHistoricalImportTest extends TestCase
         $this->assertSame('EVAL_HIST_READ_ONLY', $result['code']);
         $result = app(EvaluacionSupervisorService::class)->update($actor, $supervisor, []);
         $this->assertSame('EVAL_HIST_READ_ONLY', $result['code']);
-        $this->assertSame(15, $daily->total);
+        $this->assertSame(15, $daily->fresh()->total);
+        $this->assertSame('VALIDA', $daily->fresh()->estado_revision);
         $this->assertEquals(61, $supervisor->resultado_final);
     }
 

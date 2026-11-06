@@ -4,6 +4,7 @@ namespace App\Modules\Evaluaciones\Services;
 
 use App\Models\{EvaluacionDesempeno, EvaluacionSupervisor, EvaluacionResidente, Usuario};
 use App\Modules\Evaluaciones\Policies\EvaluacionesPolicy;
+use App\Shared\Support\SearchTerms;
 use Illuminate\Support\Collection;
 
 class EvaluacionesDashboardService
@@ -57,7 +58,7 @@ class EvaluacionesDashboardService
         return ['types' => $typeOptions, 'total' => $rows->count(), 'people' => $rows->pluck('person')->filter()->unique()->count(),
             'scored' => $scored->count(), 'unscored' => $rows->count() - $scored->count(),
             'scoreCoverage' => $rows->isEmpty() ? 0.0 : round($scored->count() / $rows->count() * 100, 1),
-            'activeFilterCount' => collect([$selectedType, $filters['mina'], $filters['cargo'], $filters['origen'] ?? ''])->filter(fn ($value) => filled($value))->count() + 1,
+            'activeFilterCount' => collect([$selectedType, $filters['mina'], $filters['cargo'], $filters['origen'] ?? '', trim($filters['q'] ?? '')])->filter(fn ($value) => filled($value))->count() + 1,
             'details' => $selectedType !== '' && isset($typeOptions[$selectedType])
                 ? $this->detailAnalytics->build($selectedType, $rows) : null,
             'summary' => $summary, 'cargos' => $cargos, 'pie' => $rows->isEmpty() ? '#e5e9ed 0% 100%' : implode(', ', $segments),
@@ -67,8 +68,6 @@ class EvaluacionesDashboardService
     private function authorizedRows(Usuario $user, array $filters, array $definitions, string $selectedType): Collection
     {
         $rows = collect();
-        $mineIds = $this->policy->isPrivileged($user) ? collect() : $user->scopesMina()->pluck('mina_id');
-
         foreach ($definitions as $type => [$model, $relation, $personField, $scoreField, $max, $label, $color]) {
             if (($selectedType !== '' && $selectedType !== $type) || !$this->policy->canViewType($user, $type)) {
                 continue;
@@ -78,42 +77,22 @@ class EvaluacionesDashboardService
                 ->with($relation.':id,puesto')
                 ->whereDate('fecha', '>=', $filters['desde'])
                 ->whereDate('fecha', '<=', $filters['hasta']);
+            if ($type === 'desempeno') {
+                $query->incluidasEnPromedio();
+            }
 
-            if ($type === 'supervisores') {
-                $query->where('estado', '<>', EvaluacionSupervisor::PENDING_REGULARIZATION);
+            $search = trim($filters['q'] ?? '');
+            if ($search !== '') {
+                $query->whereHas($relation, function ($person) use ($search): void {
+                    SearchTerms::apply($person, $search, ['nombre_completo', 'dni', 'numero_documento']);
+                });
             }
 
             if ($type !== 'residentes') {
                 $query->with('mina:id,nombre');
-                if (!$this->policy->isPrivileged($user)) {
-                    $query->where(function ($scope) use ($mineIds, $type, $user): void {
-                        $scope->where(function ($mine) use ($mineIds): void {
-                            $mine->where(function ($destination): void {
-                                $destination->whereNull('destino_tipo')->orWhere('destino_tipo', 'MINA');
-                            })->where(function ($allowed) use ($mineIds): void {
-                                $allowed->whereIn('destino_id', $mineIds)->orWhereIn('mina_id', $mineIds);
-                            });
-                        })->orWhere(function ($other): void {
-                            $other->whereNotNull('destino_tipo')->where('destino_tipo', '<>', 'MINA');
-                        });
-                        if ($type === 'desempeno') {
-                            $scope->orWhere(fn ($own) => $own->where('origen', 'DIRECTA')->where('evaluado_por_usuario_id', $user->id));
-                        }
-                        if ($this->policy->canViewOthers($user)) {
-                            $marker = $type === 'desempeno' ? 'origen' : 'calculo_version';
-                            $scope->orWhere(fn ($history) => $history->whereIn($marker, $type === 'supervisores' ? ['HISTORICA', 'REGULARIZADA'] : ['HISTORICA'])->whereNull('mina_id'));
-                        }
-                    });
-                }
             }
 
-            if (!$this->policy->canViewOthers($user)) {
-                if ($type === 'desempeno') {
-                    $query->where('evaluado_por_usuario_id', $user->id);
-                } else {
-                    $this->policy->ownedBy($query, $user);
-                }
-            }
+            $this->policy->restrictDashboardRows($query, $user, $type);
 
             foreach ($query->get() as $evaluation) {
                 $rows->push([

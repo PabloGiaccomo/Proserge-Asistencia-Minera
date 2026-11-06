@@ -47,6 +47,35 @@ class ManPowerApiTest extends TestCase
         ]);
     }
 
+    public function test_duplicar_usa_su_permiso_sin_conceder_crear_o_asignar(): void
+    {
+        [$mine, $rq] = $this->crearParadaAtendida();
+        $user = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($user, $mine);
+        $this->withToken($this->crearToken($user));
+        $source = $this->postJson('/api/v1/man-power/grupos', [
+            ...$this->payloadGrupoVacio($mine), 'rq_mina_id' => $rq,
+        ])->assertCreated()->json('data.id');
+        DB::table('roles')->where('id', $this->rolPlannerId)->update(['permisos' => json_encode(
+            PermissionCatalog::matrixFromSelections(['man_power' => ['ver', 'duplicar']])
+        )]);
+        $this->postJson('/api/v1/man-power/grupos/'.$source.'/copiar', [
+            'fecha_destino' => '2026-06-02', 'turno_destino' => 'DIA', 'copiar_integrantes' => false,
+        ])->assertCreated();
+        $this->postJson('/api/v1/man-power/grupos/'.$source.'/copiar', [
+            'fecha_destino' => '2026-06-05', 'turno_destino' => 'DIA', 'copiar_integrantes' => true,
+        ])->assertForbidden();
+        $this->postJson('/api/v1/man-power/grupos', [
+            ...$this->payloadGrupoVacio($mine), 'rq_mina_id' => $rq,
+        ])->assertForbidden();
+        DB::table('roles')->where('id', $this->rolPlannerId)->update(['permisos' => json_encode(
+            PermissionCatalog::matrixFromSelections(['man_power' => ['ver', 'crear']])
+        )]);
+        $this->postJson('/api/v1/man-power/grupos/'.$source.'/copiar', [
+            'fecha_destino' => '2026-06-05', 'turno_destino' => 'DIA', 'copiar_integrantes' => false,
+        ])->assertForbidden();
+    }
+
     public function test_usuario_con_scope_ve_paradas(): void
     {
         [$minaId, $rqMinaId] = $this->crearParadaAtendida();
@@ -744,6 +773,153 @@ class ManPowerApiTest extends TestCase
         $noche->assertStatus(201)->assertJsonPath('data.turno', 'NOCHE');
     }
 
+    public function test_no_crea_grupo_vacio_con_rq_proserge_de_otra_parada_de_la_misma_mina(): void
+    {
+        [$minaId, $rqMinaId] = $this->crearParadaAtendida();
+        [, , $otroRqProsergeId] = $this->crearParadaAtendida(true, false, $minaId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/man-power/grupos', [
+            ...$this->payloadGrupoVacio($minaId),
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $otroRqProsergeId,
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'MANPOWER_RQ_PROSERGE_MISMATCH');
+
+        $this->assertDatabaseMissing('grupo_trabajo', [
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $otroRqProsergeId,
+        ]);
+    }
+
+    public function test_no_actualiza_grupo_con_rq_proserge_de_otra_parada_de_la_misma_mina(): void
+    {
+        [$minaId, $rqMinaId, , $supervisorId] = $this->crearParadaAtendida(true);
+        [, , $otroRqProsergeId] = $this->crearParadaAtendida(true, false, $minaId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $grupoId = $this->crearGrupo($rqMinaId, $otroRqProsergeId, $supervisorId, $usuarioId);
+
+        $this->withToken($token)->putJson('/api/v1/man-power/grupos/'.$grupoId, [
+            ...$this->payloadGrupoVacio($minaId),
+            'supervisor_id' => $supervisorId,
+            'servicio' => 'Servicio modificado',
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'MANPOWER_RQ_PROSERGE_MISMATCH');
+
+        $this->assertDatabaseHas('grupo_trabajo', [
+            'id' => $grupoId,
+            'servicio' => 'Servicio',
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $otroRqProsergeId,
+        ]);
+    }
+
+    public function test_no_copia_grupo_vacio_con_rq_proserge_de_otra_parada_de_la_misma_mina(): void
+    {
+        [$minaId, $rqMinaId, , $supervisorId] = $this->crearParadaAtendida(true);
+        [, , $otroRqProsergeId] = $this->crearParadaAtendida(true, false, $minaId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $grupoId = $this->crearGrupo($rqMinaId, $otroRqProsergeId, $supervisorId, $usuarioId);
+
+        $this->withToken($token)->postJson('/api/v1/man-power/grupos/'.$grupoId.'/copiar', [
+            'fecha_destino' => '2026-06-02',
+            'turno_destino' => 'DIA',
+            'copiar_integrantes' => false,
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'MANPOWER_RQ_PROSERGE_MISMATCH');
+
+        $this->assertSame(1, DB::table('grupo_trabajo')->where('rq_mina_id', $rqMinaId)->count());
+    }
+
+    public function test_crea_y_copia_grupo_vacio_sin_rq_proserge(): void
+    {
+        [$minaId, $rqMinaId] = $this->crearParadaAtendida();
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $grupoId = $this->withToken($token)->postJson('/api/v1/man-power/grupos', [
+            ...$this->payloadGrupoVacio($minaId),
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => null,
+        ])->assertCreated()->json('data.id');
+
+        $copiaId = $this->withToken($token)->postJson('/api/v1/man-power/grupos/'.$grupoId.'/copiar', [
+            'fecha_destino' => '2026-06-02',
+            'turno_destino' => 'DIA',
+            'copiar_integrantes' => false,
+        ])->assertCreated()->json('data.grupo.id');
+
+        $this->assertNotSame($grupoId, $copiaId);
+        foreach ([$grupoId, $copiaId] as $id) {
+            $this->assertDatabaseHas('grupo_trabajo', [
+                'id' => $id,
+                'rq_mina_id' => $rqMinaId,
+                'rq_proserge_id' => null,
+            ]);
+            $this->assertSame(0, DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $id)->count());
+        }
+    }
+
+    public function test_copia_grupo_vacio_conservando_su_rq_mina_y_rq_proserge(): void
+    {
+        [$minaId, $rqMinaId, $rqProsergeId] = $this->crearParadaAtendida(true);
+        [, $otroRqMinaId, $otroRqProsergeId] = $this->crearParadaAtendida(true, false, $minaId);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+
+        $grupoId = $this->withToken($token)->postJson('/api/v1/man-power/grupos', [
+            ...$this->payloadGrupoVacio($minaId),
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $rqProsergeId,
+        ])->assertCreated()->json('data.id');
+
+        $copiaId = $this->withToken($token)->postJson('/api/v1/man-power/grupos/'.$grupoId.'/copiar', [
+            'fecha_destino' => '2026-06-02',
+            'turno_destino' => 'DIA',
+            'copiar_integrantes' => false,
+        ])->assertCreated()->json('data.grupo.id');
+
+        $this->assertNotSame($grupoId, $copiaId);
+        $this->assertDatabaseHas('grupo_trabajo', [
+            'id' => $copiaId,
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => $rqProsergeId,
+        ]);
+        $this->assertDatabaseMissing('grupo_trabajo', ['rq_mina_id' => $otroRqMinaId]);
+        $this->assertDatabaseMissing('grupo_trabajo', ['rq_proserge_id' => $otroRqProsergeId]);
+    }
+
+    public function test_actualiza_grupo_sin_rq_proserge(): void
+    {
+        [$minaId, $rqMinaId, $rqProsergeId, $supervisorId] = $this->crearParadaAtendida(true);
+        $usuarioId = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($usuarioId, $minaId);
+        $token = $this->crearToken($usuarioId);
+        $grupoId = $this->crearGrupo($rqMinaId, $rqProsergeId, $supervisorId, $usuarioId);
+        DB::table('grupo_trabajo')->where('id', $grupoId)->update(['rq_proserge_id' => null]);
+
+        $this->withToken($token)->putJson('/api/v1/man-power/grupos/'.$grupoId, [
+            ...$this->payloadGrupoVacio($minaId),
+            'supervisor_id' => $supervisorId,
+            'servicio' => 'Servicio modificado',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('grupo_trabajo', [
+            'id' => $grupoId,
+            'rq_mina_id' => $rqMinaId,
+            'rq_proserge_id' => null,
+            'servicio' => 'Servicio modificado',
+        ]);
+    }
+
     public function test_permite_crear_grupo_con_destino_taller_u_oficina(): void
     {
         [$minaId, $rqMinaId, $rqProsergeId, $supervisorId] = $this->crearParadaAtendida(true);
@@ -819,6 +995,139 @@ class ManPowerApiTest extends TestCase
 
         $response->assertOk()->assertJsonPath('code', 'MANPOWER_GRUPO_REMOVE_PERSON_OK');
         $this->assertDatabaseMissing('grupo_trabajo_detalle', ['grupo_trabajo_id' => $grupoId, 'personal_id' => $personalId]);
+        $this->withToken($token)->getJson('/api/v1/man-power/grupos/'.$grupoId)
+            ->assertOk()->assertJsonFragment(['tipo' => 'RETIRO', 'personal_id' => $personalId, 'motivo' => 'Retirado desde Man Power']);
+    }
+
+    public function test_readmision_preserva_el_retiro_y_su_asignacion_original(): void
+    {
+        [$mine, $rq, $rqProserge, $supervisor, $worker] = $this->crearParadaAtendida(true, true);
+        $actor = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($actor, $mine);
+        $this->withToken($this->crearToken($actor));
+        $group = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor);
+        $path = '/api/v1/man-power/grupos/'.$group;
+        $old = DB::table('rq_proserge_detalle')->where('personal_id', $worker)->first();
+        $newId = (string) Str::uuid();
+        DB::table('rq_proserge_detalle')->insert([
+            'id' => $newId, 'rq_proserge_id' => $rqProserge, 'rq_mina_detalle_id' => $old->rq_mina_detalle_id,
+            'personal_id' => $worker, 'puesto_asignado' => 'Tecnico de relevo', 'fecha_inicio' => '2026-06-01',
+            'fecha_fin' => '2026-06-04', 'estado' => 'ASIGNADO',
+        ]);
+
+        $detail = $this->postJson($path.'/agregar-personal', ['rq_proserge_detalle_id' => $old->id])
+            ->assertOk()->json('data.personal.0.id');
+        $this->postJson($path.'/integrantes/'.$detail.'/retirar', ['motivo' => 'Cambio de cuadrilla confirmado'])->assertOk();
+        $this->postJson($path.'/agregar-personal', ['rq_proserge_detalle_id' => $newId])
+            ->assertOk()->assertJsonPath('data.metricas.asignado', 1)->assertJsonPath('data.personal.0.id', $detail)
+            ->assertJsonPath('data.personal.0.rq_proserge_detalle_id', $newId);
+
+        $this->getJson($path)->assertOk()->assertJsonFragment([
+            'tipo' => 'RETIRO', 'grupo_trabajo_detalle_id' => $detail, 'actor_id' => $actor,
+            'origen' => 'MAN_POWER', 'asignacion_anterior_id' => $old->id, 'motivo' => 'Cambio de cuadrilla confirmado',
+        ])->assertJsonFragment([
+            'tipo' => 'REINGRESO', 'asignacion_anterior_id' => $old->id, 'asignacion_nueva_id' => $newId,
+        ]);
+        $this->withSession(['auth_token' => 'man-power-test', 'user_id' => $actor])
+            ->get(route('man-power.grupo-detalle', $group))->assertOk()
+            ->assertSee('Historial de integrantes')->assertSee('Cambio de cuadrilla confirmado');
+
+        $outsider = $this->crearUsuario($this->rolPlannerId);
+        $this->withToken($this->crearToken($outsider))->getJson($path)->assertForbidden();
+    }
+
+    public function test_readmision_archiva_retiro_legado_antes_de_limpiar_la_fila(): void
+    {
+        [$mine, $rq, $rqProserge, $supervisor, $worker] = $this->crearParadaAtendida(true, true);
+        $actor = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($actor, $mine);
+        $this->withToken($this->crearToken($actor));
+        $group = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor, [$worker]);
+        $path = '/api/v1/man-power/grupos/'.$group;
+        $detail = DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $group)->first();
+        DB::table('grupo_trabajo_detalle')->where('id', $detail->id)->update([
+            'estado_distribucion' => 'RETIRADO', 'retirado_por_id' => $actor,
+            'retirado_at' => '2026-06-01 08:00:00', 'motivo_retiro' => 'Retiro anterior a la bitácora',
+        ]);
+
+        $this->postJson($path.'/agregar-personal', ['personal_id' => $worker])->assertOk();
+        $this->getJson($path)->assertOk()->assertJsonFragment([
+            'tipo' => 'RETIRO', 'origen' => 'LEGADO', 'actor_id' => $actor,
+            'motivo' => 'Retiro anterior a la bitácora', 'ocurrido_at' => '2026-06-01 08:00:00',
+        ]);
+    }
+
+    public function test_reubicacion_invalida_no_crea_movimientos_ni_retira_del_origen(): void
+    {
+        [$mine, $rq, $rqProserge, $supervisor, $worker] = $this->crearParadaAtendida(true, true);
+        $actor = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($actor, $mine);
+        $this->withToken($this->crearToken($actor));
+        $group = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor, [$worker]);
+        $path = '/api/v1/man-power/grupos/'.$group;
+        $detail = DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $group)->value('id');
+
+        $this->postJson($path.'/integrantes/'.$detail.'/reubicar', [
+            'grupo_destino_id' => $group, 'motivo' => 'Mover dentro del mismo grupo',
+        ])->assertUnprocessable()->assertJsonPath('code', 'MANPOWER_RELOCATE_CONTEXT_MISMATCH');
+        $this->getJson($path)->assertOk()->assertJsonPath('data.movimientos', [])->assertJsonPath('data.metricas.asignado', 1);
+    }
+
+    public function test_reubicacion_y_sus_movimientos_se_guardan_o_revierten_juntos(): void
+    {
+        [$mine, $rq, $rqProserge, $supervisor, $worker] = $this->crearParadaAtendida(true, true);
+        $actor = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($actor, $mine);
+        $this->withoutExceptionHandling()->withToken($this->crearToken($actor));
+        $source = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor, [$worker]);
+        $target = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor);
+        $detail = DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $source)->value('id');
+        $path = '/api/v1/man-power/grupos/'.$source.'/integrantes/'.$detail.'/reubicar';
+        $payload = ['grupo_destino_id' => $target, 'motivo' => 'Cambio al grupo de relevo'];
+        $inserted = 0;
+        DB::connection()->beforeExecuting(function (string $sql) use (&$inserted): void {
+            if (str_starts_with($sql, 'insert into `grupo_trabajo_detalle_movimientos`') && ++$inserted === 2) {
+                throw new \RuntimeException('Fallo al registrar el ingreso simulado');
+            }
+        });
+
+        try {
+            $this->postJson($path, $payload);
+            $this->fail('La reubicación debe intentar registrar el ingreso.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Fallo al registrar el ingreso simulado', $exception->getMessage());
+        }
+        $this->assertDatabaseMissing('grupo_trabajo_detalle_movimientos', ['grupo_trabajo_id' => $source]);
+        $this->assertDatabaseMissing('grupo_trabajo_detalle', ['grupo_trabajo_id' => $target, 'personal_id' => $worker]);
+        $this->assertDatabaseHas('grupo_trabajo_detalle', ['id' => $detail, 'estado_distribucion' => 'ASIGNADO']);
+
+        $this->postJson($path, $payload)->assertOk();
+        $this->assertDatabaseHas('grupo_trabajo_detalle_movimientos', ['grupo_trabajo_id' => $source, 'grupo_destino_id' => $target, 'tipo' => 'REUBICACION']);
+        $this->assertDatabaseHas('grupo_trabajo_detalle_movimientos', ['grupo_trabajo_id' => $target, 'personal_id' => $worker, 'tipo' => 'INGRESO_REUBICADO']);
+    }
+
+    public function test_retiro_legacy_no_rompe_el_vinculo_historico_de_asistencia(): void
+    {
+        [$mine, $rq, $rqProserge, $supervisor, $worker] = $this->crearParadaAtendida(true, true);
+        $actor = $this->crearUsuario($this->rolPlannerId);
+        $this->asignarScope($actor, $mine);
+        $this->withToken($this->crearToken($actor));
+        $group = $this->crearGrupo($rq, $rqProserge, $supervisor, $actor, [$worker]);
+        $detail = DB::table('grupo_trabajo_detalle')->where('grupo_trabajo_id', $group)->value('id');
+        $header = (string) Str::uuid();
+        $mark = (string) Str::uuid();
+        DB::table('asistencia_encabezado')->insert([
+            'id' => $header, 'grupo_trabajo_id' => $group, 'mina_id' => $mine,
+            'fecha' => '2026-06-01', 'hora_ingreso' => '06:30:00', 'estado' => 'PENDIENTE',
+        ]);
+        DB::table('asistencia_detalle')->insert([
+            'id' => $mark, 'asistencia_id' => $header, 'grupo_trabajo_detalle_id' => $detail,
+            'trabajador_id' => $worker, 'estado' => 'AUSENTE', 'hora_marcado' => '00:00:00',
+        ]);
+
+        $this->postJson('/api/v1/man-power/grupos/'.$group.'/quitar-personal', ['personal_id' => $worker])->assertOk();
+        $this->assertDatabaseHas('asistencia_detalle', ['id' => $mark, 'grupo_trabajo_detalle_id' => $detail]);
+        $this->assertDatabaseHas('grupo_trabajo_detalle', ['id' => $detail, 'estado_distribucion' => 'RETIRADO']);
     }
 
     public function test_bloquea_cambios_si_asistencia_ya_iniciada(): void
@@ -1244,9 +1553,22 @@ class ManPowerApiTest extends TestCase
         $this->assertSame(1, DB::table('grupo_trabajo_detalle')->where('id', $detalleId)->where('rq_proserge_detalle_id', $assignmentId)->count());
     }
 
-    private function crearParadaAtendida(bool $extended = false, bool $withApprovedWorker = false): array
+    private function payloadGrupoVacio(string $minaId): array
     {
-        $minaId = $this->crearMina();
+        return [
+            'fecha' => '2026-06-01',
+            'turno' => 'DIA',
+            'servicio' => 'Servicio test',
+            'area' => 'Area test',
+            'horario_salida' => '06:30',
+            'destino_tipo' => 'MINA',
+            'destino_id' => $minaId,
+        ];
+    }
+
+    private function crearParadaAtendida(bool $extended = false, bool $withApprovedWorker = false, ?string $minaId = null): array
+    {
+        $minaId ??= $this->crearMina();
         $plannerId = $this->crearUsuario($this->rolPlannerId);
         $rrhhId = $this->crearUsuario($this->rolRrhhId);
 

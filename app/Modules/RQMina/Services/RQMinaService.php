@@ -19,6 +19,8 @@ use App\Models\Taller;
 use App\Models\Usuario;
 use App\Modules\RQProserge\Services\RQProsergeService;
 use App\Modules\RQMina\Policies\RQMinaPolicy;
+use App\Modules\RQMina\Support\RQMinaAtencionRrhhException;
+use App\Modules\RQMina\Support\RQMinaDeletionConflictException;
 use App\Support\Rbac\PermissionMatrix;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -129,6 +131,15 @@ class RQMinaService
         ];
     }
 
+    public function dashboardQueryForUser(Usuario $usuario): \Illuminate\Database\Eloquent\Builder
+    {
+        abort_unless(PermissionMatrix::userCanDirect($usuario, 'rq_mina', 'dashboards'), 403);
+        $query = RQMina::query();
+        $this->applyMineScope($query, $usuario);
+
+        return $query;
+    }
+
     public function getCreatorOptionsForUser(Usuario $usuario): Collection
     {
         $query = RQMina::query()
@@ -168,7 +179,7 @@ class RQMinaService
         return $rqMina;
     }
 
-    public function create(Usuario $usuario, array $payload): ?RQMina
+    public function create(Usuario $usuario, array $payload, bool $iniciarAtencionRrhh = false): ?RQMina
     {
         Log::info('rqmina.create_payload_received', [
             'usuario_id' => (string) $usuario->id,
@@ -195,8 +206,10 @@ class RQMinaService
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $payload, $destination): RQMina {
-            $detallePayload = $this->resolveDetallePayload($payload);
+        return DB::transaction(function () use ($usuario, $payload, $destination, $iniciarAtencionRrhh): RQMina {
+            $detallePayload = $iniciarAtencionRrhh
+                ? $this->normalizeDetalleRows($payload['detalle'] ?? [])
+                : $this->resolveDetallePayload($payload);
             $rqMina = RQMina::query()->create([
                 'id' => (string) Str::uuid(),
                 'mina_id' => $destination['mina_id'],
@@ -225,6 +238,9 @@ class RQMinaService
             $this->planService->ensureDefaultPlan($rqMina, $usuario);
             $this->replacePlanOperativo($rqMina, $payload['plan_operativo'] ?? [], $usuario);
             $this->rememberFieldOptions($usuario, $payload);
+            if ($iniciarAtencionRrhh) {
+                $this->iniciarAtencionRrhh($usuario, $rqMina);
+            }
 
             Log::info('rqmina.detail_persisted', [
                 'rq_mina_id' => (string) $rqMina->id,
@@ -278,7 +294,12 @@ class RQMinaService
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $rqMina, $payload, $destination): RQMina {
+        return DB::transaction(function () use ($usuario, $rqMina, $payload, $destination): ?RQMina {
+            $rqMina = RQMina::query()->whereKey($rqMina->getKey())->lockForUpdate()->first();
+            if (!$rqMina || !$this->policy->update($usuario, $rqMina)) {
+                return null;
+            }
+
             $detallePayload = $this->resolveDetallePayload($payload);
             $rqMina->fill([
                 'mina_id' => $destination['mina_id'],
@@ -327,7 +348,7 @@ class RQMinaService
             }
 
             return $rqMina->load($this->rqMinaLoadRelations());
-        });
+        }, 3);
     }
 
     public function updateGeneral(Usuario $usuario, RQMina $rqMina, array $payload): ?RQMina
@@ -358,7 +379,12 @@ class RQMinaService
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $rqMina, $payload, $destination): RQMina {
+        return DB::transaction(function () use ($usuario, $rqMina, $payload, $destination): ?RQMina {
+            $rqMina = RQMina::query()->whereKey($rqMina->getKey())->lockForUpdate()->first();
+            if (!$rqMina || !$this->policy->update($usuario, $rqMina)) {
+                return null;
+            }
+
             $rqMina->fill([
                 'mina_id' => $destination['mina_id'],
                 'destino_tipo' => $destination['tipo'],
@@ -371,6 +397,16 @@ class RQMinaService
                 'fecha_fin' => $payload['fecha_fin'],
                 'observaciones' => $payload['observaciones'] ?? null,
             ]);
+            if ($rqMina->isDirty(['fecha_inicio', 'fecha_fin'])) {
+                $fueraDeRango = $rqMina->planes()
+                    ->where(fn ($query) => $query
+                        ->where('fecha_inicio', '<', $rqMina->fecha_inicio->toDateString())
+                        ->orWhere('fecha_fin', '>', $rqMina->fecha_fin->toDateString()))
+                    ->first();
+                if ($fueraDeRango) {
+                    throw new \InvalidArgumentException('Las fechas de la parada deben incluir el rango del plan '.$fueraDeRango->codigo.'. Ajusta las fechas del plan antes de acortar la parada.');
+                }
+            }
             $rqMina->save();
             $this->rememberFieldOptions($usuario, $payload);
 
@@ -379,13 +415,35 @@ class RQMinaService
             }
 
             return $rqMina->load($this->rqMinaLoadRelations());
-        });
+        }, 3);
     }
 
     public function send(Usuario $usuario, RQMina $rqMina): ?RQMina
     {
-        if (!$this->policy->send($usuario, $rqMina)) {
-            return null;
+        return DB::transaction(function () use ($usuario, $rqMina): ?RQMina {
+            $locked = RQMina::query()->whereKey($rqMina->getKey())->lockForUpdate()->first();
+            if (!$locked || !$this->iniciarAtencionRrhh($usuario, $locked)) {
+                return null;
+            }
+
+            return $locked->load($this->rqMinaLoadRelations());
+        }, 3);
+    }
+
+    public function puedeIniciarAtencionRrhh(Usuario $usuario, RQMina $rqMina): bool
+    {
+        return $this->policy->send($usuario, $rqMina);
+    }
+
+    private function iniciarAtencionRrhh(Usuario $usuario, RQMina $rqMina): bool
+    {
+        if (!$this->puedeIniciarAtencionRrhh($usuario, $rqMina)) {
+            return false;
+        }
+
+        $rqMina->load('detalle');
+        if (!$rqMina->detalle->contains(fn (RQMinaDetalle $row): bool => $this->esCargoDePersonal((string) $row->puesto) && (int) $row->cantidad > 0)) {
+            return false;
         }
 
         $rqMina->fill([
@@ -394,18 +452,61 @@ class RQMinaService
         ]);
         $rqMina->save();
 
-        $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+        try {
+            $pedido = $this->rqProsergeService->syncFromRqMina($usuario, $rqMina);
+        } catch (\Throwable $exception) {
+            throw new RQMinaAtencionRrhhException('No se pudo registrar el pedido de personal en RQ Proserge. Vuelve a intentar el guardado.', previous: $exception);
+        }
+        if (!$pedido) {
+            throw new RQMinaAtencionRrhhException('No se pudo registrar el pedido de personal en RQ Proserge. Vuelve a intentar el guardado.');
+        }
 
-        return $rqMina->load($this->rqMinaLoadRelations());
+        return true;
     }
 
-    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null, ?string $planId = null): ?RQMina
+    public function esCargoDePersonal(string $puesto): bool
+    {
+        $puesto = mb_strtolower(trim($puesto));
+
+        return $puesto !== '' && !in_array($puesto, ['parada registrada', 'plan operativo'], true)
+            && !str_starts_with($puesto, 'plan operativo - ');
+    }
+
+    public function revisionPlan(RQMina $rqMina, string $planId): string
+    {
+        $rqMina->loadMissing(['detalle', 'planes', 'actividadGrupos.actividades.turnos', 'actividadGrupos.transportes']);
+        $plan = $rqMina->planes->firstWhere('id', $planId);
+        if (!$plan && $planId !== '') {
+            $plan = $rqMina->planes()->find($planId);
+        }
+        $grupos = $rqMina->actividadGrupos->filter(fn (RQMinaActividadGrupo $grupo): bool =>
+            $grupo->rq_mina_plan_id === $planId || ($plan && $this->isDefaultPlan($plan) && !$grupo->rq_mina_plan_id)
+        );
+
+        return hash('sha256', json_encode([
+            array_map($rqMina->getRawOriginal(...), ['id', 'estado', 'mina_id', 'area', 'fecha_inicio', 'fecha_fin', 'updated_at']),
+            $plan?->getRawOriginal(),
+            $rqMina->detalle->sortBy('id')->values()->toArray(),
+            $grupos->sortBy('id')->values()->toArray(),
+        ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR));
+    }
+
+    public function updatePlanOperativo(Usuario $usuario, RQMina $rqMina, array $planOperativo, ?array $detallePayload = null, ?string $planId = null, bool $iniciarAtencionRrhh = false, ?string $revisionEsperada = null): ?RQMina
     {
         if (!$this->policy->update($usuario, $rqMina)) {
             return null;
         }
 
-        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo, $detallePayload, $planId): RQMina {
+        return DB::transaction(function () use ($usuario, $rqMina, $planOperativo, $detallePayload, $planId, $iniciarAtencionRrhh, $revisionEsperada): ?RQMina {
+            $rqMina = RQMina::query()->whereKey($rqMina->getKey())->lockForUpdate()->first();
+            if (!$rqMina || !$this->policy->update($usuario, $rqMina)) {
+                return null;
+            }
+
+            if ($revisionEsperada !== null && !hash_equals($this->revisionPlan($rqMina, (string) $planId), $revisionEsperada)) {
+                throw new \InvalidArgumentException('Otra persona guardó cambios en esta parada. Revisa la versión actual antes de volver a guardar.');
+            }
+
             if ($detallePayload !== null) {
                 $this->replaceDetalle($rqMina, $detallePayload, $usuario);
             }
@@ -417,11 +518,13 @@ class RQMinaService
             ]);
 
             if (strtoupper((string) $rqMina->estado) === 'ENVIADO') {
-                $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->fresh('detalle'));
+                $this->rqProsergeService->syncFromRqMina($usuario, $rqMina->load('detalle'));
+            } elseif ($iniciarAtencionRrhh) {
+                $this->iniciarAtencionRrhh($usuario, $rqMina);
             }
 
-            return $rqMina->fresh($this->rqMinaLoadRelations());
-        });
+            return $rqMina->load($this->rqMinaLoadRelations());
+        }, 3);
     }
 
     private function rqMinaLoadRelations(): array
@@ -536,21 +639,32 @@ class RQMinaService
             return false;
         }
 
-        return (bool) DB::transaction(function () use ($rqMina): bool {
+        return (bool) DB::transaction(function () use ($rqMina, $usuario): bool {
             $rqId = (string) $rqMina->id;
+            $lockedRq = RQMina::query()->whereKey($rqId)->lockForUpdate()->first();
+            if (!$lockedRq || !$this->policy->delete($usuario, $lockedRq)) {
+                return false;
+            }
             $deleted = [];
 
+            $planIds = $this->collectIdsByColumn('rq_mina_planes', 'rq_mina_id', $rqId);
+            $transportServiceIds = $this->collectIdsByColumn('transporte_servicios', 'rq_mina_id', $rqId);
             $rqDetalleIds = $this->collectIdsByColumn('rq_mina_detalle', 'rq_mina_id', $rqId);
             $rqProsergeIds = $this->collectIdsByColumn('rq_proserge', 'rq_mina_id', $rqId);
             $grupoTrabajoIds = $this->uniqueIds(
                 $this->collectIdsByColumn('grupo_trabajo', 'rq_mina_id', $rqId),
                 $this->collectIdsWhereIn('grupo_trabajo', 'rq_proserge_id', $rqProsergeIds),
             );
+            $grupoTrabajoDetalleIds = $this->collectIdsWhereIn('grupo_trabajo_detalle', 'grupo_trabajo_id', $grupoTrabajoIds);
+            $assignmentIds = $this->uniqueIds(
+                $this->collectIdsWhereIn('rq_proserge_detalle', 'rq_proserge_id', $rqProsergeIds),
+                $this->collectIdsWhereIn('rq_proserge_detalle', 'rq_mina_detalle_id', $rqDetalleIds),
+            );
 
             $asistenciaEncabezadoIds = $this->collectIdsWhereIn('asistencia_encabezado', 'grupo_trabajo_id', $grupoTrabajoIds);
             $asistenciaDetalleIds = $this->uniqueIds(
-                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_id', $asistenciaEncabezadoIds),
-                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_encabezado_id', $asistenciaEncabezadoIds),
+                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_id', $asistenciaEncabezadoIds, false),
+                $this->collectIdsWhereIn('asistencia_detalle', 'asistencia_encabezado_id', $asistenciaEncabezadoIds, false),
             );
 
             $actividadGrupoIds = $this->collectIdsByColumn('rq_mina_actividad_grupos', 'rq_mina_id', $rqId);
@@ -574,6 +688,40 @@ class RQMinaService
                 $this->collectIdsWhereIn('parada_herramienta_grupos', 'grupo_trabajo_id', $grupoTrabajoIds),
             );
 
+            // Evaluaciones tambien bloquea trabajador antes de sus evaluaciones.
+            $attendanceWorkerIds = DB::table('asistencia_detalle')->whereIn('id', $asistenciaDetalleIds)
+                ->pluck('trabajador_id')->filter()->unique()->all();
+            Personal::query()->whereIn('id', $attendanceWorkerIds)->orderBy('id')->lockForUpdate()->get(['id']);
+
+            $referenceScopes = [
+                'grupo_trabajo' => ['rq_mina_id' => [$rqId], 'rq_proserge_id' => $rqProsergeIds, 'rq_mina_plan_id' => $planIds, 'rq_mina_actividad_grupo_id' => $actividadGrupoIds],
+                'rq_proserge_detalle' => ['rq_proserge_id' => $rqProsergeIds, 'rq_mina_detalle_id' => $rqDetalleIds],
+                'grupo_trabajo_detalle' => ['grupo_trabajo_id' => $grupoTrabajoIds, 'rq_proserge_detalle_id' => $assignmentIds],
+                'grupo_trabajo_actividades' => ['grupo_trabajo_id' => $grupoTrabajoIds, 'rq_mina_actividad_id' => $actividadIds],
+                'grupo_trabajo_detalle_actividades' => ['grupo_trabajo_detalle_id' => $grupoTrabajoDetalleIds, 'rq_mina_actividad_id' => $actividadIds],
+                'asistencia_detalle' => ['asistencia_id' => $asistenciaEncabezadoIds, 'asistencia_encabezado_id' => $asistenciaEncabezadoIds, 'grupo_trabajo_detalle_id' => $grupoTrabajoDetalleIds, 'rq_proserge_detalle_id' => $assignmentIds],
+                'faltas' => ['asistencia_detalle_id' => $asistenciaDetalleIds, 'asistencia_encabezado_id' => $asistenciaEncabezadoIds, 'asistencia_id' => $asistenciaEncabezadoIds, 'grupo_trabajo_id' => $grupoTrabajoIds, 'rq_mina_id' => [$rqId]],
+                'rq_mina_actividad_grupos' => ['rq_mina_id' => [$rqId], 'rq_mina_plan_id' => $planIds],
+                'rq_mina_actividades' => ['rq_mina_id' => [$rqId], 'grupo_id' => $actividadGrupoIds, 'rq_mina_actividad_grupo_id' => $actividadGrupoIds],
+                'rq_mina_actividad_transportes' => ['rq_mina_id' => [$rqId], 'grupo_id' => $actividadGrupoIds, 'rq_mina_actividad_grupo_id' => $actividadGrupoIds, 'actividad_id' => $actividadIds, 'rq_mina_actividad_id' => $actividadIds, 'rq_mina_plan_id' => $planIds],
+                'parada_herramienta_grupos' => ['lista_id' => $herramientaListaIds, 'parada_herramienta_lista_id' => $herramientaListaIds, 'grupo_trabajo_id' => $grupoTrabajoIds],
+                'transporte_servicios' => ['rq_mina_id' => [$rqId], 'rq_mina_plan_id' => $planIds],
+                'transporte_servicio_alcances' => ['transporte_servicio_id' => $transportServiceIds, 'rq_mina_actividad_grupo_id' => $actividadGrupoIds, 'rq_mina_actividad_id' => $actividadIds, 'grupo_trabajo_id' => $grupoTrabajoIds],
+                'transporte_servicio_pasajeros' => ['transporte_servicio_id' => $transportServiceIds, 'grupo_trabajo_detalle_id' => $grupoTrabajoDetalleIds],
+                'parada_ejecucion_resumen' => ['rq_mina_id' => [$rqId], 'rq_mina_plan_id' => $planIds, 'rq_mina_actividad_grupo_id' => $actividadGrupoIds, 'rq_mina_actividad_id' => $actividadIds],
+            ];
+            foreach ($referenceScopes as $table => $columns) {
+                $this->assertScopedReferences($table, $columns);
+            }
+
+            $evaluatedWorkerIds = [];
+            if ($this->tableHasColumn('evaluacion_desempeno', 'asistencia_detalle_id')) {
+                $evaluatedWorkerIds = DB::table('evaluacion_desempeno')
+                    ->whereIn('asistencia_detalle_id', $asistenciaDetalleIds)
+                    ->lockForUpdate()
+                    ->pluck('trabajador_id')->unique()->all();
+            }
+
             foreach ([
                 'faltas',
                 'evaluacion_desempeno',
@@ -588,6 +736,10 @@ class RQMinaService
                 $this->deleteByColumn($table, 'rq_mina_id', $rqId, $deleted);
             }
 
+            foreach ($evaluatedWorkerIds as $workerId) {
+                app(\App\Modules\Evaluaciones\Services\PromedioDesempenoService::class)->refreshForTrabajador((string) $workerId);
+            }
+
             $this->deleteWhereIn('asistencia_detalle', 'id', $asistenciaDetalleIds, $deleted);
             $this->deleteWhereIn('asistencia_detalle', 'asistencia_id', $asistenciaEncabezadoIds, $deleted);
             $this->deleteWhereIn('asistencia_detalle', 'asistencia_encabezado_id', $asistenciaEncabezadoIds, $deleted);
@@ -597,6 +749,16 @@ class RQMinaService
             $this->deleteWhereIn('parada_herramienta_items', 'parada_herramienta_grupo_id', $herramientaGrupoIds, $deleted);
             $this->deleteWhereIn('parada_herramienta_grupos', 'id', $herramientaGrupoIds, $deleted);
             $this->deleteWhereIn('parada_herramienta_listas', 'id', $herramientaListaIds, $deleted);
+
+            $this->deleteWhereIn('transporte_servicio_eventos', 'transporte_servicio_id', $transportServiceIds, $deleted);
+            $this->deleteWhereIn('transporte_servicio_pasajeros', 'transporte_servicio_id', $transportServiceIds, $deleted);
+            $this->deleteWhereIn('transporte_servicio_alcances', 'transporte_servicio_id', $transportServiceIds, $deleted);
+            $this->deleteWhereIn('transporte_servicios', 'id', $transportServiceIds, $deleted);
+            $this->deleteByColumn('parada_ejecucion_resumen', 'rq_mina_id', $rqId, $deleted);
+
+            // Las actividades no pueden borrarse mientras tengan asignaciones principales.
+            $this->deleteWhereIn('grupo_trabajo_detalle_actividades', 'grupo_trabajo_detalle_id', $grupoTrabajoDetalleIds, $deleted);
+            $this->deleteWhereIn('grupo_trabajo_actividades', 'grupo_trabajo_id', $grupoTrabajoIds, $deleted);
 
             $this->deleteWhereIn('rq_mina_actividad_transporte_eventos', 'transporte_id', $actividadTransporteIds, $deleted);
             $this->deleteWhereIn('rq_mina_actividad_transporte_eventos', 'rq_mina_actividad_transporte_id', $actividadTransporteIds, $deleted);
@@ -633,19 +795,50 @@ class RQMinaService
 
             $this->deleteWhereIn('rq_proserge', 'id', $rqProsergeIds, $deleted);
             $this->deleteWhereIn('rq_mina_detalle', 'id', $rqDetalleIds, $deleted);
+            $this->deleteWhereIn('rq_mina_planes', 'id', $planIds, $deleted);
 
             $rqDeleted = RQMina::query()->whereKey($rqId)->delete();
             $this->addDeletedCount($deleted, 'rq_mina', $rqDeleted);
 
-            Log::info('rqmina.deleted_with_dependencies', [
+            $audit = [
                 'rq_mina_id' => $rqId,
+                'actor_usuario_id' => (string) $usuario->id,
                 'rq_proserge_ids' => $rqProsergeIds,
                 'grupo_trabajo_ids' => $grupoTrabajoIds,
                 'deleted' => $deleted,
-            ]);
+            ];
+            DB::afterCommit(static fn () => Log::info('rqmina.deleted_with_dependencies', $audit));
 
             return $rqDeleted > 0;
         }, 3);
+    }
+
+    private function assertScopedReferences(string $table, array $referenceScopes): void
+    {
+        $columns = [];
+        foreach ($referenceScopes as $column => $ids) {
+            if ($this->tableHasColumn($table, $column)) {
+                $columns[$column] = $ids;
+            }
+        }
+        if ($columns === []) {
+            return;
+        }
+        $hasCrossedReferences = DB::table($table)
+            ->where(function ($query) use ($columns): void {
+                foreach ($columns as $column => $ids) {
+                    $query->orWhereIn($column, $ids);
+                }
+            })->where(function ($query) use ($columns): void {
+                foreach ($columns as $column => $ids) {
+                    $query->orWhere(function ($reference) use ($column, $ids): void {
+                        $reference->whereNotNull($column)->whereNotIn($column, $ids);
+                    });
+                }
+            })->lockForUpdate()->exists();
+        if ($hasCrossedReferences) {
+            throw new RQMinaDeletionConflictException;
+        }
     }
 
     private function collectIdsByColumn(string $table, string $column, string $value): array
@@ -656,6 +849,7 @@ class RQMinaService
 
         return DB::table($table)
             ->where($column, $value)
+            ->lockForUpdate()
             ->pluck('id')
             ->map(fn ($id): string => (string) $id)
             ->filter()
@@ -664,7 +858,7 @@ class RQMinaService
             ->all();
     }
 
-    private function collectIdsWhereIn(string $table, string $column, array $values): array
+    private function collectIdsWhereIn(string $table, string $column, array $values, bool $lock = true): array
     {
         $values = $this->uniqueIds($values);
 
@@ -672,8 +866,12 @@ class RQMinaService
             return [];
         }
 
-        return DB::table($table)
-            ->whereIn($column, $values)
+        $query = DB::table($table)->whereIn($column, $values);
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        return $query
             ->pluck('id')
             ->map(fn ($id): string => (string) $id)
             ->filter()
@@ -943,10 +1141,10 @@ class RQMinaService
             ->all();
     }
 
-    private function replaceDetalle(RQMina $rqMina, array $detallePayload, ?Usuario $usuario = null): array
+    private function replaceDetalle(RQMina $rqMina, array $detallePayload, Usuario $usuario): array
     {
-        $normalized = $this->resolveDetallePayload(['detalle' => $detallePayload]);
-        $existingRows = $rqMina->detalle()->withCount('asignaciones')->get();
+        $normalized = $this->normalizeDetalleRows($detallePayload);
+        $existingRows = $rqMina->detalle()->lockForUpdate()->get();
         $trackChanges = $this->shouldTrackDetalleChanges($rqMina);
         $existingByKey = [];
 
@@ -958,7 +1156,21 @@ class RQMinaService
         }
 
         $keptIds = [];
+        foreach ($normalized as $item) {
+            $key = $this->normalizeFieldOptionValue((string) $item['puesto']);
+            if (isset($existingByKey[$key])) {
+                $keptIds[(string) $existingByKey[$key]->id] = true;
+            }
+        }
+
+        foreach ($existingRows as $row) {
+            if (!isset($keptIds[(string) $row->id]) && $row->asignaciones()->exists()) {
+                throw new \InvalidArgumentException('No se puede quitar ni renombrar el puesto «'.$row->puesto.'» porque tiene historial de asignaciones. Conserva el puesto y revisa el pedido con RR. HH.');
+            }
+        }
+
         $rowsForLog = [];
+        $assignmentsRetired = false;
         foreach ($normalized as $item) {
             $key = $this->normalizeFieldOptionValue((string) ($item['puesto'] ?? ''));
             $existing = $key !== '' ? ($existingByKey[$key] ?? null) : null;
@@ -966,7 +1178,6 @@ class RQMinaService
             if ($existing) {
                 $previousTotal = (int) ($existing->cantidad_total ?: $existing->cantidad);
                 $previousCantidad = (int) $existing->cantidad;
-                $previousAssigned = (int) ($existing->asignaciones_count ?? 0);
                 $row = $this->buildDetalleRow(
                     (string) $rqMina->id,
                     $item,
@@ -978,7 +1189,8 @@ class RQMinaService
                 $existing->fill($update);
                 $existing->save();
 
-                $removedAssignments = $this->trimAssignmentsForDetalle($existing, (int) $row['cantidad_total']);
+                $removedAssignments = $this->trimAssignmentsForDetalle($existing, (int) $row['cantidad_total'], $usuario);
+                $assignmentsRetired = $assignmentsRetired || $removedAssignments > 0;
                 if ($trackChanges && ($previousTotal !== (int) $row['cantidad_total'] || $previousCantidad !== (int) $row['cantidad'])) {
                     $tipo = (int) $row['cantidad_total'] > $previousTotal
                         ? RQMinaDetalleCambio::TIPO_CANTIDAD_AUMENTADA
@@ -996,6 +1208,7 @@ class RQMinaService
                         mensaje: $this->detalleChangeMessage($tipo, (string) $row['puesto'], $previousTotal, (int) $row['cantidad_total'], $removedAssignments)
                     );
                 } elseif ($removedAssignments > 0) {
+                    $previousAssigned = (int) $row['cantidad_total'] + $removedAssignments;
                     $this->recordDetalleChange(
                         rqMina: $rqMina,
                         detalle: $existing,
@@ -1009,7 +1222,6 @@ class RQMinaService
                     );
                 }
 
-                $keptIds[] = (string) $existing->id;
                 $rowsForLog[] = $row;
                 continue;
             }
@@ -1030,17 +1242,15 @@ class RQMinaService
                     mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_PUESTO_AGREGADO, (string) $row['puesto'], 0, (int) $row['cantidad_total'], 0)
                 );
             }
-            $keptIds[] = (string) $row['id'];
             $rowsForLog[] = $row;
         }
 
         foreach ($existingRows as $row) {
-            if (in_array((string) $row->id, $keptIds, true)) {
+            if (isset($keptIds[(string) $row->id])) {
                 continue;
             }
 
             $previousTotal = (int) ($row->cantidad_total ?: $row->cantidad);
-            $removedAssignments = $this->trimAssignmentsForDetalle($row, 0);
 
             if ($trackChanges) {
                 $this->recordDetalleChange(
@@ -1050,13 +1260,17 @@ class RQMinaService
                     tipo: RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO,
                     cantidadAnterior: $previousTotal,
                     cantidadNueva: 0,
-                    asignacionesRetiradas: $removedAssignments,
+                    asignacionesRetiradas: 0,
                     usuario: $usuario,
-                    mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO, (string) $row->puesto, $previousTotal, 0, $removedAssignments)
+                    mensaje: $this->detalleChangeMessage(RQMinaDetalleCambio::TIPO_PUESTO_RETIRADO, (string) $row->puesto, $previousTotal, 0, 0)
                 );
             }
 
             $row->delete();
+        }
+
+        if ($assignmentsRetired) {
+            $this->rqProsergeService->recalculateEstadoForRqMina((string) $rqMina->id);
         }
 
         return $rowsForLog;
@@ -1068,38 +1282,61 @@ class RQMinaService
             || $rqMina->rqProserge()->exists();
     }
 
-    private function trimAssignmentsForDetalle(RQMinaDetalle $detalle, int $targetTotal): int
+    private function trimAssignmentsForDetalle(RQMinaDetalle $detalle, int $targetTotal, Usuario $usuario): int
     {
-        $targetTotal = max(0, $targetTotal);
-        $assignments = RQProsergeDetalle::query()
-            ->where('rq_mina_detalle_id', $detalle->id)
+        $assignments = $detalle->asignaciones()
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
+            ->lockForUpdate()
             ->get(['id', 'rq_proserge_id']);
 
         $surplus = max(0, $assignments->count() - $targetTotal);
-        if ($surplus <= 0) {
-            $detalle->forceFill([
-                'cantidad_atendida' => $assignments->count(),
-            ])->save();
-
+        if ($surplus === 0) {
             return 0;
         }
 
-        $idsToRemove = $assignments->take($surplus)->pluck('id')->values();
-        RQProsergeDetalle::query()->whereIn('id', $idsToRemove)->delete();
+        $idsToRetire = $assignments->take($surplus)->pluck('id');
+        $retirements = $detalle->asignaciones()
+            ->whereIn('id', $idsToRetire)
+            ->whereIn('estado', RQProsergeDetalle::ESTADOS_ACTIVOS)
+            ->whereHas('rqProserge', fn ($rq) => $rq->where('rq_mina_id', $detalle->rq_mina_id));
 
-        $remaining = RQProsergeDetalle::query()
-            ->where('rq_mina_detalle_id', $detalle->id)
-            ->count();
+        if ($retirements->count() !== $surplus) {
+            throw new \InvalidArgumentException('No se puede reducir el puesto «'.$detalle->puesto.'» porque hay asignaciones vinculadas a otra parada. Revisa esos vínculos con RR. HH.');
+        }
 
-        $detalle->forceFill([
-            'cantidad_atendida' => $remaining,
-        ])->save();
+        $this->ensureAssignmentsCanBeRetired($detalle, $idsToRetire);
 
-        $this->rqProsergeService->recalculateEstadoForRqMina((string) $detalle->rq_mina_id);
+        $retirements->update([
+            'estado' => RQProsergeDetalle::ESTADO_RETIRADO,
+            'retirado_por_id' => $usuario->id,
+            'retirado_at' => now(),
+            'motivo_retiro' => 'Reducción del pedido de personal en RQ Mina.',
+        ]);
 
         return $surplus;
+    }
+
+    private function ensureAssignmentsCanBeRetired(RQMinaDetalle $detalle, Collection $assignmentIds): void
+    {
+        if (Schema::hasColumn('grupo_trabajo_detalle', 'rq_proserge_detalle_id')) {
+            $distributions = DB::table('grupo_trabajo_detalle')->whereIn('rq_proserge_detalle_id', $assignmentIds);
+            if (Schema::hasColumn('grupo_trabajo_detalle', 'estado_distribucion')) {
+                $distributions->where(fn ($query) => $query
+                    ->whereIn('estado_distribucion', \App\Models\GrupoTrabajoDetalle::ESTADOS_DISTRIBUCION_ACTIVOS)
+                    ->orWhereNull('estado_distribucion'));
+            }
+
+            if ($distributions->exists()) {
+                throw new \InvalidArgumentException('No se puede reducir el puesto «'.$detalle->puesto.'» porque las asignaciones a retirar siguen distribuidas en Man Power. Revisa la distribución antes de reducir el pedido.');
+            }
+        }
+
+        if (Schema::hasColumn('asistencia_detalle', 'rq_proserge_detalle_id')
+            && DB::table('asistencia_detalle')->whereIn('rq_proserge_detalle_id', $assignmentIds)->exists()) {
+            throw new \InvalidArgumentException('No se puede reducir el puesto «'.$detalle->puesto.'» porque las asignaciones a retirar tienen asistencia registrada. Revisa el pedido con RR. HH.');
+        }
     }
 
     private function recordDetalleChange(
@@ -1220,16 +1457,25 @@ class RQMinaService
         $plan = $this->planService->resolvePlanForLegacyPayload($rqMina, $planId, $usuario);
         $previousTransportes = $this->snapshotActividadTransportes($rqMina, $plan);
         $normalized = $this->normalizePlanOperativo($groups);
+        $gruposExistentes = $this->gruposDelPlan($rqMina, $plan)->keyBy(fn ($grupo): string => $this->rowIdKey($grupo->id));
+        $transportesBloqueados = RQMinaActividadTransporte::query()
+            ->whereIn('grupo_id', $gruposExistentes->modelKeys())
+            ->lockForUpdate()
+            ->get();
+        foreach ($gruposExistentes as $grupoExistente) {
+            $grupoExistente->setRelation('transportes', $transportesBloqueados->where('grupo_id', $grupoExistente->id)->values());
+        }
+        $normalized = $this->restaurarIdentidadesLegacy($normalized, $gruposExistentes);
 
         // El plan es dueno del requerimiento, no de la atencion logistica. El pool de
         // reserva rescata placas, documentos, estados y recepcion de los requerimientos
         // que ya no se reutilizan por id.
-        $logisticaReservada = $this->reservarDatosLogisticos($rqMina, $plan, $this->idsTransporteDelPayload($normalized));
+        $logisticaReservada = $this->reservarDatosLogisticos($gruposExistentes, $this->idsTransporteDelPayload($normalized));
         $normalized = $this->aplicarDatosLogisticosReservados($normalized, $logisticaReservada);
+        $this->validarRetirosDelPlan($gruposExistentes, $normalized);
 
         $this->recordTransportPlanChanges($rqMina, $previousTransportes, $normalized, $usuario);
 
-        $gruposExistentes = $this->gruposDelPlan($rqMina, $plan)->keyBy(fn ($grupo): string => $this->rowIdKey($grupo->id));
         $gruposConservados = [];
 
         foreach ($normalized as $groupIndex => $group) {
@@ -1251,9 +1497,9 @@ class RQMinaService
             }
 
             $gruposConservados[$grupo->id] = true;
-            $grupo->load(['actividades.turnos', 'transportes']);
+            $grupo->load('actividades.turnos');
             $actividadesExistentes = $grupo->actividades->keyBy(fn ($actividad): string => $this->rowIdKey($actividad->id));
-            $transportesExistentes = $grupo->transportes->keyBy(fn ($transporte): string => $this->rowIdKey($transporte->id));
+            $transportesExistentes = $transportesBloqueados->where('grupo_id', $grupo->id)->keyBy(fn ($transporte): string => $this->rowIdKey($transporte->id));
 
             $actividadIdsByClientKey = [];
             $actividadesDelGrupo = [];
@@ -1348,6 +1594,9 @@ class RQMinaService
                 if ($existente) {
                     // Actualizar en su lugar conserva el id, y con el el historial de
                     // eventos y la carpeta de documentos que registro Logistica.
+                    if (!empty($transporte['_identidad_legacy'])) {
+                        $atributosRequerimiento['documentos'] = $this->normalizeTransportDocuments($existente->documentos);
+                    }
                     $existente->forceFill($atributosRequerimiento)->save();
                     $transportesDelGrupo[] = (string) $existente->id;
 
@@ -1395,6 +1644,96 @@ class RQMinaService
         }
 
         $planesGrupos->delete();
+    }
+
+    private function restaurarIdentidadesLegacy(array $groups, EloquentCollection $existingGroups): array
+    {
+        $existingByName = $existingGroups->groupBy(fn ($group): string => $this->normalizeFieldOptionValue((string) $group->nombre));
+        $incomingNames = array_count_values(array_map(fn (array $group): string => $this->normalizeFieldOptionValue($group['nombre']), $groups));
+
+        foreach ($groups as $groupIndex => $group) {
+            $name = $this->normalizeFieldOptionValue($group['nombre']);
+            if (empty($group['id']) && ($incomingNames[$name] ?? 0) === 1 && ($existingByName->get($name)?->count() ?? 0) === 1) {
+                $groups[$groupIndex]['id'] = (string) $existingByName->get($name)->first()->id;
+            }
+            $existing = $existingGroups->get($this->rowIdKey($groups[$groupIndex]['id'] ?? null));
+            if (!$existing) {
+                continue;
+            }
+
+            $activitiesBySait = $existing->actividades->groupBy(fn ($activity): string => $this->normalizeFieldOptionValue((string) $activity->sait));
+            $incomingSaits = array_count_values(array_map(fn (array $activity): string => $this->normalizeFieldOptionValue((string) $activity['sait']), $group['actividades']));
+            foreach ($group['actividades'] as $activityIndex => $activity) {
+                $sait = $this->normalizeFieldOptionValue((string) $activity['sait']);
+                if (empty($activity['id']) && $sait !== '' && ($incomingSaits[$sait] ?? 0) === 1 && ($activitiesBySait->get($sait)?->count() ?? 0) === 1) {
+                    $groups[$groupIndex]['actividades'][$activityIndex]['id'] = (string) $activitiesBySait->get($sait)->first()->id;
+                }
+            }
+        }
+
+        return $groups;
+    }
+
+    private function validarRetirosDelPlan(EloquentCollection $existingGroups, array $groups): void
+    {
+        foreach ([
+            collect($groups)->pluck('id'),
+            collect($groups)->pluck('actividades')->flatten(1)->pluck('id'),
+            collect($groups)->pluck('transportes')->flatten(1)->pluck('id'),
+        ] as $ids) {
+            if ($ids->filter()->map(fn ($id): string => $this->rowIdKey($id))->duplicates()->isNotEmpty()) {
+                throw new \InvalidArgumentException('El plan contiene identificadores de filas repetidos. Recarga el plan y conserva una sola fila por requerimiento.');
+            }
+        }
+        $incomingGroups = collect($groups)->keyBy(fn (array $group): string => $this->rowIdKey($group['id'] ?? null));
+        $removedGroups = [];
+        $removedActivities = [];
+        $removedTransports = new EloquentCollection;
+        foreach ($existingGroups as $group) {
+            $incoming = $incomingGroups->get($this->rowIdKey($group->id));
+            if (!$incoming) {
+                $removedGroups[] = (string) $group->id;
+            }
+            $activityIds = array_map(fn ($id): string => $this->rowIdKey($id), array_column($incoming['actividades'] ?? [], 'id'));
+            $transportIds = array_map(fn ($id): string => $this->rowIdKey($id), array_column($incoming['transportes'] ?? [], 'id'));
+            foreach ($group->actividades as $activity) {
+                if (!in_array($this->rowIdKey($activity->id), $activityIds, true)) {
+                    $removedActivities[] = (string) $activity->id;
+                }
+            }
+            foreach ($group->transportes as $transport) {
+                if (!in_array($this->rowIdKey($transport->id), $transportIds, true)) {
+                    $removedTransports->push($transport);
+                }
+            }
+        }
+
+        $eventTransportIds = $removedTransports->isNotEmpty() && Schema::hasTable('rq_mina_actividad_transporte_eventos')
+            ? RQMinaActividadTransporteEvento::query()->whereIn('transporte_id', $removedTransports->modelKeys())->pluck('transporte_id')->map(fn ($id): string => $this->rowIdKey($id))->all()
+            : [];
+        foreach ($removedTransports as $transport) {
+            $otherEvidence = collect(['recepcion_fecha', 'recepcion_observacion', 'incidencia_operativa', 'comentario_cambio'])
+                ->contains(fn (string $field): bool => !$this->transportValueIsEmpty($transport->{$field}));
+            if ($transport->estadoAtencion() !== RQMinaActividadTransporte::ATENCION_REQUERIDO
+                || !empty($this->normalizeTransportDocuments($transport->documentos))
+                || $otherEvidence || in_array($this->rowIdKey($transport->id), $eventTransportIds, true)) {
+                throw new \InvalidArgumentException('No se puede quitar el transporte «'.$transport->unidad_carga.'» ni su grupo porque tiene atención o evidencia de Logística. Conserva el requerimiento y revisa el retiro con Logística.');
+            }
+        }
+
+        foreach ([
+            ['grupo_trabajo', 'rq_mina_actividad_grupo_id', $removedGroups],
+            ['transporte_servicio_alcances', 'rq_mina_actividad_grupo_id', $removedGroups],
+            ['parada_ejecucion_resumen', 'rq_mina_actividad_grupo_id', $removedGroups],
+            ['grupo_trabajo_actividades', 'rq_mina_actividad_id', $removedActivities],
+            ['grupo_trabajo_detalle_actividades', 'rq_mina_actividad_id', $removedActivities],
+            ['parada_ejecucion_resumen', 'rq_mina_actividad_id', $removedActivities],
+            ['transporte_servicio_alcances', 'rq_mina_actividad_id', $removedActivities],
+        ] as [$table, $column, $ids]) {
+            if ($ids !== [] && $this->tableHasColumn($table, $column) && DB::table($table)->whereIn($column, $ids)->exists()) {
+                throw new \InvalidArgumentException('No se puede quitar un grupo o actividad con historial de Man Power, ejecución o Transporte. Conserva la estructura y revisa sus vínculos operativos.');
+            }
+        }
     }
 
     /**
@@ -1831,27 +2170,12 @@ class RQMinaService
      *
      * @return array<int, array<string, mixed>>
      */
-    private function reservarDatosLogisticos(RQMina $rqMina, ?RQMinaPlan $plan = null, array $idsReutilizados = []): array
+    private function reservarDatosLogisticos(EloquentCollection $grupos, array $idsReutilizados = []): array
     {
-        $query = RQMinaActividadGrupo::query()
-            ->where('rq_mina_id', (string) $rqMina->id)
-            ->with('transportes')
-            ->orderBy('orden');
-
-        if ($plan) {
-            $query->where(function ($inner) use ($plan): void {
-                $inner->where('rq_mina_plan_id', (string) $plan->id);
-
-                if ($this->isDefaultPlan($plan)) {
-                    $inner->orWhereNull('rq_mina_plan_id');
-                }
-            });
-        }
-
         $reservados = [];
 
-        foreach ($query->get() as $groupIndex => $group) {
-            foreach ($group->transportes->values() as $transportIndex => $transport) {
+        foreach ($grupos as $group) {
+            foreach ($group->transportes as $transport) {
                 // Si el formulario reenvia el id, el requerimiento se actualiza en su
                 // lugar: no hay nada que rescatar ni que reinyectar.
                 if (in_array($this->rowIdKey($transport->id), $idsReutilizados, true)) {
@@ -1859,9 +2183,8 @@ class RQMinaService
                 }
 
                 $reservados[] = [
-                    'grupo_posicion' => (int) $groupIndex,
-                    'grupo_nombre' => mb_strtolower(trim((string) ($group->nombre ?? ''))),
-                    'transporte_posicion' => (int) $transportIndex,
+                    'grupo_id' => (string) $group->id,
+                    'transporte_id' => (string) $transport->id,
                     'firma' => $this->transportSignature((string) ($transport->alcance ?? ''), (string) ($transport->unidad_carga ?? '')),
                     'datos' => [
                         'origen' => $transport->origen,
@@ -1899,20 +2222,12 @@ class RQMinaService
     {
         $usados = [];
         $firmasNuevas = $this->contarFirmasPorGrupo($groups);
-        $firmasReservadas = [];
-
-        foreach ($reservados as $reservado) {
-            $firma = (string) $reservado['firma'];
-            if ($firma === '') {
-                continue;
-            }
-
-            $posicion = (int) $reservado['grupo_posicion'];
-            $firmasReservadas[$posicion][$firma] = ($firmasReservadas[$posicion][$firma] ?? 0) + 1;
-        }
 
         foreach ($groups as $groupIndex => $group) {
             foreach (($group['transportes'] ?? []) as $transportIndex => $transporte) {
+                if (!empty($transporte['id'])) {
+                    continue;
+                }
                 $firma = $this->transportSignature(
                     (string) ($transporte['alcance'] ?? ''),
                     (string) ($transporte['unidad_carga'] ?? '')
@@ -1920,17 +2235,16 @@ class RQMinaService
                 $candidato = $this->buscarReservaLogistica(
                     $reservados,
                     $usados,
-                    (int) $groupIndex,
-                    (string) ($group['nombre'] ?? ''),
-                    (int) $transportIndex,
+                    (string) ($group['id'] ?? ''),
                     $firma,
                     $firma !== ''
                         && ($firmasNuevas[$groupIndex][$firma] ?? 0) === 1
-                        && ($firmasReservadas[$groupIndex][$firma] ?? 0) === 1
                 );
 
                 if ($candidato !== null) {
                     $usados[$candidato] = true;
+                    $groups[$groupIndex]['transportes'][$transportIndex]['id'] = $reservados[$candidato]['transporte_id'];
+                    $groups[$groupIndex]['transportes'][$transportIndex]['_identidad_legacy'] = true;
 
                     foreach ($reservados[$candidato]['datos'] as $field => $value) {
                         if ($this->transportValueIsEmpty($transporte[$field] ?? null)) {
@@ -1955,52 +2269,26 @@ class RQMinaService
     }
 
     /**
-     * Devuelve el indice de la reserva mas parecida al requerimiento nuevo.
-     * Los niveles priorizan posicion y contenido para no copiar datos de un
-     * requerimiento distinto.
+     * Solo reutiliza un transporte identificado sin ambiguedad dentro de su grupo.
      */
     private function buscarReservaLogistica(
         array $reservados,
         array $usados,
-        int $grupoPosicion,
-        string $grupoNombre,
-        int $transportePosicion,
+        string $grupoId,
         string $firma,
         bool $firmaConfiable
     ): ?int {
-        $mejor = null;
-        $mejorNivel = 99;
-        $nombreNormalizado = mb_strtolower(trim($grupoNombre));
-
+        if ($grupoId === '' || !$firmaConfiable) {
+            return null;
+        }
+        $candidatos = [];
         foreach ($reservados as $index => $reservado) {
-            if (isset($usados[$index])) {
-                continue;
+            if (!isset($usados[$index]) && $this->rowIdKey($reservado['grupo_id']) === $this->rowIdKey($grupoId) && $reservado['firma'] === $firma) {
+                $candidatos[] = $index;
             }
-
-            $mismoGrupo = $reservado['grupo_posicion'] === $grupoPosicion
-                || ($nombreNormalizado !== '' && $reservado['grupo_nombre'] === $nombreNormalizado);
-            $mismaPosicion = $reservado['transporte_posicion'] === $transportePosicion;
-            $mismaFirma = $reservado['firma'] !== '' && $reservado['firma'] === $firma;
-
-            // Cuando la firma es unica en ambos lados identifica el requerimiento
-            // aunque se haya movido de lugar; si es ambigua solo se confia en la
-            // posicion para no cruzar placas ni documentos entre requerimientos.
-            $nivel = match (true) {
-                $mismoGrupo && $mismaPosicion && $mismaFirma => 0,
-                $firmaConfiable && $mismoGrupo && $mismaFirma => 1,
-                $mismoGrupo && $mismaPosicion => 2,
-                default => null,
-            };
-
-            if ($nivel === null || $nivel >= $mejorNivel) {
-                continue;
-            }
-
-            $mejor = $index;
-            $mejorNivel = $nivel;
         }
 
-        return $mejor;
+        return count($candidatos) === 1 ? $candidatos[0] : null;
     }
 
     /**

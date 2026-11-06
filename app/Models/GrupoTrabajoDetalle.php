@@ -74,6 +74,11 @@ class GrupoTrabajoDetalle extends Model
         return $this->hasMany(AsistenciaDetalle::class, 'grupo_trabajo_detalle_id');
     }
 
+    public function movimientos(): HasMany
+    {
+        return $this->hasMany(GrupoTrabajoDetalleMovimiento::class, 'grupo_trabajo_detalle_id');
+    }
+
     public function actividadesPrincipales(): HasMany
     {
         return $this->hasMany(GrupoTrabajoDetalleActividad::class, 'grupo_trabajo_detalle_id');

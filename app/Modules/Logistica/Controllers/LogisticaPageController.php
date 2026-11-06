@@ -5,6 +5,7 @@ namespace App\Modules\Logistica\Controllers;
 use App\Http\Controllers\WebPageController;
 use App\Models\Personal;
 use App\Models\RQMinaActividadTransporte;
+use App\Models\RQMinaActividadTransporteEvento;
 use App\Models\Usuario;
 use App\Modules\Epps\Services\EppService;
 use App\Modules\Logistica\Services\LogisticaDashboardService;
@@ -15,6 +16,8 @@ use App\Support\Rbac\PermissionMatrix;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -54,7 +57,7 @@ class LogisticaPageController extends WebPageController
         // contexto minimo con paradas y requerimientos de transporte.
         $data = match (true) {
             $needsEppContext => $this->service->pageData($query, $eppActor),
-            $canViewServicios || $canViewHerramientas => $this->service->serviciosPageData($query),
+            $canViewServicios || $canViewHerramientas => $this->service->serviciosPageData($query, $usuario),
             default => [
                 'activeTab' => 'herramientas',
                 'filters' => [],
@@ -107,16 +110,20 @@ class LogisticaPageController extends WebPageController
         $transporte = RQMinaActividadTransporte::query()->with('grupo.rqMina:id,mina_id')->findOrFail($id);
         $this->assertTransportAccess($usuario, $transporte);
 
+        if (!$request->filled('panel')) {
+            $request->merge(['panel' => $request->has('capacidad_camion') ? 'entrega' : 'atencion']);
+        }
         $validated = $request->validate([
+            'panel' => ['required', 'in:atencion,cambio,entrega,recepcion'],
             'origen' => ['nullable', 'string', 'in:EMPRESA,ALQUILADO,OTRO'],
             'placas_asignadas' => ['nullable', 'string', 'max:2000'],
             'fecha_inicio' => ['nullable', 'date'],
             'fecha_fin' => ['nullable', 'date'],
-            'estado_logistico' => ['required', 'string', 'in:REQUERIDO,ASIGNADO,EN_USO,RETIRADO,REEMPLAZADO,DEVUELTO,INCIDENCIA'],
+            'estado_logistico' => ['required_if:panel,atencion,cambio', 'nullable', 'string', 'in:REQUERIDO,ASIGNADO,EN_USO,RETIRADO,REEMPLAZADO,DEVUELTO,INCIDENCIA'],
             'comentario_cambio' => ['nullable', 'string', 'max:2000'],
             'incidencia_operativa' => ['nullable', 'string', 'max:2000'],
             'recepcion_fecha' => ['nullable', 'date'],
-            'recepcion_estado' => ['required', 'string', 'in:PENDIENTE,RECIBIDO,INCOMPLETO,NO_LLEGO,CON_OBSERVACION'],
+            'recepcion_estado' => ['required_if:panel,recepcion', 'nullable', 'string', 'in:PENDIENTE,RECIBIDO,INCOMPLETO,NO_LLEGO,CON_OBSERVACION'],
             'recepcion_observacion' => ['nullable', 'string', 'max:2000'],
             'capacidad_camion' => ['nullable', 'string', 'max:50'],
             'doc_vehiculo' => ['nullable', 'array'],
@@ -130,82 +137,47 @@ class LogisticaPageController extends WebPageController
             'documentos' => ['nullable', 'array'],
             'documentos.*.nombre' => ['required_with:documentos.*.archivo', 'string', 'max:200'],
             'documentos.*.archivo' => ['required_with:documentos.*.nombre', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'documentos_eliminar' => ['nullable', 'array'],
-            'documentos_eliminar.*' => ['integer', 'min:0'],
+            'documentos_retirar' => ['nullable', 'array'],
+            'documentos_retirar.*' => ['string', 'regex:/^doc-[a-f0-9]{64}$/D', 'distinct'],
         ]);
 
         $data = $validated;
         unset($data['doc_vehiculo'], $data['doc_proserge'], $data['doc_mantenimiento'], $data['doc_checklist'], $data['documentos']);
-        $directory = 'logistica/transportes/'.$id;
         $uploadedDocs = [];
-        $documentTypes = [
-            'doc_vehiculo' => 'Documentacion del vehiculo',
-            'doc_proserge' => 'Documentacion interna Proserge',
-            'doc_mantenimiento' => 'Plan de mantenimiento',
-            'doc_checklist' => 'Checklist de enseres',
-        ];
-
-        foreach ($documentTypes as $field => $label) {
-            $files = $request->file($field, []);
-            if (! is_array($files)) {
-                $files = [$files];
-            }
-
-            foreach ($files as $index => $file) {
-                if (! $file || ! $file->isValid()) {
-                    continue;
-                }
-
-                $filename = $field.'_'.Str::random(8).'.'.$file->getClientOriginalExtension();
-                $path = $file->storeAs($directory, $filename, 'local');
-
-                if ($index === 0) {
-                    $data[$field.'_path'] = $path;
-                }
-
-                $uploadedDocs[] = [
-                    'tipo' => $field,
-                    'nombre' => $label,
-                    'path' => $path,
-                    'original_name' => $file->getClientOriginalName(),
-                    'uploaded_at' => now()->toDateTimeString(),
-                ];
-            }
-        }
-
-        // Procesar documentos dinámicos (múltiples archivos con nombre)
-        $additionalFiles = $request->file('documentos', []);
-        if (is_array($additionalFiles)) {
-            foreach ($additionalFiles as $index => $docFiles) {
-                $file = is_array($docFiles) ? ($docFiles['archivo'] ?? null) : $docFiles;
-                $nombre = trim((string) ($request->input('documentos.'.$index.'.nombre', '')));
-
-                if (! $file || ! $file->isValid() || $nombre === '') {
-                    continue;
-                }
-
-                $filename = 'doc_'.Str::slug($nombre).'_'.Str::random(6).'.'.$file->getClientOriginalExtension();
-                $path = $file->storeAs($directory, $filename, 'local');
-                $uploadedDocs[] = [
-                    'tipo' => 'adicional',
-                    'nombre' => $nombre,
-                    'path' => $path,
-                    'original_name' => $file->getClientOriginalName(),
-                    'uploaded_at' => now()->toDateTimeString(),
-                ];
-            }
-        }
-
-        if ($uploadedDocs !== []) {
-            $data['documentos_nuevos'] = $uploadedDocs;
-        }
 
         try {
+            if ($data['panel'] === 'entrega') {
+                $types = [
+                    'doc_vehiculo' => 'Documentación del vehículo',
+                    'doc_proserge' => 'Documentación interna Proserge',
+                    'doc_mantenimiento' => 'Plan de mantenimiento',
+                    'doc_checklist' => 'Checklist de enseres',
+                ];
+                foreach ($types as $field => $label) {
+                    foreach (array_values($validated[$field] ?? []) as $index => $file) {
+                        $path = $this->storeTransportAttachment($id, $field, $label, $file, $uploadedDocs);
+                        if ($index === 0) {
+                            $data[$field.'_path'] = $path;
+                        }
+                    }
+                }
+                foreach ($validated['documentos'] ?? [] as $document) {
+                    if (($document['archivo'] ?? null) instanceof UploadedFile) {
+                        $this->storeTransportAttachment($id, 'adicional', trim($document['nombre']), $document['archivo'], $uploadedDocs);
+                    }
+                }
+                $data['documentos_nuevos'] = $uploadedDocs;
+            }
             $this->service->updateTransportRequirement($id, $data, $usuario);
         } catch (InvalidArgumentException $exception) {
+            Storage::disk('local')->delete(array_column($uploadedDocs, 'path'));
+
             return back()
                 ->withInput()
                 ->with('error', $exception->getMessage());
+        } catch (\Throwable $exception) {
+            $this->discardUnreferencedTransportAttachments($id, $uploadedDocs);
+            throw $exception;
         }
 
         $mensaje = (string) $request->input('panel', '') === 'recepcion'
@@ -218,6 +190,40 @@ class LogisticaPageController extends WebPageController
                 'servicio_parada_id' => (string) ($transporte->grupo?->rq_mina_id ?? ''),
             ])
             ->with('success', $mensaje);
+    }
+
+    private function storeTransportAttachment(string $id, string $type, string $label, UploadedFile $file, array &$uploaded): string
+    {
+        $name = $type.'_'.Str::uuid().'.'.($file->extension() ?: 'bin');
+        $path = $file->storeAs('logistica/transportes/'.$id, $name, 'local');
+        if (!$path) {
+            throw new InvalidArgumentException('No se pudo guardar un documento. Selecciona los archivos e inténtalo de nuevo.');
+        }
+        $uploaded[] = [
+            'tipo' => $type, 'nombre' => $label, 'path' => $path,
+            'original_name' => $file->getClientOriginalName(), 'uploaded_at' => now()->toDateTimeString(),
+        ];
+
+        return $path;
+    }
+
+    private function discardUnreferencedTransportAttachments(string $id, array $uploaded): void
+    {
+        try {
+            foreach (array_column($uploaded, 'path') as $path) {
+                $recorded = RQMinaActividadTransporteEvento::query()->where('transporte_id', $id)
+                    ->whereJsonContains('transporte_snapshot->documentos', ['path' => $path])->exists();
+                $current = RQMinaActividadTransporte::query()->whereKey($id)->first();
+                $currentPaths = array_merge(array_column($current?->documentos ?? [], 'path'), array_values($current?->only([
+                    'doc_vehiculo_path', 'doc_proserge_path', 'doc_mantenimiento_path', 'doc_checklist_path',
+                ]) ?? []));
+                if (!$recorded && !in_array($path, $currentPaths, true)) {
+                    Storage::disk('local')->delete($path);
+                }
+            }
+        } catch (\Throwable $exception) {
+            Log::warning('logistica.documentos_temporales_pendientes', ['transporte_id' => $id, 'exception' => $exception::class]);
+        }
     }
 
     /**

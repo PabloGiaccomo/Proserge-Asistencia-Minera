@@ -22,34 +22,32 @@ Cada tarjeta muestra:
 - resumen de personal solicitado;
 - resumen de transporte;
 - creador y supervisor;
-- acciones principales y menu de acciones secundarias.
+- Abrir parada y menu de acciones secundarias.
 
 ## Acciones
 
-Las acciones conservan las rutas existentes:
+**Abrir parada** lleva al detalle, que reune el plan operativo, los datos
+generales y los indicadores. El menu agrupa las acciones disponibles segun
+permiso. Los filtros y la pagina se conservan al volver al listado. Desde
+Transporte, el regreso mantiene la parada y el plan seleccionados.
 
-- `rq-mina.plan`;
-- `rq-mina.show`;
-- `rq-mina.edit`;
-- `rq-mina.create?copy_from=...`;
-- `rq-mina.enviar`;
-- `rq-mina.destroy`.
-
-Las acciones siguen dependiendo de los permisos calculados en la vista mediante
-`PermissionMatrix::allowsDirect`. El envio se muestra solo para registros en
-`BORRADOR` y conserva su confirmacion. La eliminacion conserva la confirmacion
-operativa existente. La accion `Abrir plan` se muestra solo cuando el usuario
-tiene permiso `rq_mina,editar`, que es el mismo permiso exigido por la ruta web.
+El registro en RR. HH. se inicia al guardar con cargos validos y permiso de
+envio. La eliminacion conserva su confirmacion operativa. El listado distingue
+las solicitudes de transporte del plan de los registros del formato anterior.
 
 ## Filtros y estados
 
 La busqueda y los filtros avanzados siguen usando query string y el backend
 actual. Se agregan chips para retirar filtros activos de forma individual.
 
+La API `GET /api/v1/rq-mina` mantiene la lista en `data` y entrega el contexto
+de paginacion en `detail.pagination`. Exige permiso de consulta y alcance de
+mina. Admite `page` y `per_page`, con un maximo de 100 registros por pagina.
+
 Los estados se muestran con texto y color, sin depender solo del color:
 
-- Borrador;
-- Enviado;
+- En preparacion;
+- Pedido registrado en RR. HH.;
 - Cerrado;
 - Cancelado;
 - En atencion;
@@ -74,20 +72,13 @@ La nueva vista usa:
 
 ## Alcance
 
-Esta iteracion fue visual. No se cambiaron reglas de negocio, calculos,
-permisos, RQ Proserge, Man Power, Transporte, Asistencia ni base de datos.
+Las reglas de guardado, permisos y registro en RQ Proserge se describen en
+[Planes operativos](./rq-mina-planes.md).
 
 ## Verificacion
 
-Validaciones tecnicas previstas:
-
-- `php artisan route:list --path=rq-mina -v`;
-- `php artisan view:clear`;
-- `php artisan view:cache`;
-- `npm run build`;
-- `git diff --check`;
-- pruebas filtradas de RQ Mina cuando la base `proserge_app_test` este
-  disponible.
-
-La verificacion visual debe hacerse con sesion local autenticada para revisar
-registros con plan, sin plan, con transporte, sin transporte y estados reales.
+Las correcciones del 2026-11-04 se verificaron con pruebas focalizadas de RQ
+Mina e integraciones, compilacion Blade y navegador con datos sinteticos en
+desktop y mobile. El detalle de las pruebas y sus limites esta en
+[Planes operativos](./rq-mina-planes.md#validacion-local-de-las-correcciones-del-2026-11-04).
+La comprobacion operativa del servidor queda pendiente del despliegue.

@@ -4,6 +4,9 @@ namespace App\Modules\Transporte\Requests;
 
 class UpdateTransporteServicioRequest extends StoreTransporteServicioRequest
 {
+    protected const ACTION = 'editar';
+    protected const FORBIDDEN_CODE = 'TRANSPORTE_UPDATE_FORBIDDEN';
+
     public function rules(): array
     {
         $rules = parent::rules();

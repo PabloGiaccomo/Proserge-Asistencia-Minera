@@ -12,6 +12,8 @@ class PersonalIngreso extends Model
     public const ESTADO_FALTA_REVISION = 'FALTA_REVISION';
     public const ESTADO_ACEPTADA = 'ACEPTADA';
     public const ESTADO_CONTRATO_NO_FIRMADO = 'CONTRATO_NO_FIRMADO';
+    public const ESTADO_BORRADOR = 'BORRADOR';
+    public const ESTADO_OBSERVADO = 'OBSERVADO';
 
     protected $table = 'personal_ingresos';
 
@@ -35,6 +37,11 @@ class PersonalIngreso extends Model
         'submitted_at',
         'reviewed_at',
         'reviewed_by_usuario_id',
+        'proposito',
+        'revision',
+        'base_hash',
+        'completitud_json',
+        'requested_fields_json',
     ];
 
     protected $casts = [
@@ -42,6 +49,9 @@ class PersonalIngreso extends Model
         'familiares_json' => 'array',
         'submitted_at' => 'datetime',
         'reviewed_at' => 'datetime',
+        'revision' => 'integer',
+        'completitud_json' => 'array',
+        'requested_fields_json' => 'array',
     ];
 
     public function archivos(): HasMany

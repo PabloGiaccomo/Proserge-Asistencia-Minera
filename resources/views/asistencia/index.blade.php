@@ -37,7 +37,7 @@
         </div>
     </header>
 
-    <form method="GET" action="{{ route('asistencia.index') }}" class="ops-filter-band" aria-label="Filtros de asistencia">
+    <form method="GET" action="{{ (($standaloneDashboard ?? false) ? route('inicio.dashboard.asistencias') : route('asistencia.index')) }}" class="ops-filter-band" aria-label="Filtros de asistencia">
         <div class="ops-field search-field">
             <label for="attendance-search">Buscar grupo</label>
             <div class="ops-input-with-icon">
@@ -71,7 +71,7 @@
             </select>
         </div>
         <div class="ops-filter-actions">
-            <a class="ops-icon-btn" href="{{ route('asistencia.index') }}" title="Limpiar filtros" aria-label="Limpiar filtros">
+            <a class="ops-icon-btn" href="{{ (($standaloneDashboard ?? false) ? route('inicio.dashboard.asistencias') : route('asistencia.index')) }}" title="Limpiar filtros" aria-label="Limpiar filtros">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/></svg>
             </a>
             <button class="ops-btn primary" type="submit">
@@ -190,12 +190,14 @@
             </div>
             <div class="ops-priority-list">
                 @forelse($dashboard['priority_groups'] as $group)
-                    <a href="{{ route('asistencia.show', $group['id']) }}" class="ops-priority-item">
+                    <div class="ops-priority-item">
                         <span class="ops-priority-date">{{ \Carbon\Carbon::parse($group['fecha'])->format('d/m') }}</span>
                         <span><strong>{{ $group['codigo'] }}</strong><small>{{ $group['mina'] }} · {{ $group['supervisor'] }}</small></span>
                         <span class="ops-priority-metric"><strong>{{ $group['pendientes'] }}</strong><small>pendientes</small></span>
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-                    </a>
+                        @allowed('asistencias', 'ver')
+                            <a href="{{ route('asistencia.show', $group['id']) }}" aria-label="Abrir grupo {{ $group['codigo'] }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+                        @endallowed
+                    </div>
                 @empty
                     <div class="ops-empty compact">No hay grupos que requieran atención con estos filtros.</div>
                 @endforelse
@@ -203,6 +205,7 @@
         </section>
     </div>
 
+    @if(!($standaloneDashboard ?? false) || \App\Support\Rbac\PermissionMatrix::allowsDirect(session('user.permissions', []), 'asistencias', 'ver'))
     <section class="ops-panel ops-table-panel">
         <div class="ops-panel-head table-head">
             <div>
@@ -247,5 +250,6 @@
             </nav>
         @endif
     </section>
+    @endif
 </div>
 @endsection

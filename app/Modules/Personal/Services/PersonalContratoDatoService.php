@@ -84,16 +84,21 @@ class PersonalContratoDatoService
     public function uploadSignedContract(Personal $personal, UploadedFile $file, Usuario $user): PersonalContratoDato
     {
         return DB::transaction(function () use ($personal, $file, $user): PersonalContratoDato {
-            app(PersonalContratoService::class)->assertContractEditable($personal, $user);
-            $record = $this->storeSignedContractFile($personal, $file, $user, now());
-
-            $record = $record->fresh();
-            app(PersonalContratoService::class)->markEditableContractSigned($personal, $record, $user);
-            if (Schema::hasColumn('personal', 'pendiente_contrato_firmado')) {
-                $personal->forceFill(['pendiente_contrato_firmado' => false])->save();
+            $personal = Personal::query()->lockForUpdate()->findOrFail($personal->id);
+            $service = app(PersonalContratoService::class);
+            $preparations = PersonalContrato::query()->where('personal_id', $personal->id)
+                ->where('estado', PersonalContrato::ESTADO_PREPARACION)->limit(2)->get();
+            if ($preparations->count() > 1) {
+                throw ValidationException::withMessages([
+                    'contrato' => 'Hay más de un contrato en preparación. Abre el periodo correcto desde Contratos.',
+                ]);
             }
 
-            return $record;
+            $contract = $preparations->first() ?? $service->assertContractEditable($personal, $user);
+            $service->uploadSignedFileForContract($personal, $contract, $file, $user, allowUnsignedCurrent: true);
+
+            return PersonalContratoDato::query()->where('personal_id', $personal->id)->first()
+                ?? $this->ensureForPersonal($personal, [], $user);
         });
     }
 

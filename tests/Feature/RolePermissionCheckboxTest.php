@@ -150,6 +150,50 @@ class RolePermissionCheckboxTest extends TestCase
         }
     }
 
+    public function test_logistics_registration_buttons_follow_saved_epp_permissions_and_revocations(): void
+    {
+        $logisticsActions = PermissionCatalog::availableModuleActions()['logistica'];
+        $role = $this->role(['logistica' => $logisticsActions]);
+        $user = $this->user($role);
+        $url = route('logistica.index', ['tab' => 'entregas']);
+
+        $response = $this->withSession($this->sessionFor($user))->get($url)->assertOk()
+            ->assertDontSee('href="'.route('epps.catalog-returns.create').'"', false);
+        $this->assertSame(0, preg_match('/<button\b[^>]*data-epp-open-modal="eppDeliveryModal"/', $response->getContent()));
+        $this->get(route('epps.catalog-returns.create'))->assertForbidden();
+        $this->post(route('epps.entregas.store'), [])->assertForbidden();
+
+        $editor = $this->user($this->role(['roles' => ['ver', 'actualizar']]));
+        $this->withSession($this->sessionFor($editor))->put(route('seguridad.roles.update', $role->id), [
+            'nombre' => $role->nombre, 'estado' => 'ACTIVO', 'permisos_present' => '1',
+            'permisos' => [
+                'logistica' => array_fill_keys($logisticsActions, '1'),
+                'epps' => array_fill_keys(['ver', 'registrar', 'confirmar_entrega', 'confirmar_devolucion'], '1'),
+            ],
+        ])->assertRedirect(route('seguridad.roles.edit', $role->id))->assertSessionHasNoErrors();
+        $stored = $role->fresh()->permisos;
+        $this->assertTrue($stored['epps']['registrar']);
+        $this->assertTrue($stored['epps']['confirmar_entrega']);
+        $this->assertTrue($stored['epps']['confirmar_devolucion']);
+        $this->assertFalse($stored['epps']['administrar']);
+        $this->assertFalse($stored['epps']['aprobar_excepcion_firma']);
+
+        $response = $this->withSession($this->sessionFor($user))->get($url)->assertOk()
+            ->assertSee('href="'.route('epps.catalog-returns.create').'"', false);
+        $this->assertSame(1, preg_match('/<button\b[^>]*data-epp-open-modal="eppDeliveryModal"/', $response->getContent()));
+        $this->get(route('epps.catalog-returns.create'))->assertOk();
+        $this->postJson(route('epps.entregas.store'), [])->assertUnprocessable()
+            ->assertJsonValidationErrors(['personal_id', 'epp_id']);
+
+        $stored['epps']['registrar'] = false;
+        $role->update(['permisos' => $stored]);
+        $response = $this->get($url)->assertOk()
+            ->assertDontSee('href="'.route('epps.catalog-returns.create').'"', false);
+        $this->assertSame(0, preg_match('/<button\b[^>]*data-epp-open-modal="eppDeliveryModal"/', $response->getContent()));
+        $this->get(route('epps.catalog-returns.create'))->assertForbidden();
+        $this->post(route('epps.entregas.store'), [])->assertForbidden();
+    }
+
     public function test_evaluations_hides_dashboard_and_denies_direct_and_partial_requests_when_unchecked(): void
     {
         $role = $this->role(['evaluaciones' => ['ver', 'ver_desempeno', 'evaluar_desempeno']]);

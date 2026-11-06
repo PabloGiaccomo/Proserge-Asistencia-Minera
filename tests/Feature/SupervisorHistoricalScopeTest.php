@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\EvaluacionesImportLote;
 use App\Models\EvaluacionSupervisor;
 use App\Models\Usuario;
-use App\Modules\Dashboard\Policies\DashboardPolicy;
 use App\Modules\Dashboard\Services\DashboardService;
 use App\Modules\Evaluaciones\Requests\StoreEvaluacionDiariaRequest;
 use App\Modules\Evaluaciones\Requests\StoreEvaluacionResidenteRequest;
@@ -228,10 +227,12 @@ class SupervisorHistoricalScopeTest extends TestCase
     {
         [$actor, $worker] = $this->actor();
         $item = $this->pending($actor, $worker);
-        $policy = \Mockery::mock(DashboardPolicy::class);
-        $policy->shouldReceive('view')->andReturn(true);
-        $policy->shouldReceive('isPrivileged')->andReturn(true);
-        $dashboard = new DashboardService($policy);
+        DB::table('roles')->where('id', $actor->rol_id)->update(['permisos' => json_encode(PermissionCatalog::matrixFromSelections([
+            'inicio' => ['ver'],
+            'evaluaciones' => ['dashboards', 'administrar', 'ver_supervisores', 'ver_todas_evaluaciones', 'editar'],
+        ]))]);
+        $actor = $actor->fresh();
+        $dashboard = app(DashboardService::class);
         $filters = ['trabajador_id' => $worker];
         $this->assertSame(0, $dashboard->resumen($actor, $filters)['evaluaciones_supervisor_total']);
         app(EvaluacionSupervisorService::class)->update($actor, $item, ['respuestas' => array_fill_keys(array_keys(SupervisorEvaluationTemplate::WEIGHTS), 4)]);

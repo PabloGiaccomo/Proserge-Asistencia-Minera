@@ -23,7 +23,9 @@ class RQProsergeCoverageService
 
     public function calculateForRq(RQProserge $rq): array
     {
-        $detalles = RQMinaDetalle::query()
+        $detalles = $rq->relationLoaded('rqMina') && $rq->rqMina?->relationLoaded('detalle')
+            ? $rq->rqMina->detalle
+            : RQMinaDetalle::query()
             ->with('asignaciones')
             ->where('rq_mina_id', $rq->rq_mina_id)
             ->get();

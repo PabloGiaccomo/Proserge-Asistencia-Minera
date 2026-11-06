@@ -5,6 +5,13 @@ Este documento complementa `docs/GUIA_TECNICA_TRASPASO.md` y
 
 ## Entrada y capas transversales
 
+Inicio ofrece dashboards independientes por permiso y conserva el alcance del
+modulo. `HomeDashboardCatalog` define las tarjetas y sus rutas;
+`HomeDashboardPageController` prepara los resumenes faltantes con
+`HomeSummaryDashboardService`. `ExistingDashboardPageController` reutiliza los
+dashboards de Asistencia, Faltas, Evaluaciones, Man Power, Logistica y KPI por
+parada. Contrato, permisos y despliegue: `docs/INICIO_DASHBOARDS.md`.
+
 - `routes/web.php`: superficie web principal. Casi todas las rutas protegidas
   usan `web.auth` y `web.permission:modulo,accion`.
 - `routes/console.php`: scheduler para limpieza de notificaciones y recordatorio
@@ -124,6 +131,27 @@ Vistas principales:
   `UsuarioMinaScope`, `RoleManagementService`, vistas `seguridad`.
 - Notificaciones: `NotificationService`, `NotificationInboxService`,
   `NotificationRecipientResolverService`, modelos `Notification*`.
+- `NotificacionesPolicy` valida acceso Web/API y permiso declarado por tipo.
+  El resolver exige `notificaciones.ver` y permisos de roles activos; prioridad
+  critica no evita preferencias. `target_user_ids=[]` significa sin audiencia.
+  La bandeja revalida dominio, propietario, vencimiento y scope operativo en
+  SQL antes de contar, paginar o actualizar en lote. La mina en avisos de
+  Personal/Habilitacion es contexto, no scope del usuario. Abrir por GET no
+  marca leido ni ACTIONED; las acciones POST existentes requieren Actualizar.
+  Los avisos nuevos conservan requisitos adicionales del emisor en el payload
+  reservado `_notification_access`. El lector los revalida en SQL. La consulta
+  comparte esa validacion entre tipos con y sin alcance de mina para evitar
+  repetir la matriz completa por modulo y superar `max_allowed_packet`.
+  Cada modulo conserva su propio filtro de tipos y de mina. Los
+  recordatorios antiguos de herramientas mantienen su requisito Man Power y
+  resuelven la mina desde la parada cuando falta en el evento. Una escritura
+  API con Actualizar pero sin Ver devuelve estado, no contenido del evento.
+  El poll entrega `can_update` actual; el encabezado sincroniza acciones y elimina
+  la bandeja ante 401/403. Guardar preferencias valida booleanos y conserva silencio.
+  La migracion `2026_10_21_000100_align_notification_destination_permissions.php`
+  alinea ocho tipos con las capacidades reales de Habilitacion, Contratos y
+  Vencimientos sin modificar roles ni preferencias. El aviso de contrato pendiente
+  abre Datos de contrato, no la revision de la ficha.
 - Preferencias de usuario y rol: `NotificationUserSetting`,
   `NotificationRolePreference`.
 
@@ -283,3 +311,27 @@ el exportador conserva su rango completo y sus controles de evidencia.
 `SearchTerms` en Shared centraliza las busquedas por palabras sin orden; no
 reemplaza controles de permiso o alcance. El filtro operativo de mina en EPP
 consulta paradas RQ solapadas con el intervalo de uso, no habilitacion minera.
+
+## Propuestas y operaciones revisadas de RR. HH.
+
+`PersonalIngresoRevisionService` conserva propuestas generales cifradas,
+compara contra la ficha vigente y aplica una revisión explícita bajo bloqueo.
+`PersonalIngresoPurpose` limita los campos generales y sus dependencias.
+`PersonalIngresoFamilyProposal` valida nuevas filas familiares y detecta
+coincidencias sin editar filas vigentes. Ambas propuestas forman parte de la
+misma revisión cifrada; los sobres anteriores mantienen su comparación original.
+`PersonalIngresoLinkService` emite secretos con hash y
+`PersonalIngresoUpdateController` liga cada pestaña pública mediante un
+identificador opaco de sesión. Los lotes de Ingresos reutilizan la aceptación
+individual correspondiente al propósito.
+
+`PersonalContratoSignedBatchService` conserva PDFs temporales privados,
+asociaciones a contratos y resultados por archivo. La firma y la activación
+reutilizan `PersonalContratoService` con revisión de términos bajo bloqueo.
+`PersonalArchivoVersionService` registra versiones antes de sustituir una
+referencia. Los archivos anteriores mantienen almacenamiento privado.
+
+`EvaluacionAsistenciaRevisionService` conecta la corrección de asistencia
+con el estado de revisión de la evaluación y el recálculo de promedios.
+`RoleChangeNotificationService` entrega avisos a partir de eventos persistidos
+del cambio de permisos. Su fallo conserva el evento para reintento.

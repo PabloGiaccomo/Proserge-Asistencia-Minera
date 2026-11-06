@@ -3,14 +3,15 @@
 namespace App\Modules\MiAsistencia\Controllers;
 
 use App\Http\Controllers\WebPageController;
+use App\Models\GrupoTrabajo;
 use App\Models\GrupoTrabajoDetalle;
-use App\Modules\Asistencia\Resources\AsistenciaGrupoResource;
+use App\Models\Usuario;
 use App\Modules\Asistencia\Policies\AsistenciaPolicy;
+use App\Modules\Asistencia\Resources\AsistenciaGrupoResource;
 use App\Modules\Asistencia\Services\AsistenciaService;
-use App\Support\Rbac\PermissionMatrix;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class MiAsistenciaPageController extends WebPageController
@@ -31,7 +32,7 @@ class MiAsistenciaPageController extends WebPageController
         $filters['fecha'] = $filters['fecha'] ?? now()->toDateString();
 
         $grupos = $this->service->listMiAsistencia($user, $filters) ?? collect();
-        $canViewAll = PermissionMatrix::userCanDirect($user, 'mi_asistencia', 'ver_todas_asistencias');
+        $canViewAll = $this->policy->canViewAllAttendances($user);
 
         return view('mi-asistencia.index', [
             'user' => $user,
@@ -59,19 +60,25 @@ class MiAsistenciaPageController extends WebPageController
             ))
             ->values()
             ->all();
-        $canManageAll = PermissionMatrix::userCanDirect($user, 'mi_asistencia', 'ver_todas_asistencias');
-        $attendanceReady = $canManageAll
-            || filled($grupo->supervisor_id)
-            || filled($grupo->asistencia?->id)
-            || filled($user->personal_id);
+        $attendanceReady = $this->policy->canIdentifyAttendanceResponsible($user, $grupo);
+        $attendanceOpen = $grupo->estado !== GrupoTrabajo::ESTADO_CANCELADO && $grupo->asistencia?->estado !== 'CERRADO';
+        $returnTurn = $request->query('turno', $grupo->turno);
+        $returnFilters = [
+            'fecha' => $data['fecha'],
+            'turno' => in_array($returnTurn, ['DIA', 'NOCHE'], true) ? $returnTurn : null,
+        ];
+        $returnUrl = $request->boolean('volver_movil')
+            ? route('mi-asistencia.mobile', [...$returnFilters, 'grupo_id' => $grupo->id])
+            : route('mi-asistencia.index', $returnFilters);
 
         return view('mi-asistencia.show', [
             'user' => $user,
             'grupo' => $data,
-            'canViewAll' => $canManageAll,
+            'canViewAll' => $this->policy->canViewAllAttendances($user),
             'attendanceReady' => $attendanceReady,
-            'canRegister' => $attendanceReady && $this->policy->canRegisterGrupo($user, $grupo),
-            'canClose' => $attendanceReady && $this->policy->canCloseGrupo($user, $grupo),
+            'canRegister' => $attendanceOpen && $attendanceReady && $this->policy->canRegisterGrupo($user, $grupo),
+            'canClose' => $attendanceOpen && $attendanceReady && $this->policy->canCloseGrupo($user, $grupo),
+            'returnUrl' => $returnUrl,
         ]);
     }
 
@@ -95,9 +102,21 @@ class MiAsistenciaPageController extends WebPageController
 
     public function estado(Request $request, string $id): JsonResponse
     {
-        $grupo = $this->service->getGrupo($this->requireAuthenticatedUser(), $id);
+        $user = $this->requireAuthenticatedUser();
+        $grupo = $this->service->getGrupo($user, $id);
         abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
         $data = AsistenciaGrupoResource::make($grupo)->resolve($request);
+
+        if ($request->boolean('propio')) {
+            $mobile = $this->mobileGroup($user, $grupo, $data);
+
+            return response()->json([
+                'propio' => $mobile['marca_propia'],
+                'puede_marcar' => $mobile['puede_marcar'],
+                'mensaje' => $mobile['mensaje'],
+            ])->header('Cache-Control', 'no-store');
+        }
+
         return response()->json([
             'horario' => $data['horario_marcacion'],
             'cerrado' => $grupo->asistencia?->estado === 'CERRADO',
@@ -160,67 +179,114 @@ class MiAsistenciaPageController extends WebPageController
     public function mobile(Request $request): View
     {
         $user = $this->requireAuthenticatedUser();
-        $fecha = $request->validate(['fecha' => ['nullable', 'date']])['fecha'] ?? now()->toDateString();
-        $turno = now()->hour < 18 ? 'DIA' : 'NOCHE';
-
+        $filters = $request->validate([
+            'fecha' => ['nullable', 'date_format:Y-m-d'],
+            'turno' => ['nullable', 'in:DIA,NOCHE'],
+            'grupo_id' => ['nullable', 'uuid'],
+        ]);
+        $fecha = $filters['fecha'] ?? now(config('app.display_timezone', 'America/Lima'))->toDateString();
+        $turno = $filters['turno'] ?? '';
         $grupos = $this->service->listMiAsistencia($user, ['fecha' => $fecha, 'turno' => $turno]) ?? collect();
-        $grupo = $grupos->first();
-
-        if (!$grupo) {
-            return view('mi-asistencia.mobile-empty', [
-                'user' => $user,
-                'fecha' => $fecha,
-            ]);
-        }
-
-        $canRegister = $this->policy->canRegisterGrupo($user, (object) $grupo);
-
-        $miAsistencia = null;
-        if (filled($user->personal_id) && filled($grupo['grupo_id'])) {
-            $miAsistencia = $this->service->getMiEstadoAsistencia($user, $grupo['grupo_id']);
-        }
+        $selectedId = $filters['grupo_id'] ?? ($grupos->count() === 1 ? $grupos->first()['id'] : null);
+        $selected = $selectedId ? $this->service->getGrupo($user, $selectedId, refreshMarks: false) : null;
+        $grupo = $selected && $selected->fecha?->toDateString() === $fecha
+            && ($turno === '' || $selected->turno === $turno)
+            && ($grupos->contains('id', $selectedId) || $selected->estado === GrupoTrabajo::ESTADO_CANCELADO)
+            ? $this->mobileGroup($user, $selected, AsistenciaGrupoResource::make($selected)->resolve($request))
+            : null;
 
         return view('mi-asistencia.mobile', [
             'user' => $user,
             'grupo' => $grupo,
-            'canRegister' => $canRegister,
-            'miAsistencia' => $miAsistencia,
+            'grupos' => $grupos,
+            'fecha' => $fecha,
+            'turno' => $turno,
+            'selectionUnavailable' => $selectedId !== null && !$grupo,
         ]);
     }
 
     public function marcarMobile(Request $request, string $id): JsonResponse
     {
         $user = $this->requireAuthenticatedUser();
-        $grupo = $this->service->getGrupo($user, $id);
+        $grupo = $this->service->getGrupo($user, $id, refreshMarks: false);
         abort_if(!$grupo, 404, 'Grupo no encontrado o sin acceso');
+        abort_unless($this->policy->canRegisterGrupo($user, $grupo), 403, 'No tienes permiso para registrar esta asistencia.');
 
         $payload = $request->validate([
-            'grupo_trabajo_detalle_id' => ['required', 'string', 'size:36', 'exists:grupo_trabajo_detalle,id'],
-            'estado' => ['required', 'string', 'in:PRESENTE,AUSENTE,TARDANZA,JUSTIFICADO'],
-            'hora_marcado' => ['nullable', 'date_format:H:i'],
-            'observaciones' => ['nullable', 'string', 'max:1000'],
+            'grupo_trabajo_detalle_id' => ['required', 'uuid'],
+            'estado' => ['required', 'in:PRESENTE'],
         ]);
+        abort_unless($this->ownDetailId($user, $grupo) === $payload['grupo_trabajo_detalle_id'], 403, 'No figuras como integrante activo de este grupo.');
 
-        $result = $this->service->marcar($user, $grupo, $payload);
+        $result = $this->service->marcar($user, $grupo, [...$payload, 'registrar_llegada' => true, 'solo_marca_propia' => true]);
 
-        if (($result['ok'] ?? false) === false) {
-            return response()->json(['ok' => false, 'message' => $result['message'] ?? 'No se pudo marcar.'], 422);
+        if (in_array($result['code'] ?? null, ['ASISTENCIA_ALREADY_CLOSED', 'ASISTENCIA_GROUP_CANCELLED', 'ASISTENCIA_PERSON_NOT_IN_GROUP'], true)) {
+            $result['status'] = 409;
         }
 
-        return response()->json(['ok' => true, 'message' => 'Asistencia registrada.']);
+        return $this->attendanceResponse($request, $result, 'Asistencia registrada.', forceJson: true);
     }
 
-    private function attendanceResponse(Request $request, array $result, string $message): JsonResponse|RedirectResponse
+    private function ownDetailId(Usuario $user, GrupoTrabajo $grupo): ?string
     {
+        if (blank($user->personal_id)) {
+            return null;
+        }
+
+        return $grupo->detalle->first(fn (GrupoTrabajoDetalle $item): bool => $item->personal_id === $user->personal_id
+            && $item->isDistribucionActiva())?->id;
+    }
+
+    private function mobileGroup(Usuario $user, GrupoTrabajo $grupo, array $data): array
+    {
+        $ownDetailId = $this->ownDetailId($user, $grupo);
+        $ownMark = collect($data['integrantes'])->firstWhere('grupo_trabajo_detalle_id', $ownDetailId);
+        $canRegister = $this->policy->canRegisterGrupo($user, $grupo);
+        $status = match (true) {
+            $grupo->estado === GrupoTrabajo::ESTADO_CANCELADO => 'Cancelado',
+            $data['asistencia']['estado'] === 'CERRADO' => 'Cerrada',
+            default => 'Abierta',
+        };
+        $message = match (true) {
+            $status === 'Cancelado' => 'Grupo cancelado. Puedes consultar sus datos.',
+            $status === 'Cerrada' => 'Asistencia cerrada. Puedes consultar tu registro.',
+            blank($user->personal_id) => 'Solicita al administrador que vincule tu cuenta con un trabajador.',
+            !$canRegister && blank($grupo->supervisor_id) => 'El grupo no tiene responsable asignado. Solicita la asignación en Man Power.',
+            !$canRegister => 'Solo tienes permiso para consultar la asistencia de este grupo.',
+            !$ownDetailId => 'No figuras como integrante activo de este grupo.',
+            !$data['horario_marcacion']['limite'] => $data['horario_marcacion']['mensaje'],
+            default => null,
+        };
+
+        return [
+            'id' => $grupo->id,
+            'mina' => $data['mina_nombre'] ?: $data['destino']['nombre'] ?: 'Sin unidad minera',
+            'servicio' => $data['servicio'] ?: $grupo->nombre_snapshot ?: 'Grupo operativo',
+            'turno' => $data['turno'],
+            'horario' => substr((string) $data['horario_salida'], 0, 5),
+            'estado' => $status,
+            'total' => $data['asistencia']['metricas']['programado'],
+            'puede_registrar' => $canRegister && $status === 'Abierta' && $this->policy->canIdentifyAttendanceResponsible($user, $grupo),
+            'puede_marcar' => $message === null,
+            'detalle_propio_id' => $ownDetailId,
+            'marca_propia' => $ownMark ? ['id' => $ownDetailId, 'estado' => $ownMark['estado_asistencia'], 'hora' => $ownMark['hora_marcado']] : null,
+            'sin_responsable' => blank($grupo->supervisor_id),
+            'mensaje' => $message,
+        ];
+    }
+
+    private function attendanceResponse(Request $request, array $result, string $message, bool $forceJson = false): JsonResponse|RedirectResponse
+    {
+        $asJson = $forceJson || $request->expectsJson();
         if (($result['ok'] ?? false) === false) {
             $status = ($result['forbidden'] ?? false) ? 403 : (int) ($result['status'] ?? 422);
 
-            return $request->expectsJson()
+            return $asJson
                 ? response()->json(['ok' => false, 'message' => $result['message'] ?? 'No se pudo actualizar la asistencia.'], $status)
                 : back()->withErrors(['asistencia' => $result['message'] ?? 'No se pudo actualizar la asistencia.']);
         }
 
-        return $request->expectsJson()
+        return $asJson
             ? response()->json(['ok' => true, 'message' => $message, 'estado' => $result['estado'] ?? null, 'hora_marcado' => $result['hora_marcado'] ?? null])
             : back()->with('success', $message);
     }
