@@ -74,6 +74,12 @@ El conductor puede ser un trabajador del sistema. La pantalla muestra nombre y s
 
 La planificación conserva la parada, el plan, la fecha y el turno al guardar y al corregir datos. Un servicio nuevo se guarda en `BORRADOR`. En `Editar servicio` se puede completar placa, conductor, capacidad y alcance. La fila muestra los datos que faltan para confirmar. Cuando se pierde la respuesta, el formulario conserva lo escrito y ofrece consultar el listado en otra pestaña antes de reenviar.
 
+Las acciones de Transporte operativo se realizan dentro de la planificación.
+La pantalla no incluye accesos «Volver a Logística» ni «Atender en Logística».
+Cuando se ingresa desde un plan autorizado, se conserva «Volver al plan de la
+parada» con su contexto. La atención del requerimiento se consulta en la tabla,
+sin cambiar la propiedad de los datos ni los permisos de Logística.
+
 | Acción | Permiso directo en Transportes |
 |---|---|
 | Consultar | `ver` |

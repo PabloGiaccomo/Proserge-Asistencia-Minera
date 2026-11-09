@@ -109,12 +109,11 @@
             <h1 class="tr-title">Transporte operativo</h1>
             <p class="tr-subtitle">Planificacion de unidades, pasajeros y brechas por parada, plan, fecha y turno.</p>
         </div>
-        <div class="tr-actions">
-            @if($canReturnToPlan)
+        @if($canReturnToPlan)
+            <div class="tr-actions">
                 <a class="tr-btn tr-btn-soft" href="{{ route('rq-mina.plan', ['id' => $selectedRq, 'plan_id' => $selectedPlan, 'lista' => $lista]) }}">Volver al plan de la parada</a>
-            @endif
-            <a class="tr-btn" href="{{ route('logistica.index', ['tab' => 'servicios']) }}">Volver a Logística</a>
-        </div>
+            </div>
+        @endif
     </div>
 
     @if(session('success'))
@@ -225,14 +224,9 @@
         <div class="tr-card-head">
             <div>
                 <h2 class="tr-card-title">Requerimientos del plan</h2>
-                <p class="tr-card-subtitle">RQ Mina conserva lo requerido; Logistica registra placa, documentos y recepcion. La ejecucion de pasajeros se gestiona como servicio.</p>
+                <p class="tr-card-subtitle">Consulta lo solicitado por el plan para organizar las unidades y los pasajeros.</p>
             </div>
-            <div class="tr-actions">
-                <span class="tr-badge">{{ $requirements->count() }} requerimientos</span>
-                @if($selectedRq !== '')
-                    <a class="tr-btn tr-btn-soft" href="{{ route('logistica.index', ['tab' => 'servicios', 'servicio_parada_id' => $selectedRq]) }}">Atender en Logistica</a>
-                @endif
-            </div>
+            <span class="tr-badge">{{ $requirements->count() }} requerimientos</span>
         </div>
         <div class="tr-table-wrap">
             <table class="tr-table">

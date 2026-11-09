@@ -47,6 +47,10 @@ async function exercise(browser, width, height) {
     });
 
     await page.goto(home + context);
+    const transport = page.locator('[data-transport-planning]');
+    assert.equal(await transport.locator('a[href*="/logistica"]').count(), 0,
+        'Transporte operativo must keep its actions in the operational flow.');
+    assert.equal(await transport.getByRole('link', { name: 'Volver al plan de la parada', exact: true }).count(), 1);
     await page.getByRole('link', { name: 'Editar servicio', exact: true }).click();
     await page.waitForURL(url => url.searchParams.get('editar') === service);
     const edit = page.locator('#transporte-editar form');
@@ -122,6 +126,13 @@ async function exercise(browser, width, height) {
         assert.equal(await viewportFits(), true, 'The layout must reflow at the CSS viewport of 200% desktop zoom.');
     }
     assert.deepEqual(errors, []);
+
+    await page.goto(home + context + '&sin_contexto=1');
+    assert.equal(await transport.locator('a[href*="/logistica"]').count(), 0);
+    assert.equal(await transport.getByRole('link', { name: 'Volver al plan de la parada', exact: true }).count(), 0,
+        'Direct entry must not invent a return path to a plan.');
+    assert.equal(await transport.locator('.tr-head .tr-actions').count(), 0,
+        'The header must not leave an empty action group.');
     await page.close();
 }
 

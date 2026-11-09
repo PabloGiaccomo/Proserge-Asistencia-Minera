@@ -21,7 +21,8 @@ $plan = ['id' => $planId, 'codigo' => 'PLAN-01', 'nombre' => 'Parada de mantenim
 $group = ['id' => $groupId, 'servicio' => 'Equipo de montaje y mantenimiento mecánico de chancado', 'paradero' => 'Paradero principal'];
 $driver = ['id' => $driverId, 'nombre_completo' => 'Conductor de Prueba con Apellidos Compuestos'];
 parse_str($argv[1] ?? '', $query);
-$request = Request::create('http://transporte.test/transporte/planificacion', 'GET', $query + $selected);
+$requestQuery = ($query['sin_contexto'] ?? '') === '1' ? $query : $query + $selected;
+$request = Request::create('http://transporte.test/transporte/planificacion', 'GET', $requestQuery);
 $request->setLaravelSession($app['session.store']);
 $app->instance('request', $request);
 $app['url']->setRequest($request);
