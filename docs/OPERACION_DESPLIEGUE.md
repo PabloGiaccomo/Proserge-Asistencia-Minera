@@ -434,3 +434,14 @@ después de generar el respaldo privado en
 El recorrido se verificó con fixtures sintéticos, 72 pruebas PHP y el build
 en Chrome a 390 y 1440 px. Para publicar en cPanel, incluir esta migración,
 el código y el build generado en el procedimiento de despliegue del ambiente.
+
+## Publicacion del 9 de noviembre de 2026
+
+La entrega `abf94a1` se publico en el hosting por FTPS, con once migraciones
+explicitas, respaldo verificado fuera de `public_html`, comparacion de datos y
+verificacion del build y PHP FPM. El registro de ejecucion y las tareas de
+limpieza configuradas estan en
+[`2026-11-09-despliegue-ftps.md`](superpowers/reports/2026-11-09-despliegue-ftps.md).
+Conservar el ejecutor CLI privado indicado en ese reporte: las tres entradas
+de cron de esta entrega dependen de el. No se activo el scheduler general de
+las otras automatizaciones del sistema.
